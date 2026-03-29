@@ -345,6 +345,7 @@ def get_project_activity_feed(
             ActivityLog.details,
             ActivityLog.created_at,
             Agent.name.label("agent_name"),
+            Agent.role.label("agent_role"),
         )
         .outerjoin(Agent, ActivityLog.agent_id == Agent.id)
         .where(ActivityLog.project_id == project_id)
@@ -367,6 +368,7 @@ def get_project_activity_feed(
             "entity_id": row.entity_id,
             "details": details,
             "agent_name": row.agent_name,
+            "agent_role": row.agent_role,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         })
     return feed
