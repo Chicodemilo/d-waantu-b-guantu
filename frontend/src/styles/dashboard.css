@@ -348,6 +348,7 @@
 .project-sprint-row__right {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .project-sprint-row__left .ascii-chart,
@@ -361,11 +362,13 @@
   font-size: 11px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .activity-feed__header {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 90px 70px;
+  grid-template-columns: 50px 1fr 70px 56px;
   gap: 6px;
   padding: 4px 10px;
   border-bottom: 1px solid var(--border);
@@ -378,12 +381,13 @@
 
 .activity-feed__scroll {
   overflow-y: auto;
+  overflow-x: hidden;
   max-height: 240px;
 }
 
 .activity-feed__entry {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 90px 70px;
+  grid-template-columns: 50px 1fr 70px 56px;
   gap: 6px;
   padding: 3px 10px;
   border-bottom: 1px solid var(--border);
