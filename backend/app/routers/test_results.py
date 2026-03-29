@@ -1,3 +1,13 @@
+# Path: app/routers/test_results.py
+# File: test_results.py
+# Created: 2026-03-29
+# Purpose: Test result HTTP endpoints — list, get, create, performance
+# Caller: app/main.py
+# Callees: app/services/test_result.py, app/models/test_result.py
+# Data In: HTTP requests
+# Data Out: JSON responses (TestResultRead, performance list)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session

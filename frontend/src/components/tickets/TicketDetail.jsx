@@ -1,3 +1,13 @@
+// Path: src/components/tickets/TicketDetail.jsx
+// File: TicketDetail.jsx
+// Created: 2026-03-29
+// Purpose: Full ticket detail view with metadata, description, stats, status history, and comments
+// Caller: TicketDetailPage.jsx
+// Callees: react (useState, useEffect), useStore, StatusBadge, TicketComments, api/tickets (getTicketHistory), tickets.css
+// Data In: ticketId prop
+// Data Out: default export TicketDetail component
+// Last Modified: 2026-03-29
+
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
 import StatusBadge from '../common/StatusBadge';

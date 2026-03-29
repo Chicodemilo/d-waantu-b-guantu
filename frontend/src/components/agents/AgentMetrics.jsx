@@ -1,3 +1,13 @@
+// Path: src/components/agents/AgentMetrics.jsx
+// File: AgentMetrics.jsx
+// Created: 2026-03-29
+// Purpose: Displays token usage, time spent, and ticket status breakdown chart for an agent
+// Caller: AgentDetail.jsx
+// Callees: useStore, AsciiChart, agents.css
+// Data In: agentId prop
+// Data Out: default export AgentMetrics component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 import AsciiChart from '../common/AsciiChart';
 import '../../styles/agents.css';

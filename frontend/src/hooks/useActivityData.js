@@ -1,3 +1,13 @@
+// Path: src/hooks/useActivityData.js
+// File: useActivityData.js
+// Created: 2026-03-29
+// Purpose: Fetches and parses activity log data on a polling interval
+// Caller: None currently (unused hook, superseded by useAppData)
+// Callees: react, store/useStore, api/activityLogs, config, hooks/usePolling
+// Data In: None (reads ACTIVITY_LOG_LIMIT from config)
+// Data Out: Exports useActivityData hook; sets activityLog in Zustand store
+// Last Modified: 2026-03-29
+
 import { useCallback } from 'react';
 import useStore from '../store/useStore';
 import { getActivityLogs } from '../api/activityLogs';

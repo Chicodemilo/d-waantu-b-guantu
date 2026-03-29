@@ -1,3 +1,13 @@
+// Path: src/pages/ProjectPage.jsx
+// File: ProjectPage.jsx
+// Created: 2026-03-29
+// Purpose: Project detail page with tools (deploy, scan, archive, delete), sprint gates, alerts, sprint progress, overhead, velocity, and epics
+// Caller: App.jsx (route: /projects/:id)
+// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/OverheadTracker, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
+// Data In: Route param (id), project and alerts from Zustand store
+// Data Out: Default export ProjectPage component
+// Last Modified: 2026-03-29
+
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';

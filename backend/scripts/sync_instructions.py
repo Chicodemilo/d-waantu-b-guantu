@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# Path: backend/scripts/sync_instructions.py
+# File: sync_instructions.py
+# Created: 2026-03-27
+# Purpose: Bidirectional sync between DB instructions and docs/rules/ markdown files
+# Caller: Manual CLI
+# Callees: app.database.SessionLocal, app.services.instruction, app.services.sync_check
+# Data In: CLI args (--export, --import, --sync); DB instructions; docs/rules/*.md files
+# Data Out: Markdown files (export) or DB records (import); stdout report
+# Last Modified: 2026-03-29
 """Bidirectional sync between DB instructions and docs/rules/ markdown files.
 
 Usage:

@@ -1,3 +1,13 @@
+// Path: src/components/dashboard/TokenOverview.jsx
+// File: TokenOverview.jsx
+// Created: 2026-03-29
+// Purpose: Dashboard section with three AsciiCharts showing token usage by project, by agent, and overhead breakdown
+// Caller: DashboardPage.jsx
+// Callees: useStore, ROLES config, AsciiChart, dashboard.css
+// Data In: projects, tickets, agents, projectAgents from store
+// Data Out: default export TokenOverview component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 import { ROLES } from '../../config';
 import AsciiChart from '../common/AsciiChart';

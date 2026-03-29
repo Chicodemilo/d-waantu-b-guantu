@@ -1,3 +1,13 @@
+# Path: app/models/__init__.py
+# File: __init__.py
+# Created: 2026-03-29
+# Purpose: Model re-exports for convenient imports
+# Caller: app/services/*, alembic
+# Callees: All model modules
+# Data In: None
+# Data Out: All model classes
+# Last Modified: 2026-03-29
+
 from app.models.project import Project, ProjectStatus
 from app.models.sprint import Sprint, SprintStatus
 from app.models.epic import Epic, EpicStatus

@@ -1,3 +1,13 @@
+# Path: app/services/epic.py
+# File: epic.py
+# Created: 2026-03-29
+# Purpose: Epic CRUD with auto-assignment logic
+# Caller: app/routers/epics.py
+# Callees: app/models/epic.py
+# Data In: db: Session, EpicCreate/Update
+# Data Out: list[Epic], Epic
+# Last Modified: 2026-03-29
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

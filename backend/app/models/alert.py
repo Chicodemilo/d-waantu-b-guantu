@@ -1,3 +1,13 @@
+# Path: app/models/alert.py
+# File: alert.py
+# Created: 2026-03-29
+# Purpose: Alert ORM model with severity/status enums
+# Caller: app/services/alert.py, sprint.py, ticket.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: Alert, AlertSeverity, AlertStatus
+# Last Modified: 2026-03-29
+
 import enum
 from datetime import datetime
 

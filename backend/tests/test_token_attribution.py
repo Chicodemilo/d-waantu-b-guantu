@@ -1,3 +1,13 @@
+# Path:          tests/test_token_attribution.py
+# File:          test_token_attribution.py
+# Created:       2026-03-28
+# Purpose:       Tests for token attribution endpoint and token_source field
+# Caller:        pytest
+# Callees:       GET /api/tickets/:id/token-attribution, POST /api/tickets/:id/tokens
+# Data In:       Factory-created tickets via conftest fixtures
+# Data Out:      Assertions on attribution shape, source values, and token accumulation
+# Last Modified: 2026-03-29
+
 """Tests for token attribution endpoint and token_source field."""
 
 

@@ -1,3 +1,13 @@
+# Path:          tests/test_instructions_sync.py
+# File:          test_instructions_sync.py
+# Created:       2026-03-28
+# Purpose:       Tests for instruction sync-check and sync endpoints
+# Caller:        pytest
+# Callees:       GET /api/instructions/sync-check, POST /api/instructions/sync
+# Data In:       Factory-created instructions via conftest fixtures
+# Data Out:      Assertions on sync status and instruction state
+# Last Modified: 2026-03-29
+
 """Tests for /api/instructions sync-check and sync endpoints."""
 
 

@@ -1,3 +1,13 @@
+// Path: src/components/tests/TestPerformance.jsx
+// File: TestPerformance.jsx
+// Created: 2026-03-29
+// Purpose: Displays test performance dashboard with duration bar chart, sparkline trends, summary stats, and per-test drill-down
+// Caller: ProjectTestsPage.jsx
+// Callees: react (useState, useEffect), api/testResults (getTestPerformance, getProjectTestRuns), tests.css, charts.css
+// Data In: projectId prop
+// Data Out: default export TestPerformance component
+// Last Modified: 2026-03-29
+
 import { useState, useEffect } from 'react';
 import { getTestPerformance, getProjectTestRuns } from '../../api/testResults';
 import '../../styles/tests.css';

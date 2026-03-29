@@ -1,3 +1,13 @@
+// Path: src/components/common/AsciiChart.jsx
+// File: AsciiChart.jsx
+// Created: 2026-03-29
+// Purpose: Renders a horizontal bar chart using Unicode block characters with labels and values
+// Caller: TokenOverview.jsx, FailureAnalysis.jsx, AgentMetrics.jsx
+// Callees: charts.css
+// Data In: props { title, tooltip, data[], maxBarWidth, colorClass }
+// Data Out: default export AsciiChart component
+// Last Modified: 2026-03-29
+
 import '../../styles/charts.css';
 
 function AsciiChart({ title, tooltip, data, maxBarWidth = 54, colorClass = '' }) {

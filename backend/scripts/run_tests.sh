@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+# Path: backend/scripts/run_tests.sh
+# File: run_tests.sh
+# Created: 2026-03-27
+# Purpose: Run backend pytest suite and optionally POST results to the LAT API
+# Caller: Manual CLI, run_token_scan.sh, Claude Code hooks
+# Callees: pytest, curl → POST /api/test-results
+# Data In: CLI args (--post, --project-id, --triggered-by, --context, --url)
+# Data Out: Pytest output + JSON report; optional HTTP POST to API
+# Last Modified: 2026-03-29
 #
 # run_tests.sh — Run the backend pytest suite and optionally POST results to the API.
 #

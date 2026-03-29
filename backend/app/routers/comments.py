@@ -1,3 +1,13 @@
+# Path: app/routers/comments.py
+# File: comments.py
+# Created: 2026-03-29
+# Purpose: Comment HTTP endpoints — list, get, create, delete
+# Caller: app/main.py
+# Callees: app/services/comment.py
+# Data In: HTTP requests
+# Data Out: JSON responses (CommentRead)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 

@@ -1,3 +1,13 @@
+# Path: app/routers/alerts.py
+# File: alerts.py
+# Created: 2026-03-29
+# Purpose: Alert HTTP endpoints — CRUD, dismiss-all, run-tests
+# Caller: app/main.py
+# Callees: app/services/alert.py
+# Data In: HTTP requests
+# Data Out: JSON responses (AlertRead)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 

@@ -1,3 +1,13 @@
+# Path: app/models/project.py
+# File: project.py
+# Created: 2026-03-29
+# Purpose: Project ORM model with status enum and sprint gate flags
+# Caller: app/services/project.py, sprint.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: Project, ProjectStatus
+# Last Modified: 2026-03-29
+
 import enum
 from datetime import datetime
 

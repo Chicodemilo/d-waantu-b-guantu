@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# Path: backend/scripts/attribute_tokens.py
+# File: attribute_tokens.py
+# Created: 2026-03-28
+# Purpose: Scan Claude transcript JSONL files and attribute token usage to tickets
+# Caller: run_token_scan.sh, manual CLI, sprint completion trigger
+# Callees: urllib → GET /api/agents, GET /api/tickets, POST /api/tickets/:id/tokens, POST /api/alerts
+# Data In: CLI args (--project-id, --dry-run, --force, --transcript-dir); JSONL transcripts
+# Data Out: JSON summary to stdout; HTTP POSTs to API; state file updates
+# Last Modified: 2026-03-29
 """Scan Claude transcript JSONL files and attribute tokens to tickets.
 
 Reads transcript files from Claude Code's project directories, identifies

@@ -1,3 +1,13 @@
+// Path: src/pages/InstructionsPage.jsx
+// File: InstructionsPage.jsx
+// Created: 2026-03-29
+// Purpose: Manages CLI instruction syncing, displays instruction list, playbooks, and code standards
+// Caller: App.jsx (route: /instructions)
+// Callees: react, ../components/instructions/InstructionList, ../api/instructions, ../api/status, ../styles/dashboard.css, ../styles/common.css
+// Data In: Instructions sync status, playbooks, and code standards from API
+// Data Out: Default export InstructionsPage component
+// Last Modified: 2026-03-29
+
 import { useState, useEffect, useCallback } from 'react';
 import InstructionList from '../components/instructions/InstructionList';
 import { syncCheck, syncInstructions, getPlaybooks } from '../api/instructions';

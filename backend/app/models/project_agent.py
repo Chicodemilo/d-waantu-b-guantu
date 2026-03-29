@@ -1,3 +1,13 @@
+# Path: app/models/project_agent.py
+# File: project_agent.py
+# Created: 2026-03-29
+# Purpose: ProjectAgent ORM model — agent-project join table
+# Caller: app/services/project_agent.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: ProjectAgent
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, UniqueConstraint, func

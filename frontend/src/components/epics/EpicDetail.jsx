@@ -1,3 +1,13 @@
+// Path: src/components/epics/EpicDetail.jsx
+// File: EpicDetail.jsx
+// Created: 2026-03-29
+// Purpose: Displays epic details with progress bar, token/time stats, and linked ticket list
+// Caller: EpicPage.jsx
+// Callees: react-router-dom (Link), useStore, StatusBadge, AsciiProgressBar, common.css, tickets.css
+// Data In: epicId and projectId props
+// Data Out: default export EpicDetail component
+// Last Modified: 2026-03-29
+
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import StatusBadge from '../common/StatusBadge';

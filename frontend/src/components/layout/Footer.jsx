@@ -1,3 +1,13 @@
+// Path: src/components/layout/Footer.jsx
+// File: Footer.jsx
+// Created: 2026-03-29
+// Purpose: Displays polling status indicator and last-updated timestamp in the app footer
+// Caller: AppShell.jsx
+// Callees: useStore (Zustand store)
+// Data In: polling state from store (isActive, interval, lastUpdated)
+// Data Out: default export Footer component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 
 function Footer() {

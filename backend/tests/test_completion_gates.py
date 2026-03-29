@@ -1,3 +1,13 @@
+# Path:          tests/test_completion_gates.py
+# File:          test_completion_gates.py
+# Created:       2026-03-28
+# Purpose:       Tests for sprint completion validation gates (force_test_run, force_test_coverage)
+# Caller:        pytest
+# Callees:       POST/PATCH /api/projects, POST/PATCH /api/sprints, POST /api/test-results
+# Data In:       Factory-created projects, epics, test results via conftest fixtures
+# Data Out:      Assertions on gate-blocked 400s and successful 200 completions
+# Last Modified: 2026-03-29
+
 """Tests for sprint completion gates (DWB-087/088/089).
 
 Projects have three boolean flags: force_headers, force_test_run, force_test_coverage.

@@ -1,3 +1,13 @@
+# Path: app/services/activity_log.py
+# File: activity_log.py
+# Created: 2026-03-29
+# Purpose: Activity log CRUD and filtered queries
+# Caller: app/routers/activity_logs.py
+# Callees: app/models/activity_log.py
+# Data In: db: Session, filters
+# Data Out: list[ActivityLog], ActivityLog
+# Last Modified: 2026-03-29
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

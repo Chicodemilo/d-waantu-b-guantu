@@ -1,3 +1,13 @@
+// Path: src/api/projects.js
+// File: projects.js
+// Created: 2026-03-29
+// Purpose: CRUD API functions for projects plus deploy-playbooks, create-from-repo, and scan-tokens actions
+// Caller: pages/DashboardPage.jsx, pages/ProjectPage.jsx, hooks/useProjectsData.js, hooks/useAppData.js
+// Callees: ./client (get, post, patch, del)
+// Data In: Project ID for fetch/update/delete/actions; project data for create/update; repo path for create-from-repo
+// Data Out: Project objects/arrays, action responses from /projects endpoint
+// Last Modified: 2026-03-29
+
 import { get, post, patch, del } from './client';
 
 export function getProjects(params = {}) {

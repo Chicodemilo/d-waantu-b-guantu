@@ -1,3 +1,13 @@
+# Path: app/models/test_result.py
+# File: test_result.py
+# Created: 2026-03-29
+# Purpose: TestResult ORM model — test run outcomes
+# Caller: app/services/test_result.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: TestResult
+# Last Modified: 2026-03-29
+
 import enum
 from datetime import datetime
 

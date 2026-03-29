@@ -1,3 +1,13 @@
+# Path: app/routers/epics.py
+# File: epics.py
+# Created: 2026-03-29
+# Purpose: Epic HTTP endpoints — CRUD
+# Caller: app/main.py
+# Callees: app/services/epic.py
+# Data In: HTTP requests
+# Data Out: JSON responses (EpicRead)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 

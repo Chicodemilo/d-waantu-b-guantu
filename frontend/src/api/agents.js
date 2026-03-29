@@ -1,3 +1,13 @@
+// Path: src/api/agents.js
+// File: agents.js
+// Created: 2026-03-29
+// Purpose: CRUD API functions for agent entities
+// Caller: hooks/useAgentsData.js, hooks/useAppData.js
+// Callees: ./client (get, post, patch, del)
+// Data In: Agent ID for single fetch/update/delete; agent data object for create/update; query params for listing
+// Data Out: Agent objects or arrays from the /agents endpoint
+// Last Modified: 2026-03-29
+
 import { get, post, patch, del } from './client';
 
 export function getAgents(params = {}) {

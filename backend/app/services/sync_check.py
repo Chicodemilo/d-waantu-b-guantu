@@ -1,3 +1,13 @@
+# Path: app/services/sync_check.py
+# File: sync_check.py
+# Created: 2026-03-29
+# Purpose: Compare DB instructions with Claude memory files
+# Caller: app/routers/instructions.py
+# Callees: app/models/instruction.py, pathlib
+# Data In: db: Session
+# Data Out: dict (sync status report)
+# Last Modified: 2026-03-29
+
 """Compare Claude memory files with DB instructions and report differences."""
 
 from __future__ import annotations

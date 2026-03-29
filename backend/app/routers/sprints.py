@@ -1,3 +1,13 @@
+# Path: app/routers/sprints.py
+# File: sprints.py
+# Created: 2026-03-29
+# Purpose: Sprint HTTP endpoints — CRUD with completion gate enforcement
+# Caller: app/main.py
+# Callees: app/services/sprint.py
+# Data In: HTTP requests
+# Data Out: JSON responses (SprintRead)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 

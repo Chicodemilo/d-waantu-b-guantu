@@ -1,3 +1,13 @@
+# Path: app/services/instruction.py
+# File: instruction.py
+# Created: 2026-03-29
+# Purpose: Instruction CRUD with scope filtering
+# Caller: app/routers/instructions.py
+# Callees: app/models/instruction.py
+# Data In: db: Session, InstructionCreate/Update
+# Data Out: list[Instruction], Instruction
+# Last Modified: 2026-03-29
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

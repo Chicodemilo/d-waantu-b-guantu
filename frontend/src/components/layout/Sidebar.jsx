@@ -1,3 +1,13 @@
+// Path: src/components/layout/Sidebar.jsx
+// File: Sidebar.jsx
+// Created: 2026-03-29
+// Purpose: Navigation sidebar with links to dashboard, instructions, system tests, and per-project sub-nav
+// Caller: AppShell.jsx
+// Callees: react (useState), react-router-dom (NavLink, useLocation), useStore
+// Data In: projects from store, current location pathname
+// Data Out: default export Sidebar component
+// Last Modified: 2026-03-29
+
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import useStore from '../../store/useStore';

@@ -1,3 +1,13 @@
+// Path: src/pages/ProjectTestsPage.jsx
+// File: ProjectTestsPage.jsx
+// Created: 2026-03-29
+// Purpose: Displays project test runs with detail drill-down, performance tab, and failure analysis tab
+// Caller: App.jsx (route: /projects/:id/tests)
+// Callees: react, react-router-dom, ../store/useStore, ../api/testResults, ../api/alerts, ../components/common/StatusBadge, ../components/tests/TestPerformance, ../components/tests/FailureAnalysis, ../styles/tests.css
+// Data In: Route param (id), project from Zustand store, test runs from API
+// Data Out: Default export ProjectTestsPage component
+// Last Modified: 2026-03-29
+
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import useStore from '../store/useStore';

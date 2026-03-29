@@ -1,3 +1,13 @@
+# Path: app/routers/tickets.py
+# File: tickets.py
+# Created: 2026-03-29
+# Purpose: Ticket HTTP endpoints — CRUD, history, tokens, token-attribution
+# Caller: app/main.py
+# Callees: app/services/ticket.py
+# Data In: HTTP requests
+# Data Out: JSON responses (TicketRead, StatusHistoryRead, attribution dict)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 

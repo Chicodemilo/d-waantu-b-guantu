@@ -1,3 +1,13 @@
+// Path: src/components/tickets/TicketFilters.jsx
+// File: TicketFilters.jsx
+// Created: 2026-03-29
+// Purpose: Filter controls for ticket list (status, type, sprint, epic, agent dropdowns)
+// Caller: TicketList.jsx
+// Callees: useStore, tickets.css
+// Data In: projectId prop, filters object prop, onChange callback prop
+// Data Out: default export TicketFilters component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 import '../../styles/tickets.css';
 

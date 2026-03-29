@@ -1,3 +1,13 @@
+# Path: app/models/activity_log.py
+# File: activity_log.py
+# Created: 2026-03-29
+# Purpose: ActivityLog ORM model — audit trail entries
+# Caller: app/services/activity_log.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: ActivityLog
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, func

@@ -1,3 +1,13 @@
+# Path: app/models/sprint.py
+# File: sprint.py
+# Created: 2026-03-29
+# Purpose: Sprint ORM model with status enum
+# Caller: app/services/sprint.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: Sprint, SprintStatus
+# Last Modified: 2026-03-29
+
 import enum
 from datetime import date, datetime
 

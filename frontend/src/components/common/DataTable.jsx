@@ -1,3 +1,13 @@
+// Path: src/components/common/DataTable.jsx
+// File: DataTable.jsx
+// Created: 2026-03-29
+// Purpose: Reusable sortable data table with column definitions, click-to-sort headers, and optional row click handler
+// Caller: None currently (available for use)
+// Callees: react (useState), common.css
+// Data In: props { columns[], data[], onRowClick }
+// Data Out: default export DataTable component
+// Last Modified: 2026-03-29
+
 import { useState } from 'react';
 import '../../styles/common.css';
 

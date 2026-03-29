@@ -1,3 +1,13 @@
+# Path: app/services/agent.py
+# File: agent.py
+# Created: 2026-03-29
+# Purpose: Agent CRUD operations
+# Caller: app/routers/agents.py
+# Callees: app/models/agent.py
+# Data In: db: Session, AgentCreate/Update
+# Data Out: list[Agent], Agent
+# Last Modified: 2026-03-29
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

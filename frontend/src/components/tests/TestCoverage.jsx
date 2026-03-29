@@ -1,3 +1,13 @@
+// Path: src/components/tests/TestCoverage.jsx
+// File: TestCoverage.jsx
+// Created: 2026-03-29
+// Purpose: Fetches and displays test coverage table showing which routers have test files
+// Caller: TestResultsPage.jsx
+// Callees: react (useState, useEffect), api/status (getTestCoverage), tests.css
+// Data In: None (fetches coverage data from API)
+// Data Out: default export TestCoverage component
+// Last Modified: 2026-03-29
+
 import { useState, useEffect } from 'react';
 import { getTestCoverage } from '../../api/status';
 import '../../styles/tests.css';

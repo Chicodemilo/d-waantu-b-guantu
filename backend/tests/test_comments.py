@@ -1,3 +1,13 @@
+# Path:          tests/test_comments.py
+# File:          test_comments.py
+# Created:       2026-03-28
+# Purpose:       CRUD + filtering tests for /api/comments
+# Caller:        pytest
+# Callees:       GET/POST/DELETE /api/comments, GET /api/comments/:id
+# Data In:       Factory-created tickets, agents via conftest fixtures
+# Data Out:      Assertions on HTTP status codes and JSON response shapes
+# Last Modified: 2026-03-29
+
 """Tests for /api/comments endpoints."""
 
 

@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# Path: backend/scripts/report_tokens.py
+# File: report_tokens.py
+# Created: 2026-03-27
+# Purpose: Claude Code hook — reads transcript JSONL and POSTs token usage to LAT API
+# Caller: Claude Code hooks (Stop, SubagentStop, TeammateIdle)
+# Callees: urllib → GET /api/agents, POST /api/tickets/:id/tokens, POST /api/alerts
+# Data In: Hook event JSON on stdin (session_id, transcript_path, agentName)
+# Data Out: HTTP POST to API; debug log to /tmp/lat_hook_debug.log
+# Last Modified: 2026-03-29
 """Claude Code Stop hook — reports token usage to LAT API.
 
 Reads session data from stdin (Stop hook JSON), parses the transcript

@@ -1,3 +1,13 @@
+# Path: app/main.py
+# File: main.py
+# Created: 2026-03-29
+# Purpose: FastAPI app initialization, CORS, and router registration
+# Caller: uvicorn entrypoint
+# Callees: All routers, app/database.py
+# Data In: None
+# Data Out: FastAPI app instance
+# Last Modified: 2026-03-29
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

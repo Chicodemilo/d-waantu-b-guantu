@@ -1,3 +1,13 @@
+# Path:          tests/test_sprints.py
+# File:          test_sprints.py
+# Created:       2026-03-28
+# Purpose:       Full CRUD + filtering tests for /api/sprints, including completion gates
+# Caller:        pytest
+# Callees:       GET/POST/PATCH/DELETE /api/sprints, GET /api/sprints/:id
+# Data In:       Factory-created projects, epics, test results via conftest fixtures
+# Data Out:      Assertions on HTTP status codes, JSON shapes, and gate behavior
+# Last Modified: 2026-03-29
+
 """Tests for /api/sprints CRUD, filtering, and completion gates."""
 
 

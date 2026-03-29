@@ -1,3 +1,13 @@
+// Path: src/hooks/usePolling.js
+// File: usePolling.js
+// Created: 2026-03-29
+// Purpose: Reusable adaptive polling hook that adjusts interval based on active agent/ticket status
+// Caller: useActivityData, useAgentsData, useAlertsData, useCommentsData, useEpicsData, useInstructionsData, useProjectsData, useSprintsData, useTicketsData
+// Callees: react, store/useStore, api/status, config
+// Data In: fetchFn (callback to execute each poll), deps (dependency array)
+// Data Out: None (side-effect hook; updates polling state in Zustand store)
+// Last Modified: 2026-03-29
+
 import { useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import { getStatus } from '../api/status';

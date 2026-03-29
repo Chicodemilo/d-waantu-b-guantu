@@ -1,3 +1,13 @@
+# Path: app/services/test_result.py
+# File: test_result.py
+# Created: 2026-03-29
+# Purpose: Test result CRUD with auto-failure-record creation
+# Caller: app/routers/test_results.py
+# Callees: app/models (test_result, failure_record, agent, sprint)
+# Data In: db: Session, TestResultCreate
+# Data Out: list[TestResult], TestResult
+# Last Modified: 2026-03-29
+
 import json
 
 from sqlalchemy import select

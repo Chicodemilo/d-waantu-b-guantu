@@ -1,3 +1,13 @@
+# Path: app/services/ticket.py
+# File: ticket.py
+# Created: 2026-03-29
+# Purpose: Ticket CRUD, status history, rework detection, time computation
+# Caller: app/routers/tickets.py
+# Callees: models (ticket, status_history, alert, failure_record, agent, project_agent)
+# Data In: db: Session, TicketCreate/Update
+# Data Out: list[Ticket], Ticket
+# Last Modified: 2026-03-29
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session

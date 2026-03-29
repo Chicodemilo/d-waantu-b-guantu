@@ -1,3 +1,13 @@
+// Path: src/api/client.js
+// File: client.js
+// Created: 2026-03-29
+// Purpose: Core HTTP client wrapping fetch with error handling for API requests (get, post, patch, del)
+// Caller: All api/ modules (agents, projects, tickets, sprints, epics, alerts, etc.), client.test.js
+// Callees: ../config (API_BASE_URL)
+// Data In: URL path strings, query params objects, request body data
+// Data Out: Parsed JSON responses; throws ApiError on non-OK responses
+// Last Modified: 2026-03-29
+
 import { API_BASE_URL } from '../config';
 
 const BASE_URL = API_BASE_URL;

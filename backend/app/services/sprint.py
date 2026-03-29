@@ -1,3 +1,13 @@
+# Path: app/services/sprint.py
+# File: sprint.py
+# Created: 2026-03-29
+# Purpose: Sprint CRUD, completion gates, and post-close automation
+# Caller: app/routers/sprints.py
+# Callees: models (sprint, ticket, alert, agent, failure_record, test_result), token_scan
+# Data In: db: Session, SprintCreate/Update
+# Data Out: list[Sprint], Sprint
+# Last Modified: 2026-03-29
+
 import logging
 import re
 from pathlib import Path

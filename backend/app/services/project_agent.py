@@ -1,3 +1,13 @@
+# Path: app/services/project_agent.py
+# File: project_agent.py
+# Created: 2026-03-29
+# Purpose: Project-agent assignment CRUD
+# Caller: app/routers/project_agents.py
+# Callees: app/models/project_agent.py
+# Data In: db: Session, ProjectAgentCreate
+# Data Out: list[ProjectAgent], ProjectAgent
+# Last Modified: 2026-03-29
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

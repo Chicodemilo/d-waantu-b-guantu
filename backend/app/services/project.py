@@ -1,3 +1,13 @@
+# Path: app/services/project.py
+# File: project.py
+# Created: 2026-03-29
+# Purpose: Project CRUD with overhead increment and cascading delete
+# Caller: app/routers/projects.py
+# Callees: app/models/project.py and all related models
+# Data In: db: Session, ProjectCreate/Update
+# Data Out: list[Project], Project
+# Last Modified: 2026-03-29
+
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 

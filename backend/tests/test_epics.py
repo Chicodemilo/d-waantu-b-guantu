@@ -1,3 +1,13 @@
+# Path:          tests/test_epics.py
+# File:          test_epics.py
+# Created:       2026-03-28
+# Purpose:       Full CRUD + filtering tests for /api/epics
+# Caller:        pytest
+# Callees:       GET/POST/PATCH/DELETE /api/epics, GET /api/epics/:id
+# Data In:       Factory-created projects via conftest fixtures
+# Data Out:      Assertions on HTTP status codes and JSON response shapes
+# Last Modified: 2026-03-29
+
 """Tests for /api/epics CRUD and filtering."""
 
 

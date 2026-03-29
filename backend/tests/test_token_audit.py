@@ -1,3 +1,13 @@
+# Path:          tests/test_token_audit.py
+# File:          test_token_audit.py
+# Created:       2026-03-28
+# Purpose:       Tests for token audit aggregation endpoint
+# Caller:        pytest
+# Callees:       GET /api/tokens/audit
+# Data In:       Factory-created projects, agents, tickets via conftest fixtures
+# Data Out:      Assertions on audit response shape and aggregated totals
+# Last Modified: 2026-03-29
+
 """Tests for GET /api/tokens/audit (Sprint 13)."""
 
 

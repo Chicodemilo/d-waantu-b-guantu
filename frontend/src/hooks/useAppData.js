@@ -1,3 +1,13 @@
+// Path: src/hooks/useAppData.js
+// File: useAppData.js
+// Created: 2026-03-29
+// Purpose: Master data-fetching hook that polls all API endpoints and hydrates the Zustand store
+// Caller: App.jsx
+// Callees: react, store/useStore, api/status, api/projects, api/sprints, api/epics, api/agents, api/tickets, api/comments, api/alerts, api/instructions, api/activityLogs, api/projectAgents, api/testResults, config
+// Data In: None (reads polling intervals from config)
+// Data Out: Exports useAppData hook; populates entire Zustand store via polling
+// Last Modified: 2026-03-29
+
 import { useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import { getStatus } from '../api/status';

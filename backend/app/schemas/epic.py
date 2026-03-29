@@ -1,3 +1,13 @@
+# Path: app/schemas/epic.py
+# File: epic.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for epic CRUD
+# Caller: app/routers/epics.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: EpicCreate, EpicUpdate, EpicRead
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

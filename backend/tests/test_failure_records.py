@@ -1,3 +1,13 @@
+# Path:          tests/test_failure_records.py
+# File:          test_failure_records.py
+# Created:       2026-03-28
+# Purpose:       CRUD + filtering + summary tests for /api/failure-records
+# Caller:        pytest
+# Callees:       GET/POST/PATCH/DELETE /api/failure-records, GET /api/failure-records/summary
+# Data In:       Factory-created projects, sprints, agents via conftest fixtures
+# Data Out:      Assertions on HTTP status codes, JSON shapes, and summary counts
+# Last Modified: 2026-03-29
+
 """Tests for /api/failure-records CRUD, filtering, and summary."""
 
 import pytest

@@ -1,3 +1,13 @@
+# Path: app/schemas/project_agent.py
+# File: project_agent.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for project-agent assignments
+# Caller: app/routers/project_agents.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: ProjectAgentCreate, ProjectAgentRead
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

@@ -1,3 +1,13 @@
+// Path: src/pages/TestResultsPage.jsx
+// File: TestResultsPage.jsx
+// Created: 2026-03-29
+// Purpose: Global test results view listing all test runs with detail drill-down and test coverage display
+// Caller: App.jsx (route: /tests, /tests/:runId)
+// Callees: react, react-router-dom, ../store/useStore, ../components/common/StatusBadge, ../components/tests/TestCoverage, ../styles/tests.css
+// Data In: Route param (runId), testRuns from Zustand store
+// Data Out: Default export TestResultsPage component
+// Last Modified: 2026-03-29
+
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import useStore from '../store/useStore';

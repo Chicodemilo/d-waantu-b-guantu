@@ -1,3 +1,13 @@
+// Path: src/pages/AgentPage.jsx
+// File: AgentPage.jsx
+// Created: 2026-03-29
+// Purpose: Displays agent detail view with applicable instructions (global, project, agent scoped)
+// Caller: App.jsx (route: /projects/:id/agents/:agentId)
+// Callees: react-router-dom, ../store/useStore, ../components/agents/AgentDetail, ../components/instructions/InstructionView
+// Data In: Route params (id, agentId), instructions from Zustand store
+// Data Out: Default export AgentPage component
+// Last Modified: 2026-03-29
+
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import AgentDetail from '../components/agents/AgentDetail';

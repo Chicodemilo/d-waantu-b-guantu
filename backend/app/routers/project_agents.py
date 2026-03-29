@@ -1,3 +1,13 @@
+# Path: app/routers/project_agents.py
+# File: project_agents.py
+# Created: 2026-03-29
+# Purpose: Project-agent assignment HTTP endpoints
+# Caller: app/main.py
+# Callees: app/services/project_agent.py
+# Data In: HTTP requests
+# Data Out: JSON responses (ProjectAgentRead)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 

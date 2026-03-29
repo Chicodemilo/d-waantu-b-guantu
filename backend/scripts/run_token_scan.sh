@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+# Path: backend/scripts/run_token_scan.sh
+# File: run_token_scan.sh
+# Created: 2026-03-28
+# Purpose: Wrapper for attribute_tokens.py — runs scan and posts summary alert
+# Caller: Manual CLI, sprint completion hooks
+# Callees: attribute_tokens.py, curl → POST /api/alerts
+# Data In: CLI args (--project-id, --dry-run, --force)
+# Data Out: Scan output to stdout; summary alert to API
+# Last Modified: 2026-03-29
 #
 # run_token_scan.sh — Scan Claude transcripts and attribute tokens to tickets.
 #

@@ -1,3 +1,13 @@
+# Path: app/schemas/instruction.py
+# File: instruction.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for instruction CRUD
+# Caller: app/routers/instructions.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: InstructionCreate, InstructionUpdate, InstructionRead
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

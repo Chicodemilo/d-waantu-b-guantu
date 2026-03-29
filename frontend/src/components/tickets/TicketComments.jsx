@@ -1,3 +1,13 @@
+// Path: src/components/tickets/TicketComments.jsx
+// File: TicketComments.jsx
+// Created: 2026-03-29
+// Purpose: Displays a list of comments for a ticket with agent names and timestamps
+// Caller: TicketDetail.jsx
+// Callees: useStore, tickets.css
+// Data In: ticketId prop
+// Data Out: default export TicketComments component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 import '../../styles/tickets.css';
 

@@ -1,3 +1,13 @@
+# Path: app/database.py
+# File: database.py
+# Created: 2026-03-29
+# Purpose: SQLAlchemy engine, session factory, and Base
+# Caller: app/routers/* via Depends(get_db)
+# Callees: app/config.py, sqlalchemy
+# Data In: DATABASE_URL from config
+# Data Out: Session, Base, engine
+# Last Modified: 2026-03-29
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 

@@ -1,3 +1,13 @@
+# Path:          tests/test_tokens.py
+# File:          test_tokens.py
+# Created:       2026-03-28
+# Purpose:       Tests for /api/tokens/audit endpoint shape and data validation
+# Caller:        pytest
+# Callees:       GET /api/tokens/audit, POST /api/projects/:id/overhead
+# Data In:       Factory-created projects, agents, tickets via conftest fixtures
+# Data Out:      Assertions on audit shape, token totals, and overhead inclusion
+# Last Modified: 2026-03-29
+
 """Tests for /api/tokens/audit endpoint."""
 
 

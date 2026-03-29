@@ -1,3 +1,13 @@
+# Path: app/schemas/ticket.py
+# File: ticket.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for ticket CRUD with token tracking
+# Caller: app/routers/tickets.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: TicketCreate, TicketUpdate, TicketRead, TicketTokenIncrement
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

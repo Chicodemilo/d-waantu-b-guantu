@@ -1,3 +1,13 @@
+# Path:          tests/test_playbooks.py
+# File:          test_playbooks.py
+# Created:       2026-03-28
+# Purpose:       Tests for /api/playbooks and project playbook deployment
+# Caller:        pytest
+# Callees:       GET/POST /api/playbooks, POST /api/projects/:id/deploy-playbooks
+# Data In:       Factory-created projects via conftest fixtures; temp playbook files
+# Data Out:      Assertions on HTTP status codes and deployed playbook content
+# Last Modified: 2026-03-29
+
 """Tests for /api/playbooks and /api/projects/:id/deploy-playbooks."""
 
 import tempfile

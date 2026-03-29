@@ -1,3 +1,13 @@
+# Path:          tests/test_dismiss_all.py
+# File:          test_dismiss_all.py
+# Created:       2026-03-28
+# Purpose:       Tests for bulk alert dismissal via POST /api/alerts/dismiss-all
+# Caller:        pytest
+# Callees:       POST /api/alerts, POST /api/alerts/dismiss-all
+# Data In:       Factory-created projects, agents, alerts via conftest fixtures
+# Data Out:      Assertions on dismissed count and alert status changes
+# Last Modified: 2026-03-29
+
 """Tests for POST /api/alerts/dismiss-all (Sprint 12)."""
 
 

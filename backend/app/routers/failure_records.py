@@ -1,3 +1,13 @@
+# Path: app/routers/failure_records.py
+# File: failure_records.py
+# Created: 2026-03-29
+# Purpose: Failure record HTTP endpoints — CRUD and summary analytics
+# Caller: app/main.py
+# Callees: app/services/failure_record.py, models (Agent, Sprint)
+# Data In: HTTP requests
+# Data Out: JSON responses (FailureRecordRead, summary dict)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session

@@ -1,3 +1,13 @@
+# Path:          tests/conftest.py
+# File:          conftest.py
+# Created:       2026-03-28
+# Purpose:       Shared pytest fixtures — DB session, test client, factory helpers
+# Caller:        pytest (auto-loaded by all test modules)
+# Callees:       app.main (FastAPI TestClient), app.database (engine, session)
+# Data In:       MySQL lat_test database connection
+# Data Out:      Rolled-back test transactions; factory-created API objects
+# Last Modified: 2026-03-29
+
 """Shared fixtures for backend API tests.
 
 Uses a separate 'lat_test' MySQL database. Tables are created fresh per session

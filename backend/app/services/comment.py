@@ -1,3 +1,13 @@
+# Path: app/services/comment.py
+# File: comment.py
+# Created: 2026-03-29
+# Purpose: Comment CRUD operations
+# Caller: app/routers/comments.py
+# Callees: app/models/comment.py
+# Data In: db: Session, CommentCreate
+# Data Out: list[Comment], Comment
+# Last Modified: 2026-03-29
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

@@ -1,3 +1,13 @@
+# Path: app/services/token_scan.py
+# File: token_scan.py
+# Created: 2026-03-29
+# Purpose: Run attribute_tokens.py and parse results
+# Caller: app/routers/projects.py, app/services/sprint.py
+# Callees: subprocess, scripts/attribute_tokens.py
+# Data In: project_id: int
+# Data Out: dict (scan summary)
+# Last Modified: 2026-03-29
+
 """Run the token attribution scanner and return structured results."""
 
 import json

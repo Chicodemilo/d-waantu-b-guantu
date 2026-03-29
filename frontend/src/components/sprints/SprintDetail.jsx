@@ -1,3 +1,13 @@
+// Path: src/components/sprints/SprintDetail.jsx
+// File: SprintDetail.jsx
+// Created: 2026-03-29
+// Purpose: Displays sprint details with status, dates, progress bar, token/time stats, and ticket list
+// Caller: SprintPage.jsx
+// Callees: react-router-dom (Link), useStore, StatusBadge, AsciiProgressBar, common.css, tickets.css
+// Data In: sprintId and projectId props
+// Data Out: default export SprintDetail component
+// Last Modified: 2026-03-29
+
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import StatusBadge from '../common/StatusBadge';

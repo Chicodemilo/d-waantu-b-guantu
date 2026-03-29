@@ -1,3 +1,13 @@
+# Path:          tests/test_project_agents.py
+# File:          test_project_agents.py
+# Created:       2026-03-28
+# Purpose:       CRUD + filtering tests for /api/project-agents
+# Caller:        pytest
+# Callees:       GET/POST/DELETE /api/project-agents, GET /api/project-agents/:id
+# Data In:       Factory-created projects, agents via conftest fixtures
+# Data Out:      Assertions on HTTP status codes and JSON response shapes
+# Last Modified: 2026-03-29
+
 """Tests for /api/project-agents CRUD and filtering."""
 
 

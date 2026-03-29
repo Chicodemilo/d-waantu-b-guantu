@@ -1,3 +1,13 @@
+// Path: src/components/sprints/SprintVelocity.jsx
+// File: SprintVelocity.jsx
+// Created: 2026-03-29
+// Purpose: Renders vertical bar chart showing tickets completed per sprint (velocity)
+// Caller: SprintPage.jsx, ProjectPage.jsx
+// Callees: react-router-dom (Link), useStore, charts.css
+// Data In: projectId prop
+// Data Out: default export SprintVelocity component
+// Last Modified: 2026-03-29
+
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import '../../styles/charts.css';

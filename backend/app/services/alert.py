@@ -1,3 +1,13 @@
+# Path: app/services/alert.py
+# File: alert.py
+# Created: 2026-03-29
+# Purpose: Alert CRUD with auto-resolved_at on status change
+# Caller: app/routers/alerts.py
+# Callees: app/models/alert.py
+# Data In: db: Session, AlertCreate/Update
+# Data Out: list[Alert], Alert
+# Last Modified: 2026-03-29
+
 from datetime import datetime, timezone
 
 from sqlalchemy import select, update

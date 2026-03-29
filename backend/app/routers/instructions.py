@@ -1,3 +1,13 @@
+# Path: app/routers/instructions.py
+# File: instructions.py
+# Created: 2026-03-29
+# Purpose: Instruction HTTP endpoints — CRUD, sync-check, sync
+# Caller: app/main.py
+# Callees: app/services/instruction.py, app/services/sync_check.py
+# Data In: HTTP requests
+# Data Out: JSON responses (InstructionRead, sync reports)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session

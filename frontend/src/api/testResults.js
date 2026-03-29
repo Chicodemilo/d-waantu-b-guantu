@@ -1,3 +1,13 @@
+// Path: src/api/testResults.js
+// File: testResults.js
+// Created: 2026-03-29
+// Purpose: API functions for fetching test runs, project-specific test runs, and test performance data
+// Caller: pages/ProjectTestsPage.jsx, hooks/useAppData.js, components/project/ProjectHeader.jsx, components/tests/TestPerformance.jsx
+// Callees: ./client (get)
+// Data In: Test run ID for single fetch; project ID for project-scoped runs; query params for listing
+// Data Out: Test run objects/arrays, performance data from /test-results endpoint
+// Last Modified: 2026-03-29
+
 import { get } from './client';
 
 export function getTestRuns(params = {}) {

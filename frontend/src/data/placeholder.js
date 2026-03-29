@@ -1,3 +1,13 @@
+// Path: src/data/placeholder.js
+// File: placeholder.js
+// Created: 2026-03-29
+// Purpose: Static placeholder/seed data for development and fallback rendering
+// Caller: pages/DashboardPage.jsx, components/tests/FailureAnalysis.jsx
+// Callees: None
+// Data In: None
+// Data Out: Exports named constants: projects, sprints, epics, agents, tickets, comments, alerts, instructions, activityLog, dashboard
+// Last Modified: 2026-03-29
+
 export const projects = [
   {
     id: 1,

@@ -1,3 +1,13 @@
+# Path:          tests/test_instructions.py
+# File:          test_instructions.py
+# Created:       2026-03-28
+# Purpose:       Full CRUD + filtering tests for /api/instructions
+# Caller:        pytest
+# Callees:       GET/POST/PATCH/DELETE /api/instructions, GET /api/instructions/:id
+# Data In:       Factory-created projects, agents via conftest fixtures
+# Data Out:      Assertions on HTTP status codes and JSON response shapes
+# Last Modified: 2026-03-29
+
 """Tests for /api/instructions CRUD and filtering."""
 
 

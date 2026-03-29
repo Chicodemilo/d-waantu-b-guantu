@@ -1,3 +1,13 @@
+# Path: app/schemas/project.py
+# File: project.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for project CRUD with gate flags
+# Caller: app/routers/projects.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: ProjectCreate, ProjectUpdate, ProjectRead, ProjectOverheadIncrement
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

@@ -1,3 +1,13 @@
+// Path: src/components/project/ProjectHeader.jsx
+// File: ProjectHeader.jsx
+// Created: 2026-03-29
+// Purpose: Renders project header with status, dates, token/time totals, test status icon, and active epic link
+// Caller: ProjectPage.jsx
+// Callees: react (useState, useEffect), react-router-dom (Link), useStore, StatusBadge, api/testResults (getProjectTestRuns)
+// Data In: project prop (full project object)
+// Data Out: default export ProjectHeader component
+// Last Modified: 2026-03-29
+
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';

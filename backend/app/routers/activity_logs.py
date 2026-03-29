@@ -1,3 +1,13 @@
+# Path: app/routers/activity_logs.py
+# File: activity_logs.py
+# Created: 2026-03-29
+# Purpose: Activity log HTTP endpoints — list, get, create
+# Caller: app/main.py
+# Callees: app/services/activity_log.py
+# Data In: HTTP requests
+# Data Out: JSON responses (ActivityLogRead)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 

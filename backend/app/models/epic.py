@@ -1,3 +1,13 @@
+# Path: app/models/epic.py
+# File: epic.py
+# Created: 2026-03-29
+# Purpose: Epic ORM model with status enum
+# Caller: app/services/epic.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: Epic, EpicStatus
+# Last Modified: 2026-03-29
+
 import enum
 from datetime import datetime
 

@@ -1,3 +1,13 @@
+// Path: src/store/useStore.js
+// File: useStore.js
+// Created: 2026-03-29
+// Purpose: Central Zustand store managing all application state (projects, sprints, epics, agents, tickets, comments, alerts, instructions, test runs, activity log, polling)
+// Caller: App.jsx, useAppData, usePolling, useActivityData, useAgentsData, useAlertsData, useCommentsData, useEpicsData, useInstructionsData, useProjectsData, useSprintsData, useTicketsData, and ~30 component files
+// Callees: zustand, api/alerts, config
+// Data In: Data set via setter functions from API fetch hooks
+// Data Out: Exports useStore hook with state, setters, and computed getters
+// Last Modified: 2026-03-29
+
 import { create } from 'zustand';
 import { updateAlert } from '../api/alerts';
 import { POLLING_IDLE_INTERVAL } from '../config';

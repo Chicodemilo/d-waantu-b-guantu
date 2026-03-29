@@ -1,3 +1,13 @@
+# Path:          tests/test_status_history.py
+# File:          test_status_history.py
+# Created:       2026-03-28
+# Purpose:       Tests for status history tracking, rework detection, and time computation
+# Caller:        pytest
+# Callees:       PATCH /api/tickets, GET /api/tickets/:id/history, GET /api/failure-records
+# Data In:       Factory-created tickets, agents, projects via conftest fixtures
+# Data Out:      Assertions on history records, failure records, and time_spent_seconds
+# Last Modified: 2026-03-29
+
 """Tests for status history, rework detection, and time computation (Sprint 27)."""
 
 import time

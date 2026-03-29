@@ -1,3 +1,13 @@
+# Path: app/schemas/sprint.py
+# File: sprint.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for sprint CRUD
+# Caller: app/routers/sprints.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: SprintCreate, SprintUpdate, SprintRead
+# Last Modified: 2026-03-29
+
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict

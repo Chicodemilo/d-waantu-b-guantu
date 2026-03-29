@@ -1,3 +1,13 @@
+# Path:          tests/test_failure_gate.py
+# File:          test_failure_gate.py
+# Created:       2026-03-28
+# Purpose:       Tests for sprint close gate — unreviewed failure records block completion
+# Caller:        pytest
+# Callees:       POST/PATCH /api/failure-records, PATCH /api/sprints, PATCH /api/tickets
+# Data In:       Factory-created projects, sprints, tickets, agents via conftest fixtures
+# Data Out:      Assertions on gate-blocked 400s and successful 200 completions
+# Last Modified: 2026-03-29
+
 """Tests for sprint close gate: unreviewed failure records block completion."""
 
 import pytest

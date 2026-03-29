@@ -1,3 +1,13 @@
+# Path: app/models/agent.py
+# File: agent.py
+# Created: 2026-03-29
+# Purpose: Agent ORM model — Claude Code teammate definitions
+# Caller: app/services/agent.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: Agent
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, String, Text, func

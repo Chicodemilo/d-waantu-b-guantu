@@ -1,3 +1,13 @@
+// Path: src/components/layout/Header.jsx
+// File: Header.jsx
+// Created: 2026-03-29
+// Purpose: Renders the top header bar with dynamic page title and open alerts badge
+// Caller: AppShell.jsx
+// Callees: react-router-dom (useLocation, Link), useStore
+// Data In: location pathname, alerts and projects from store
+// Data Out: default export Header component
+// Last Modified: 2026-03-29
+
 import { useLocation, Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 

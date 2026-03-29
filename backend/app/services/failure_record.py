@@ -1,3 +1,13 @@
+# Path: app/services/failure_record.py
+# File: failure_record.py
+# Created: 2026-03-29
+# Purpose: Failure record CRUD and filtered queries
+# Caller: app/routers/failure_records.py
+# Callees: app/models/failure_record.py
+# Data In: db: Session, filters
+# Data Out: list[FailureRecord], FailureRecord
+# Last Modified: 2026-03-29
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

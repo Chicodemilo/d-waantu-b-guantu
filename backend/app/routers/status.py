@@ -1,3 +1,13 @@
+# Path: app/routers/status.py
+# File: status.py
+# Created: 2026-03-29
+# Purpose: System status, test coverage, and code standards endpoints
+# Caller: app/main.py
+# Callees: app/models (agent, alert, ticket), pathlib
+# Data In: HTTP requests
+# Data Out: JSON responses (status dict, coverage report, header format)
+# Last Modified: 2026-03-29
+
 from pathlib import Path
 
 from fastapi import APIRouter, Depends

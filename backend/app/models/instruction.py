@@ -1,3 +1,13 @@
+# Path: app/models/instruction.py
+# File: instruction.py
+# Created: 2026-03-29
+# Purpose: Instruction ORM model — scoped behavioral rules
+# Caller: app/services/instruction.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: Instruction, InstructionScope
+# Last Modified: 2026-03-29
+
 import enum
 from datetime import datetime
 

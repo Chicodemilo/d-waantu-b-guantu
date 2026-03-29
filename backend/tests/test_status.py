@@ -1,3 +1,13 @@
+# Path:          tests/test_status.py
+# File:          test_status.py
+# Created:       2026-03-28
+# Purpose:       Tests for system status and health check endpoint
+# Caller:        pytest
+# Callees:       GET /api/status
+# Data In:       None (stateless health check)
+# Data Out:      Assertions on HTTP 200 and status response shape
+# Last Modified: 2026-03-29
+
 """Tests for GET /api/status."""
 
 

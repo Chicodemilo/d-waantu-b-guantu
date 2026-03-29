@@ -1,3 +1,13 @@
+# Path:          tests/test_projects.py
+# File:          test_projects.py
+# Created:       2026-03-28
+# Purpose:       Full CRUD + filtering tests for /api/projects, including overhead
+# Caller:        pytest
+# Callees:       GET/POST/PATCH/DELETE /api/projects, POST /api/projects/:id/overhead
+# Data In:       Factory-created projects, tickets, test results via conftest fixtures
+# Data Out:      Assertions on HTTP status codes, JSON shapes, and cascade deletes
+# Last Modified: 2026-03-29
+
 """Tests for /api/projects CRUD and filtering."""
 
 import pytest

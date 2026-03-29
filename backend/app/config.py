@@ -1,3 +1,13 @@
+# Path: app/config.py
+# File: config.py
+# Created: 2026-03-29
+# Purpose: Application configuration via Pydantic Settings
+# Caller: app/database.py
+# Callees: pydantic_settings
+# Data In: .env file
+# Data Out: Settings instance
+# Last Modified: 2026-03-29
+
 from pydantic_settings import BaseSettings
 
 

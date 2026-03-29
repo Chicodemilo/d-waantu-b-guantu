@@ -1,3 +1,13 @@
+# Path: app/models/ticket.py
+# File: ticket.py
+# Created: 2026-03-29
+# Purpose: Ticket ORM model with status/type enums
+# Caller: app/services/ticket.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: Ticket, TicketStatus, TicketType
+# Last Modified: 2026-03-29
+
 import enum
 from datetime import datetime
 

@@ -1,3 +1,13 @@
+# Path: app/schemas/alert.py
+# File: alert.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for alert CRUD
+# Caller: app/routers/alerts.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: AlertCreate, AlertUpdate, AlertRead
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

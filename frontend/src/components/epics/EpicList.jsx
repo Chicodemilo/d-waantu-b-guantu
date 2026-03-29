@@ -1,3 +1,13 @@
+// Path: src/components/epics/EpicList.jsx
+// File: EpicList.jsx
+// Created: 2026-03-29
+// Purpose: Renders expandable list of epics with progress bars and nested sprint breakdowns
+// Caller: ProjectPage.jsx
+// Callees: react (useState), react-router-dom (Link), useStore, StatusBadge, AsciiProgressBar, common.css
+// Data In: projectId prop
+// Data Out: default export EpicList component
+// Last Modified: 2026-03-29
+
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';

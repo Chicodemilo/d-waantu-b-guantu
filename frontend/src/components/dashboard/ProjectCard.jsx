@@ -1,3 +1,13 @@
+// Path: src/components/dashboard/ProjectCard.jsx
+// File: ProjectCard.jsx
+// Created: 2026-03-29
+// Purpose: Dashboard card displaying a project summary with ticket stats, token usage, time spent, and progress bar
+// Caller: DashboardPage.jsx
+// Callees: react-router-dom (Link), useStore, StatusBadge, AsciiProgressBar, dashboard.css
+// Data In: props { project }; tickets from store via getTicketsByProject
+// Data Out: default export ProjectCard component
+// Last Modified: 2026-03-29
+
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import StatusBadge from '../common/StatusBadge';

@@ -1,3 +1,13 @@
+# Path:          tests/test_test_results.py
+# File:          test_test_results.py
+# Created:       2026-03-28
+# Purpose:       CRUD + filtering tests for /api/test-results
+# Caller:        pytest
+# Callees:       GET/POST /api/test-results, GET /api/test-results/:id
+# Data In:       Factory-created projects via conftest fixtures
+# Data Out:      Assertions on HTTP status codes and JSON response shapes
+# Last Modified: 2026-03-29
+
 """Tests for /api/test-results CRUD and filtering."""
 
 

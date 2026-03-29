@@ -1,3 +1,13 @@
+// Path: src/components/tests/FailureAnalysis.jsx
+// File: FailureAnalysis.jsx
+// Created: 2026-03-29
+// Purpose: Multi-view failure analysis dashboard with summary, by-type/agent/sprint charts, trends, logging form, and pending review
+// Caller: ProjectTestsPage.jsx
+// Callees: react (useState, useEffect, useCallback), useStore, api/failureRecords (getFailureSummary, getFailureRecords, createFailureRecord, updateFailureRecord), AsciiChart, tests.css, charts.css
+// Data In: projectId prop
+// Data Out: default export FailureAnalysis component
+// Last Modified: 2026-03-29
+
 import { useState, useEffect, useCallback } from 'react';
 import useStore from '../../store/useStore';
 import { getFailureSummary, getFailureRecords, createFailureRecord, updateFailureRecord } from '../../api/failureRecords';

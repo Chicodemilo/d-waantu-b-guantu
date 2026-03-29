@@ -1,3 +1,13 @@
+# Path: app/models/failure_record.py
+# File: failure_record.py
+# Created: 2026-03-29
+# Purpose: FailureRecord ORM model — failure analysis tracking
+# Caller: app/services/failure_record.py, ticket.py, test_result.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: FailureRecord
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func

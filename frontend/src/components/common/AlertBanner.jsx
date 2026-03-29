@@ -1,3 +1,13 @@
+// Path: src/components/common/AlertBanner.jsx
+// File: AlertBanner.jsx
+// Created: 2026-03-29
+// Purpose: Renders a dismissible alert banner with severity styling, agent/project source, and relative timestamp
+// Caller: DashboardPage.jsx, ProjectPage.jsx
+// Callees: useStore, common.css
+// Data In: props { alert } (alert object with severity, title, body, raised_by_agent_id, project_id, created_at)
+// Data Out: default export AlertBanner component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 import '../../styles/common.css';
 

@@ -1,3 +1,13 @@
+// Path: src/components/tickets/TicketList.jsx
+// File: TicketList.jsx
+// Created: 2026-03-29
+// Purpose: Filterable ticket table with backlog toggle, status/type/sprint/epic/agent filters, and navigable rows
+// Caller: TicketsPage.jsx
+// Callees: react (useState), react-router-dom (useNavigate), useStore, TicketFilters, StatusBadge, tickets.css
+// Data In: projectId prop
+// Data Out: default export TicketList component
+// Last Modified: 2026-03-29
+
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useStore from '../../store/useStore';

@@ -1,3 +1,13 @@
+# Path: app/schemas/test_result.py
+# File: test_result.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for test result CRUD
+# Caller: app/routers/test_results.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: TestResultCreate, TestResultRead
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

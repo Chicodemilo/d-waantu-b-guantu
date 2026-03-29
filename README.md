@@ -95,7 +95,7 @@ Dashboard is now at `http://localhost:5173`.
 
 **Frontend** — React 18 with Vite, Zustand for state management, React Router for navigation. Vanilla CSS with a dark terminal aesthetic (JetBrains Mono, green/orange/blue on black). Adaptive polling refreshes data every 2s when sprints are active, 10s when idle.
 
-**Database** — MySQL 8.0 via PyMySQL driver. Alembic manages schema migrations with autogenerate support. 14 tables including status_history and failure_records.
+**Database** — MySQL 8.0 via PyMySQL driver. Alembic manages schema migrations with autogenerate support. 13 tables including status_history and failure_records.
 
 ---
 
@@ -630,6 +630,7 @@ All endpoints are prefixed with `/api`. Interactive docs at `http://localhost:80
 | `ADMIN_API_KEY` | (placeholder) | Admin API key |
 | `PMA_PORT` | `8080` | phpMyAdmin port |
 | `VITE_API_BASE_URL` | `http://localhost:8000/api` | Frontend API base URL |
+| `VITE_POLL_INTERVAL_MS` | `2000` | Frontend polling interval (ms) |
 
 ### Script variables (all optional)
 
@@ -664,7 +665,7 @@ local_agent_tracker/
 │   │   ├── main.py         # FastAPI app + CORS + router registration
 │   │   ├── config.py       # Pydantic Settings
 │   │   ├── database.py     # Engine + session factory
-│   │   ├── models/         # SQLAlchemy models (14 tables)
+│   │   ├── models/         # SQLAlchemy models (13 tables)
 │   │   ├── schemas/        # Pydantic request/response schemas
 │   │   ├── services/       # Business logic layer
 │   │   └── routers/        # HTTP endpoint handlers (15 routers)

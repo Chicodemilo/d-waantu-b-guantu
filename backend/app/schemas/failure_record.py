@@ -1,3 +1,13 @@
+# Path: app/schemas/failure_record.py
+# File: failure_record.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for failure record CRUD
+# Caller: app/routers/failure_records.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: FailureRecordCreate, FailureRecordUpdate, FailureRecordRead
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

@@ -1,3 +1,13 @@
+// Path: src/components/dashboard/CrossProjectSummary.jsx
+// File: CrossProjectSummary.jsx
+// Created: 2026-03-29
+// Purpose: Dashboard summary panels showing aggregate counts for projects, tickets, completion, and alerts
+// Caller: DashboardPage.jsx
+// Callees: useStore, dashboard.css
+// Data In: projects, tickets, agents, projectAgents, alerts from store
+// Data Out: default export CrossProjectSummary component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 import '../../styles/dashboard.css';
 

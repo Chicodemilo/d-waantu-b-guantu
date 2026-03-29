@@ -1,3 +1,13 @@
+# Path: app/routers/projects.py
+# File: projects.py
+# Created: 2026-03-29
+# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, scan-tokens
+# Caller: app/main.py
+# Callees: app/services/project.py, token_scan.py, models (Agent, Alert, ProjectAgent)
+# Data In: HTTP requests
+# Data Out: JSON responses (ProjectRead, gate status, scan results)
+# Last Modified: 2026-03-29
+
 import json
 import re
 from pathlib import Path

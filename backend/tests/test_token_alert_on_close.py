@@ -1,3 +1,13 @@
+# Path:          tests/test_token_alert_on_close.py
+# File:          test_token_alert_on_close.py
+# Created:       2026-03-28
+# Purpose:       Tests for auto-alert creation when ticket closed with zero tokens
+# Caller:        pytest
+# Callees:       PATCH /api/tickets, POST /api/tickets/:id/tokens, GET /api/alerts
+# Data In:       Factory-created tickets, agents via conftest fixtures
+# Data Out:      Assertions on auto-created alerts and their content
+# Last Modified: 2026-03-29
+
 """Tests for auto-alert when ticket closed with tokens_used=0."""
 
 

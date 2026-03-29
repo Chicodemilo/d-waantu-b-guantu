@@ -1,3 +1,13 @@
+# Path: app/models/status_history.py
+# File: status_history.py
+# Created: 2026-03-29
+# Purpose: StatusHistory ORM model — ticket status transition log
+# Caller: app/services/ticket.py
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: StatusHistory
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, func

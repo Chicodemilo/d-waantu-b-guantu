@@ -1,3 +1,13 @@
+// Path: src/pages/ProjectAgentsPage.jsx
+// File: ProjectAgentsPage.jsx
+// Created: 2026-03-29
+// Purpose: Lists all agents assigned to a project in a table with name, role, description, and status
+// Caller: App.jsx (route: /projects/:id/agents)
+// Callees: react-router-dom, ../store/useStore, ../components/common/StatusBadge
+// Data In: Route param (id), project and agents from Zustand store
+// Data Out: Default export ProjectAgentsPage component
+// Last Modified: 2026-03-29
+
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import StatusBadge from '../components/common/StatusBadge';

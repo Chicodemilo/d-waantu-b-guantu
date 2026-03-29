@@ -1,3 +1,13 @@
+# Path:          tests/test_alerts.py
+# File:          test_alerts.py
+# Created:       2026-03-28
+# Purpose:       CRUD + filtering tests for /api/alerts
+# Caller:        pytest
+# Callees:       GET/POST/PATCH/DELETE /api/alerts, GET /api/alerts/:id
+# Data In:       Factory-created projects, agents via conftest fixtures
+# Data Out:      Assertions on HTTP status codes and JSON response shapes
+# Last Modified: 2026-03-29
+
 """Tests for /api/alerts CRUD, filtering, and run-tests endpoint."""
 
 

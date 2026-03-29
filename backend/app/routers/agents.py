@@ -1,3 +1,13 @@
+# Path: app/routers/agents.py
+# File: agents.py
+# Created: 2026-03-29
+# Purpose: Agent HTTP endpoints — CRUD
+# Caller: app/main.py
+# Callees: app/services/agent.py
+# Data In: HTTP requests
+# Data Out: JSON responses (AgentRead)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 

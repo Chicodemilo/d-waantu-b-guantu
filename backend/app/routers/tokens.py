@@ -1,3 +1,13 @@
+# Path: app/routers/tokens.py
+# File: tokens.py
+# Created: 2026-03-29
+# Purpose: Token audit endpoint — system-wide token usage analysis
+# Caller: app/main.py
+# Callees: app/models (ticket, agent, project)
+# Data In: HTTP requests
+# Data Out: JSON response (audit dict)
+# Last Modified: 2026-03-29
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session

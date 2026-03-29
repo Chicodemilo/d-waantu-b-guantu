@@ -1,3 +1,13 @@
+# Path:          tests/test_tickets.py
+# File:          test_tickets.py
+# Created:       2026-03-28
+# Purpose:       Full CRUD + filtering tests for /api/tickets
+# Caller:        pytest
+# Callees:       GET/POST/PATCH/DELETE /api/tickets, POST /api/tickets/:id/tokens
+# Data In:       Factory-created projects, sprints, agents via conftest fixtures
+# Data Out:      Assertions on HTTP status codes, JSON shapes, and token increments
+# Last Modified: 2026-03-29
+
 """Tests for /api/tickets CRUD and filtering."""
 
 import pytest

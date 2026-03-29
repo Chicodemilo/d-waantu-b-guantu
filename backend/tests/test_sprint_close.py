@@ -1,3 +1,13 @@
+# Path:          tests/test_sprint_close.py
+# File:          test_sprint_close.py
+# Created:       2026-03-28
+# Purpose:       Tests for auto-alert and auto-test-ticket on sprint completion
+# Caller:        pytest
+# Callees:       PATCH /api/sprints, GET /api/alerts, GET /api/tickets
+# Data In:       Factory-created projects, epics, sprints, agents via conftest fixtures
+# Data Out:      Assertions on auto-created alerts and test tickets
+# Last Modified: 2026-03-29
+
 """Tests for DWB-076: auto-test-ticket and alerts on sprint close.
 
 When a sprint is PATCHed to status=completed, the system should:

@@ -1,3 +1,13 @@
+// Path: src/App.jsx
+// File: App.jsx
+// Created: 2026-03-29
+// Purpose: Root application component that initializes data polling and defines all routes
+// Caller: main.jsx
+// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage
+// Data In: None
+// Data Out: Exports App component (renders route tree inside AppShell)
+// Last Modified: 2026-03-29
+
 import { Routes, Route } from 'react-router-dom';
 import useAppData from './hooks/useAppData';
 import AppShell from './components/layout/AppShell';

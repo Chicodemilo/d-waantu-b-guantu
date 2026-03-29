@@ -1,3 +1,13 @@
+// Path: src/components/project/SprintProgress.jsx
+// File: SprintProgress.jsx
+// Created: 2026-03-29
+// Purpose: Shows current/active sprint progress with ticket counts, tokens, time, and goal
+// Caller: ProjectPage.jsx
+// Callees: useStore, StatusBadge, AsciiProgressBar
+// Data In: projectId prop
+// Data Out: default export SprintProgress component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 import StatusBadge from '../common/StatusBadge';
 import AsciiProgressBar from '../common/AsciiProgressBar';

@@ -1,3 +1,13 @@
+# Path:          tests/test_auto_assign.py
+# File:          test_auto_assign.py
+# Created:       2026-03-28
+# Purpose:       Tests for ticket->sprint and sprint->epic auto-assignment
+# Caller:        pytest
+# Callees:       POST /api/tickets, POST /api/sprints
+# Data In:       Factory-created projects, epics, sprints via conftest fixtures
+# Data Out:      Assertions on auto-assigned sprint_id and epic_id values
+# Last Modified: 2026-03-29
+
 """Tests for auto-assign hierarchy (Sprints 12-13).
 
 - Ticket without sprint_id → auto-assigns to active sprint

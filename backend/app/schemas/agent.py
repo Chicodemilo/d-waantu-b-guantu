@@ -1,3 +1,13 @@
+# Path: app/schemas/agent.py
+# File: agent.py
+# Created: 2026-03-29
+# Purpose: Pydantic schemas for agent CRUD
+# Caller: app/routers/agents.py
+# Callees: pydantic
+# Data In: JSON request body
+# Data Out: AgentCreate, AgentUpdate, AgentRead
+# Last Modified: 2026-03-29
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

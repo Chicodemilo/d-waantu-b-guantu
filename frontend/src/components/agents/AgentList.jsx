@@ -1,3 +1,13 @@
+// Path: src/components/agents/AgentList.jsx
+// File: AgentList.jsx
+// Created: 2026-03-29
+// Purpose: Renders a list of agent cards linked to their detail pages across active projects
+// Caller: DashboardPage.jsx
+// Callees: react-router-dom (Link), useStore, agents.css
+// Data In: None (reads agents, projectAgents, projects from store)
+// Data Out: default export AgentList component
+// Last Modified: 2026-03-29
+
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import '../../styles/agents.css';

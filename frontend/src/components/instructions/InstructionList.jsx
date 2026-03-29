@@ -1,3 +1,13 @@
+// Path: src/components/instructions/InstructionList.jsx
+// File: InstructionList.jsx
+// Created: 2026-03-29
+// Purpose: Groups and displays instructions by scope (global, project, agent)
+// Caller: InstructionsPage.jsx
+// Callees: useStore, InstructionView, common.css
+// Data In: None (reads instructions from store)
+// Data Out: default export InstructionList component
+// Last Modified: 2026-03-29
+
 import useStore from '../../store/useStore';
 import InstructionView from './InstructionView';
 import '../../styles/common.css';

@@ -1,3 +1,13 @@
+# Path:          tests/test_activity_logs.py
+# File:          test_activity_logs.py
+# Created:       2026-03-28
+# Purpose:       CRUD + filtering tests for /api/activity-logs
+# Caller:        pytest
+# Callees:       GET/POST /api/activity-logs, GET /api/activity-logs/:id
+# Data In:       Factory-created projects, agents via conftest fixtures
+# Data Out:      Assertions on HTTP status codes and JSON response shapes
+# Last Modified: 2026-03-29
+
 """Tests for /api/activity-logs endpoints."""
 
 

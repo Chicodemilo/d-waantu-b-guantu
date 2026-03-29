@@ -1,3 +1,13 @@
+// Path: src/pages/DashboardPage.jsx
+// File: DashboardPage.jsx
+// Created: 2026-03-29
+// Purpose: Main dashboard showing project cards, alerts, token usage summary, and agent list
+// Caller: App.jsx (route: /)
+// Callees: react, react-router-dom, ../store/useStore, ../components/dashboard/CrossProjectSummary, ../components/dashboard/ProjectCard, ../components/dashboard/TokenOverview, ../components/common/AlertBanner, ../components/agents/AgentList, ../components/dashboard/TokenAudit, ../api/alerts, ../api/projects, ../styles/dashboard.css
+// Data In: Projects, alerts, and agents from Zustand store
+// Data Out: Default export DashboardPage component
+// Last Modified: 2026-03-29
+
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
