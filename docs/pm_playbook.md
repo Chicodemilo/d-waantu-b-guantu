@@ -192,6 +192,22 @@ Look at `tokens_used` and `time_spent_seconds` on each. Flag outliers — if mos
 
 ## 7. Keeping the Activity Log Useful
 
+### X-Agent-ID Header (REQUIRED)
+
+**Include `X-Agent-ID: {your_agent_id}` on every API call.** The activity logging middleware uses this header to attribute actions to the correct agent in the activity feed. Without it, the system falls back to heuristics (response body parsing, project role lookups) which may misattribute or show "system".
+
+Example:
+```
+curl -X PATCH http://localhost:8000/api/tickets/42 \
+  -H "Content-Type: application/json" \
+  -H "X-Agent-ID: 2" \
+  -d '{"status": "in_review"}'
+```
+
+This applies to all POST, PATCH, PUT, and DELETE requests. GET requests are not logged.
+
+### Manual activity log entries
+
 The PM should log its own actions and observations:
 
 ```

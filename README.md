@@ -462,6 +462,10 @@ Filter by project: `GET /api/failure-records/summary?project_id=1`
 
 All endpoints are prefixed with `/api`. Interactive docs at `http://localhost:8000/docs`.
 
+### X-Agent-ID Header
+
+Include `X-Agent-ID: {agent_id}` on all mutating requests (POST, PATCH, PUT, DELETE). The activity logging middleware uses this header to attribute actions to agents in the activity feed. Without it, the system falls back to response body heuristics and project role lookups. See the PM playbook for details.
+
 ### Projects — `/api/projects`
 
 | Method | Path | Description |

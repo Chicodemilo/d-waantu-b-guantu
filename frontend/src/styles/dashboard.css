@@ -393,6 +393,11 @@
   border-bottom: 1px solid var(--border);
 }
 
+.activity-feed__entry--system .activity-feed__col-activity,
+.activity-feed__entry--system .activity-feed__col-worker {
+  color: var(--gray);
+}
+
 .activity-feed__entry:last-child {
   border-bottom: none;
 }

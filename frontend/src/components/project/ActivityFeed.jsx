@@ -81,7 +81,7 @@ function ActivityFeed({ projectId }) {
       </div>
       <div className="activity-feed__scroll">
         {entries.map((entry) => (
-          <div key={entry.id} className="activity-feed__entry">
+          <div key={entry.id} className={`activity-feed__entry${!entry.agent_name || entry.agent_name === 'system' ? ' activity-feed__entry--system' : ''}`}>
             <span className="activity-feed__col-time">{timeAgo(entry.created_at)}</span>
             <span className="activity-feed__col-activity">{formatActivity(entry)}</span>
             <span className="activity-feed__col-worker">{entry.agent_name || 'system'}</span>
