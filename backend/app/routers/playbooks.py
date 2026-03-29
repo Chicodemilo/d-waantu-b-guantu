@@ -1,0 +1,77 @@
+import shutil
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.services import project as project_svc
+
+router = APIRouter(prefix="/api", tags=["playbooks"])
+
+DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
+
+PLAYBOOK_FILES = {
+    "team_lead": "team_lead_playbook.md",
+    "pm": "pm_playbook.md",
+}
+
+
+class PlaybookRead(BaseModel):
+    name: str
+    title: str
+    content: str
+
+
+class DeployResult(BaseModel):
+    deployed: list[str]
+    target_dir: str
+
+
+@router.get("/playbooks", response_model=list[PlaybookRead])
+def list_playbooks():
+    results = []
+    for key, filename in PLAYBOOK_FILES.items():
+        path = DOCS_DIR / filename
+        if not path.is_file():
+            continue
+        content = path.read_text(encoding="utf-8")
+        # Extract title from first markdown heading
+        title = key.replace("_", " ").title() + " Playbook"
+        for line in content.splitlines():
+            if line.startswith("# "):
+                title = line.lstrip("# ").strip()
+                break
+        results.append(PlaybookRead(name=key, title=title, content=content))
+    return results
+
+
+@router.post("/projects/{project_id}/deploy-playbooks", response_model=DeployResult)
+def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
+    project = project_svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not project.repo_path:
+        raise HTTPException(400, "Project has no repo_path configured")
+
+    repo = Path(project.repo_path)
+    if not repo.is_dir():
+        raise HTTPException(400, f"repo_path does not exist: {project.repo_path}")
+
+    target_dir = repo / ".claude"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    deployed = []
+    for key, filename in PLAYBOOK_FILES.items():
+        src = DOCS_DIR / filename
+        if not src.is_file():
+            continue
+        dst = target_dir / filename
+        shutil.copy2(src, dst)
+        deployed.append(filename)
+
+    if not deployed:
+        raise HTTPException(500, "No playbook files found in docs/")
+
+    return DeployResult(deployed=deployed, target_dir=str(target_dir))

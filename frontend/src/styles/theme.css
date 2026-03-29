@@ -1,0 +1,77 @@
+:root {
+  --bg: #000000;
+  --bg-alt: #0a0a0a;
+  --bg-hover: #111111;
+  --green: #4ade80;
+  --green-dim: #22c55e;
+  --green-bright: #86efac;
+  --orange: #fb923c;
+  --orange-bright: #fdba74;
+  --blue: #93c5fd;
+  --blue-dim: #60a5fa;
+  --gray: #525252;
+  --gray-light: #737373;
+  --border: #262626;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+
+  --red: #f87171;
+  --red-dim: #ef4444;
+  --yellow: #fbbf24;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background-color: var(--bg);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+}
+
+a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--blue-dim);
+  text-decoration: underline;
+}
+
+::selection {
+  background-color: var(--green-dim);
+  color: var(--bg);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-alt);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--gray);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-light);
+}

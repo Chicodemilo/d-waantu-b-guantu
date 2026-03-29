@@ -1,0 +1,162 @@
+.ascii-chart {
+  padding: 16px;
+  background-color: var(--bg-alt);
+  border: 1px solid var(--border);
+}
+
+.ascii-chart__title {
+  font-size: 12px;
+  color: var(--gray-light);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+  cursor: default;
+}
+
+.ascii-chart__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  flex-wrap: nowrap;
+}
+
+.ascii-chart__label {
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
+  flex-shrink: 0;
+  color: var(--green);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ascii-chart__track {
+  white-space: nowrap;
+}
+
+.ascii-chart__bar {
+  color: var(--green-dim);
+  letter-spacing: -1px;
+}
+
+.ascii-chart__bar--orange {
+  color: var(--orange);
+}
+
+.ascii-chart__bar--blue {
+  color: var(--blue);
+}
+
+.ascii-chart__bar-empty {
+  color: var(--gray);
+  letter-spacing: -1px;
+}
+
+.ascii-chart__value {
+  min-width: 60px;
+  color: var(--gray-light);
+  font-size: 12px;
+}
+
+.progress-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.progress-bar__track {
+  letter-spacing: -1px;
+}
+
+.progress-bar__filled {
+  color: var(--green-dim);
+}
+
+.progress-bar__empty {
+  color: var(--gray);
+}
+
+.progress-bar__pct {
+  color: var(--green);
+  font-size: 12px;
+  min-width: 36px;
+}
+
+.sparkline {
+  font-size: 16px;
+  letter-spacing: 1px;
+  color: var(--green-dim);
+}
+
+.sparkline--orange {
+  color: var(--orange);
+}
+
+.ascii-chart--stacked {
+  margin-top: 8px;
+}
+
+.vbar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.vbar-chart__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 36px;
+}
+
+.vbar-chart__value {
+  font-size: 11px;
+  color: var(--gray-light);
+  margin-bottom: 2px;
+}
+
+.vbar-chart__bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  white-space: pre;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  font-size: 13px;
+}
+
+.vbar-chart__filled {
+  color: var(--green-dim);
+}
+
+.vbar-chart__empty {
+  color: var(--gray);
+}
+
+.vbar-chart__col--link {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.vbar-chart__col--link:hover .vbar-chart__filled {
+  color: var(--green-bright);
+}
+
+.vbar-chart__col--link:hover .vbar-chart__label {
+  color: var(--green-bright);
+}
+
+.vbar-chart__label {
+  font-size: 10px;
+  color: var(--green);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
