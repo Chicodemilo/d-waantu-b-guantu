@@ -3,7 +3,7 @@
 // Created: 2026-03-29
 // Purpose: Root application component that initializes data polling and defines all routes
 // Caller: main.jsx
-// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage
+// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/DocsPage, pages/SystemDocsPage
 // Data In: None
 // Data Out: Exports App component (renders route tree inside AppShell)
 // Last Modified: 2026-03-29
@@ -22,6 +22,8 @@ import ProjectAgentsPage from './pages/ProjectAgentsPage';
 import InstructionsPage from './pages/InstructionsPage';
 import TestResultsPage from './pages/TestResultsPage';
 import ProjectTestsPage from './pages/ProjectTestsPage';
+import DocsPage from './pages/DocsPage';
+import SystemDocsPage from './pages/SystemDocsPage';
 
 function App() {
   useAppData();
@@ -37,7 +39,9 @@ function App() {
         <Route path="/projects/:id/epics/:epicId" element={<EpicPage />} />
         <Route path="/projects/:id/agents" element={<ProjectAgentsPage />} />
         <Route path="/projects/:id/tests" element={<ProjectTestsPage />} />
+        <Route path="/projects/:id/docs" element={<DocsPage />} />
         <Route path="/projects/:id/agents/:agentId" element={<AgentPage />} />
+        <Route path="/docs" element={<SystemDocsPage />} />
         <Route path="/instructions" element={<InstructionsPage />} />
         <Route path="/tests" element={<TestResultsPage />} />
         <Route path="/tests/:runId" element={<TestResultsPage />} />

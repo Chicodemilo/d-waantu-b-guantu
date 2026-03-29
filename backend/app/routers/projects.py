@@ -1,7 +1,7 @@
 # Path: app/routers/projects.py
 # File: projects.py
 # Created: 2026-03-29
-# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, scan-tokens
+# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, scan-tokens, docs, activity-feed
 # Caller: app/main.py
 # Callees: app/services/project.py, token_scan.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
@@ -14,10 +14,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.activity_log import ActivityLog
 from app.models.agent import Agent
 from app.models.alert import Alert, AlertSeverity, AlertStatus
 from app.models.project import ProjectStatus
@@ -292,3 +293,80 @@ def scan_project_tokens(project_id: int, db: Session = Depends(get_db)):
     except Exception as exc:
         raise HTTPException(500, f"Token scan failed: {exc}")
     return result
+
+
+_DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md", "INITIAL.md"]
+
+
+@router.get("/{project_id}/docs")
+def list_project_docs(project_id: int, db: Session = Depends(get_db)):
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not project.repo_path:
+        raise HTTPException(400, "Project has no repo_path configured")
+
+    repo = Path(project.repo_path)
+    docs = []
+    for name in _DOC_FILES:
+        filepath = repo / name
+        exists = filepath.is_file()
+        content = None
+        if exists:
+            try:
+                content = filepath.read_text(encoding="utf-8")
+            except Exception:
+                content = None
+        docs.append({
+            "name": name,
+            "path": str(filepath),
+            "exists": exists,
+            "content": content,
+        })
+    return docs
+
+
+@router.get("/{project_id}/activity-feed")
+def get_project_activity_feed(
+    project_id: int,
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    rows = db.execute(
+        select(
+            ActivityLog.id,
+            ActivityLog.action,
+            ActivityLog.entity_type,
+            ActivityLog.entity_id,
+            ActivityLog.details,
+            ActivityLog.created_at,
+            Agent.name.label("agent_name"),
+        )
+        .outerjoin(Agent, ActivityLog.agent_id == Agent.id)
+        .where(ActivityLog.project_id == project_id)
+        .order_by(ActivityLog.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    feed = []
+    for row in rows:
+        details = row.details
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        feed.append({
+            "id": row.id,
+            "action": row.action,
+            "entity_type": row.entity_type,
+            "entity_id": row.entity_id,
+            "details": details,
+            "agent_name": row.agent_name,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        })
+    return feed

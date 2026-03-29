@@ -164,6 +164,9 @@ function TestPerformance({ projectId }) {
   const latestRun = testRuns
     ? [...testRuns].sort((a, b) => new Date(b.run_at || 0) - new Date(a.run_at || 0))[0]
     : null;
+  const latestRunDate = latestRun?.run_at
+    ? new Date(latestRun.run_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+    : '';
   const latestTests = (latestRun?.details?.tests || [])
     .filter((t) => t.duration != null)
     .sort((a, b) => b.duration - a.duration);
@@ -245,7 +248,7 @@ function TestPerformance({ projectId }) {
 
       {latestTests.length > 0 && (
         <div className="ascii-chart">
-          <div className="ascii-chart__title">Recent Tests</div>
+          <div className="ascii-chart__title">recent tests{latestRunDate && <span className="test-perf__run-date"> — {latestRunDate}</span>}</div>
           <div className="test-perf__table-scroll">
           <table className="data-table">
             <thead>
@@ -267,7 +270,7 @@ function TestPerformance({ projectId }) {
                         className="test-drill__trigger"
                         onClick={() => setExpandedTest(expandedTest === t.nodeid ? null : t.nodeid)}
                       >
-                        {t.nodeid}
+                        {t.nodeid.replace(/^tests\//, '')}
                       </button>
                       {expandedTest === t.nodeid && testRuns && (
                         <TestDrillDown nodeid={t.nodeid} testRuns={testRuns} />

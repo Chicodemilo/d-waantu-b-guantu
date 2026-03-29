@@ -104,7 +104,7 @@
 .vbar-chart {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   padding-bottom: 4px;
 }

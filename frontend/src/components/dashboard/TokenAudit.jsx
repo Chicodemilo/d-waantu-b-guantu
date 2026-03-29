@@ -65,6 +65,7 @@ function TokenAudit() {
       >
         <span className={`token-audit__caret${expanded ? ' token-audit__caret--open' : ''}`}>&gt;</span>
         token audit
+        <span className="tooltip-trigger">?<span className="tooltip-content">Compares token totals across tickets, agents, and projects. &apos;Clean&apos; means all numbers add up — no discrepancies between individual ticket tokens and project/agent rollups.</span></span>
         {hasDiscrepancies ? (
           <span className="token-audit__status token-audit__status--error">[discrepancies found]</span>
         ) : (

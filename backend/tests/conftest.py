@@ -19,6 +19,7 @@ import os
 
 # Must set BEFORE any app module is imported so Settings picks it up
 os.environ["MYSQL_DATABASE"] = "lat_test"
+os.environ["TESTING"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient

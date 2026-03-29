@@ -1,19 +1,21 @@
 # Path: app/main.py
 # File: main.py
 # Created: 2026-03-29
-# Purpose: FastAPI app initialization, CORS, and router registration
+# Purpose: FastAPI app initialization, CORS, activity logging middleware, and router registration
 # Caller: uvicorn entrypoint
 # Callees: All routers, app/database.py
 # Data In: None
 # Data Out: FastAPI app instance
 # Last Modified: 2026-03-29
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
+from app.middleware.activity_logger import ActivityLoggerMiddleware
 from app.routers import (
     activity_logs,
     agents,
@@ -41,6 +43,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Local Agent Tracker", lifespan=lifespan)
 
+if os.getenv("TESTING") != "1":
+    app.add_middleware(ActivityLoggerMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

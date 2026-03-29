@@ -1,7 +1,7 @@
 # Path: app/routers/status.py
 # File: status.py
 # Created: 2026-03-29
-# Purpose: System status, test coverage, and code standards endpoints
+# Purpose: System status, test coverage, code standards, and system docs endpoints
 # Caller: app/main.py
 # Callees: app/models (agent, alert, ticket), pathlib
 # Data In: HTTP requests
@@ -30,10 +30,14 @@ class StatusResponse(BaseModel):
     in_progress_tickets: int
 
 
-router = APIRouter(prefix="/api/status", tags=["status"])
+REPO_ROOT = BACKEND_DIR.parent
+
+_SYSTEM_DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md"]
+
+router = APIRouter(prefix="/api", tags=["system"])
 
 
-@router.get("", response_model=StatusResponse)
+@router.get("/status", response_model=StatusResponse)
 def get_status(db: Session = Depends(get_db)):
     active_agents = db.scalar(
         select(func.count()).select_from(Agent).where(Agent.is_active.is_(True))
@@ -55,7 +59,7 @@ def get_status(db: Session = Depends(get_db)):
     )
 
 
-@router.get("/test-coverage")
+@router.get("/status/test-coverage")
 def get_test_coverage():
     routers_dir = BACKEND_DIR / "app" / "routers"
     tests_dir = BACKEND_DIR / "tests"
@@ -106,6 +110,28 @@ _CODE_HEADER_FORMAT = {
 }
 
 
-@router.get("/code-standards")
+@router.get("/status/code-standards")
 def get_code_standards():
     return {"header_format": _CODE_HEADER_FORMAT}
+
+
+@router.get("/system/docs")
+def get_system_docs():
+    """Return DWB system-level documentation files from the repo root."""
+    docs = []
+    for name in _SYSTEM_DOC_FILES:
+        filepath = REPO_ROOT / name
+        exists = filepath.is_file()
+        content = None
+        if exists:
+            try:
+                content = filepath.read_text(encoding="utf-8")
+            except Exception:
+                content = None
+        docs.append({
+            "name": name,
+            "path": str(filepath),
+            "exists": exists,
+            "content": content,
+        })
+    return docs

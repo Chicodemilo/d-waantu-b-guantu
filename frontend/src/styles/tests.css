@@ -471,6 +471,13 @@
   color: var(--orange);
 }
 
+.test-perf__run-date {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--gray);
+  font-weight: 400;
+}
+
 /* Test drill-down */
 
 .test-drill__trigger {

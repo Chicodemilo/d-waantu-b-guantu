@@ -3,7 +3,7 @@
 // Created: 2026-03-29
 // Purpose: Project detail page with tools (deploy, scan, archive, delete), sprint gates, alerts, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
-// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/OverheadTracker, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
+// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/OverheadTracker, ../components/project/ActivityFeed, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
 // Last Modified: 2026-03-29
@@ -19,6 +19,7 @@ import OverheadTracker from '../components/project/OverheadTracker';
 import SprintVelocity from '../components/sprints/SprintVelocity';
 import EpicList from '../components/epics/EpicList';
 import AlertBanner from '../components/common/AlertBanner';
+import ActivityFeed from '../components/project/ActivityFeed';
 
 import '../styles/dashboard.css';
 
@@ -301,9 +302,15 @@ function ProjectPage() {
         </div>
       )}
 
-      <div>
-        <div className="dashboard__section-title">Current Sprint</div>
-        <SprintProgress projectId={id} />
+      <div className="project-sprint-row">
+        <div className="project-sprint-row__left">
+          <div className="dashboard__section-title">Current Sprint</div>
+          <SprintProgress projectId={id} />
+        </div>
+        <div className="project-sprint-row__right">
+          <div className="dashboard__section-title">Recent Activity</div>
+          <ActivityFeed projectId={id} />
+        </div>
       </div>
 
       <div>
