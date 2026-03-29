@@ -100,7 +100,7 @@ function Sidebar({ open, onNavClick }) {
           </li>
           <li>
             <NavLink to="/docs" className={caretLinkClass(isSystemDocsActive)} onClick={onNavClick}>
-              docs
+              system_docs
             </NavLink>
           </li>
 

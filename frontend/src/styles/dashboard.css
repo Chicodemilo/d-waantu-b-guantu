@@ -365,7 +365,7 @@
 
 .activity-feed__header {
   display: grid;
-  grid-template-columns: 64px 1fr 80px 60px;
+  grid-template-columns: 56px minmax(0, 1fr) 90px 70px;
   gap: 6px;
   padding: 4px 10px;
   border-bottom: 1px solid var(--border);
@@ -383,7 +383,7 @@
 
 .activity-feed__entry {
   display: grid;
-  grid-template-columns: 64px 1fr 80px 60px;
+  grid-template-columns: 56px minmax(0, 1fr) 90px 70px;
   gap: 6px;
   padding: 3px 10px;
   border-bottom: 1px solid var(--border);
