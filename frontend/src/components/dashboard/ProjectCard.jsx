@@ -3,13 +3,16 @@
 // Created: 2026-03-29
 // Purpose: Dashboard card displaying a project summary with ticket stats, token usage, time spent, and progress bar
 // Caller: DashboardPage.jsx
-// Callees: react-router-dom (Link), useStore, StatusBadge, AsciiProgressBar, dashboard.css
-// Data In: props { project }; tickets from store via getTicketsByProject
+// Callees: react (useState, useEffect), react-router-dom (Link), useStore, services/tracking, utils/format, StatusBadge, AsciiProgressBar, dashboard.css
+// Data In: props { project }; tickets from store; tracking summary from API
 // Data Out: default export ProjectCard component
 // Last Modified: 2026-03-29
 
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
+import { getTrackingSummary } from '../../services/tracking';
+import { formatTime, formatTokens } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import AsciiProgressBar from '../common/AsciiProgressBar';
 import '../../styles/dashboard.css';
@@ -17,18 +20,18 @@ import '../../styles/dashboard.css';
 function ProjectCard({ project }) {
   const tickets = useStore((s) => s.getTicketsByProject(project.id));
   const done = tickets.filter((t) => t.status === 'done').length;
-  const totalTokens = tickets.reduce((sum, t) => sum + t.tokens_used, 0);
-  const totalSeconds = tickets.reduce((sum, t) => sum + (t.time_spent_seconds || 0), 0);
+  const [summary, setSummary] = useState(null);
 
-  const formatTime = (seconds) => {
-    if (!seconds || seconds === 0) return '\u2014';
-    if (seconds < 60) return '< 1m';
-    const mins = Math.floor(seconds / 60);
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    const rem = mins % 60;
-    return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-  };
+  useEffect(() => {
+    let cancelled = false;
+    getTrackingSummary(project.id)
+      .then((data) => { if (!cancelled) setSummary(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [project.id]);
+
+  const totalTokens = summary ? (summary.project_total.tokens || 0) : 0;
+  const totalTime = summary ? (summary.project_total.time || 0) : 0;
 
   return (
     <Link to={`/projects/${project.id}`} className="project-card">
@@ -48,13 +51,11 @@ function ProjectCard({ project }) {
           <div className="project-card__stat-label">Done</div>
         </div>
         <div className="project-card__stat">
-          <div className="project-card__stat-value">
-            {(totalTokens / 1000).toFixed(1)}k
-          </div>
+          <div className="project-card__stat-value">{formatTokens(totalTokens)}</div>
           <div className="project-card__stat-label">Tokens</div>
         </div>
         <div className="project-card__stat">
-          <div className="project-card__stat-value">{formatTime(totalSeconds)}</div>
+          <div className="project-card__stat-value">{formatTime(totalTime)}</div>
           <div className="project-card__stat-label">Time</div>
         </div>
       </div>

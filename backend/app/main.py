@@ -32,6 +32,7 @@ from app.routers import (
     test_results,
     tickets,
     tokens,
+    tracking,
 )
 
 
@@ -72,4 +73,5 @@ app.include_router(test_results.router)
 app.include_router(playbooks.router)
 app.include_router(tokens.router)
 app.include_router(failure_records.router)
+app.include_router(tracking.router)
 app.include_router(status.router)

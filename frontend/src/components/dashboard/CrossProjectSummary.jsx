@@ -1,14 +1,17 @@
 // Path: src/components/dashboard/CrossProjectSummary.jsx
 // File: CrossProjectSummary.jsx
 // Created: 2026-03-29
-// Purpose: Dashboard summary panels showing aggregate counts for projects, tickets, completion, and alerts
+// Purpose: Dashboard summary panels showing aggregate counts and token/time totals across active projects
 // Caller: DashboardPage.jsx
-// Callees: useStore, dashboard.css
-// Data In: projects, tickets, agents, projectAgents, alerts from store
+// Callees: react (useState, useEffect), useStore, services/tracking, utils/format, dashboard.css
+// Data In: projects, tickets, alerts from store; tracking summaries from API
 // Data Out: default export CrossProjectSummary component
 // Last Modified: 2026-03-29
 
+import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
+import { getTrackingSummary } from '../../services/tracking';
+import { formatTokens, formatTime } from '../../utils/format';
 import '../../styles/dashboard.css';
 
 function CrossProjectSummary() {
@@ -16,21 +19,45 @@ function CrossProjectSummary() {
   const tickets = useStore((s) => s.tickets).filter((t) =>
     projects.some((p) => p.id === t.project_id)
   );
-  const agents = useStore((s) => s.agents);
-  const projectAgents = useStore((s) => s.projectAgents).filter((pa) =>
-    projects.some((p) => p.id === pa.project_id)
-  );
   const alerts = useStore((s) => s.alerts).filter(
     (a) => a.status === 'open' && projects.some((p) => p.id === a.project_id)
   );
+  const [summaries, setSummaries] = useState({});
 
-  const activeAgentIds = new Set(projectAgents.map((pa) => pa.agent_id));
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      projects.map((p) =>
+        getTrackingSummary(p.id).then((data) => ({ id: p.id, data }))
+      )
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const map = {};
+        for (const r of results) map[r.id] = r.data;
+        setSummaries(map);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projects.map((p) => p.id).join(',')]);
+
+  let totalTokens = 0;
+  let totalTime = 0;
+  for (const p of projects) {
+    const s = summaries[p.id];
+    if (s) {
+      totalTokens += (s.project_total.tokens || 0) + (s.project_total.overhead_tokens || 0);
+      totalTime += s.project_total.time || 0;
+    }
+  }
 
   const panels = [
     { label: 'Projects', value: projects.length },
     { label: 'Total Tickets', value: tickets.length },
     { label: 'Completed', value: tickets.filter((t) => t.status === 'done').length, className: '' },
     { label: 'In Progress', value: tickets.filter((t) => t.status === 'in_progress').length, className: 'summary-panel__value--orange' },
+    { label: 'Tokens', value: formatTokens(totalTokens), className: 'summary-panel__value--blue' },
+    { label: 'Time', value: formatTime(totalTime), className: '' },
     { label: 'Open Alerts', value: alerts.length, className: 'summary-panel__value--blue' },
   ];
 

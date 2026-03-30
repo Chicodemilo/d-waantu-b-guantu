@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useStore from '../../store/useStore';
+import { formatTime, formatTokens } from '../../utils/format';
 import TicketFilters from './TicketFilters';
 import StatusBadge from '../common/StatusBadge';
 import '../../styles/tickets.css';
@@ -29,23 +30,6 @@ function TicketList({ projectId }) {
     agent_id: 'all',
     epic_id: 'all',
   });
-
-  const formatTokens = (tokens) => {
-    if (!tokens || tokens === 0) return '\u2014';
-    if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
-    if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
-    return String(tokens);
-  };
-
-  const formatTime = (seconds) => {
-    if (!seconds || seconds === 0) return '\u2014';
-    if (seconds < 60) return '< 1m';
-    const mins = Math.floor(seconds / 60);
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    const rem = mins % 60;
-    return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-  };
 
   const getAgentName = (agentId) => {
     if (!agentId) return 'unassigned';

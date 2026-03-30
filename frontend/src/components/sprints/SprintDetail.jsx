@@ -10,6 +10,7 @@
 
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
+import { formatTime } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import AsciiProgressBar from '../common/AsciiProgressBar';
 import '../../styles/common.css';
@@ -23,18 +24,8 @@ function SprintDetail({ sprintId, projectId }) {
   if (!sprint) return <div className="empty-state">Sprint not found</div>;
 
   const done = tickets.filter((t) => t.status === 'done').length;
-  const totalTokens = tickets.reduce((sum, t) => sum + t.tokens_used, 0);
+  const totalTokens = tickets.reduce((sum, t) => sum + (t.tokens_used || 0), 0);
   const totalSeconds = tickets.reduce((sum, t) => sum + (t.time_spent_seconds || 0), 0);
-
-  const formatTime = (seconds) => {
-    if (!seconds || seconds === 0) return '\u2014';
-    if (seconds < 60) return '< 1m';
-    const mins = Math.floor(seconds / 60);
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    const rem = mins % 60;
-    return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-  };
 
   const getAgentName = (agentId) => {
     if (!agentId) return 'unassigned';

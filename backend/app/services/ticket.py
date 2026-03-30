@@ -1,12 +1,14 @@
 # Path: app/services/ticket.py
 # File: ticket.py
 # Created: 2026-03-29
-# Purpose: Ticket CRUD, status history, rework detection, time computation
+# Purpose: Ticket CRUD, status history, rework detection, time computation, tracking events
 # Caller: app/routers/tickets.py
-# Callees: models (ticket, status_history, alert, failure_record, agent, project_agent)
+# Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking
 # Data In: db: Session, TicketCreate/Update
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-03-29
+# Last Modified: 2026-03-30
+
+import logging
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -21,6 +23,9 @@ from app.models.status_history import StatusHistory
 from app.models.sprint import Sprint, SprintStatus
 from app.models.ticket import Ticket, TicketStatus, TicketType
 from app.schemas.ticket import TicketCreate, TicketUpdate
+from app.services import tracking as tracking_svc
+
+logger = logging.getLogger(__name__)
 
 
 def list_tickets(
@@ -111,6 +116,17 @@ def update_ticket(db: Session, ticket: Ticket, data: TicketUpdate) -> Ticket:
             changed_by_agent_id=ticket.assigned_agent_id,
         ))
         db.commit()
+
+        # DWB-200: Auto-insert tracking events on status transitions
+        try:
+            agent_id = ticket.assigned_agent_id
+            if agent_id:
+                if updates["status"] == TicketStatus.in_progress:
+                    tracking_svc.log_start(db, ticket.id, agent_id)
+                elif old_status == TicketStatus.in_progress:
+                    tracking_svc.log_stop(db, ticket.id, agent_id)
+        except Exception as exc:
+            logger.warning("Tracking event failed for ticket %s: %s", ticket.id, exc)
 
         # DWB-143: Detect rework (moved back to in_progress after being done)
         if updates["status"] == TicketStatus.in_progress:

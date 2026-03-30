@@ -3,80 +3,71 @@
 // Created: 2026-03-29
 // Purpose: Dashboard section with three AsciiCharts showing token usage by project, by agent, and overhead breakdown
 // Caller: DashboardPage.jsx
-// Callees: useStore, ROLES config, AsciiChart, dashboard.css
-// Data In: projects, tickets, agents, projectAgents from store
+// Callees: react (useState, useEffect), useStore, services/tracking, utils/format, AsciiChart, dashboard.css
+// Data In: projects from store; tracking summaries from API
 // Data Out: default export TokenOverview component
 // Last Modified: 2026-03-29
 
+import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
-import { ROLES } from '../../config';
+import { getTrackingSummary } from '../../services/tracking';
+import { formatTokens } from '../../utils/format';
 import AsciiChart from '../common/AsciiChart';
 import '../../styles/dashboard.css';
 
 function TokenOverview() {
   const projects = useStore((s) => s.projects).filter((p) => p.status === 'active');
-  const tickets = useStore((s) => s.tickets);
-  const agents = useStore((s) => s.agents);
-  const projectAgents = useStore((s) => s.projectAgents);
+  const [summaries, setSummaries] = useState({});
 
-  // Token breakdown by project
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      projects.map((p) =>
+        getTrackingSummary(p.id).then((data) => ({ id: p.id, data }))
+      )
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const map = {};
+        for (const r of results) map[r.id] = r.data;
+        setSummaries(map);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projects.map((p) => p.id).join(',')]);
+
   const projectData = projects.map((p) => {
-    const projectTickets = tickets.filter((t) => t.project_id === p.id);
-    const ticketTokens = projectTickets.reduce((sum, t) => sum + t.tokens_used, 0);
-    const total = ticketTokens + p.tl_overhead_tokens + p.pm_overhead_tokens;
+    const summary = summaries[p.id];
+    const total = summary ? (summary.project_total.tokens || 0) + (summary.project_total.overhead_tokens || 0) : 0;
     return {
       label: p.prefix,
       value: total,
-      displayValue: `${(total / 1000).toFixed(1)}k`,
+      displayValue: formatTokens(total),
     };
   });
 
-  // Token breakdown by agent (exclude TL/PM — they're in Overhead, and only active projects)
-  const activeProjectIds = new Set(projects.map((p) => p.id));
-  const activeAgentIds = new Set(
-    projectAgents.filter((pa) => activeProjectIds.has(pa.project_id)).map((pa) => pa.agent_id)
-  );
-  const workerAgents = agents.filter(
-    (a) => a.role !== ROLES.TEAM_LEAD && a.role !== ROLES.PM && activeAgentIds.has(a.id)
-  );
-  const agentData = workerAgents.map((a) => {
-    const agentTickets = tickets.filter((t) => t.assigned_agent_id === a.id);
-    const total = agentTickets.reduce((sum, t) => sum + t.tokens_used, 0);
-    const pa = projectAgents?.find((r) => r.agent_id === a.id);
-    const project = pa ? projects.find((p) => p.id === pa.project_id) : null;
-    const label = `${a.name}/${a.role}`;
-    return {
-      label,
-      value: total,
-      displayValue: `${(total / 1000).toFixed(1)}k`,
-    };
+  const agentData = projects.flatMap((p) => {
+    const summary = summaries[p.id];
+    if (!summary) return [];
+    return (summary.per_agent || [])
+      .filter((a) => a.role !== 'team-lead' && a.role !== 'pm')
+      .map((a) => ({
+        label: `${a.name}/${a.role}`,
+        value: a.tokens || 0,
+        displayValue: formatTokens(a.tokens || 0),
+      }));
   });
-
-  // Overhead breakdown — look up actual TL and PM agents per project
-  const findAgent = (projectId, role) => {
-    const pa = projectAgents.find((r) => {
-      if (r.project_id !== projectId) return false;
-      const a = agents.find((ag) => ag.id === r.agent_id);
-      return a && a.role === role;
-    });
-    return pa ? agents.find((a) => a.id === pa.agent_id) : null;
-  };
 
   const overheadData = projects.flatMap((p) => {
-    const tl = findAgent(p.id, ROLES.TEAM_LEAD);
-    const pm = findAgent(p.id, ROLES.PM);
-    return [
-      {
-        label: tl ? `${tl.name}/${tl.role}` : `${p.prefix} TL`,
-        value: p.tl_overhead_tokens,
-        displayValue: `${(p.tl_overhead_tokens / 1000).toFixed(1)}k`,
-      },
-      {
-        label: pm ? `${pm.name}/${pm.role}` : `${p.prefix} PM`,
-        value: p.pm_overhead_tokens,
-        displayValue: `${(p.pm_overhead_tokens / 1000).toFixed(1)}k`,
-      },
-    ];
+    const summary = summaries[p.id];
+    if (!summary) return [];
+    return (summary.per_agent || [])
+      .filter((a) => a.role === 'team-lead' || a.role === 'pm')
+      .map((a) => ({
+        label: `${a.name}/${a.role}`,
+        value: a.tokens || 0,
+        displayValue: formatTokens(a.tokens || 0),
+      }));
   });
 
   return (

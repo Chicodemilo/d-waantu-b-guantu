@@ -3,18 +3,30 @@
 // Created: 2026-03-29
 // Purpose: Shows current/active sprint progress with ticket counts, tokens, time, and goal
 // Caller: ProjectPage.jsx
-// Callees: useStore, StatusBadge, AsciiProgressBar
+// Callees: react (useState, useEffect), useStore, services/tracking, utils/format, StatusBadge, AsciiProgressBar
 // Data In: projectId prop
 // Data Out: default export SprintProgress component
 // Last Modified: 2026-03-29
 
+import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
+import { getTrackingSummary } from '../../services/tracking';
+import { formatTime, formatTokens } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import AsciiProgressBar from '../common/AsciiProgressBar';
 
 function SprintProgress({ projectId }) {
   const sprints = useStore((s) => s.getSprintsByProject(projectId));
   const tickets = useStore((s) => s.tickets);
+  const [summary, setSummary] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTrackingSummary(projectId)
+      .then((data) => { if (!cancelled) setSummary(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   const sorted = [...sprints].sort((a, b) => b.sprint_number - a.sprint_number);
   const activeSprint = sorted.find((s) => s.status === 'active') || sorted[0];
@@ -23,18 +35,12 @@ function SprintProgress({ projectId }) {
   const sprintTickets = tickets.filter((t) => t.sprint_id === activeSprint.id);
   const done = sprintTickets.filter((t) => t.status === 'done').length;
   const inProgress = sprintTickets.filter((t) => t.status === 'in_progress').length;
-  const totalTokens = sprintTickets.reduce((sum, t) => sum + t.tokens_used, 0);
-  const totalSeconds = sprintTickets.reduce((sum, t) => sum + (t.time_spent_seconds || 0), 0);
 
-  const formatTime = (seconds) => {
-    if (!seconds || seconds === 0) return '\u2014';
-    if (seconds < 60) return '< 1m';
-    const mins = Math.floor(seconds / 60);
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    const rem = mins % 60;
-    return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-  };
+  const sprintTracking = summary
+    ? (summary.per_sprint || []).find((s) => s.sprint_id === activeSprint.id)
+    : null;
+  const totalTokens = sprintTracking ? (sprintTracking.tokens || 0) : 0;
+  const totalSeconds = sprintTracking ? (sprintTracking.time || 0) : 0;
 
   return (
     <div className="ascii-chart">
@@ -57,7 +63,7 @@ function SprintProgress({ projectId }) {
       </div>
       <div className="ascii-chart__row">
         <span className="ascii-chart__label">Tokens</span>
-        <span className="ascii-chart__value">{totalTokens.toLocaleString()}</span>
+        <span className="ascii-chart__value">{formatTokens(totalTokens)}</span>
       </div>
       <div className="ascii-chart__row">
         <span className="ascii-chart__label">Time</span>

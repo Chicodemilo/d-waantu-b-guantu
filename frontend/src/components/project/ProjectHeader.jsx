@@ -3,7 +3,7 @@
 // Created: 2026-03-29
 // Purpose: Renders project header with status, dates, token/time totals, test status icon, and active epic link
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect), react-router-dom (Link), useStore, StatusBadge, api/testResults (getProjectTestRuns)
+// Callees: react (useState, useEffect), react-router-dom (Link), useStore, services/tracking, utils/format, StatusBadge, api/testResults (getProjectTestRuns)
 // Data In: project prop (full project object)
 // Data Out: default export ProjectHeader component
 // Last Modified: 2026-03-29
@@ -11,6 +11,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
+import { getTrackingSummary } from '../../services/tracking';
+import { formatTime, formatTokens } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import { getProjectTestRuns } from '../../api/testResults';
 
@@ -54,29 +56,22 @@ function TestStatusIcon({ projectId }) {
   );
 }
 
-function formatTime(seconds) {
-  if (!seconds || seconds === 0) return '\u2014';
-  if (seconds < 60) return '< 1m';
-  const mins = Math.floor(seconds / 60);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-}
-
-function formatTokens(tokens) {
-  if (!tokens || tokens === 0) return '\u2014';
-  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
-  return String(tokens);
-}
-
 function ProjectHeader({ project }) {
   const epics = useStore((s) => s.getEpicsByProject(project?.id));
-  const tickets = useStore((s) => s.getTicketsByProject(project?.id));
   const activeEpic = epics.find((e) => e.status === 'active' || e.status === 'in_progress');
-  const totalTime = tickets.reduce((sum, t) => sum + (t.time_spent_seconds || 0), 0);
-  const totalTokens = tickets.reduce((sum, t) => sum + (t.tokens_used || 0), 0);
+  const [summary, setSummary] = useState(null);
+
+  useEffect(() => {
+    if (!project?.id) return;
+    let cancelled = false;
+    getTrackingSummary(project.id)
+      .then((data) => { if (!cancelled) setSummary(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [project?.id]);
+
+  const totalTokens = summary ? (summary.project_total.tokens || 0) : 0;
+  const totalTime = summary ? (summary.project_total.time || 0) : 0;
 
   if (!project) return null;
 

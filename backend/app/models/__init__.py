@@ -21,6 +21,7 @@ from app.models.activity_log import ActivityLog
 from app.models.test_result import TestResult, TestStatus
 from app.models.failure_record import FailureRecord
 from app.models.status_history import StatusHistory
+from app.models.tracking_log import TrackingLog
 
 __all__ = [
     "Project", "ProjectStatus",
@@ -36,4 +37,5 @@ __all__ = [
     "TestResult", "TestStatus",
     "FailureRecord",
     "StatusHistory",
+    "TrackingLog",
 ]

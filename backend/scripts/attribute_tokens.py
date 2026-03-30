@@ -4,10 +4,10 @@
 # Created: 2026-03-28
 # Purpose: Scan Claude transcript JSONL files and attribute token usage to tickets
 # Caller: run_token_scan.sh, manual CLI, sprint completion trigger
-# Callees: urllib → GET /api/agents, GET /api/tickets, POST /api/tickets/:id/tokens, POST /api/alerts
+# Callees: urllib → GET /api/agents, GET /api/tickets, POST /api/tracking/tokens, POST /api/alerts
 # Data In: CLI args (--project-id, --dry-run, --force, --transcript-dir); JSONL transcripts
 # Data Out: JSON summary to stdout; HTTP POSTs to API; state file updates
-# Last Modified: 2026-03-29
+# Last Modified: 2026-03-30
 """Scan Claude transcript JSONL files and attribute tokens to tickets.
 
 Reads transcript files from Claude Code's project directories, identifies
@@ -236,18 +236,25 @@ def find_best_ticket(agent_id, project_id, first_ts, last_ts):
     return unique
 
 
-def attribute_tokens_to_tickets(tickets, tokens, dry_run=False):
-    """POST tokens to ticket(s). Splits proportionally if multiple."""
+def attribute_tokens_to_tickets(tickets, tokens, agent_id=None, dry_run=False):
+    """POST tokens to ticket(s) via /api/tracking/tokens. Splits proportionally if multiple."""
     results = []
+
+    def _post_tracking(ticket, token_count):
+        """Post a token_report event through the tracking API."""
+        payload = {
+            "ticket_id": ticket["id"],
+            "agent_id": agent_id or ticket.get("assigned_agent_id") or FALLBACK_AGENT_ID,
+            "tokens": token_count,
+            "source": "transcript_scan",
+        }
+        return post_json(f"{API_BASE}/api/tracking/tokens", payload)
 
     if len(tickets) == 1:
         ticket = tickets[0]
         if not dry_run:
             try:
-                post_json(f"{API_BASE}/api/tickets/{ticket['id']}/tokens", {
-                    "tokens_used": tokens,
-                    "time_spent_seconds": 0,
-                })
+                _post_tracking(ticket, tokens)
                 results.append({"ticket_id": ticket["id"], "ticket_key": ticket.get("ticket_key", ""), "tokens": tokens, "status": "posted"})
             except Exception as exc:
                 results.append({"ticket_id": ticket["id"], "ticket_key": ticket.get("ticket_key", ""), "tokens": tokens, "status": f"failed: {exc}"})
@@ -263,10 +270,7 @@ def attribute_tokens_to_tickets(tickets, tokens, dry_run=False):
                 continue
             if not dry_run:
                 try:
-                    post_json(f"{API_BASE}/api/tickets/{ticket['id']}/tokens", {
-                        "tokens_used": share,
-                        "time_spent_seconds": 0,
-                    })
+                    _post_tracking(ticket, share)
                     results.append({"ticket_id": ticket["id"], "ticket_key": ticket.get("ticket_key", ""), "tokens": share, "status": "posted"})
                 except Exception as exc:
                     results.append({"ticket_id": ticket["id"], "ticket_key": ticket.get("ticket_key", ""), "tokens": share, "status": f"failed: {exc}"})
@@ -420,7 +424,7 @@ def main():
             continue
 
         # Attribute
-        results = attribute_tokens_to_tickets(tickets, tokens, dry_run=args.dry_run)
+        results = attribute_tokens_to_tickets(tickets, tokens, agent_id=agent_id, dry_run=args.dry_run)
         for r in results:
             status_icon = "+" if "posted" in r["status"] else "~" if "dry" in r["status"] else "!"
             log(f"{rel_path}: {agent_label} → {r['ticket_key']} = {r['tokens']:,} tokens [{r['status']}]")

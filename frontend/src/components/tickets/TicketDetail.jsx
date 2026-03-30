@@ -10,6 +10,7 @@
 
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
+import { formatTime } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import TicketComments from './TicketComments';
 import { getTicketHistory } from '../../api/tickets';
@@ -76,16 +77,6 @@ function TicketDetail({ ticketId }) {
   const agent = agents.find((a) => a.id === ticket.assigned_agent_id);
   const sprint = sprints.find((s) => s.id === ticket.sprint_id);
   const epic = epics.find((e) => e.id === ticket.epic_id);
-
-  const formatTime = (seconds) => {
-    if (!seconds || seconds === 0) return '\u2014';
-    if (seconds < 60) return '< 1m';
-    const mins = Math.floor(seconds / 60);
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    const rem = mins % 60;
-    return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-  };
 
   return (
     <div className="ticket-detail">
