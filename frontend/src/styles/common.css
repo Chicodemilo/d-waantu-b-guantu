@@ -565,6 +565,18 @@
   font-size: 12px;
 }
 
+.project-header__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.project-header__meta-value--dim {
+  color: var(--gray);
+}
+
 .project-header__meta-label {
   color: var(--gray-light);
 }

@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
 import CrossProjectSummary from '../components/dashboard/CrossProjectSummary';
 import ProjectCard from '../components/dashboard/ProjectCard';
-import TokenOverview from '../components/dashboard/TokenOverview';
+import TimeTokens from '../components/dashboard/TimeTokens';
 import AlertBanner from '../components/common/AlertBanner';
 import AgentList from '../components/agents/AgentList';
 import TokenAudit from '../components/dashboard/TokenAudit';
@@ -133,8 +133,8 @@ function DashboardPage() {
       </div>
 
       <div>
-        <div className="dashboard__section-title">Token Usage</div>
-        <TokenOverview />
+        <div className="dashboard__section-title">Time &amp; Tokens</div>
+        <TimeTokens />
         <TokenAudit />
       </div>
 
