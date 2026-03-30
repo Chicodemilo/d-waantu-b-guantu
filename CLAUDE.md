@@ -124,12 +124,13 @@ Enable via PATCH /api/projects/:id or the toggle switches on the project page.
 5. PM closes sprint (gates checked automatically)
 6. Sprint close auto-creates: test ticket for next sprint, token scan, alerts to team
 
-## Token Tracking
+## Tracking (Time & Tokens)
 
-Tokens are tracked per ticket. Two methods:
-- **Transcript scan**: `./scripts/run_token_scan.sh --project-id 1` reads Claude JSONL transcripts and attributes tokens to tickets
-- **Manual POST**: `POST /api/tickets/:id/tokens {"tokens_used": N}`
-- **Auto-alert**: if a ticket is closed with 0 tokens, an alert reminds the team
+The `tracking_log` table is the source of truth for time and token accounting. Status transitions auto-insert tracking events (start/stop). Token attribution scans POST through `/api/tracking/tokens`.
+
+- **Start/stop** tracking via the API or auto-inserted on status changes
+- **Transcript scan**: `POST /api/projects/:id/scan-tokens` or auto on sprint close
+- **Auto-alert**: if a ticket is closed with 0 tokens, an alert fires
 
 ## Failure Analysis
 
@@ -138,7 +139,7 @@ When a ticket moves back to in_progress after being done (rework), the system:
 2. Alerts the PM to fill in the failure type
 3. Blocks sprint close until the PM reviews it
 
-Failure types: context_degradation, spec_drift, sycophantic_confirmation, tool_selection_error, cascading_failure, silent_failure, integration_failure
+Failure types: A–G (manual taxonomy), rework (auto-detected), test_failure (auto-detected)
 
 ## Key Rules
 
@@ -161,15 +162,23 @@ Failure types: context_degradation, spec_drift, sycophantic_confirmation, tool_s
 | Create sprint | POST /api/sprints |
 | Create ticket | POST /api/tickets |
 | Update ticket status | PATCH /api/tickets/:id |
-| Post tokens | POST /api/tickets/:id/tokens |
+| Track work start | POST /api/tracking/start |
+| Track work stop | POST /api/tracking/stop |
+| Report tokens | POST /api/tracking/tokens |
+| Track overhead start | POST /api/tracking/overhead/start |
+| Track overhead stop | POST /api/tracking/overhead/stop |
+| Tracking summary | GET /api/tracking/summary?project_id=X |
 | Post test results | POST /api/test-results |
+| Run tests | POST /api/system/run-tests |
 | Check health | GET /api/status |
 | Gate status | GET /api/projects/:id/gate-status |
 | Activity feed | GET /api/projects/:id/activity-feed |
+| Project docs | GET /api/projects/:id/docs |
+| System docs | GET /api/system/docs |
 | Failure summary | GET /api/failure-records/summary |
 | Token audit | GET /api/tokens/audit |
 | Dismiss all alerts | POST /api/alerts/dismiss-all |
 | Scan tokens | POST /api/projects/:id/scan-tokens |
 | Deploy playbooks | POST /api/projects/:id/deploy-playbooks |
 
-See README.md for the full 67-endpoint reference.
+See README.md for the full 83-endpoint reference.

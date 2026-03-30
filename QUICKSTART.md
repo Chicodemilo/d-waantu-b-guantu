@@ -2,7 +2,7 @@
 
 Get a working dashboard with sample data in under 5 minutes.
 
-**Prerequisites:** Docker, Node.js 18+, Python 3.12+
+**Prerequisites:** Docker, Node.js 18+, Python 3.12+, mysql client (`brew install mysql-client` on macOS)
 
 ---
 
@@ -13,7 +13,7 @@ git clone <repo-url> && cd local_agent_tracker
 cp .env.example .env
 ```
 
-No changes needed in `.env` for local dev — defaults work out of the box.
+No changes needed — `.env` defaults work out of the box.
 
 ## 2. Start the database
 
@@ -21,20 +21,26 @@ No changes needed in `.env` for local dev — defaults work out of the box.
 docker compose up -d
 ```
 
-**What you'll see:** Two containers start — MySQL on port 23847 and phpMyAdmin on port 8080. Run `docker compose ps` to confirm both show "running".
+Wait for healthy status:
+
+```bash
+docker compose ps
+```
+
+**What you'll see:** Two containers — `lat_mysql` (port 23847) and `lat_phpmyadmin` (port 8080) — both showing "running" / "healthy". MySQL may take 10–15 seconds to become healthy on first run.
 
 ## 3. Start the backend
 
 ```bash
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
-**What you'll see:** Alembic runs migrations, then uvicorn starts with `Uvicorn running on http://127.0.0.1:8000`. Visit http://localhost:8000/docs to confirm — you should see the Swagger API docs.
+**What you'll see:** Alembic applies migrations, then uvicorn prints `Uvicorn running on http://127.0.0.1:8000`. Visit http://localhost:8000/docs to see the Swagger API docs. Leave this terminal running.
 
 ## 4. Start the frontend (new terminal)
 
@@ -44,22 +50,23 @@ npm install
 npm run dev
 ```
 
-**What you'll see:** Vite starts with `Local: http://localhost:5173/`. The dashboard loads but will be empty until you seed data.
+**What you'll see:** Vite prints `Local: http://localhost:5173/`. The dashboard loads but will be empty until you seed data. Leave this terminal running.
 
 ## 5. Seed sample data (new terminal)
 
+From the repo root:
+
 ```bash
-cd local_agent_tracker
 mysql -h 127.0.0.1 -P 23847 -u lat_user -plat_dev_password local_agent_tracker < seed.sql
 ```
 
-**What you'll see:** No output means success. If you get a connection error, wait a few seconds for MySQL to finish starting and retry.
+**What you'll see:** No output means success. If you get `ERROR 2003 (HY000): Can't connect`, MySQL is still starting — wait a few seconds and retry.
 
 ## 6. Open the dashboard
 
 Open http://localhost:5173 in your browser.
 
-**What you'll see:** The dashboard with sample project data — project cards with ticket counts, token usage, time spent. Click into a project to see sprints, epics, tickets, test results, and agent activity.
+**What you'll see:** Dashboard with project cards showing ticket counts, token usage, and time spent. Click into a project to see sprints, epics, tickets, test results, and agent activity.
 
 ---
 
@@ -80,20 +87,17 @@ cd backend && source .venv/bin/activate
 pytest tests/ -v
 ```
 
-**What you'll see:** Test results with pass/fail counts. All tests should pass on a fresh setup.
-
 ## Scan tokens from transcripts
-
-After seeding data, you can scan Claude session transcripts to attribute token usage to tickets:
 
 ```bash
 curl -X POST http://localhost:8000/api/projects/1/scan-tokens
 ```
 
-**What you'll see:** JSON response with `sessions_found`, `sessions_attributed`, and `total_tokens` — showing how many sessions were matched to tickets.
+**What you'll see:** JSON with `sessions_found`, `sessions_attributed`, and `total_tokens`.
 
 ## Troubleshooting
 
-- **"Connection refused" on MySQL:** Docker containers may need a few seconds after `docker compose up -d`. Wait and retry.
-- **Empty dashboard after seeding:** Hard-refresh the browser (Cmd+Shift+R). The frontend polls for data every few seconds.
-- **Port conflict:** If 5173, 8000, or 23847 are in use, check `.env` and `docker-compose.yml` for port configuration.
+- **"Can't connect" on MySQL:** Containers need 10–15 seconds on first start. Run `docker compose ps` — wait until mysql shows "healthy".
+- **`python: command not found`:** Use `python3` instead. On macOS, `python` may not be aliased.
+- **Empty dashboard after seeding:** Hard-refresh (Cmd+Shift+R). The frontend auto-polls every second.
+- **Port conflict:** Edit `.env` to change ports — `MYSQL_PORT`, `API_PORT`, `PMA_PORT`, and `VITE_API_BASE_URL` are all configurable.

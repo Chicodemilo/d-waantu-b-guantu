@@ -3,24 +3,24 @@
 Technical reference for the Local Agent Tracker (LAT) system.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Local Agent Tracker                   │
-│                                                         │
-│  ┌──────────┐    ┌──────────────┐    ┌───────────────┐  │
-│  │  React    │───▶│  FastAPI     │───▶│  MySQL 8.0    │  │
-│  │  :5173    │◀───│  :8000       │◀───│  :23847       │  │
-│  └──────────┘    └──────────────┘    └───────────────┘  │
-│       │               ▲                     ▲           │
-│       │               │                     │           │
-│       │          ┌────┴─────┐         ┌─────┴─────┐     │
-│       │          │ Scripts  │         │ phpMyAdmin │     │
-│       │          │ & Hooks  │         │   :8080    │     │
-│       │          └──────────┘         └───────────┘     │
-│       │                                                 │
-│  Vite dev server                Docker Compose          │
-│  polls /api/status              manages DB + PMA        │
-│  adaptive 2s/10s                                        │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Local Agent Tracker                       │
+│                                                             │
+│  ┌──────────┐    ┌──────────────────┐    ┌───────────────┐  │
+│  │  React    │───▶│  FastAPI         │───▶│  MySQL 8.0    │  │
+│  │  :5173    │◀───│  :8000           │◀───│  :23847       │  │
+│  └──────────┘    └──────────────────┘    └───────────────┘  │
+│       │               ▲       ▲                ▲            │
+│       │               │       │                │            │
+│       │          ┌────┴──┐ ┌──┴───────────┐ ┌──┴────────┐  │
+│       │          │Scripts│ │Activity Logger│ │phpMyAdmin  │  │
+│       │          │& Hooks│ │ (middleware)  │ │  :8080     │  │
+│       │          └───────┘ └──────────────┘ └───────────┘  │
+│       │                                                     │
+│  Vite dev server              Docker Compose                │
+│  polls /api/status            manages DB + PMA              │
+│  adaptive 2s/10s                                            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -29,14 +29,15 @@ Technical reference for the Local Agent Tracker (LAT) system.
 
 Three-tier architecture for tracking AI agent work across projects, sprints, and tickets.
 
-| Layer    | Technology           | Port  | Purpose                          |
-|----------|----------------------|-------|----------------------------------|
-| Frontend | React 18 + Vite      | 5173  | Dashboard, project management UI |
-| Backend  | FastAPI + SQLAlchemy  | 8000  | REST API, business logic         |
-| Database | MySQL 8.0 (Docker)   | 23847 | Persistent storage               |
-| Admin    | phpMyAdmin (Docker)   | 8080  | DB administration                |
+| Layer      | Technology           | Port  | Purpose                          |
+|------------|----------------------|-------|----------------------------------|
+| Frontend   | React 18 + Vite      | 5173  | Dashboard, project management UI |
+| Backend    | FastAPI + SQLAlchemy  | 8000  | REST API, business logic         |
+| Database   | MySQL 8.0 (Docker)   | 23847 | Persistent storage               |
+| Admin      | phpMyAdmin (Docker)   | 8080  | DB administration                |
+| Middleware | ActivityLoggerMiddleware | —  | Auto-logs all mutations          |
 
-The frontend polls the backend with adaptive intervals (2s when agents are active, 10s when idle). The backend follows a router → service → model pattern. Scripts handle test execution, token attribution, and instruction sync.
+The frontend polls the backend with adaptive intervals (2s when agents are active, 10s when idle). The backend follows a router → service → model pattern. An activity logger middleware auto-records all POST/PATCH/DELETE operations. Scripts handle test execution, token attribution, and instruction sync.
 
 ---
 
@@ -51,12 +52,14 @@ Project
 ├── Sprint
 │   └── Ticket
 │       ├── StatusHistory (every status transition)
+│       ├── TrackingLog (start/stop/token events)
 │       ├── Comment
 │       ├── FailureRecord (optional)
 │       └── Alert (optional)
 ├── ProjectAgent (join table)
 ├── Instruction (scoped)
-├── ActivityLog
+├── ActivityLog (auto-populated by middleware)
+├── TrackingLog (time/token events)
 ├── TestResult
 ├── FailureRecord (project-level)
 └── Alert (project-level)
@@ -64,6 +67,7 @@ Project
 Agent (standalone)
 ├── ProjectAgent (assigned to projects)
 ├── Ticket (assigned work)
+├── TrackingLog (time/token events)
 ├── Comment (authored)
 ├── Alert (raised)
 ├── FailureRecord (agent + logged_by_agent)
@@ -87,7 +91,7 @@ Agent (standalone)
 | pm_overhead_tokens       | BIGINT       | PM overhead accumulator                  |
 | tl_overhead_time_seconds | BIGINT       |                                          |
 | pm_overhead_time_seconds | BIGINT       |                                          |
-| force_headers            | BOOL         | Sprint gate: require code headers (v2)   |
+| force_headers            | BOOL         | Sprint gate: require code headers        |
 | force_test_coverage      | BOOL         | Sprint gate: require test coverage       |
 | force_test_run           | BOOL         | Sprint gate: require passing test run    |
 | force_initial_md         | BOOL         | Sprint gate: require INITIAL.md          |
@@ -157,7 +161,22 @@ Completion triggers: validates 5 sprint gates + unreviewed failure records, crea
 | created_at        | DATETIME     |                                           |
 | updated_at        | DATETIME     |                                           |
 
-On status change: records StatusHistory, recomputes time_spent_seconds, detects rework. Auto-creates alert when marked done with 0 tokens.
+On status change: records StatusHistory, inserts TrackingLog start/stop events, recomputes time_spent_seconds, detects rework. Auto-creates alert when marked done with 0 tokens.
+
+#### tracking_log
+| Column     | Type        | Notes                                               |
+|------------|-------------|-----------------------------------------------------|
+| id         | BIGINT PK   |                                                     |
+| ticket_id  | FK→tickets  | Nullable, indexed                                   |
+| agent_id   | FK→agents   | NOT NULL, indexed                                   |
+| project_id | FK→projects | NOT NULL, indexed                                   |
+| sprint_id  | FK→sprints  | Nullable, indexed                                   |
+| event_type | VARCHAR(50) | start, stop, token_report, overhead_start, overhead_stop |
+| tokens     | INT         | Default: 0                                          |
+| timestamp  | DATETIME    | Default: now()                                      |
+| source     | VARCHAR(50) | Nullable (e.g. "transcript_scan", "manual")         |
+
+Central event log for all time and token tracking. Used to compute ticket time-in-progress, token totals, overhead time, and project-wide summaries. No ORM relationships — purely audit/event-sourcing.
 
 #### status_history
 | Column              | Type        | Notes                          |
@@ -180,12 +199,12 @@ Used for: time-in-progress computation, rework detection, ticket timeline UI.
 | sprint_id         | FK→sprints  | NOT NULL, indexed                            |
 | agent_id          | FK→agents   | NOT NULL (the agent who failed)              |
 | logged_by_agent_id| FK→agents   | NOT NULL (who recorded it)                   |
-| failure_type      | VARCHAR(50) | A-G, rework, test_failure, TBD               |
+| failure_type      | VARCHAR(50) | A-G taxonomy, rework, test_failure, TBD      |
 | severity          | VARCHAR(20) | low, medium, high, critical                  |
 | attempt_number    | INT         | Default: 2                                   |
 | notes             | TEXT        |                                              |
 | root_cause        | TEXT        |                                              |
-| resolution        | TEXT        |                                              |
+| resolution        | Text        |                                              |
 | resolved          | BOOL        | Default: false                               |
 | created_at        | DATETIME    |                                              |
 | updated_at        | DATETIME    |                                              |
@@ -236,6 +255,8 @@ Two FK relationships to agents (agent_id + logged_by_agent_id) using `foreign_ke
 | details     | TEXT        | JSON-encoded details             |
 | created_at  | DATETIME    |                                  |
 
+Populated automatically by the ActivityLoggerMiddleware on every POST/PATCH/DELETE.
+
 #### test_results
 | Column            | Type         | Notes                         |
 |-------------------|--------------|-------------------------------|
@@ -264,32 +285,51 @@ On create with status="failed": auto-creates failure_records for each failed tes
 ### Pattern: Router → Service → Model
 
 ```
-Request → Router (validation, HTTP) → Service (business logic) → Model (ORM) → DB
-                  ↓                         ↓
-            Pydantic schemas         SQLAlchemy queries
+Request → ActivityLoggerMiddleware → Router → Service → Model → DB
+              │                        ↓         ↓
+              │                  Pydantic    SQLAlchemy
+              │                  schemas     queries
+              ▼
+         activity_log table
+         (auto-populated)
 ```
 
-- **Routers** (`app/routers/`): Define endpoints, validate input via Pydantic, inject DB session via `Depends(get_db)`. 15 router files.
-- **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution). 14 service files.
-- **Models** (`app/models/`): SQLAlchemy 2.0 ORM classes with Mapped types and relationships. 13 model files.
-- **Schemas** (`app/schemas/`): Pydantic v2 models with ConfigDict(from_attributes=True) for Create, Update, Read per entity. 13 schema files.
+- **Routers** (`app/routers/`): Define endpoints, validate input via Pydantic, inject DB session via `Depends(get_db)`. 16 router files.
+- **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution, tracking events). 15 service files.
+- **Models** (`app/models/`): SQLAlchemy 2.0 ORM classes with Mapped types and relationships. 14 model files.
+- **Schemas** (`app/schemas/`): Pydantic v2 models with ConfigDict(from_attributes=True) for Create, Update, Read per entity.
+- **Middleware** (`app/middleware/`): ActivityLoggerMiddleware auto-logs all mutations.
+
+### ActivityLoggerMiddleware
+
+Intercepts all POST/PATCH/PUT/DELETE requests with 2xx responses and inserts an `activity_log` row.
+
+Agent ID resolution priority:
+1. `X-Agent-ID` header (highest priority)
+2. Response body entity-specific fields (`raised_by_agent_id` for alerts, `assigned_agent_id` for tickets)
+3. Generic body fields (`agent_id`, `author_agent_id`)
+4. Project PM/TL fallback for sprint/epic creation
+5. null (shows as "system")
+
+Disabled during testing (`TESTING=1` env var).
 
 ### Endpoint Reference
 
 #### /api/projects
-| Method | Path                              | Query Params | Purpose                    |
-|--------|-----------------------------------|--------------|----------------------------|
-| GET    | /api/projects                     | status       | List projects              |
-| GET    | /api/projects/{id}                |              | Get project                |
-| POST   | /api/projects                     |              | Create project             |
-| POST   | /api/projects/from-repo           |              | Create from repo scan      |
-| PATCH  | /api/projects/{id}                |              | Update project             |
-| POST   | /api/projects/{id}/overhead       |              | Increment overhead tokens  |
-| DELETE | /api/projects/{id}                |              | Delete (cascades all)      |
-| GET    | /api/projects/{id}/gate-status    |              | Check doc gates + alert    |
-| POST   | /api/projects/{id}/scan-tokens    |              | Trigger token attribution  |
-| POST   | /api/projects/{id}/deploy-playbooks|             | Deploy playbooks to repo   |
-| GET    | /api/projects/{id}/tests          | suite, status, limit | Project test runs  |
+| Method | Path                               | Query Params         | Purpose                    |
+|--------|-------------------------------------|----------------------|----------------------------|
+| GET    | /api/projects                      | status               | List projects              |
+| GET    | /api/projects/{id}                 |                      | Get project                |
+| POST   | /api/projects                      |                      | Create project             |
+| POST   | /api/projects/from-repo            |                      | Create from repo scan      |
+| PATCH  | /api/projects/{id}                 |                      | Update project             |
+| POST   | /api/projects/{id}/overhead        |                      | Increment overhead tokens  |
+| DELETE | /api/projects/{id}                 |                      | Delete (cascades all)      |
+| GET    | /api/projects/{id}/gate-status     |                      | Check sprint gates         |
+| GET    | /api/projects/{id}/tests           | suite, status, limit | Project test runs          |
+| POST   | /api/projects/{id}/scan-tokens     |                      | Trigger token attribution  |
+| GET    | /api/projects/{id}/docs            |                      | Read project doc files     |
+| GET    | /api/projects/{id}/activity-feed   | limit                | Activity log with agents   |
 
 #### /api/sprints
 | Method | Path                | Query Params       | Purpose        |
@@ -338,6 +378,18 @@ Request → Router (validation, HTTP) → Service (business logic) → Model (OR
 | POST   | /api/tickets/{id}/tokens           |                                                                 | Increment tokens    |
 | DELETE | /api/tickets/{id}                  |                                                                 | Delete ticket       |
 
+#### /api/tracking
+| Method | Path                      | Purpose                                |
+|--------|---------------------------|-----------------------------------------|
+| POST   | /api/tracking/start       | Log work start (ticket_id, agent_id)    |
+| POST   | /api/tracking/stop        | Log work stop (ticket_id, agent_id)     |
+| POST   | /api/tracking/tokens      | Log token report (ticket_id, agent_id, tokens, source) |
+| POST   | /api/tracking/overhead/start | Log overhead start (project_id, agent_id) |
+| POST   | /api/tracking/overhead/stop  | Log overhead stop (project_id, agent_id)  |
+| GET    | /api/tracking/summary     | Full rollup (per_ticket, per_agent, per_sprint, project_total) |
+
+The tracking API is the central event log for time and token tracking. `attribute_tokens.py` posts here. Ticket status changes auto-insert start/stop events. The summary endpoint computes totals from event pairs.
+
 #### /api/comments
 | Method | Path                 | Query Params               | Purpose        |
 |--------|----------------------|----------------------------|----------------|
@@ -375,12 +427,12 @@ Request → Router (validation, HTTP) → Service (business logic) → Model (OR
 | POST   | /api/activity-logs      |                                     | Create log     |
 
 #### /api/test-results
-| Method | Path                        | Query Params                  | Purpose              |
-|--------|-----------------------------|-------------------------------|----------------------|
-| GET    | /api/test-results           | project_id, suite, status, limit | List results      |
-| GET    | /api/test-results/performance| project_id, limit            | Lightweight history  |
-| GET    | /api/test-results/{id}      |                               | Get result           |
-| POST   | /api/test-results           |                               | Create result        |
+| Method | Path                         | Query Params                     | Purpose              |
+|--------|------------------------------|----------------------------------|----------------------|
+| GET    | /api/test-results            | project_id, suite, status, limit | List results         |
+| GET    | /api/test-results/performance| project_id, limit                | Lightweight history  |
+| GET    | /api/test-results/{id}       |                                  | Get result           |
+| POST   | /api/test-results            |                                  | Create result        |
 
 #### /api/failure-records
 | Method | Path                         | Query Params                                            | Purpose            |
@@ -397,17 +449,20 @@ Request → Router (validation, HTTP) → Service (business logic) → Model (OR
 |--------|-------------------|--------------------------------------------------|
 | GET    | /api/tokens/audit | Token audit: totals, by-agent, by-project, discrepancies |
 
-#### /api/status
-| Method | Path                      | Purpose                                    |
-|--------|---------------------------|--------------------------------------------|
-| GET    | /api/status               | Health check + active counts               |
-| GET    | /api/status/test-coverage | Router test coverage report                |
-| GET    | /api/status/code-standards| Code header format template                |
+#### /api/status and /api/system
+| Method | Path                       | Purpose                                    |
+|--------|----------------------------|--------------------------------------------|
+| GET    | /api/status                | Health check + active counts               |
+| GET    | /api/status/test-coverage  | Router test coverage report                |
+| GET    | /api/status/code-standards | Code header format template                |
+| GET    | /api/system/docs           | Read system docs (README, ARCHITECTURE)    |
+| POST   | /api/system/run-tests      | Trigger backend test suite                 |
 
 #### /api/playbooks
 | Method | Path                                   | Purpose                        |
 |--------|----------------------------------------|--------------------------------|
 | GET    | /api/playbooks                         | List available playbooks       |
+| POST   | /api/projects/{id}/deploy-playbooks    | Deploy playbooks to project    |
 
 ---
 
@@ -432,6 +487,8 @@ Request → Router (validation, HTTP) → Service (business logic) → Model (OR
 /projects/:id/agents                 → ProjectAgentsPage
 /projects/:id/agents/:agentId        → AgentPage
 /projects/:id/tests                  → ProjectTestsPage
+/projects/:id/docs                   → DocsPage
+/docs                                → SystemDocsPage
 /instructions                        → InstructionsPage
 /tests                               → TestResultsPage
 /tests/:runId                        → TestResultsPage (detail mode)
@@ -444,7 +501,32 @@ Request → Router (validation, HTTP) → Service (business logic) → Model (OR
 - **Test performance tab** — duration charts, drill-down to individual tests, average/diff metrics
 - **Test count sparklines** — inline pass/fail trends on project and sprint views
 - **Token scan button** — triggers POST /api/projects/:id/scan-tokens from the UI
+- **Tracking summary** — time/token rollups from /api/tracking/summary
 - **Adaptive polling** — 2s when active, 10s when idle
+
+### API Client Layer
+
+```
+src/api/
+├── client.js          # fetch wrapper, ApiError class, get/post/patch/del
+├── projects.js        # CRUD + deployPlaybooks
+├── sprints.js         # CRUD
+├── epics.js           # CRUD
+├── agents.js          # CRUD
+├── tickets.js         # CRUD
+├── comments.js        # Create, list, delete
+├── alerts.js          # CRUD + dismissAll + requestTestRun
+├── instructions.js    # CRUD + syncCheck + sync + playbooks
+├── activityLogs.js    # Read-only
+├── projectAgents.js   # Read-only
+├── testResults.js     # Read by ID or project
+├── failureRecords.js  # CRUD
+├── tokens.js          # getTokenAudit()
+├── tracking.js        # getTrackingSummary(projectId)
+├── status.js          # getStatus, getTestCoverage, getCodeStandards
+├── system.js          # runSystemTests
+└── docs.js            # getProjectDocs, getSystemDocs
+```
 
 ### Zustand Store
 
@@ -494,7 +576,7 @@ Activates venv automatically, loads `.env` for DB settings. Uses `pytest-json-re
 
 ### attribute_tokens.py
 
-Scans Claude Code transcript JSONL files and attributes tokens to tickets.
+Scans Claude Code transcript JSONL files and attributes tokens to tickets via the tracking API.
 
 ```
 python scripts/attribute_tokens.py                         # scan + attribute
@@ -507,10 +589,10 @@ Workflow:
 1. Finds transcript dirs under `~/.claude/projects/` matching `local_agent_tracker`
 2. For each JSONL file: reads agentName, counts tokens, resolves agent ID
 3. Skips overhead roles (team-lead, pm) and already-attributed sessions
-4. Finds agent's in_progress/todo ticket and POSTs tokens
+4. Finds agent's in_progress/todo ticket and POSTs to `POST /api/tracking/tokens`
 5. Outputs JSON summary on last line (consumed by API endpoint and shell wrapper)
 
-State file (`/tmp/lat_token_attribution_state.json`) tracks attributed sessions. Always exits 0.
+State file (`/tmp/lat_token_attribution_state.json`) tracks attributed sessions. Sanity cap: 50M tokens. Always exits 0.
 
 ### run_token_scan.sh
 
@@ -523,11 +605,11 @@ Shell wrapper for `attribute_tokens.py`. Parses args, activates venv, loads .env
 
 ### report_tokens.py
 
-Claude Code hook script for real-time token tracking. Reads hook event JSON from stdin, parses transcript JSONL for token counts, POSTs to the API.
+Claude Code hook script for real-time token tracking. Reads hook event JSON from stdin, parses transcript JSONL for token counts, POSTs to the API. Active — used for immediate token reporting when hooks are configured.
 
 Hook event types: `Stop`, `SubagentStop`, `TeammateIdle`.
 
-Delta tracking via state file prevents double-counting. Always exits 0. On failure, posts an info alert.
+Posts to `POST /api/tickets/:id/tokens` for work, `POST /api/projects/:id/overhead` for overhead roles. Delta tracking via state file prevents double-counting. Always exits 0. On failure, posts an info alert.
 
 ### sync_instructions.py
 
@@ -626,16 +708,19 @@ Projects enforce up to 6 gates via `force_test_run`, `force_test_coverage`, `for
 
 ### Status History and Time Tracking
 - Every ticket status change records a `status_history` entry
+- Status transitions auto-insert `tracking_log` start/stop events
 - `time_spent_seconds` auto-computed: sum of all in_progress intervals from history
 - Rework detection: in_progress after done creates failure_record + PM alert
 
 ### Token Tracking
-- Per-ticket: `POST /api/tickets/{id}/tokens` increments `tokens_used`, `time_spent_seconds`, sets `token_source`
+- Per-ticket via tracking API: `POST /api/tracking/tokens` inserts event + increments ticket
+- Per-ticket legacy: `POST /api/tickets/{id}/tokens` increments directly (also inserts tracking event)
 - Per-project overhead: `POST /api/projects/{id}/overhead` increments `tl_overhead_tokens` or `pm_overhead_tokens`
-- Transcript scan: `POST /api/projects/{id}/scan-tokens` runs attribute_tokens.py
+- Transcript scan: `POST /api/projects/{id}/scan-tokens` runs attribute_tokens.py → posts to tracking API
 - Auto-scan on sprint close
 - Audit: `GET /api/tokens/audit` cross-checks totals and flags discrepancies
 - Attribution detail: `GET /api/tickets/{id}/token-attribution`
+- Project summary: `GET /api/tracking/summary` — per-ticket, per-agent, per-sprint rollups
 
 ### Alert Auto-Creation
 - Ticket marked done with 0 tokens → info alert
@@ -645,10 +730,10 @@ Projects enforce up to 6 gates via `force_test_run`, `force_test_coverage`, `for
 - Rework detected → info alert for PM
 
 ### Failure Analysis
-- Manual records: A-G taxonomy
+- Manual records: A-G taxonomy (context_degradation, spec_drift, sycophantic_confirmation, tool_selection_error, cascading_failure, silent_failure, integration_failure)
 - Auto-detected: rework (from status_history), test_failure (from test results)
 - Sprint gate: unreviewed stubs block close
 - Summary endpoint: aggregated by type, agent, sprint, trend
 
 ### Project Deletion Cascade
-Deleting a project cascades through: alerts, test_results, activity_logs, instructions, tickets (and their comments, status_history), failure_records, project_agents, sprints, epics.
+Deleting a project cascades through: alerts, test_results, activity_logs, instructions, tickets (and their comments, status_history, tracking_log entries), failure_records, project_agents, sprints, epics.
