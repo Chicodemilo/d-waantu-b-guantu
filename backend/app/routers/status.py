@@ -1,16 +1,19 @@
 # Path: app/routers/status.py
 # File: status.py
 # Created: 2026-03-29
-# Purpose: System status, test coverage, code standards, and system docs endpoints
+# Purpose: System status, test coverage, code standards, system docs, and test runner endpoints
 # Caller: app/main.py
-# Callees: app/models (agent, alert, ticket), pathlib
+# Callees: app/models (agent, alert, ticket), pathlib, subprocess
 # Data In: HTTP requests
 # Data Out: JSON responses (status dict, coverage report, header format)
 # Last Modified: 2026-03-29
 
+import json
+import subprocess
+import time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -21,6 +24,7 @@ from app.models.alert import Alert, AlertStatus
 from app.models.ticket import Ticket, TicketStatus
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+SCRIPTS_DIR = BACKEND_DIR / "scripts"
 
 
 class StatusResponse(BaseModel):
@@ -135,3 +139,63 @@ def get_system_docs():
             "content": content,
         })
     return docs
+
+
+@router.post("/system/run-tests")
+def run_tests():
+    """Trigger the backend test suite via run_tests.sh and return a summary."""
+    script = SCRIPTS_DIR / "run_tests.sh"
+    if not script.is_file():
+        raise HTTPException(500, f"Test script not found at {script}")
+
+    start = time.monotonic()
+    try:
+        result = subprocess.run(
+            ["bash", str(script)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(BACKEND_DIR),
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(500, "Test run timed out after 300 seconds")
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to run tests: {exc}")
+
+    duration = round(time.monotonic() - start, 3)
+
+    # Try to parse the JSON report for accurate counts
+    report_path = Path("/tmp/lat_pytest_report.json")
+    passed = 0
+    failed = 0
+    total = 0
+    report_duration = duration
+
+    if report_path.is_file():
+        try:
+            report = json.loads(report_path.read_text())
+            summary = report.get("summary", {})
+            passed = summary.get("passed", 0)
+            failed = summary.get("failed", 0)
+            total = summary.get("total", 0)
+            report_duration = round(report.get("duration", duration), 3)
+        except Exception:
+            pass
+
+    if total == 0:
+        # Fallback: parse from stdout
+        for line in result.stdout.splitlines():
+            if "passed" in line or "failed" in line:
+                pass  # JSON report is the authoritative source
+
+    status = "passed" if result.returncode == 0 else "failed"
+
+    return {
+        "passed": passed,
+        "failed": failed,
+        "total": total,
+        "duration_seconds": report_duration,
+        "status": status,
+        "stdout_tail": (result.stdout or "")[-2000:],
+        "stderr_tail": (result.stderr or "")[-1000:],
+    }

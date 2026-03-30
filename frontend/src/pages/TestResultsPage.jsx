@@ -1,9 +1,9 @@
 // Path: src/pages/TestResultsPage.jsx
 // File: TestResultsPage.jsx
 // Created: 2026-03-29
-// Purpose: Global test results view listing all test runs with detail drill-down and test coverage display
+// Purpose: Global test results view with run system tests button, test run list with detail drill-down, and test coverage
 // Caller: App.jsx (route: /tests, /tests/:runId)
-// Callees: react, react-router-dom, ../store/useStore, ../components/common/StatusBadge, ../components/tests/TestCoverage, ../styles/tests.css
+// Callees: react, react-router-dom, ../store/useStore, ../api/system, ../components/common/StatusBadge, ../components/tests/TestCoverage, ../styles/tests.css
 // Data In: Route param (runId), testRuns from Zustand store
 // Data Out: Default export TestResultsPage component
 // Last Modified: 2026-03-29
@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import useStore from '../store/useStore';
+import { runSystemTests } from '../api/system';
 import StatusBadge from '../components/common/StatusBadge';
 import TestCoverage from '../components/tests/TestCoverage';
 import '../styles/tests.css';
@@ -92,6 +93,21 @@ function TestResultsPage() {
   const navigate = useNavigate();
   const testRuns = useStore((s) => s.testRuns);
   const [selectedId, setSelectedId] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState(null);
+
+  const handleRunTests = async () => {
+    setRunning(true);
+    setRunResult(null);
+    try {
+      const result = await runSystemTests();
+      setRunResult(result);
+    } catch {
+      setRunResult({ error: true });
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const activeId = runId ? Number(runId) : selectedId;
   const selectedRun = activeId ? testRuns.find((r) => r.id === activeId) : null;
@@ -127,29 +143,56 @@ function TestResultsPage() {
   return (
     <div>
       <div className="page-title">Test Results</div>
-      <div className="test-runs">
-        {sorted.map((run) => (
-          <div
-            key={run.id}
-            className="test-run-row"
-            onClick={() => setSelectedId(run.id)}
-          >
-            <span className="test-run-row__timestamp">
-              {formatTime(run.run_at)}
-            </span>
-            <span className="test-run-row__suite">{run.suite}</span>
-            <span className="test-run-row__passed">{run.passed} pass</span>
-            <span className="test-run-row__failed">{run.failed} fail</span>
-            <StatusBadge status={run.status} />
-            <span className="test-run-row__triggered">
-              {run.triggered_by}{run.triggered_context ? ` \u2014 ${run.triggered_context}` : ''}
-            </span>
-          </div>
-        ))}
-        {sorted.length === 0 && (
-          <div className="empty-state">No test runs recorded</div>
+      <div className="test-actions">
+        <button
+          className="sync-btn"
+          onClick={handleRunTests}
+          disabled={running}
+        >
+          {running ? '$ running...' : '$ run system tests'}
+        </button>
+        {runResult && !runResult.error && (
+          <span className="sync-btn__status">
+            {'\u2713'} {runResult.passed || 0} passed, {runResult.failed || 0} failed ({runResult.total || 0} total)
+          </span>
+        )}
+        {runResult?.error && (
+          <span className="sync-btn__status" style={{ color: 'var(--red)' }}>test run failed</span>
         )}
       </div>
+      {sorted.length === 0 ? (
+        <div className="test-empty-prompt">
+          <div className="test-empty-prompt__text">No test runs found &mdash; run system tests to verify your installation.</div>
+          <button
+            className="sync-btn"
+            onClick={handleRunTests}
+            disabled={running}
+          >
+            {running ? '$ running...' : '$ run system tests'}
+          </button>
+        </div>
+      ) : (
+        <div className="test-runs">
+          {sorted.map((run) => (
+            <div
+              key={run.id}
+              className="test-run-row"
+              onClick={() => setSelectedId(run.id)}
+            >
+              <span className="test-run-row__timestamp">
+                {formatTime(run.run_at)}
+              </span>
+              <span className="test-run-row__suite">{run.suite}</span>
+              <span className="test-run-row__passed">{run.passed} pass</span>
+              <span className="test-run-row__failed">{run.failed} fail</span>
+              <StatusBadge status={run.status} />
+              <span className="test-run-row__triggered">
+                {run.triggered_by}{run.triggered_context ? ` \u2014 ${run.triggered_context}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <TestCoverage />
     </div>
   );
