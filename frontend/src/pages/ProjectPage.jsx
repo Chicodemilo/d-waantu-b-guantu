@@ -16,6 +16,7 @@ import { deployPlaybooks, updateProject, deleteProject, scanTokens } from '../ap
 import { dismissAllAlerts, getAlerts } from '../api/alerts';
 import SprintProgress from '../components/project/SprintProgress';
 import OverheadTracker from '../components/project/OverheadTracker';
+import TimeTokens from '../components/dashboard/TimeTokens';
 import SprintVelocity from '../components/sprints/SprintVelocity';
 import EpicList from '../components/epics/EpicList';
 import AlertBanner from '../components/common/AlertBanner';
@@ -314,8 +315,8 @@ function ProjectPage() {
       </div>
 
       <div>
-        <div className="dashboard__section-title">Overhead</div>
-        <OverheadTracker project={project} />
+        <div className="dashboard__section-title">Time &amp; Tokens</div>
+        <TimeTokens projectId={id} />
       </div>
 
       <div>

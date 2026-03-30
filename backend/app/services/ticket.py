@@ -117,13 +117,19 @@ def update_ticket(db: Session, ticket: Ticket, data: TicketUpdate) -> Ticket:
         ))
         db.commit()
 
-        # DWB-200: Auto-insert tracking events on status transitions
+        # DWB-200/211: Auto-insert tracking events on status transitions
         try:
             agent_id = ticket.assigned_agent_id
             if agent_id:
                 if updates["status"] == TicketStatus.in_progress:
                     tracking_svc.log_start(db, ticket.id, agent_id)
                 elif old_status == TicketStatus.in_progress:
+                    tracking_svc.log_stop(db, ticket.id, agent_id)
+                elif updates["status"] == TicketStatus.done and old_status != TicketStatus.in_progress:
+                    # DWB-211: Ticket skipped in_progress (e.g. todo→done)
+                    # Insert both start+stop with current timestamp so every
+                    # completed ticket has a tracking record.
+                    tracking_svc.log_start(db, ticket.id, agent_id)
                     tracking_svc.log_stop(db, ticket.id, agent_id)
         except Exception as exc:
             logger.warning("Tracking event failed for ticket %s: %s", ticket.id, exc)
