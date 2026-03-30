@@ -146,12 +146,37 @@
   cursor: pointer;
 }
 
-.vbar-chart__col--link:hover .vbar-chart__filled {
+.vbar-chart__col--link:hover .vbar-chart__filled:not(.vu--orange):not(.vu--brick) {
   color: var(--green-bright);
 }
 
 .vbar-chart__col--link:hover .vbar-chart__label {
   color: var(--green-bright);
+}
+
+/* VU meter color bands — row position from bottom */
+.vu--green {
+  color: var(--green-dim);
+}
+
+.vu--orange {
+  color: var(--orange);
+}
+
+.vu--brick {
+  color: var(--brick-red);
+}
+
+.vbar-chart__col--link:hover .vu--green {
+  color: var(--green-bright);
+}
+
+.vbar-chart__col--link:hover .vu--orange {
+  color: var(--orange-bright);
+}
+
+.vbar-chart__col--link:hover .vu--brick {
+  color: #c4503f;
 }
 
 .vbar-chart__label {

@@ -41,3 +41,7 @@ export function createProjectFromRepo(repoPath) {
 export function scanTokens(id) {
   return post(`/projects/${id}/scan-tokens`);
 }
+
+export function seedDemoProject() {
+  return post('/projects/seed-demo');
+}

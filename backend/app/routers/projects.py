@@ -27,6 +27,7 @@ from app.schemas.project import ProjectCreate, ProjectOverheadIncrement, Project
 from app.schemas.test_result import TestResultRead
 from app.services import project as svc
 from app.services import test_result as test_svc
+from app.services.seed_demo import seed_demo_project
 from app.services.token_scan import run_token_scan
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -141,6 +142,12 @@ def create_from_repo(data: FromRepoRequest, db: Session = Depends(get_db)):
     # Auto-check doc gates and raise alerts for missing docs
     _check_doc_gates(db, project)
     return project
+
+
+@router.post("/seed-demo", status_code=201)
+def seed_demo(db: Session = Depends(get_db)):
+    result = seed_demo_project(db)
+    return result
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

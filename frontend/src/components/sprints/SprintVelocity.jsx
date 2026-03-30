@@ -6,13 +6,19 @@
 // Callees: react-router-dom (Link), useStore, charts.css
 // Data In: projectId prop
 // Data Out: default export SprintVelocity component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-03-30
 
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import '../../styles/charts.css';
 
 const MAX_BAR_HEIGHT = 10;
+
+function vuColor(row) {
+  if (row >= 9) return 'vu--brick';
+  if (row >= 7) return 'vu--orange';
+  return 'vu--green';
+}
 
 function SprintVelocity({ projectId }) {
   const sprints = useStore((s) => s.getSprintsByProject(projectId));
@@ -43,12 +49,19 @@ function SprintVelocity({ projectId }) {
           let filled = Math.round((item.value / maxValue) * MAX_BAR_HEIGHT);
           if (item.value > 0 && filled === 0) filled = 1;
           const empty = MAX_BAR_HEIGHT - filled;
+          const blocks = [];
+          for (let row = MAX_BAR_HEIGHT; row >= 1; row--) {
+            if (row > filled) {
+              blocks.push(<span key={row} className="vbar-chart__empty">{'░\n'}</span>);
+            } else {
+              blocks.push(<span key={row} className={`vbar-chart__filled ${vuColor(row)}`}>{'█\n'}</span>);
+            }
+          }
           return (
             <Link key={i} to={`/projects/${projectId}/sprints/${item.id}`} className="vbar-chart__col vbar-chart__col--link">
               <span className="vbar-chart__value">{item.value}</span>
               <div className="vbar-chart__bar">
-                <span className="vbar-chart__empty">{'░\n'.repeat(empty)}</span>
-                <span className="vbar-chart__filled">{'█\n'.repeat(filled)}</span>
+                {blocks}
               </div>
               <span className="vbar-chart__label">{item.label}</span>
             </Link>

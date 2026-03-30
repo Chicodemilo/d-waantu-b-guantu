@@ -15,12 +15,15 @@ from app.models.activity_log import ActivityLog
 from app.models.alert import Alert
 from app.models.comment import Comment
 from app.models.epic import Epic
+from app.models.failure_record import FailureRecord
 from app.models.instruction import Instruction
 from app.models.project import Project, ProjectStatus
 from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint
+from app.models.status_history import StatusHistory
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket
+from app.models.tracking_log import TrackingLog
 from app.schemas.project import ProjectCreate, ProjectUpdate
 
 
@@ -75,10 +78,18 @@ def delete_project(db: Session, project: Project) -> None:
         db.execute(delete(Comment).where(Comment.ticket_id.in_(ticket_ids)))
         # Delete alerts linked to project tickets
         db.execute(delete(Alert).where(Alert.ticket_id.in_(ticket_ids)))
+        # Delete failure records referencing project tickets
+        db.execute(delete(FailureRecord).where(FailureRecord.ticket_id.in_(ticket_ids)))
+        # Delete status history for project tickets
+        db.execute(delete(StatusHistory).where(StatusHistory.ticket_id.in_(ticket_ids)))
+    # Delete failure records directly on project (ticket_id may be null)
+    db.execute(delete(FailureRecord).where(FailureRecord.project_id == pid))
     # Delete alerts directly on project (ticket_id may be null)
     db.execute(delete(Alert).where(Alert.project_id == pid))
     # Delete test results (may reference sprints/tickets in this project)
     db.execute(delete(TestResult).where(TestResult.project_id == pid))
+    # Delete tracking logs
+    db.execute(delete(TrackingLog).where(TrackingLog.project_id == pid))
     # Delete activity logs
     db.execute(delete(ActivityLog).where(ActivityLog.project_id == pid))
     # Delete instructions

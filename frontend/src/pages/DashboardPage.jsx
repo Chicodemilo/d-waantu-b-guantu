@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom, ../store/useStore, ../components/dashboard/CrossProjectSummary, ../components/dashboard/ProjectCard, ../components/dashboard/TokenOverview, ../components/common/AlertBanner, ../components/agents/AgentList, ../components/dashboard/TokenAudit, ../api/alerts, ../api/projects, ../styles/dashboard.css
 // Data In: Projects, alerts, and agents from Zustand store
 // Data Out: Default export DashboardPage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-03-30
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -18,7 +18,7 @@ import AlertBanner from '../components/common/AlertBanner';
 import AgentList from '../components/agents/AgentList';
 import TokenAudit from '../components/dashboard/TokenAudit';
 import { dismissAllAlerts, getAlerts } from '../api/alerts';
-import { createProjectFromRepo } from '../api/projects';
+import { createProjectFromRepo, seedDemoProject } from '../api/projects';
 import '../styles/dashboard.css';
 
 function DashboardPage() {
@@ -31,6 +31,18 @@ function DashboardPage() {
   const [repoPath, setRepoPath] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState(null);
+  const [seeding, setSeeding] = useState(false);
+
+  const handleSeedDemo = async () => {
+    setSeeding(true);
+    try {
+      await seedDemoProject();
+    } catch {
+      // next poll will refresh
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   const handleDismissAll = async () => {
     setDismissing(true);
@@ -83,6 +95,14 @@ function DashboardPage() {
             onClick={() => { setAddExpanded(!addExpanded); setAddError(null); }}
           >
             {addExpanded ? '$ cancel' : '$ add project'}
+          </button>
+          <button
+            className="sync-btn"
+            style={{ marginLeft: '8px' }}
+            onClick={handleSeedDemo}
+            disabled={seeding}
+          >
+            {seeding ? '$ seeding...' : '$ seed demo project'}
           </button>
         </div>
         {addExpanded && (
