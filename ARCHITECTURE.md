@@ -295,7 +295,7 @@ Request → ActivityLoggerMiddleware → Router → Service → Model → DB
 ```
 
 - **Routers** (`app/routers/`): Define endpoints, validate input via Pydantic, inject DB session via `Depends(get_db)`. 16 router files.
-- **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution, tracking events). 15 service files.
+- **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution, tracking events, demo seeding). 15 service files.
 - **Models** (`app/models/`): SQLAlchemy 2.0 ORM classes with Mapped types and relationships. 14 model files.
 - **Schemas** (`app/schemas/`): Pydantic v2 models with ConfigDict(from_attributes=True) for Create, Update, Read per entity.
 - **Middleware** (`app/middleware/`): ActivityLoggerMiddleware auto-logs all mutations.
@@ -322,6 +322,7 @@ Disabled during testing (`TESTING=1` env var).
 | GET    | /api/projects/{id}                 |                      | Get project                |
 | POST   | /api/projects                      |                      | Create project             |
 | POST   | /api/projects/from-repo            |                      | Create from repo scan      |
+| POST   | /api/projects/seed-demo            |                      | Seed demo project (idempotent) |
 | PATCH  | /api/projects/{id}                 |                      | Update project             |
 | POST   | /api/projects/{id}/overhead        |                      | Increment overhead tokens  |
 | DELETE | /api/projects/{id}                 |                      | Delete (cascades all)      |

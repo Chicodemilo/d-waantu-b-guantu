@@ -48,7 +48,7 @@ mysql -h 127.0.0.1 -P 23847 -u lat_user -plat_dev_password local_agent_tracker <
 
 ```bash
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 alembic upgrade head
@@ -84,7 +84,7 @@ Dashboard at `http://localhost:5173`.
 ```
 
 **Backend** — FastAPI with SQLAlchemy 2.0, Pydantic v2, three-layer architecture:
-- `app/routers/` — 17 router files, 83 HTTP endpoints
+- `app/routers/` — 16 router files, 83 HTTP endpoints
 - `app/services/` — business logic, validation, automation triggers
 - `app/models/` — 14 SQLAlchemy models (14 tables)
 - `app/schemas/` — Pydantic request/response models
@@ -264,6 +264,14 @@ Or trigger via API: `POST /api/system/run-tests`
 
 ## Adding a Project
 
+### Demo project (quick start)
+
+```
+POST /api/projects/seed-demo
+```
+
+Creates a fully-populated demo project (prefix `DMO`) with 5 agents, 3 epics, 6 sprints, 30 tickets, test results, failure records, and alerts. Idempotent — re-seeding deletes and recreates the DMO project. Also creates a fake repo at `/tmp/dwb-demo-project` with README.md, INITIAL.md, and ARCHITECTURE.md so doc gates pass. Great for testing the dashboard without setting up a real project.
+
 ### From repo (recommended)
 
 ```
@@ -286,7 +294,7 @@ Auto-detects name, prefix, description. Enables doc gates by default.
 
 ## API Reference
 
-All endpoints prefixed with `/api`. Interactive docs at `http://localhost:8000/docs`. 83 endpoints across 17 routers.
+All endpoints prefixed with `/api`. Interactive docs at `http://localhost:8000/docs`. 83 endpoints across 16 routers.
 
 ### Projects — `/api/projects`
 
@@ -296,6 +304,7 @@ All endpoints prefixed with `/api`. Interactive docs at `http://localhost:8000/d
 | GET | `/api/projects/{id}` | Get project |
 | POST | `/api/projects` | Create project |
 | POST | `/api/projects/from-repo` | Create from repo scan |
+| POST | `/api/projects/seed-demo` | Seed demo project (idempotent) |
 | PATCH | `/api/projects/{id}` | Update project |
 | DELETE | `/api/projects/{id}` | Delete project |
 | POST | `/api/projects/{id}/overhead` | Increment overhead tokens |

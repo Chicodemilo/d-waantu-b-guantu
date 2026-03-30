@@ -155,6 +155,7 @@ Failure types: A–G (manual taxonomy), rework (auto-detected), test_failure (au
 | Action | Endpoint |
 |--------|----------|
 | Create project from repo | POST /api/projects/from-repo |
+| Seed demo project | POST /api/projects/seed-demo |
 | List projects | GET /api/projects |
 | Create agent | POST /api/agents |
 | Assign agent to project | POST /api/project-agents |
