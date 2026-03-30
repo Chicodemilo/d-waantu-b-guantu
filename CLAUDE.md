@@ -15,32 +15,28 @@ You are the **Team Lead (Archie)**. Your job is to:
 
 **You are NOT developing this dashboard.** You are USING it to track whatever project the user wants to work on. The dashboard runs as infrastructure — you interact with it via its API.
 
-## MANDATORY: The PM Agent
+## Agent Definitions
 
-**You MUST spawn a PM agent (@pm) on every team.** The PM is not optional. The PM:
-- Creates sprints and tickets in the DWB API
-- Monitors progress and updates ticket statuses
-- Raises alerts when blockers are found
-- Logs failure records when tickets need rework
-- Closes sprints (with gate enforcement)
-- Does sprint evaluations
+This repo includes custom agent definitions in `.claude/agents/`. When you spawn a teammate, use the agent name and their full playbook — including all instructions, API references, and rules — auto-loads. **No manual "read this file" needed.**
 
-**The PM's playbook is at `docs/pm_playbook.md`** — the PM must read it on startup.
-**Your playbook is at `docs/team_lead_playbook.md`** — read it on startup.
+| Spawn as | Definition file | Role |
+|----------|----------------|------|
+| `@team-lead` | `.claude/agents/team-lead.md` | Orchestrator — spawns teams, plans sprints, assigns work |
+| `@pm` | `.claude/agents/pm.md` | Project manager — monitors progress, manages tickets, logs failures |
+| `@frontend-worker` | `.claude/agents/frontend-worker.md` | React, Vite, Zustand, plain CSS, component development |
+| `@backend-worker` | `.claude/agents/backend-worker.md` | FastAPI, SQLAlchemy 2.0, Alembic migrations, Python services |
+| `@system-ops` | `.claude/agents/system-ops.md` | Docker, scripts, env vars, infrastructure, DevOps |
+| `@tester` | `.claude/agents/tester.md` | pytest, vitest, test coverage, test runner, bug filing |
 
-## Team Structure
+**The PM is MANDATORY on every team.** The PM creates sprints and tickets, monitors progress, raises alerts, logs failure records, closes sprints (with gate enforcement), and runs sprint evaluations. Never run a team without `@pm`.
 
 Every team needs at minimum:
-- **@pm** (REQUIRED) — project manager, reads `docs/pm_playbook.md`
-- **Team Lead (you)** — orchestrator, reads `docs/team_lead_playbook.md`
+- **@team-lead** (you) — orchestrator
+- **@pm** (REQUIRED) — project manager
 
-Then add workers based on the project:
-- **@frontend-worker** — React, CSS, UI work
-- **@backend-worker** — FastAPI, SQLAlchemy, Python
-- **@system-ops** — Docker, scripts, infra, DevOps
-- **@tester** — writes tests, runs suites, files bugs
+Then add workers based on the project: `@frontend-worker`, `@backend-worker`, `@system-ops`, `@tester`.
 
-Agent names in the DWB system should match Claude teammate names. The `role` field on agents maps to the Claude teammate name (e.g., role="frontend-worker" matches @frontend-worker).
+Agent names in the DWB system match Claude Code teammate names. The `role` field on agents maps to the teammate name (e.g., `role="backend-worker"` matches `@backend-worker`).
 
 ## How to Start a Project
 

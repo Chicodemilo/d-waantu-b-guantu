@@ -1,15 +1,15 @@
 // Path: src/pages/DocsPage.jsx
 // File: DocsPage.jsx
 // Created: 2026-03-29
-// Purpose: Displays project documentation files with expandable cards; used for both project docs and system docs
-// Caller: App.jsx (routes: /projects/:id/docs, /docs)
-// Callees: react (useState, useEffect), react-router-dom (useParams), useStore, api/docs (getProjectDocs), styles/docs.css
-// Data In: Route param (id) or systemProjectId prop, project from Zustand store, docs from API
+// Purpose: Displays project documentation files with expandable cards; detects DWB project and redirects to system docs
+// Caller: App.jsx (route: /projects/:id/docs)
+// Callees: react (useState, useEffect), react-router-dom (useParams, Link), useStore, api/docs (getProjectDocs), styles/docs.css
+// Data In: Route param (id), project from Zustand store, docs from API
 // Data Out: Default export DocsPage component
 // Last Modified: 2026-03-29
 
 import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { getProjectDocs } from '../api/docs';
 import '../styles/docs.css';
@@ -45,18 +45,22 @@ function DocCard({ doc }) {
   );
 }
 
-function DocsPage({ systemProjectId }) {
-  const { id: routeId } = useParams();
-  const projectId = systemProjectId || routeId;
-  const project = useStore((s) => s.getProject(projectId));
+function DocsPage() {
+  const { id } = useParams();
+  const project = useStore((s) => s.getProject(id));
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const isDwb = project?.prefix === 'DWB';
+
   useEffect(() => {
-    if (!projectId) return;
+    if (!id || isDwb) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
-    getProjectDocs(projectId)
+    getProjectDocs(id)
       .then((data) => {
         if (!cancelled) setDocs(data.filter((d) => d.name !== 'INITIAL.md'));
       })
@@ -65,10 +69,22 @@ function DocsPage({ systemProjectId }) {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [id, isDwb]);
 
-  if (!projectId || !project) {
-    return <div className="empty-state">{systemProjectId ? 'System project not found' : 'Project not found'}</div>;
+  if (!project) {
+    return <div className="empty-state">Project not found</div>;
+  }
+
+  if (isDwb) {
+    return (
+      <div>
+        <div className="page-title">{project.prefix} &mdash; Docs</div>
+        <div className="docs-redirect">
+          This project&apos;s docs are the system docs. View them under{' '}
+          <Link to="/docs" className="docs-redirect__link">Overview &rarr; system_docs</Link>.
+        </div>
+      </div>
+    );
   }
 
   if (loading) {
@@ -77,12 +93,11 @@ function DocsPage({ systemProjectId }) {
 
   const existing = docs.filter((d) => d.exists);
   const missing = docs.filter((d) => !d.exists);
-  const title = systemProjectId ? 'System Docs' : `${project.prefix} \u2014 Docs`;
 
   return (
     <div>
       <div className="page-title">
-        {title}
+        {project.prefix} &mdash; Docs
         <span className="tooltip-trigger">
           ?
           <span className="tooltip-content">

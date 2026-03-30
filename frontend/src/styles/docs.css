@@ -90,6 +90,23 @@
   padding: 12px;
 }
 
+.docs-redirect {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  color: var(--gray);
+  font-size: 13px;
+}
+
+.docs-redirect__link {
+  color: var(--green-bright);
+  text-decoration: none;
+}
+
+.docs-redirect__link:hover {
+  text-decoration: underline;
+}
+
 .doc-card__content {
   margin: 0;
   font-size: 12px;
