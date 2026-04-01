@@ -39,6 +39,7 @@ class TicketUpdate(BaseModel):
     tokens_used: int | None = None
     time_spent_seconds: int | None = None
     completed_at: datetime | None = None
+    jira_issue_key: str | None = None
 
 
 class TicketTokenIncrement(BaseModel):
@@ -64,6 +65,7 @@ class TicketRead(BaseModel):
     tokens_used: int
     time_spent_seconds: int
     token_source: str | None
+    jira_issue_key: str | None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

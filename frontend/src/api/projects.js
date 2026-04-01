@@ -45,3 +45,7 @@ export function scanTokens(id) {
 export function seedDemoProject() {
   return post('/projects/seed-demo');
 }
+
+export function disableJira(id) {
+  return post(`/projects/${id}/disable-jira`);
+}

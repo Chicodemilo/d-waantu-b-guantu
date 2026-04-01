@@ -255,6 +255,12 @@
   gap: 6px;
 }
 
+.footer__infra {
+  cursor: help;
+  font-weight: 600;
+  font-size: 11px;
+}
+
 .footer__dot {
   width: 6px;
   height: 6px;

@@ -13,7 +13,7 @@ import useStore from '../../store/useStore';
 import { formatTime } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import TicketComments from './TicketComments';
-import { getTicketHistory } from '../../api/tickets';
+import { getTicketHistory, updateTicket } from '../../api/tickets';
 import '../../styles/tickets.css';
 
 function StatusHistory({ ticketId }) {
@@ -66,6 +66,87 @@ function StatusHistory({ ticketId }) {
   );
 }
 
+function JiraLink({ ticket }) {
+  const [editing, setEditing] = useState(false);
+  const [keyInput, setKeyInput] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleLink = async () => {
+    if (!keyInput.trim()) return;
+    setSaving(true);
+    try {
+      await updateTicket(ticket.id, { jira_issue_key: keyInput.trim().toUpperCase() });
+      setEditing(false);
+      setKeyInput('');
+    } catch {
+      // next poll will refresh
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUnlink = async () => {
+    setSaving(true);
+    try {
+      await updateTicket(ticket.id, { jira_issue_key: null });
+    } catch {
+      // next poll will refresh
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (ticket.jira_issue_key) {
+    return (
+      <div className="jira-link">
+        <span className="jira-link__key">{ticket.jira_issue_key}</span>
+        <button
+          className="jira-link__unlink"
+          onClick={handleUnlink}
+          disabled={saving}
+        >
+          {saving ? 'unlinking...' : '[unlink]'}
+        </button>
+      </div>
+    );
+  }
+
+  if (editing) {
+    return (
+      <div className="jira-link">
+        <input
+          type="text"
+          className="jira-key-input"
+          placeholder="POR-123"
+          value={keyInput}
+          onChange={(e) => setKeyInput(e.target.value)}
+          maxLength={50}
+          autoFocus
+        />
+        <button
+          className="sync-btn"
+          onClick={handleLink}
+          disabled={saving || !keyInput.trim()}
+        >
+          {saving ? '$ linking...' : '$ link'}
+        </button>
+        <button className="sync-btn" onClick={() => { setEditing(false); setKeyInput(''); }}>
+          $ cancel
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      className="jira-link__unlink"
+      onClick={() => setEditing(true)}
+    >
+      [link jira issue]
+    </button>
+  );
+}
+
 function TicketDetail({ ticketId }) {
   const ticket = useStore((s) => s.getTicket(ticketId));
   const agents = useStore((s) => s.agents);
@@ -103,6 +184,10 @@ function TicketDetail({ ticketId }) {
           <div className="ticket-detail__meta-item">
             <span className="ticket-detail__meta-label">Epic:</span>
             <span className="ticket-detail__meta-value">{epic?.name || 'none'}</span>
+          </div>
+          <div className="ticket-detail__meta-item">
+            <span className="ticket-detail__meta-label">Jira:</span>
+            <JiraLink ticket={ticket} />
           </div>
           <div className="ticket-detail__meta-item">
             <span className="ticket-detail__meta-label">Time:</span>

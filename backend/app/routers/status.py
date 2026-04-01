@@ -9,16 +9,18 @@
 # Last Modified: 2026-03-29
 
 import json
+import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import engine, get_db
 from app.models.agent import Agent
 from app.models.alert import Alert, AlertStatus
 from app.models.ticket import Ticket, TicketStatus
@@ -27,11 +29,18 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = BACKEND_DIR / "scripts"
 
 
+class InfraWarning(BaseModel):
+    key: str
+    severity: str  # info, warning, critical
+    message: str
+
+
 class StatusResponse(BaseModel):
     healthy: bool
     active_agents: int
     open_alerts: int
     in_progress_tickets: int
+    infra_warnings: Optional[list[InfraWarning]] = None
 
 
 REPO_ROOT = BACKEND_DIR.parent
@@ -55,11 +64,93 @@ def get_status(db: Session = Depends(get_db)):
         .where(Ticket.status == TicketStatus.in_progress)
     ) or 0
 
+    # Infra checks
+    warnings = []
+
+    # DB connection pool health
+    pool = engine.pool
+    pool_size = pool.size()
+    pool_checked_out = pool.checkedout()
+    pool_overflow = pool.overflow()
+    if pool_checked_out >= pool_size:
+        warnings.append(InfraWarning(
+            key="db_pool_exhausted",
+            severity="critical",
+            message=f"DB pool exhausted: {pool_checked_out}/{pool_size} connections in use, {pool_overflow} overflow",
+        ))
+    elif pool_checked_out >= pool_size * 0.7:
+        warnings.append(InfraWarning(
+            key="db_pool_high",
+            severity="warning",
+            message=f"DB pool high usage: {pool_checked_out}/{pool_size} connections in use",
+        ))
+
+    # Stale DB connections (queries running > 60s)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text(
+                "SELECT COUNT(*) FROM information_schema.processlist "
+                "WHERE user != 'event_scheduler' AND command = 'Query' AND time > 60"
+            ))
+            stale = result.scalar() or 0
+            if stale > 0:
+                warnings.append(InfraWarning(
+                    key="db_stale_connections",
+                    severity="critical" if stale > 5 else "warning",
+                    message=f"{stale} stale DB queries running > 60s — possible deadlock",
+                ))
+    except Exception:
+        pass
+
+    # Disk space (host)
+    disk = shutil.disk_usage("/")
+    free_gb = disk.free / (1024 ** 3)
+    pct_used = (disk.used / disk.total) * 100
+    if free_gb < 5:
+        warnings.append(InfraWarning(
+            key="disk_low",
+            severity="critical",
+            message=f"Host disk critically low: {free_gb:.1f} GB free ({pct_used:.0f}% used)",
+        ))
+    elif free_gb < 20:
+        warnings.append(InfraWarning(
+            key="disk_low",
+            severity="warning",
+            message=f"Host disk getting low: {free_gb:.1f} GB free ({pct_used:.0f}% used)",
+        ))
+
+    # Docker disk (check via subprocess if docker available)
+    try:
+        result = subprocess.run(
+            ["docker", "system", "df", "--format", "{{.Size}}\t{{.Reclaimable}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            lines = result.stdout.strip().split("\n")
+            for line in lines:
+                parts = line.split("\t")
+                if len(parts) >= 1 and "GB" in parts[0]:
+                    size_str = parts[0].replace("GB", "").strip()
+                    try:
+                        size_gb = float(size_str)
+                        if size_gb > 30:
+                            warnings.append(InfraWarning(
+                                key="docker_disk_high",
+                                severity="warning",
+                                message=f"Docker using {size_gb:.1f} GB — consider pruning",
+                            ))
+                            break
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+
     return StatusResponse(
         healthy=True,
         active_agents=active_agents,
         open_alerts=open_alerts,
         in_progress_tickets=in_progress_tickets,
+        infra_warnings=warnings if warnings else None,
     )
 
 

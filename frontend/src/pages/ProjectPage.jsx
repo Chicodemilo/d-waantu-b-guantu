@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
 import ProjectHeader from '../components/project/ProjectHeader';
-import { deployPlaybooks, updateProject, deleteProject, scanTokens } from '../api/projects';
+import { deployPlaybooks, updateProject, deleteProject, scanTokens, disableJira } from '../api/projects';
 import { dismissAllAlerts, getAlerts } from '../api/alerts';
 import SprintProgress from '../components/project/SprintProgress';
 import OverheadTracker from '../components/project/OverheadTracker';
@@ -29,6 +29,8 @@ function ProjectPage() {
   const navigate = useNavigate();
   const project = useStore((s) => s.getProject(id));
   const setAlerts = useStore((s) => s.setAlerts);
+  const tickets = useStore((s) => s.getTicketsByProject(id));
+  const jiraLinkedCount = tickets.filter((t) => t.jira_issue_key).length;
   const alerts = useStore((s) => s.alerts).filter(
     (a) => a.project_id === Number(id) && a.status === 'open'
   );
@@ -43,6 +45,10 @@ function ProjectPage() {
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState(null);
+  const [jiraKeyInput, setJiraKeyInput] = useState('');
+  const [jiraSaving, setJiraSaving] = useState(false);
+  const [jiraDisabling, setJiraDisabling] = useState(false);
+  const [jiraConfirmDisable, setJiraConfirmDisable] = useState(false);
 
   const handleDeploy = async () => {
     setDeploying(true);
@@ -107,6 +113,31 @@ function ProjectPage() {
       // next poll will refresh
     } finally {
       setDismissing(false);
+    }
+  };
+
+  const handleJiraSave = async () => {
+    if (!jiraKeyInput.trim()) return;
+    setJiraSaving(true);
+    try {
+      await updateProject(id, { jira_project_key: jiraKeyInput.trim().toUpperCase() });
+    } catch {
+      // next poll will refresh
+    } finally {
+      setJiraSaving(false);
+    }
+  };
+
+  const handleJiraDisable = async () => {
+    setJiraDisabling(true);
+    try {
+      await disableJira(id);
+      setJiraConfirmDisable(false);
+      setJiraKeyInput('');
+    } catch {
+      // next poll will refresh
+    } finally {
+      setJiraDisabling(false);
     }
   };
 
@@ -276,6 +307,68 @@ function ProjectPage() {
                   {label} [{project[field] ? 'ON' : 'OFF'}]
                 </button>
               ))}
+            </div>
+
+            <div className="project-tools__group">
+              <span className="project-gates__label">
+                Jira Integration
+                <span className="tooltip-trigger">
+                  ?
+                  <span className="tooltip-content">
+                    Links this project to a Jira project for ticket tracking. Disabling removes all Jira issue links from tickets in this project. Your Jira data is never modified.
+                  </span>
+                </span>
+              </span>
+              {project.jira_project_key ? (
+                <>
+                  <span className="jira-key-display">{project.jira_project_key}</span>
+                  {!jiraConfirmDisable ? (
+                    <button
+                      className="sync-btn sync-btn--danger"
+                      onClick={() => setJiraConfirmDisable(true)}
+                    >
+                      $ disable jira
+                    </button>
+                  ) : (
+                    <span className="project-actions__confirm">
+                      <span className="project-actions__confirm-text">
+                        This will remove Jira links from {jiraLinkedCount} ticket{jiraLinkedCount !== 1 ? 's' : ''}. Jira issues are not affected. Continue?
+                      </span>
+                      <button
+                        className="sync-btn sync-btn--danger"
+                        onClick={handleJiraDisable}
+                        disabled={jiraDisabling}
+                      >
+                        {jiraDisabling ? '$ disabling...' : '$ yes, disable'}
+                      </button>
+                      <button
+                        className="sync-btn"
+                        onClick={() => setJiraConfirmDisable(false)}
+                      >
+                        $ cancel
+                      </button>
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    className="jira-key-input"
+                    placeholder="PROJ"
+                    value={jiraKeyInput}
+                    onChange={(e) => setJiraKeyInput(e.target.value)}
+                    maxLength={20}
+                  />
+                  <button
+                    className="sync-btn"
+                    onClick={handleJiraSave}
+                    disabled={jiraSaving || !jiraKeyInput.trim()}
+                  >
+                    {jiraSaving ? '$ saving...' : '$ enable jira'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}

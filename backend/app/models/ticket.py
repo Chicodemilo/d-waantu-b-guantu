@@ -60,6 +60,7 @@ class Ticket(Base):
     tokens_used: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     time_spent_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     token_source: Mapped[str | None] = mapped_column(String(50), nullable=True, default="unknown")
+    jira_issue_key: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

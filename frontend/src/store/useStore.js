@@ -123,6 +123,10 @@ const useStore = create((set, get) => ({
     set((state) => ({
       polling: { ...state.polling, lastUpdated: new Date().toISOString() },
     })),
+
+  // Infra warnings (from /api/status)
+  infraWarnings: [],
+  setInfraWarnings: (warnings) => set({ infraWarnings: warnings || [] }),
 }));
 
 export default useStore;

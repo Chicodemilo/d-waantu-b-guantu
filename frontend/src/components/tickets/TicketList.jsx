@@ -101,7 +101,12 @@ function TicketList({ projectId }) {
             className="ticket-row"
             onClick={() => navigate(`/projects/${projectId}/tickets/${ticket.id}`)}
           >
-            <span className="ticket-row__key">{ticket.ticket_key}</span>
+            <span className="ticket-row__key">
+              {ticket.ticket_key}
+              {ticket.jira_issue_key && (
+                <span className="jira-badge">{ticket.jira_issue_key}</span>
+              )}
+            </span>
             <span className="ticket-row__title">{ticket.title}</span>
             <StatusBadge status={ticket.status} />
             <span className="ticket-row__type">{ticket.ticket_type}</span>

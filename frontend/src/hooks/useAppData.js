@@ -102,6 +102,7 @@ function useAppData() {
             : POLLING_IDLE_INTERVAL;
         state.setPollingInterval(interval);
         state.setPollingActive(true);
+        state.setInfraWarnings(status.infra_warnings);
       } catch (err) {
         console.error('[useAppData] status error:', err);
         state.setPollingActive(false);

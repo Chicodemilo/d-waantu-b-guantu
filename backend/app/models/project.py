@@ -40,6 +40,7 @@ class Project(Base):
     pm_overhead_time_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     jira_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    jira_project_key: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     force_headers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_test_coverage: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_test_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

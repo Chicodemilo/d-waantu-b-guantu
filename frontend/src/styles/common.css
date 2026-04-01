@@ -829,3 +829,69 @@
 .test-status-icon--none {
   color: var(--gray);
 }
+
+.jira-key-display {
+  font-size: 12px;
+  color: var(--blue);
+  border: 1px solid var(--blue-dim);
+  padding: 2px 8px;
+  letter-spacing: 1px;
+}
+
+.jira-key-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  width: 80px;
+  text-transform: uppercase;
+}
+
+.jira-key-input::placeholder {
+  color: var(--gray);
+}
+
+.jira-key-input:focus {
+  outline: none;
+  border-color: var(--green-dim);
+}
+
+.jira-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--blue);
+  border: 1px solid var(--blue-dim);
+  padding: 0 4px;
+  margin-left: 6px;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+}
+
+.jira-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jira-link__key {
+  color: var(--blue);
+  font-size: 12px;
+  border: 1px solid var(--blue-dim);
+  padding: 2px 8px;
+}
+
+.jira-link__unlink {
+  background: none;
+  border: none;
+  color: var(--gray);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.jira-link__unlink:hover {
+  color: var(--red);
+}

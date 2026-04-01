@@ -23,6 +23,7 @@ from app.models.agent import Agent
 from app.models.alert import Alert, AlertSeverity, AlertStatus
 from app.models.project import ProjectStatus
 from app.models.project_agent import ProjectAgent
+from app.models.ticket import Ticket
 from app.schemas.project import ProjectCreate, ProjectOverheadIncrement, ProjectRead, ProjectUpdate
 from app.schemas.test_result import TestResultRead
 from app.services import project as svc
@@ -187,6 +188,27 @@ def increment_project_overhead(
     return svc.increment_overhead(
         db, project, role, data.tokens_used, data.time_spent_seconds
     )
+
+
+@router.post("/{project_id}/disable-jira")
+def disable_jira(project_id: int, db: Session = Depends(get_db)):
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    # Count affected tickets before clearing
+    affected = db.query(Ticket).filter(
+        Ticket.project_id == project_id,
+        Ticket.jira_issue_key.isnot(None),
+    ).count()
+    # Clear jira_issue_key on all project tickets
+    db.query(Ticket).filter(Ticket.project_id == project_id).update(
+        {"jira_issue_key": None}, synchronize_session="fetch"
+    )
+    # Clear jira_project_key on the project
+    project.jira_project_key = None
+    db.commit()
+    db.refresh(project)
+    return {"project_id": project_id, "tickets_cleared": affected}
 
 
 @router.delete("/{project_id}", status_code=204)

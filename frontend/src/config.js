@@ -10,7 +10,7 @@
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
-export const POLLING_ACTIVE_INTERVAL = Number(import.meta.env.VITE_POLL_ACTIVE_MS) || 1000;
+export const POLLING_ACTIVE_INTERVAL = Number(import.meta.env.VITE_POLL_ACTIVE_MS) || 4000;
 export const POLLING_IDLE_INTERVAL = 10000;
 
 export const ACTIVITY_LOG_LIMIT = 50;
