@@ -1,10 +1,10 @@
 # Architecture
 
-Technical reference for the Local Agent Tracker (LAT) system.
+Technical reference for D'Waantu B'Guantu (DWB).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Local Agent Tracker                       │
+│                    D'Waantu B'Guantu                         │
 │                                                             │
 │  ┌──────────┐    ┌──────────────────┐    ┌───────────────┐  │
 │  │  React    │───▶│  FastAPI         │───▶│  MySQL 8.0    │  │
@@ -13,13 +13,15 @@ Technical reference for the Local Agent Tracker (LAT) system.
 │       │               ▲       ▲                ▲            │
 │       │               │       │                │            │
 │       │          ┌────┴──┐ ┌──┴───────────┐ ┌──┴────────┐  │
-│       │          │Scripts│ │Activity Logger│ │phpMyAdmin  │  │
-│       │          │& Hooks│ │ (middleware)  │ │  :8080     │  │
-│       │          └───────┘ └──────────────┘ └───────────┘  │
-│       │                                                     │
-│  Vite dev server              Docker Compose                │
-│  polls /api/status            manages DB + PMA              │
-│  adaptive 2s/10s                                            │
+│       │          │Claude │ │Activity Logger│ │phpMyAdmin  │  │
+│       │          │Code   │ │ (middleware)  │ │  :8080     │  │
+│       │          │Hooks  │ └──────────────┘ └───────────┘  │
+│       │          └───────┘                                  │
+│       │            │  SessionStart → POST /api/hooks/...    │
+│  Vite dev server   │  SessionEnd  → parse transcript JSONL  │
+│  polls /api/status │  SubagentStop→ log time + tokens       │
+│  adaptive 2s/10s   │                                        │
+│                    Docker Compose manages DB + PMA           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -604,9 +606,9 @@ Shell wrapper for `attribute_tokens.py`. Parses args, activates venv, loads .env
 ./scripts/run_token_scan.sh --project-id 1 --dry-run
 ```
 
-### report_tokens.py
+### report_tokens.py (DEPRECATED)
 
-Claude Code hook script for real-time token tracking. Reads hook event JSON from stdin, parses transcript JSONL for token counts, POSTs to the API. Active — used for immediate token reporting when hooks are configured.
+Replaced by the hook-based tracking system. The hooks router (`app/routers/hooks.py`) and hook tracking service (`app/services/hook_tracking.py`) now handle all real-time token/time tracking via Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop). Hook configuration is in `.claude/settings.json`.
 
 Hook event types: `Stop`, `SubagentStop`, `TeammateIdle`.
 

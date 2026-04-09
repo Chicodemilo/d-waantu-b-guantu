@@ -84,9 +84,9 @@ Dashboard at `http://localhost:5173`.
 ```
 
 **Backend** — FastAPI with SQLAlchemy 2.0, Pydantic v2, three-layer architecture:
-- `app/routers/` — 16 router files, 83 HTTP endpoints
+- `app/routers/` — 17 router files, 87 HTTP endpoints
 - `app/services/` — business logic, validation, automation triggers
-- `app/models/` — 14 SQLAlchemy models (14 tables)
+- `app/models/` — 15 SQLAlchemy models (15 tables)
 - `app/schemas/` — Pydantic request/response models
 - `app/middleware/` — activity logging middleware
 
@@ -171,13 +171,30 @@ The `tracking_log` table is the **source of truth** for time and token accountin
 | POST | `/api/tracking/overhead/stop` | Stop overhead `{project_id, agent_id}` |
 | GET | `/api/tracking/summary?project_id=X` | Full breakdown: per-ticket, per-agent, per-sprint, project totals |
 
-### Transcript scanning
+### Hook-based tracking (passive — primary)
 
-`scripts/attribute_tokens.py` scans Claude Code transcript files (`~/.claude/projects/`), counts tokens, matches to agents and tickets, and POSTs through `/api/tracking/tokens` with `source="transcript_scan"`. A state file prevents double-counting.
+Time and tokens are captured **automatically** via Claude Code lifecycle hooks. No agent awareness needed.
+
+- **SessionStart** hook → `POST /api/hooks/session-start` → creates `hook_session` record, logs start event
+- **SessionEnd** hook → `POST /api/hooks/session-end` → parses JSONL transcript for tokens, resolves agent identity, logs stop + token events
+- **SubagentStop** hook → same as SessionEnd for teammate transcripts
+
+Hook configuration lives in `.claude/settings.json`. Hooks fire automatically — zero manual intervention.
+
+The `hook_sessions` table tracks session state (active/completed). The `tracking_log` table remains the authoritative ledger — hooks delegate to `log_start()`, `log_stop()`, `log_tokens()`, `log_overhead_start/stop()`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/hooks/session-start` | Receive SessionStart hook data |
+| POST | `/api/hooks/session-end` | Receive SessionEnd/SubagentStop hook data |
+| GET | `/api/hooks/sessions` | List hook sessions (filters: project_id, status) |
+| GET | `/api/hooks/sessions/{id}` | Get session by session_id |
+
+### Transcript scanning (manual fallback)
+
+`scripts/attribute_tokens.py` scans Claude Code transcript files and attributes tokens to tickets. Kept as a manual fallback for backfilling or recovery.
 
 Trigger via API: `POST /api/projects/{id}/scan-tokens`
-
-Runs automatically on sprint close (failures logged as alerts, never block close).
 
 ### Legacy endpoints
 
@@ -512,7 +529,8 @@ d-waantu_b-guantu/
 │   └── tester.md
 ├── docs/
 │   ├── team_lead_playbook.md
-│   └── pm_playbook.md
+│   ├── pm_playbook.md
+│   └── PASSIVE_TRACKING_PLAN.md
 ├── backend/
 │   ├── alembic/             # Database migrations
 │   ├── app/
@@ -520,10 +538,10 @@ d-waantu_b-guantu/
 │   │   ├── config.py        # Pydantic Settings
 │   │   ├── database.py      # Engine + session factory
 │   │   ├── middleware/       # Activity logging middleware
-│   │   ├── models/          # 14 SQLAlchemy models
+│   │   ├── models/          # 15 SQLAlchemy models (incl. hook_session)
 │   │   ├── schemas/         # Pydantic request/response
 │   │   ├── services/        # Business logic layer
-│   │   └── routers/         # 17 HTTP router files
+│   │   └── routers/         # 17 HTTP router files (incl. hooks)
 │   ├── scripts/
 │   │   ├── attribute_tokens.py   # Transcript scanner → /api/tracking/tokens
 │   │   ├── run_token_scan.sh     # Shell wrapper
