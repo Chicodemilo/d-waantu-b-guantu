@@ -50,7 +50,7 @@ STATE_FILE = os.environ.get(
 FALLBACK_AGENT_ID = int(os.environ.get("LAT_FALLBACK_AGENT_ID", "1"))
 
 # Claude stores transcripts under ~/.claude/projects/<encoded-path>/
-# The project working dir /Users/mchick/Dev/local_agent_tracker encodes to:
+# The project working dir /Users/mchick/Dev/d-waantu_b-guantu encodes to:
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 
@@ -102,10 +102,10 @@ def find_transcript_dirs():
     for d in CLAUDE_PROJECTS_DIR.iterdir():
         if not d.is_dir():
             continue
-        # Match dirs whose name encodes a path containing local_agent_tracker
-        # or local-agent-tracker
+        # Match dirs whose name encodes a path containing d-waantu_b-guantu
+        # or d-waantu-b-guantu (also legacy local-agent-tracker)
         name = d.name.lower()
-        if "local-agent-tracker" in name or "local_agent_tracker" in name:
+        if "d-waantu-b-guantu" in name or "d-waantu_b-guantu" in name or "local-agent-tracker" in name or "local_agent_tracker" in name:
             dirs.append(d)
     return sorted(dirs)
 

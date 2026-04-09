@@ -9,7 +9,7 @@ Get a working dashboard with sample data in under 5 minutes.
 ## 1. Clone and configure
 
 ```bash
-git clone <repo-url> && cd local_agent_tracker
+git clone <repo-url> && cd d-waantu_b-guantu
 cp .env.example .env
 ```
 

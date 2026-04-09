@@ -495,7 +495,7 @@ All endpoints prefixed with `/api`. Interactive docs at `http://localhost:8000/d
 ### Project structure
 
 ```
-local_agent_tracker/
+d-waantu_b-guantu/
 ├── .env
 ├── docker-compose.yml
 ├── seed.sql

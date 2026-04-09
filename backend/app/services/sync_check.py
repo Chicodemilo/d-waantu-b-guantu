@@ -23,7 +23,7 @@ from app.models.instruction import Instruction, InstructionScope
 from app.schemas.instruction import InstructionCreate
 from app.services import instruction as instruction_svc
 
-MEMORY_DIR = Path.home() / ".claude" / "projects" / "-Users-mchick-Dev-local-agent-tracker" / "memory"
+MEMORY_DIR = Path.home() / ".claude" / "projects" / "-Users-mchick-Dev-d-waantu-b-guantu" / "memory"
 
 FUZZY_THRESHOLD = 0.6
 

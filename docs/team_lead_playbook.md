@@ -26,7 +26,7 @@ POST /api/projects
   "prefix": "DWB",
   "name": "D'Waantu B'Guantu",
   "description": "Local agent tracker — sprint management for AI agents",
-  "repo_path": "/Users/mchick/Dev/local_agent_tracker"
+  "repo_path": "/Users/mchick/Dev/d-waantu_b-guantu"
 }
 ```
 

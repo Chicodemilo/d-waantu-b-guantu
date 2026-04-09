@@ -587,7 +587,7 @@ python scripts/attribute_tokens.py --force                  # re-process all
 ```
 
 Workflow:
-1. Finds transcript dirs under `~/.claude/projects/` matching `local_agent_tracker`
+1. Finds transcript dirs under `~/.claude/projects/` matching `d-waantu_b-guantu`
 2. For each JSONL file: reads agentName, counts tokens, resolves agent ID
 3. Skips overhead roles (team-lead, pm) and already-attributed sessions
 4. Finds agent's in_progress/todo ticket and POSTs to `POST /api/tracking/tokens`

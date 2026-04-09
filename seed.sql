@@ -41,7 +41,7 @@ INSERT INTO agents (id, name, description, role, api_key, is_active) VALUES
 -- PROJECTS
 -- ============================================================
 INSERT INTO projects (id, prefix, name, description, status, tl_overhead_tokens, pm_overhead_tokens, repo_path) VALUES
-(1, 'DWB',    'D''Waantu B''Guantu Portal',   'Multi-agent workflow dashboard — monitor progress, manage team instructions, track token spend',  'active',    48200,  31500, '/Users/mchick/Dev/local_agent_tracker'),
+(1, 'DWB',    'D''Waantu B''Guantu Portal',   'Multi-agent workflow dashboard — monitor progress, manage team instructions, track token spend',  'active',    48200,  31500, '/Users/mchick/Dev/d-waantu_b-guantu'),
 (2, 'INGEST', 'Pipeline Ingestion Engine',     'ETL pipeline for normalizing vendor data feeds into a unified schema',                           'active',    12400,   8700,  NULL),
 (3, 'RECON',  'Reconciliation Service',        'Nightly job that cross-references transactions between internal ledger and upstream providers',  'paused',     5100,   3200,  NULL),
 (4, 'DOCS',   'Internal Knowledge Base',       'Searchable docs site built with Astro — runbooks, onboarding guides, architecture decisions',   'completed',  2800,   1900,  NULL);

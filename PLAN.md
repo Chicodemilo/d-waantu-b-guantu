@@ -59,7 +59,7 @@ Using Claude Code multi-agent mode with 4 sub-agents:
 ## Directory Structure
 
 ```
-local_agent_tracker/
+d-waantu_b-guantu/
 ├── docker-compose.yml
 ├── .env / .env.example / .gitignore
 ├── PLAN.md
