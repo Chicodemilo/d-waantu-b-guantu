@@ -1,3 +1,13 @@
+// Path: src/__tests__/api/projectAgents.test.js
+// File: projectAgents.test.js
+// Created: 2026-03-29
+// Purpose: Unit tests for the projectAgents API module (getProjectAgents)
+// Caller: vitest test runner
+// Callees: ../../api/projectAgents (getProjectAgents)
+// Data In: Mock fetch responses
+// Data Out: Test assertions
+// Last Modified: 2026-04-09
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getProjectAgents } from '../../api/projectAgents';
 

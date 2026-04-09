@@ -80,7 +80,7 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
     if not agent:
         agent = _fallback_tl_agent(db, project.id)
         if agent:
-            agent_name = agent.name
+            agent_name = agent.role
 
     session_type = _determine_session_type(agent)
 
@@ -171,7 +171,7 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         if not agent:
             agent = _fallback_tl_agent(db, project.id)
             if agent:
-                agent_name = agent.name
+                agent_name = agent.role
 
         session_type = _determine_session_type(agent)
 
@@ -213,7 +213,7 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
             if not agent:
                 agent = _fallback_tl_agent(db, session.project_id)
                 if agent:
-                    session.agent_name = agent.name
+                    session.agent_name = agent.role
             if agent:
                     session.agent_id = agent.id
                     session.session_type = _determine_session_type(agent)
@@ -351,6 +351,12 @@ def resolve_agent(db: Session, agent_name: str | None, project_id: int) -> Agent
         .where(Agent.id.in_(assigned_ids))
         .where(Agent.name.ilike(agent_name))
     )
+    if not agent:
+        logger.warning(
+            "resolve_agent: no match for agent_name=%r in project %d "
+            "(Teams agentName may not match DWB agent role/name)",
+            agent_name, project_id,
+        )
     return agent
 
 

@@ -15,6 +15,8 @@ Read `docs/team_lead_playbook.md` on startup for full operating procedures.
 
 **The PM is MANDATORY on every team.** Never run without a PM.
 
+When you create a team via TeamCreate, ALWAYS spawn a PM agent (Pam) as a teammate. Pam owns: ticket creation/closure in DWB+Jira, progress tracking, sprint health checks, and proactive status updates to both the TL and the human. The TL should NOT do ticket housekeeping — delegate it to Pam.
+
 Minimum team:
 - **@pm** — project manager (reads `docs/pm_playbook.md`)
 - **You** (team lead)
@@ -154,6 +156,16 @@ If the project has Jira enabled, set `jira_issue_key` on each ticket. **DWB tick
 ```
 backlog → todo → in_progress → in_review → done
 ```
+
+### Code Review Gate
+
+Before marking any implementation task complete, you MUST:
+1. Read the changed files — don't trust the agent's summary
+2. Verify the code actually matches what was asked for (field names match, routes work, CSS is correct)
+3. Run the tests locally if they exist for the changed area
+4. Check that the dashboard actually renders what the API returns (field mapping verification)
+
+Do NOT batch-complete tasks without reviewing. If you're tempted to skip review because you're moving fast, that's exactly when bugs slip through.
 
 ## When to Run Tests
 

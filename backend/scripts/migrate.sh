@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-#
-# migrate.sh — Safe Alembic migration wrapper
-# Kills the API server first to prevent metadata lock deadlocks,
-# runs the migration, then reminds you to restart.
+# Path: backend/scripts/migrate.sh
+# File: migrate.sh
+# Created: 2026-04-01
+# Purpose: Safe Alembic migration wrapper — kills API to prevent metadata lock deadlocks
+# Caller: Manual CLI
+# Callees: lsof, docker exec, alembic upgrade head
+# Data In: Interactive prompts (kill API? restart MySQL?)
+# Data Out: Alembic migration output; stdout status messages
+# Last Modified: 2026-04-01
 #
 set -euo pipefail
 

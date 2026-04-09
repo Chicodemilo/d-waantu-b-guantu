@@ -1,3 +1,13 @@
+// Path: src/__tests__/api/instructions.test.js
+// File: instructions.test.js
+// Created: 2026-03-29
+// Purpose: Unit tests for the instructions API module (CRUD, sync, playbooks)
+// Caller: vitest test runner
+// Callees: ../../api/instructions (getInstructions, getInstruction, createInstruction, updateInstruction, deleteInstruction, syncCheck, syncInstructions, getPlaybooks)
+// Data In: Mock fetch responses
+// Data Out: Test assertions
+// Last Modified: 2026-04-09
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   getInstructions,

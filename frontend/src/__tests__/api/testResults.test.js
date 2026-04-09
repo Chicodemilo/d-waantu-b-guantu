@@ -1,3 +1,13 @@
+// Path: src/__tests__/api/testResults.test.js
+// File: testResults.test.js
+// Created: 2026-03-29
+// Purpose: Unit tests for the testResults API module (getTestRuns, getTestRun)
+// Caller: vitest test runner
+// Callees: ../../api/testResults (getTestRuns, getTestRun)
+// Data In: Mock fetch responses
+// Data Out: Test assertions
+// Last Modified: 2026-04-09
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getTestRuns, getTestRun } from '../../api/testResults';
 

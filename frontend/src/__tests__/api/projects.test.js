@@ -1,3 +1,13 @@
+// Path: src/__tests__/api/projects.test.js
+// File: projects.test.js
+// Created: 2026-03-29
+// Purpose: Unit tests for the projects API module (CRUD, deployPlaybooks)
+// Caller: vitest test runner
+// Callees: ../../api/projects (getProjects, getProject, createProject, updateProject, deleteProject, deployPlaybooks)
+// Data In: Mock fetch responses
+// Data Out: Test assertions
+// Last Modified: 2026-04-09
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   getProjects,

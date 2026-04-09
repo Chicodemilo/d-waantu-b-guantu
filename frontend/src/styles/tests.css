@@ -1,3 +1,9 @@
+/* Path: src/styles/tests.css */
+/* File: tests.css */
+/* Created: 2026-03-29 */
+/* Purpose: Styles for test results pages — test runs, test detail, coverage, performance, failure analysis, drill-down, sparkline tooltips, pending review */
+/* Last Modified: 2026-04-09 */
+
 .test-empty-prompt {
   padding: 24px;
   border: 1px solid var(--border);

@@ -1,3 +1,9 @@
+/* Path: src/styles/layout.css */
+/* File: layout.css */
+/* Created: 2026-03-29 */
+/* Purpose: Styles for app shell grid layout — sidebar, header, main content, footer, mobile responsive breakpoints */
+/* Last Modified: 2026-04-09 */
+
 .app-shell {
   display: grid;
   grid-template-columns: 220px 1fr;

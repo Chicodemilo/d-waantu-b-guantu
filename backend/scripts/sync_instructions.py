@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Path: backend/scripts/sync_instructions.py
+# Path: scripts/sync_instructions.py
 # File: sync_instructions.py
 # Created: 2026-03-27
 # Purpose: Bidirectional sync between DB instructions and docs/rules/ markdown files

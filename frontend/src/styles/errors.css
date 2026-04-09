@@ -1,5 +1,8 @@
 /* Path: src/styles/errors.css */
-/* Error log page styles */
+/* File: errors.css */
+/* Created: 2026-04-09 */
+/* Purpose: Styles for the error log page — filters, log entries, severity badges, detail view */
+/* Last Modified: 2026-04-09 */
 
 .error-log__filters {
   display: flex;

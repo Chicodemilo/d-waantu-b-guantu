@@ -1,3 +1,13 @@
+// Path: src/__tests__/store/useStore.test.js
+// File: useStore.test.js
+// Created: 2026-03-29
+// Purpose: Unit tests for the Zustand store (setters, getters, computed selectors, polling)
+// Caller: vitest test runner
+// Callees: ../../store/useStore
+// Data In: Sample data fixtures
+// Data Out: Test assertions
+// Last Modified: 2026-04-09
+
 import { describe, it, expect, beforeEach } from 'vitest';
 import useStore from '../../store/useStore';
 

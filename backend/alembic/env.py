@@ -1,3 +1,13 @@
+# Path: backend/alembic/env.py
+# File: env.py
+# Created: 2026-03-29
+# Purpose: Alembic environment configuration for online and offline migrations
+# Caller: alembic CLI (upgrade, downgrade, revision)
+# Callees: app.config.settings, app.database.Base, app.models
+# Data In: alembic.ini config, app settings (DB URL)
+# Data Out: Migration execution against target database
+# Last Modified: 2026-04-09
+
 import sys
 from logging.config import fileConfig
 from pathlib import Path

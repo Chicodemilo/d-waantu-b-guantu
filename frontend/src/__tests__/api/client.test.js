@@ -1,3 +1,13 @@
+// Path: src/__tests__/api/client.test.js
+// File: client.test.js
+// Created: 2026-03-29
+// Purpose: Unit tests for the core HTTP client (get, post, patch, del) and ApiError handling
+// Caller: vitest test runner
+// Callees: ../../api/client (get, post, patch, del, ApiError)
+// Data In: Mock fetch responses
+// Data Out: Test assertions
+// Last Modified: 2026-04-09
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { get, post, patch, del, ApiError } from '../../api/client';
 
