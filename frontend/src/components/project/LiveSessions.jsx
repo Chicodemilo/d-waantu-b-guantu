@@ -13,7 +13,8 @@ import useStore from '../../store/useStore';
 import '../../styles/hooks.css';
 
 function formatElapsed(startTime) {
-  const elapsed = Math.floor((Date.now() - new Date(startTime).getTime()) / 1000);
+  const ts = startTime.endsWith('Z') ? startTime : startTime + 'Z';
+  const elapsed = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
   if (elapsed < 0) return '0s';
   const hrs = Math.floor(elapsed / 3600);
   const mins = Math.floor((elapsed % 3600) / 60);

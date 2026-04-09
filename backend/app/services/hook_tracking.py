@@ -79,6 +79,8 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
     # Main CLI session (no agent name) → attribute as TL overhead
     if not agent:
         agent = _fallback_tl_agent(db, project.id)
+        if agent:
+            agent_name = agent.name
 
     session_type = _determine_session_type(agent)
 
@@ -168,6 +170,8 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         # Main CLI session (no agent name) → attribute as TL overhead
         if not agent:
             agent = _fallback_tl_agent(db, project.id)
+            if agent:
+                agent_name = agent.name
 
         session_type = _determine_session_type(agent)
 
@@ -208,6 +212,8 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
             # Still no agent? Fall back to TL
             if not agent:
                 agent = _fallback_tl_agent(db, session.project_id)
+                if agent:
+                    session.agent_name = agent.name
             if agent:
                     session.agent_id = agent.id
                     session.session_type = _determine_session_type(agent)
