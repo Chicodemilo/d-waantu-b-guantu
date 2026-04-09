@@ -186,6 +186,22 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         if transcript_path and not session.transcript_path:
             session.transcript_path = transcript_path
 
+        # Re-resolve agent if we didn't get one at session start
+        if not session.agent_id and transcript_path:
+            agent_name = _read_agent_name_from_transcript(transcript_path)
+            if agent_name:
+                session.agent_name = agent_name
+                agent = resolve_agent(db, agent_name, session.project_id)
+                if agent:
+                    session.agent_id = agent.id
+                    session.session_type = _determine_session_type(agent)
+                    # Resolve ticket if worker
+                    if agent.role not in OVERHEAD_ROLES:
+                        ticket = _resolve_ticket(db, agent, session.project_id)
+                        if ticket:
+                            session.ticket_id = ticket.id
+                            session.sprint_id = ticket.sprint_id
+
     # Update session with end data
     session.end_time = end_time
     session.total_tokens = token_total
@@ -244,8 +260,8 @@ def parse_transcript(path: str) -> dict:
                 except json.JSONDecodeError:
                     continue
 
-                # Extract usage from API response entries
-                usage = entry.get("usage")
+                # Extract usage — nested under message.usage for assistant entries
+                usage = entry.get("message", {}).get("usage") or entry.get("usage")
                 if usage:
                     inp = usage.get("input_tokens", 0)
                     out = usage.get("output_tokens", 0)

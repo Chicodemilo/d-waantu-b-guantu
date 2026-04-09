@@ -654,40 +654,71 @@
 /* Terminal output */
 
 .terminal-output {
-  margin: 8px 0;
+  margin: 4px 0;
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+.terminal-output__wrapper {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease-in-out;
 }
 
 .terminal-output__border {
+  display: flex;
   color: var(--gray);
-  white-space: pre;
-  line-height: 1.2;
+  line-height: 1.4;
   user-select: none;
+  overflow: hidden;
 }
 
-.terminal-output__content {
-  max-height: 400px;
+.terminal-output__border-fill {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.terminal-output__border-fill::before {
+  content: '----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------';
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+}
+
+.terminal-output__scroll {
+  max-height: 180px;
   overflow-y: auto;
-  padding: 8px 12px;
   background-color: var(--bg);
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
 }
 
-.terminal-output__content pre {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--green);
-  white-space: pre-wrap;
-  word-break: break-all;
+.terminal-output__line {
+  display: flex;
   line-height: 1.5;
 }
 
+.terminal-output__pipe {
+  color: var(--gray);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.terminal-output__text {
+  color: var(--green);
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding: 0 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
 .terminal-output__empty {
+  display: block;
   color: var(--gray);
   font-style: italic;
+  padding: 8px 12px;
 }
 
 .terminal-output__loading {
@@ -699,6 +730,14 @@
 
 .test-runs--expandable .test-run-row {
   grid-template-columns: 24px 160px auto 70px 70px 80px 1fr;
+}
+
+.test-run-row--clickable {
+  cursor: pointer;
+}
+
+.test-run-row--clickable:hover {
+  background-color: var(--bg-hover);
 }
 
 .test-run-row--expanded {

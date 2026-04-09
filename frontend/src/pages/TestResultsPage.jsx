@@ -185,19 +185,21 @@ function TestResultsPage() {
         <div className="test-runs test-runs--expandable">
           {sorted.map((run) => (
             <div key={run.id}>
-              <div className={`test-run-row${expandedRunId === run.id ? ' test-run-row--expanded' : ''}`}>
-                <button
+              <div
+                className={`test-run-row test-run-row--clickable${expandedRunId === run.id ? ' test-run-row--expanded' : ''}`}
+                onClick={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+              >
+                <span
                   className={`test-run-row__expand${expandedRunId === run.id ? ' test-run-row__expand--open' : ''}`}
-                  onClick={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
                 >
                   {expandedRunId === run.id ? 'v' : '>'}
-                </button>
+                </span>
                 <span className="test-run-row__timestamp">
                   {formatTime(run.run_at)}
                 </span>
                 <button
                   className="test-run-row__detail-link"
-                  onClick={() => setSelectedId(run.id)}
+                  onClick={(e) => { e.stopPropagation(); setSelectedId(run.id); }}
                 >
                   {run.suite}
                 </button>

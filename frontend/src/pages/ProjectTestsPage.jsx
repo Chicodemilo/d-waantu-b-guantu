@@ -12,8 +12,9 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { getProjectTestRuns } from '../api/testResults';
-import { requestTestRun } from '../api/alerts';
+import { runSystemTests } from '../api/system';
 import StatusBadge from '../components/common/StatusBadge';
+import TerminalOutput from '../components/common/TerminalOutput';
 import TestPerformance from '../components/tests/TestPerformance';
 import FailureAnalysis from '../components/tests/FailureAnalysis';
 import '../styles/tests.css';
@@ -95,21 +96,33 @@ function ProjectTestsPage() {
   const project = useStore((s) => s.getProject(id));
   const [testRuns, setTestRuns] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [expandedRunId, setExpandedRunId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [requesting, setRequesting] = useState(false);
-  const [requestResult, setRequestResult] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [runOutput, setRunOutput] = useState(null);
+  const [runResult, setRunResult] = useState(null);
   const [activeTab, setActiveTab] = useState('results');
 
   const handleRunTests = async () => {
-    setRequesting(true);
-    setRequestResult(null);
+    setRunning(true);
+    setRunResult(null);
+    setRunOutput(null);
     try {
-      await requestTestRun(Number(id));
-      setRequestResult('done');
+      const result = await runSystemTests();
+      setRunResult(result);
+      setRunOutput(result.stdout_tail || null);
+      // Refresh the test runs list
+      const data = await getProjectTestRuns(id);
+      const parsed = data.map((run) => {
+        if (!run.details || typeof run.details !== 'string') return run;
+        try { return { ...run, details: JSON.parse(run.details) }; } catch { return run; }
+      });
+      setTestRuns(parsed);
     } catch {
-      setRequestResult('error');
+      setRunResult({ error: true });
+      setRunOutput(null);
     } finally {
-      setRequesting(false);
+      setRunning(false);
     }
   };
 
@@ -177,22 +190,24 @@ function ProjectTestsPage() {
         <button
           className="sync-btn"
           onClick={handleRunTests}
-          disabled={requesting}
+          disabled={running}
         >
-          {requesting ? '$ requesting...' : '$ run tests'}
+          {running ? '$ running...' : '$ run system tests'}
         </button>
-        <span className="tooltip-trigger">
-          ?
-          <span className="tooltip-content">
-            Alerts the team lead and PM to run the test suite for this project.
+        {runResult && !runResult.error && (
+          <span className="sync-btn__status">
+            {'\u2713'} {runResult.passed || 0} passed, {runResult.failed || 0} failed ({runResult.total || 0} total)
           </span>
-        </span>
-        {requestResult === 'done' && <span className="sync-btn__status">{'\u2713'} requested</span>}
-        {requestResult === 'error' && <span className="sync-btn__status" style={{ color: 'var(--red)' }}>request failed</span>}
+        )}
+        {runResult?.error && (
+          <span className="sync-btn__status" style={{ color: 'var(--red)' }}>test run failed</span>
+        )}
       </div>
-      <div className="test-cadence">
-        Tests run at the end of each sprint. Use the button above to request an ad-hoc run.
-      </div>
+      <TerminalOutput
+        output={runOutput}
+        isOpen={running || runOutput !== null}
+        isLoading={running}
+      />
       <div className="test-tab-bar">
         <button
           className={`test-tab${activeTab === 'results' ? ' test-tab--active' : ''}`}
@@ -216,21 +231,26 @@ function ProjectTestsPage() {
       {activeTab === 'results' && (
         <div className="test-runs">
           {sorted.map((run) => (
-            <div
-              key={run.id}
-              className="test-run-row"
-              onClick={() => setSelectedId(run.id)}
-            >
-              <span className="test-run-row__timestamp">
-                {formatTime(run.run_at)}
-              </span>
-              <span className="test-run-row__suite">{run.suite}</span>
-              <span className="test-run-row__passed">{run.passed} pass</span>
-              <span className="test-run-row__failed">{run.failed} fail</span>
-              <StatusBadge status={run.status} />
-              <span className="test-run-row__triggered">
-                {run.triggered_by}{run.triggered_context ? ` \u2014 ${run.triggered_context}` : ''}
-              </span>
+            <div key={run.id}>
+              <div
+                className={`test-run-row test-run-row--clickable${expandedRunId === run.id ? ' test-run-row--expanded' : ''}`}
+                onClick={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+              >
+                <span className="test-run-row__timestamp">
+                  {formatTime(run.run_at)}
+                </span>
+                <span className="test-run-row__suite">{run.suite}</span>
+                <span className="test-run-row__passed">{run.passed} pass</span>
+                <span className="test-run-row__failed">{run.failed} fail</span>
+                <StatusBadge status={run.status} />
+                <span className="test-run-row__triggered">
+                  {run.triggered_by}{run.triggered_context ? ` \u2014 ${run.triggered_context}` : ''}
+                </span>
+              </div>
+              <TerminalOutput
+                output={run.details?.raw_output_tail}
+                isOpen={expandedRunId === run.id}
+              />
             </div>
           ))}
           {sorted.length === 0 && (
