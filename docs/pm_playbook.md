@@ -164,29 +164,39 @@ POST /api/alerts
 
 ---
 
-## 6. Tracking Token Overhead
+## 6. Tracking — AUTOMATIC
 
-The PM tracks its own overhead and watches agent efficiency.
+**Time and token tracking is fully passive.** You do NOT need to manually update overhead or token counts. Claude Code lifecycle hooks capture everything automatically.
 
-### PM overhead
-Update the project periodically:
+### How it works
+When any Claude Code session starts or ends, hooks fire and:
+1. Parse the JSONL transcript for token counts (input + output + cache)
+2. Log start/end time as `tracking_log` events
+3. Attribute to the correct agent and ticket (or project overhead for TL/PM)
+
+- **PM sessions** → logged as overhead time + tokens on the project
+- **TL sessions** → same, overhead
+- **Worker sessions** → logged on their in_progress ticket
+
+### Checking the data
 ```
-PATCH /api/projects/{id}
-{
-  "pm_overhead_tokens": 85000,
-  "pm_overhead_time_seconds": 600
-}
+GET /api/tracking/summary?project_id=1
 ```
+Returns per-ticket, per-agent, per-sprint, and project-level rollups including overhead.
 
-These are cumulative. The PM should increment these values, not reset them.
+```
+GET /api/hooks/sessions?project_id=1
+```
+Shows active and completed hook sessions — who worked, for how long, how many tokens.
 
 ### Agent efficiency
-Check completed tickets for token usage:
-```
-GET /api/tickets?project_id=1&status=done
-```
+Review the tracking summary for outliers. If one ticket consumed 10x the tokens of similar tickets, investigate via activity logs and flag to the TL.
 
-Look at `tokens_used` and `time_spent_seconds` on each. Flag outliers — if most tickets use 20-50k tokens but one used 300k, investigate via activity logs.
+### Manual fallback
+If hooks missed a session (API was down, etc.), the batch scanner can backfill:
+```
+POST /api/projects/{id}/scan-tokens
+```
 
 ---
 
@@ -268,9 +278,17 @@ GET /api/alerts?project_id={pid}&status=open   # unresolved alerts
 ```
 
 ### Step 2: Calculate metrics
+```
+GET /api/tracking/summary?project_id={pid}
+```
+This gives you:
+- Per-ticket time and tokens
+- Per-agent time and tokens
+- Per-sprint rollups
+- Project totals including TL/PM overhead (captured automatically by hooks)
+
+Also check:
 - Total tickets planned vs completed
-- Total tokens used across all tickets
-- TL + PM overhead tokens (from project record)
 - Average tokens per ticket
 - Tickets that spilled over (not `done`)
 
@@ -307,7 +325,7 @@ PATCH /api/tickets/{id}
 5. `GET /api/test-results?project_id=1&limit=3` — tests still green?
 6. Log a progress observation to the activity log
 7. Raise alerts for anything that needs attention
-8. Update PM overhead tokens on the project
+8. Review tracking summary: `GET /api/tracking/summary?project_id=1` (time + tokens captured automatically via hooks)
 
 ---
 

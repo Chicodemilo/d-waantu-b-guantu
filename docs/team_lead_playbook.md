@@ -35,7 +35,7 @@ Fields that matter:
 - `repo_path` — optional filesystem path to the repo, useful for test runners and scripts
 - `status` — one of `active`, `paused`, `completed`, `archived`. Default: `active`
 
-Update with `PATCH /api/projects/{id}`. Track overhead tokens and time here — the TL is responsible for logging `tl_overhead_tokens` and `tl_overhead_time_seconds` periodically.
+Update with `PATCH /api/projects/{id}`.
 
 ---
 
@@ -183,16 +183,29 @@ The TL moves tickets through this pipeline:
 ### Assigning work
 Set `assigned_agent_id` when creating or updating a ticket. An unassigned ticket has `null` for this field.
 
-### Tracking effort
-After an agent finishes, update the ticket with token/time usage:
+### Tracking effort — AUTOMATIC
+
+**You do NOT need to manually track tokens or time.** The system captures both passively via Claude Code lifecycle hooks.
+
+When any Claude Code session starts or ends (yours, teammates, subagents), hooks automatically:
+1. Log start/end time via `tracking_log` events
+2. Parse the JSONL transcript for token usage
+3. Attribute to the agent's in_progress ticket (workers) or project overhead (TL/PM)
+
+This means:
+- **Your TL sessions** → logged as overhead time + tokens on the project
+- **Worker sessions** → logged as time + tokens on their active ticket
+- **PM sessions** → logged as overhead time + tokens on the project
+
+To check the current tracking state:
 ```
-PATCH /api/tickets/{id}
-{
-  "status": "done",
-  "tokens_used": 45000,
-  "time_spent_seconds": 120,
-  "completed_at": "2026-03-27T15:20:00"
-}
+GET /api/tracking/summary?project_id=1
+```
+Returns per-ticket, per-agent, per-sprint, and project-level rollups.
+
+To see active/recent hook sessions:
+```
+GET /api/hooks/sessions?project_id=1
 ```
 
 ### Querying tickets
@@ -360,7 +373,7 @@ The TL should regularly check:
    `GET /api/alerts?project_id=1&status=open`
 
 4. **Token usage** — are agents burning too many tokens?
-   Check `tokens_used` on completed tickets. Update `tl_overhead_tokens` on the project.
+   `GET /api/tracking/summary?project_id=1` — shows per-ticket, per-agent, per-sprint rollups. Tracked automatically via hooks.
 
 5. **Test results** — are tests passing?
    `GET /api/test-results?project_id=1&limit=5`
@@ -376,7 +389,7 @@ The TL should regularly check:
 5. Assign tickets to available agents
 6. Set or update instructions as patterns emerge
 7. Log activity for significant decisions
-8. Update overhead tokens/time on the project
+8. Check tracking summary: `GET /api/tracking/summary?project_id=1` (time + tokens captured automatically via hooks)
 
 ---
 
