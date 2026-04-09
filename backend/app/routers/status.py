@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -24,6 +24,8 @@ from app.database import engine, get_db
 from app.models.agent import Agent
 from app.models.alert import Alert, AlertStatus
 from app.models.ticket import Ticket, TicketStatus
+from app.schemas.test_result import TestResultCreate
+from app.services import test_result as test_result_svc
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = BACKEND_DIR / "scripts"
@@ -233,8 +235,11 @@ def get_system_docs():
 
 
 @router.post("/system/run-tests")
-def run_tests():
-    """Trigger the backend test suite via run_tests.sh and return a summary."""
+def run_tests(
+    project_id: int = Query(1),
+    db: Session = Depends(get_db),
+):
+    """Trigger the backend test suite via run_tests.sh, store and return a summary."""
     script = SCRIPTS_DIR / "run_tests.sh"
     if not script.is_file():
         raise HTTPException(500, f"Test script not found at {script}")
@@ -259,8 +264,10 @@ def run_tests():
     report_path = Path("/tmp/lat_pytest_report.json")
     passed = 0
     failed = 0
+    skipped = 0
     total = 0
     report_duration = duration
+    test_details = []
 
     if report_path.is_file():
         try:
@@ -268,25 +275,54 @@ def run_tests():
             summary = report.get("summary", {})
             passed = summary.get("passed", 0)
             failed = summary.get("failed", 0)
+            skipped = summary.get("skipped", 0)
             total = summary.get("total", 0)
             report_duration = round(report.get("duration", duration), 3)
+
+            for t in report.get("tests", []):
+                dur = sum(
+                    t.get(phase, {}).get("duration", 0) or 0
+                    for phase in ("setup", "call", "teardown")
+                )
+                test_details.append({
+                    "nodeid": t.get("nodeid", ""),
+                    "outcome": t.get("outcome", "unknown"),
+                    "duration": round(dur, 4),
+                })
         except Exception:
             pass
 
-    if total == 0:
-        # Fallback: parse from stdout
-        for line in result.stdout.splitlines():
-            if "passed" in line or "failed" in line:
-                pass  # JSON report is the authoritative source
-
     status = "passed" if result.returncode == 0 else "failed"
+    stdout_tail = (result.stdout or "")[-4000:]
+    stderr_tail = (result.stderr or "")[-1000:]
+
+    # Build details JSON matching run_tests.sh format
+    details_obj = {
+        "tests": test_details,
+        "raw_output_tail": stdout_tail,
+    }
+
+    # Persist the test result record
+    tr = test_result_svc.create_test_result(db, TestResultCreate(
+        project_id=project_id,
+        suite="backend",
+        total_tests=total,
+        passed=passed,
+        failed=failed,
+        skipped=skipped,
+        duration_seconds=report_duration,
+        status=status,
+        details=json.dumps(details_obj),
+        triggered_by="system/run-tests",
+    ))
 
     return {
+        "test_result_id": tr.id,
         "passed": passed,
         "failed": failed,
         "total": total,
         "duration_seconds": report_duration,
         "status": status,
-        "stdout_tail": (result.stdout or "")[-2000:],
-        "stderr_tail": (result.stderr or "")[-1000:],
+        "stdout_tail": stdout_tail,
+        "stderr_tail": stderr_tail,
     }

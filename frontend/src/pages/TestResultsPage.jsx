@@ -3,16 +3,17 @@
 // Created: 2026-03-29
 // Purpose: Global test results view with run system tests button, test run list with detail drill-down, and test coverage
 // Caller: App.jsx (route: /tests, /tests/:runId)
-// Callees: react, react-router-dom, ../store/useStore, ../api/system, ../components/common/StatusBadge, ../components/tests/TestCoverage, ../styles/tests.css
+// Callees: react, react-router-dom, ../store/useStore, ../api/system, ../components/common/StatusBadge, ../components/common/TerminalOutput, ../components/tests/TestCoverage, ../styles/tests.css
 // Data In: Route param (runId), testRuns from Zustand store
 // Data Out: Default export TestResultsPage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-04-09
 
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { runSystemTests } from '../api/system';
 import StatusBadge from '../components/common/StatusBadge';
+import TerminalOutput from '../components/common/TerminalOutput';
 import TestCoverage from '../components/tests/TestCoverage';
 import '../styles/tests.css';
 
@@ -95,13 +96,17 @@ function TestResultsPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState(null);
+  const [expandedRunId, setExpandedRunId] = useState(null);
+  const [liveOutput, setLiveOutput] = useState(null);
 
   const handleRunTests = async () => {
     setRunning(true);
     setRunResult(null);
+    setLiveOutput(null);
     try {
       const result = await runSystemTests();
       setRunResult(result);
+      setLiveOutput(result.stdout_tail || null);
     } catch {
       setRunResult({ error: true });
     } finally {
@@ -160,6 +165,11 @@ function TestResultsPage() {
           <span className="sync-btn__status" style={{ color: 'var(--red)' }}>test run failed</span>
         )}
       </div>
+      <TerminalOutput
+        output={liveOutput}
+        isOpen={running || liveOutput !== null}
+        isLoading={running}
+      />
       {sorted.length === 0 ? (
         <div className="test-empty-prompt">
           <div className="test-empty-prompt__text">No test runs found &mdash; run system tests to verify your installation.</div>
@@ -172,23 +182,38 @@ function TestResultsPage() {
           </button>
         </div>
       ) : (
-        <div className="test-runs">
+        <div className="test-runs test-runs--expandable">
           {sorted.map((run) => (
-            <div
-              key={run.id}
-              className="test-run-row"
-              onClick={() => setSelectedId(run.id)}
-            >
-              <span className="test-run-row__timestamp">
-                {formatTime(run.run_at)}
-              </span>
-              <span className="test-run-row__suite">{run.suite}</span>
-              <span className="test-run-row__passed">{run.passed} pass</span>
-              <span className="test-run-row__failed">{run.failed} fail</span>
-              <StatusBadge status={run.status} />
-              <span className="test-run-row__triggered">
-                {run.triggered_by}{run.triggered_context ? ` \u2014 ${run.triggered_context}` : ''}
-              </span>
+            <div key={run.id}>
+              <div className={`test-run-row${expandedRunId === run.id ? ' test-run-row--expanded' : ''}`}>
+                <button
+                  className={`test-run-row__expand${expandedRunId === run.id ? ' test-run-row__expand--open' : ''}`}
+                  onClick={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+                >
+                  {expandedRunId === run.id ? 'v' : '>'}
+                </button>
+                <span className="test-run-row__timestamp">
+                  {formatTime(run.run_at)}
+                </span>
+                <button
+                  className="test-run-row__detail-link"
+                  onClick={() => setSelectedId(run.id)}
+                >
+                  {run.suite}
+                </button>
+                <span className="test-run-row__passed">{run.passed} pass</span>
+                <span className="test-run-row__failed">{run.failed} fail</span>
+                <StatusBadge status={run.status} />
+                <span className="test-run-row__triggered">
+                  {run.triggered_by}{run.triggered_context ? ` \u2014 ${run.triggered_context}` : ''}
+                </span>
+              </div>
+              {expandedRunId === run.id && (
+                <TerminalOutput
+                  output={run.details?.raw_output_tail}
+                  isOpen={true}
+                />
+              )}
             </div>
           ))}
         </div>
