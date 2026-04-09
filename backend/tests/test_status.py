@@ -22,7 +22,7 @@ def test_status_response_shape(client):
     assert isinstance(data["active_agents"], int)
     assert isinstance(data["open_alerts"], int)
     assert isinstance(data["in_progress_tickets"], int)
-    assert set(data.keys()) == {"healthy", "active_agents", "open_alerts", "in_progress_tickets"}
+    assert set(data.keys()) == {"healthy", "active_agents", "open_alerts", "in_progress_tickets", "infra_warnings"}
 
 
 def test_status_healthy_is_true(client):

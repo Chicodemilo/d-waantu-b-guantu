@@ -59,7 +59,7 @@ class TestGetTicket:
             "id", "project_id", "epic_id", "sprint_id", "assigned_agent_id",
             "ticket_number", "ticket_key", "title", "description",
             "ticket_type", "status", "tokens_used", "time_spent_seconds",
-            "token_source",
+            "token_source", "jira_issue_key",
             "created_at", "updated_at", "completed_at",
         }
         assert set(data.keys()) == expected_keys

@@ -48,7 +48,7 @@ class TestGetProject:
         data = client.get(f"/api/projects/{project['id']}").json()
         expected_keys = {
             "id", "prefix", "name", "description", "status", "repo_path",
-            "jira_base_url",
+            "jira_base_url", "jira_project_key",
             "tl_overhead_tokens", "pm_overhead_tokens",
             "tl_overhead_time_seconds", "pm_overhead_time_seconds",
             "force_headers", "force_test_coverage", "force_test_run",
