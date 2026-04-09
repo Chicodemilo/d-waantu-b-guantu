@@ -729,10 +729,23 @@
 }
 
 .project-tools__body {
-  margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.2s ease, margin-top 0.3s ease, padding-top 0.3s ease;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 1px solid transparent;
+}
+
+.project-tools__body--open {
+  max-height: 800px;
+  overflow: visible;
+  opacity: 1;
+  margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
@@ -867,6 +880,34 @@
   margin-left: 6px;
   letter-spacing: 0.5px;
   vertical-align: middle;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.jira-badge:hover {
+  background-color: var(--blue-dim);
+  color: var(--bg);
+}
+
+a.jira-link__key {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+a.jira-link__key:hover {
+  text-decoration: underline;
+}
+
+.ticket-row__jira {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jira-badge--empty {
+  color: var(--gray);
+  border-color: transparent;
 }
 
 .jira-link {

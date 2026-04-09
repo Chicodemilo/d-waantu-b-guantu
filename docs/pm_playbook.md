@@ -91,6 +91,15 @@ Typical PM status moves:
 
 The PM should **not** move tickets to `in_progress` — that's the agent's signal. And `in_review` -> `done` should only happen after TL approval.
 
+### Jira Linking
+
+If the project has Jira enabled, tickets should have `jira_issue_key` set. **DWB tickets map 1:1 to Jira issues** — each DWB ticket must have a unique Jira key. Set it on creation or via PATCH:
+
+```
+PATCH /api/tickets/{id}
+{ "jira_issue_key": "PROJ-123" }
+```
+
 ---
 
 ## 4. Adding Comments
@@ -192,11 +201,8 @@ Shows active and completed hook sessions — who worked, for how long, how many 
 ### Agent efficiency
 Review the tracking summary for outliers. If one ticket consumed 10x the tokens of similar tickets, investigate via activity logs and flag to the TL.
 
-### Manual fallback
-If hooks missed a session (API was down, etc.), the batch scanner can backfill:
-```
-POST /api/projects/{id}/scan-tokens
-```
+### Hook-based tracking
+Token attribution is handled passively by Claude Code lifecycle hooks (`SessionStart`, `SessionEnd`, `SubagentStop`). These POST to `/api/hooks/session-start` and `/api/hooks/session-end` automatically. Active sessions are visible on the project page under Live Sessions.
 
 ---
 

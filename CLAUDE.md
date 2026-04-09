@@ -104,6 +104,14 @@ Project → Epic → Sprint → Ticket
 - Every epic MUST have a project
 - This is enforced at the API level — missing parents return 400
 
+## Jira Integration
+
+Projects can optionally link to a Jira project. When enabled:
+- DWB tickets map **1:1** to Jira issues via the `jira_issue_key` field
+- One DWB ticket = one Jira issue (enforced by unique constraint)
+- Enable/disable via the Tools panel on the project page
+- Disabling clears all Jira links from project tickets (Jira data is never modified)
+
 ## Sprint Gates
 
 Projects can have validation gates that block sprint closure:
@@ -122,14 +130,14 @@ Enable via PATCH /api/projects/:id or the toggle switches on the project page.
 3. Agents work tickets, PM monitors
 4. Tester runs tests: `./scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"`
 5. PM closes sprint (gates checked automatically)
-6. Sprint close auto-creates: test ticket for next sprint, token scan, alerts to team
+6. Sprint close auto-creates: test ticket for next sprint, alerts to team
 
 ## Tracking (Time & Tokens)
 
-The `tracking_log` table is the source of truth for time and token accounting. Status transitions auto-insert tracking events (start/stop). Token attribution scans POST through `/api/tracking/tokens`.
+The `tracking_log` table is the source of truth for time and token accounting. Status transitions auto-insert tracking events (start/stop). Token attribution is handled passively by Claude Code lifecycle hooks.
 
 - **Start/stop** tracking via the API or auto-inserted on status changes
-- **Transcript scan**: `POST /api/projects/:id/scan-tokens` or auto on sprint close
+- **Hook tracking**: Claude Code hooks (`SessionStart`, `SessionEnd`, `SubagentStop`) POST to `/api/hooks/session-start` and `/api/hooks/session-end` for real-time token attribution
 - **Auto-alert**: if a ticket is closed with 0 tokens, an alert fires
 
 ## Failure Analysis
@@ -179,7 +187,9 @@ Failure types: A–G (manual taxonomy), rework (auto-detected), test_failure (au
 | Failure summary | GET /api/failure-records/summary |
 | Token audit | GET /api/tokens/audit |
 | Dismiss all alerts | POST /api/alerts/dismiss-all |
-| Scan tokens | POST /api/projects/:id/scan-tokens |
+| Hook session start | POST /api/hooks/session-start |
+| Hook session end | POST /api/hooks/session-end |
+| List hook sessions | GET /api/hooks/sessions |
 | Deploy playbooks | POST /api/projects/:id/deploy-playbooks |
 
 See README.md for the full 83-endpoint reference.

@@ -24,6 +24,7 @@ import TestResultsPage from './pages/TestResultsPage';
 import ProjectTestsPage from './pages/ProjectTestsPage';
 import DocsPage from './pages/DocsPage';
 import SystemDocsPage from './pages/SystemDocsPage';
+import ErrorLogPage from './pages/ErrorLogPage';
 
 function App() {
   useAppData();
@@ -45,6 +46,7 @@ function App() {
         <Route path="/instructions" element={<InstructionsPage />} />
         <Route path="/tests" element={<TestResultsPage />} />
         <Route path="/tests/:runId" element={<TestResultsPage />} />
+        <Route path="/errors" element={<ErrorLogPage />} />
       </Routes>
     </AppShell>
   );

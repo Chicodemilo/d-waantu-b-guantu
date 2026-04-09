@@ -141,6 +141,8 @@ POST /api/tickets
 
 Tickets auto-assign to the active sprint and inherit the epic. Types: `task`, `bug`, `story`.
 
+If the project has Jira enabled, set `jira_issue_key` on each ticket. **DWB tickets map 1:1 to Jira issues** — each DWB ticket must have a unique Jira key.
+
 ### Assigning Work to Teammates
 
 1. Create the ticket with `assigned_agent_id` set
@@ -164,12 +166,7 @@ Tell tester: `./scripts/run_tests.sh --post --project-id 1 --triggered-by "teste
 ## When to Run Token Scans
 
 - Before sprint close (sprint close auto-triggers one)
-- After a large batch of work by multiple agents
-- When tokens show as 0 on tickets that clearly had work done
-
-```
-./scripts/run_token_scan.sh --project-id 1
-```
+Token attribution is now handled passively by Claude Code lifecycle hooks. Active sessions are visible on the project page under Live Sessions. If tokens show as 0 on tickets, check that the hook configuration in `.claude/settings.json` is intact and the API is running.
 
 ## Sprint Gates
 
@@ -196,7 +193,9 @@ Check gate status: `GET /api/projects/{id}/gate-status`
 | Update ticket | PATCH /api/tickets/{id} |
 | Post tokens | POST /api/tickets/{id}/tokens |
 | Token audit | GET /api/tokens/audit |
-| Scan tokens | POST /api/projects/{id}/scan-tokens |
+| Hook session start | POST /api/hooks/session-start |
+| Hook session end | POST /api/hooks/session-end |
+| List hook sessions | GET /api/hooks/sessions |
 | Create/list alerts | POST/GET /api/alerts |
 | Dismiss all alerts | POST /api/alerts/dismiss-all |
 | Failure summary | GET /api/failure-records/summary |

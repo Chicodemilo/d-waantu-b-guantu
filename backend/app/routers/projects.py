@@ -1,11 +1,11 @@
 # Path: app/routers/projects.py
 # File: projects.py
 # Created: 2026-03-29
-# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, scan-tokens, docs, activity-feed
+# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, docs, activity-feed
 # Caller: app/main.py
-# Callees: app/services/project.py, token_scan.py, models (Agent, Alert, ProjectAgent)
+# Callees: app/services/project.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
-# Data Out: JSON responses (ProjectRead, gate status, scan results)
+# Data Out: JSON responses (ProjectRead, gate status)
 # Last Modified: 2026-03-29
 
 import json
@@ -29,7 +29,6 @@ from app.schemas.test_result import TestResultRead
 from app.services import project as svc
 from app.services import test_result as test_svc
 from app.services.seed_demo import seed_demo_project
-from app.services.token_scan import run_token_scan
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -310,18 +309,6 @@ def list_project_tests(
     return test_svc.list_test_results(
         db, project_id=project_id, suite=suite, status=status, limit=limit
     )
-
-
-@router.post("/{project_id}/scan-tokens")
-def scan_project_tokens(project_id: int, db: Session = Depends(get_db)):
-    project = svc.get_project(db, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-    try:
-        result = run_token_scan(project_id)
-    except Exception as exc:
-        raise HTTPException(500, f"Token scan failed: {exc}")
-    return result
 
 
 _DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md", "INITIAL.md"]

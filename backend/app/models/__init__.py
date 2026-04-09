@@ -23,6 +23,7 @@ from app.models.failure_record import FailureRecord
 from app.models.status_history import StatusHistory
 from app.models.tracking_log import TrackingLog
 from app.models.hook_session import HookSession, HookSessionStatus, HookSessionType
+from app.models.error_log import ErrorLog, ErrorSource
 
 __all__ = [
     "Project", "ProjectStatus",
@@ -40,4 +41,5 @@ __all__ = [
     "StatusHistory",
     "TrackingLog",
     "HookSession", "HookSessionStatus", "HookSessionType",
+    "ErrorLog", "ErrorSource",
 ]

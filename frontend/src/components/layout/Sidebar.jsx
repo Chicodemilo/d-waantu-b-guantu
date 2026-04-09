@@ -73,6 +73,7 @@ function Sidebar({ open, onNavClick }) {
   const isInstructionsActive = location.pathname === '/instructions';
   const isSystemTestsActive = location.pathname.startsWith('/tests');
   const isSystemDocsActive = location.pathname === '/docs';
+  const isErrorLogActive = location.pathname === '/errors';
 
   return (
     <aside className={`sidebar${open ? ' sidebar--open' : ''}`}>
@@ -89,7 +90,7 @@ function Sidebar({ open, onNavClick }) {
           </li>
           <li>
             <NavLink to="/instructions" className={caretLinkClass(isInstructionsActive)} onClick={onNavClick}>
-              instructions
+              agent_rules
             </NavLink>
           </li>
           <li className="sidebar__link-with-info">
@@ -101,6 +102,11 @@ function Sidebar({ open, onNavClick }) {
           <li>
             <NavLink to="/docs" className={caretLinkClass(isSystemDocsActive)} onClick={onNavClick}>
               system_docs
+            </NavLink>
+          </li>
+          <li>
+            <NavLink to="/errors" className={caretLinkClass(isErrorLogActive)} onClick={onNavClick}>
+              error_log
             </NavLink>
           </li>
 

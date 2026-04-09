@@ -48,24 +48,8 @@ Runs pytest suite, optionally POSTs results to API.
 ```
 Env: `LAT_API_URL`, `LAT_PYTEST_REPORT`, `LAT_PYTEST_OUTPUT`, `LAT_POST_RESPONSE`
 
-### attribute_tokens.py
-Scans Claude transcript JSONL files, attributes tokens to tickets.
-```bash
-python scripts/attribute_tokens.py --project-id 1 --dry-run
-python scripts/attribute_tokens.py --project-id 1
-```
-Env: `LAT_API_URL`, `LAT_DEFAULT_PROJECT_ID`, `LAT_TOKEN_SANITY_CAP` (50M), `LAT_TRANSCRIPT_DIR`, `LAT_TOKEN_STATE_FILE`
-
-### run_token_scan.sh
-Wrapper for attribute_tokens.py — runs scan and posts summary alert.
-```bash
-./scripts/run_token_scan.sh --project-id 1
-./scripts/run_token_scan.sh --project-id 1 --dry-run
-```
-
-### report_tokens.py
-Claude Code hook script (currently inactive). Reads hook event JSON from stdin, parses transcript for token counts, POSTs to API.
-Env: `LAT_API_URL`, `LAT_DEFAULT_PROJECT_ID`, `LAT_TOKEN_SANITY_CAP`, `LAT_DEBUG_LOG`, `LAT_TOKEN_STATE_FILE`, `LAT_FALLBACK_AGENT_ID`, `LAT_EVENT_DUMP_DIR`
+### Token Tracking (Hook-based)
+Token attribution is handled passively by Claude Code lifecycle hooks configured in `.claude/settings.json`. Hooks POST to `/api/hooks/session-start` and `/api/hooks/session-end` automatically — no manual scripts needed.
 
 ### sync_instructions.py
 Bidirectional sync: DB instructions <-> docs/rules/ markdown files.

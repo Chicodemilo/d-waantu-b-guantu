@@ -21,25 +21,48 @@ class ApiError extends Error {
   }
 }
 
+function reportError(path, method, status, message, stack) {
+  try {
+    fetch(`${BASE_URL}/errors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'frontend',
+        endpoint: `${method} ${path}`,
+        error_type: status ? `HTTP_${status}` : 'NetworkError',
+        message: (message || 'Unknown error').slice(0, 2000),
+        stack_trace: (stack || '').slice(0, 10000),
+        status_code: status || null,
+      }),
+    }).catch(() => {});
+  } catch {}
+}
+
 async function request(path, options = {}) {
   const url = `${BASE_URL}${path}`;
+  const method = (options.method || 'GET').toUpperCase();
   const config = {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   };
 
-  const response = await fetch(url, config);
+  let response;
+  try {
+    response = await fetch(url, config);
+  } catch (err) {
+    reportError(path, method, null, err.message, err.stack);
+    throw err;
+  }
 
   if (!response.ok) {
     let data = null;
     try {
       data = await response.json();
     } catch {}
-    throw new ApiError(
-      data?.detail || `Request failed: ${response.status}`,
-      response.status,
-      data
-    );
+    const message = data?.detail || `Request failed: ${response.status}`;
+    const error = new ApiError(message, response.status, data);
+    reportError(path, method, response.status, message, error.stack);
+    throw error;
   }
 
   if (response.status === 204) return null;

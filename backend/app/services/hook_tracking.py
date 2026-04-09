@@ -75,6 +75,11 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
 
     # Resolve agent and session type
     agent = resolve_agent(db, agent_name, project.id) if agent_name else None
+
+    # Main CLI session (no agent name) → attribute as TL overhead
+    if not agent:
+        agent = _fallback_tl_agent(db, project.id)
+
     session_type = _determine_session_type(agent)
 
     # Resolve work context for workers
@@ -159,6 +164,11 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
             agent_name = _read_agent_name_from_transcript(transcript_path)
 
         agent = resolve_agent(db, agent_name, project.id) if agent_name else None
+
+        # Main CLI session (no agent name) → attribute as TL overhead
+        if not agent:
+            agent = _fallback_tl_agent(db, project.id)
+
         session_type = _determine_session_type(agent)
 
         ticket = None
@@ -187,12 +197,18 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
             session.transcript_path = transcript_path
 
         # Re-resolve agent if we didn't get one at session start
-        if not session.agent_id and transcript_path:
-            agent_name = _read_agent_name_from_transcript(transcript_path)
+        if not session.agent_id:
+            agent = None
+            agent_name = None
+            if transcript_path:
+                agent_name = _read_agent_name_from_transcript(transcript_path)
             if agent_name:
                 session.agent_name = agent_name
                 agent = resolve_agent(db, agent_name, session.project_id)
-                if agent:
+            # Still no agent? Fall back to TL
+            if not agent:
+                agent = _fallback_tl_agent(db, session.project_id)
+            if agent:
                     session.agent_id = agent.id
                     session.session_type = _determine_session_type(agent)
                     # Resolve ticket if worker
@@ -223,8 +239,12 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
                 )
         else:
             tracking.log_overhead_stop(db, session.project_id, agent.id)
+            if token_total > 0:
+                tracking.log_overhead_tokens(
+                    db, session.project_id, agent.id, token_total, source="hook"
+                )
     elif token_total > 0:
-        # Unattributed tokens — create an alert
+        # No TL agent on project — truly unattributed
         _create_unattributed_alert(db, session)
 
     return session
@@ -401,6 +421,21 @@ def _read_agent_name_from_transcript(path: str) -> str | None:
         pass
 
     return None
+
+
+def _fallback_tl_agent(db: Session, project_id: int) -> Agent | None:
+    """Find the team-lead agent assigned to a project.
+
+    Used as fallback when a main CLI session has no agent name — the human
+    user running Claude Code directly is effectively the TL.
+    """
+    return db.scalar(
+        select(Agent)
+        .join(ProjectAgent, ProjectAgent.agent_id == Agent.id)
+        .where(ProjectAgent.project_id == project_id)
+        .where(Agent.role == "team-lead")
+        .limit(1)
+    )
 
 
 def _determine_session_type(agent: Agent | None) -> HookSessionType:

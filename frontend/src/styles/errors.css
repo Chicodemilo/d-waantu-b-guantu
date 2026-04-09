@@ -1,0 +1,172 @@
+/* Path: src/styles/errors.css */
+/* Error log page styles */
+
+.error-log__filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.error-log__filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.error-log__filter-label {
+  color: var(--gray-light);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.error-log__filter-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--gray-light);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.error-log__filter-btn:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.error-log__filter-btn--active {
+  color: var(--green);
+  border-color: var(--green);
+  background-color: rgba(74, 222, 128, 0.08);
+}
+
+.error-log__list {
+  display: flex;
+  flex-direction: column;
+}
+
+.error-log__row-wrapper {
+  border-bottom: 1px solid var(--border);
+}
+
+.error-log__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  min-height: 32px;
+}
+
+.error-log__row:hover {
+  background-color: var(--bg-hover);
+}
+
+.error-log__row--expanded {
+  background-color: var(--bg-alt);
+}
+
+.error-log__time {
+  color: var(--gray-light);
+  min-width: 140px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.error-log__source {
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 32px;
+  text-align: center;
+}
+
+.error-log__source--backend {
+  color: var(--orange);
+}
+
+.error-log__source--frontend {
+  color: var(--blue);
+}
+
+.error-log__source--hook {
+  color: var(--green-dim);
+}
+
+.error-log__project {
+  color: var(--orange-bright);
+  font-size: 11px;
+  text-transform: uppercase;
+  min-width: 40px;
+}
+
+.error-log__status-code {
+  color: var(--yellow);
+  font-size: 12px;
+  min-width: 30px;
+}
+
+.error-log__status-code--500 {
+  color: var(--red);
+}
+
+.error-log__endpoint {
+  color: var(--gray-light);
+  font-size: 12px;
+  min-width: 120px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error-log__message {
+  color: var(--red);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error-log__detail {
+  padding: 8px 8px 12px 8px;
+  background-color: var(--bg-alt);
+  border-top: 1px solid var(--border);
+}
+
+.error-log__detail-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.error-log__detail-label {
+  color: var(--gray-light);
+  min-width: 50px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.error-log__detail-value {
+  color: var(--green);
+}
+
+.error-log__stack {
+  margin-top: 8px;
+  padding: 10px;
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--gray-light);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 300px;
+  overflow-y: auto;
+}

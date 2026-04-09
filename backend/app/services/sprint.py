@@ -3,7 +3,7 @@
 # Created: 2026-03-29
 # Purpose: Sprint CRUD, completion gates, and post-close automation
 # Caller: app/routers/sprints.py
-# Callees: models (sprint, ticket, alert, agent, failure_record, test_result), token_scan
+# Callees: models (sprint, ticket, alert, agent, failure_record, test_result)
 # Data In: db: Session, SprintCreate/Update
 # Data Out: list[Sprint], Sprint
 # Last Modified: 2026-03-29
@@ -282,8 +282,7 @@ def _on_sprint_completed(db: Session, sprint: Sprint) -> None:
 
     db.commit()
 
-    # Token attribution is now handled in real-time by lifecycle hooks.
-    # Manual scan is still available via POST /api/projects/:id/scan-tokens.
+    # Token attribution is handled in real-time by Claude Code lifecycle hooks.
 
 
 def delete_sprint(db: Session, sprint: Sprint) -> None:

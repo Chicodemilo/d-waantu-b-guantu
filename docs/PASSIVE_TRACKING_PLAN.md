@@ -54,10 +54,9 @@ tracking_log → Ticket → Agent → Sprint → Epic → Project
 - `tracking.py` service — log_start/stop/tokens, compute_*, get_project_summary
 - `tracking.py` router — REST endpoints + summary
 - Frontend display components
-- `attribute_tokens.py` as manual-only fallback
-
 **Replace:**
-- `report_tokens.py` (never configured) → proper backend service
+- `attribute_tokens.py` (removed) → real-time hook tracking
+- `report_tokens.py` (removed) → proper backend service (`hook_tracking.py`)
 - `/tmp` state files → `hook_sessions` DB table
 - Sprint close auto-scan → real-time hook data
 - Manual agent tracking → automatic hook tracking

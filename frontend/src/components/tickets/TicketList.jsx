@@ -19,6 +19,7 @@ import '../../styles/tickets.css';
 function TicketList({ projectId }) {
   const navigate = useNavigate();
   const tickets = useStore((s) => s.getTicketsByProject(projectId));
+  const project = useStore((s) => s.getProject(projectId));
   const agents = useStore((s) => s.agents);
   const sprints = useStore((s) => s.sprints);
   const epics = useStore((s) => s.epics);
@@ -83,9 +84,10 @@ function TicketList({ projectId }) {
         </button>
       </div>
       <TicketFilters projectId={projectId} filters={filters} onChange={setFilters} />
-      <div className="ticket-list">
+      <div className={`ticket-list${project?.jira_project_key ? ' ticket-list--jira' : ''}`}>
         <div className="ticket-row ticket-row--header">
           <span className="ticket-row__key">Key</span>
+          {project?.jira_project_key && <span className="ticket-row__jira">Jira</span>}
           <span className="ticket-row__title">Title</span>
           <span>Status</span>
           <span className="ticket-row__type">Type</span>
@@ -101,12 +103,22 @@ function TicketList({ projectId }) {
             className="ticket-row"
             onClick={() => navigate(`/projects/${projectId}/tickets/${ticket.id}`)}
           >
-            <span className="ticket-row__key">
-              {ticket.ticket_key}
-              {ticket.jira_issue_key && (
-                <span className="jira-badge">{ticket.jira_issue_key}</span>
-              )}
-            </span>
+            <span className="ticket-row__key">{ticket.ticket_key}</span>
+            {project?.jira_project_key && (
+              <span className="ticket-row__jira">
+                {ticket.jira_issue_key ? (
+                  <a
+                    className="jira-badge"
+                    href={`${project.jira_base_url || 'https://roadvantage.atlassian.net'}/browse/${ticket.jira_issue_key}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                  >{ticket.jira_issue_key}</a>
+                ) : (
+                  <span className="jira-badge jira-badge--empty">—</span>
+                )}
+              </span>
+            )}
             <span className="ticket-row__title">{ticket.title}</span>
             <StatusBadge status={ticket.status} />
             <span className="ticket-row__type">{ticket.ticket_type}</span>

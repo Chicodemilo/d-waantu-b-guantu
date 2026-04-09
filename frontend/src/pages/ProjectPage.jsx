@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
 import ProjectHeader from '../components/project/ProjectHeader';
-import { deployPlaybooks, updateProject, deleteProject, scanTokens, disableJira } from '../api/projects';
+import { deployPlaybooks, updateProject, deleteProject, disableJira } from '../api/projects';
 import { dismissAllAlerts, getAlerts } from '../api/alerts';
 import SprintProgress from '../components/project/SprintProgress';
 import OverheadTracker from '../components/project/OverheadTracker';
@@ -44,8 +44,6 @@ function ProjectPage() {
   const [toggling, setToggling] = useState({});
   const [dismissing, setDismissing] = useState(false);
   const [toolsExpanded, setToolsExpanded] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState(null);
   const [jiraKeyInput, setJiraKeyInput] = useState(''); // unused but kept for state cleanup
   const [jiraSaving, setJiraSaving] = useState(false);
   const [jiraDisabling, setJiraDisabling] = useState(false);
@@ -61,19 +59,6 @@ function ProjectPage() {
       setDeployResult('error');
     } finally {
       setDeploying(false);
-    }
-  };
-
-  const handleScanTokens = async () => {
-    setScanning(true);
-    setScanResult(null);
-    try {
-      const result = await scanTokens(id);
-      setScanResult(result);
-    } catch {
-      setScanResult({ error: true });
-    } finally {
-      setScanning(false);
     }
   };
 
@@ -171,8 +156,8 @@ function ProjectPage() {
           <span className={`project-tools__caret${toolsExpanded ? ' project-tools__caret--open' : ''}`}>&gt;</span>
           Tools
         </button>
-        {toolsExpanded && (
-          <div className="project-tools__body">
+
+          <div className={`project-tools__body${toolsExpanded ? ' project-tools__body--open' : ''}`}>
             {project.repo_path && (
               <div className="project-tools__group">
                 <button
@@ -192,28 +177,6 @@ function ProjectPage() {
                 {deployResult === 'error' && <span className="sync-btn__status" style={{ color: 'var(--red)' }}>deploy failed</span>}
               </div>
             )}
-
-            <div className="project-tools__group">
-              <button
-                className="sync-btn"
-                onClick={handleScanTokens}
-                disabled={scanning}
-              >
-                {scanning ? '$ scanning...' : '$ scan tokens'}
-              </button>
-              <span className="tooltip-trigger">
-                ?
-                <span className="tooltip-content">
-                  Scans Claude session transcripts and attributes token usage to tickets.
-                </span>
-              </span>
-              {scanResult && !scanResult.error && (
-                <span className="sync-btn__status">
-                  {'\u2713'} Scanned {scanResult.sessions_found || 0} sessions, attributed {(scanResult.total_tokens || 0).toLocaleString()} tokens to {scanResult.sessions_attributed || 0} tickets
-                </span>
-              )}
-              {scanResult?.error && <span className="sync-btn__status" style={{ color: 'var(--red)' }}>scan failed</span>}
-            </div>
 
             <div className="project-tools__group">
               <button
@@ -364,7 +327,6 @@ function ProjectPage() {
               )}
             </div>
           </div>
-        )}
       </div>
 
       <div>

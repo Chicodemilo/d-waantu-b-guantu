@@ -67,6 +67,8 @@ function StatusHistory({ ticketId }) {
 }
 
 function JiraLink({ ticket }) {
+  const project = useStore((s) => s.getProject(ticket.project_id));
+  const jiraBaseUrl = project?.jira_base_url || 'https://roadvantage.atlassian.net';
   const [editing, setEditing] = useState(false);
   const [keyInput, setKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
@@ -99,7 +101,12 @@ function JiraLink({ ticket }) {
   if (ticket.jira_issue_key) {
     return (
       <div className="jira-link">
-        <span className="jira-link__key">{ticket.jira_issue_key}</span>
+        <a
+          className="jira-link__key"
+          href={`${jiraBaseUrl}/browse/${ticket.jira_issue_key}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >{ticket.jira_issue_key}</a>
         <button
           className="jira-link__unlink"
           onClick={handleUnlink}

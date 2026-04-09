@@ -1,7 +1,7 @@
 // Path: src/api/projects.js
 // File: projects.js
 // Created: 2026-03-29
-// Purpose: CRUD API functions for projects plus deploy-playbooks, create-from-repo, and scan-tokens actions
+// Purpose: CRUD API functions for projects plus deploy-playbooks and create-from-repo actions
 // Caller: pages/DashboardPage.jsx, pages/ProjectPage.jsx, hooks/useProjectsData.js, hooks/useAppData.js
 // Callees: ./client (get, post, patch, del)
 // Data In: Project ID for fetch/update/delete/actions; project data for create/update; repo path for create-from-repo
@@ -36,10 +36,6 @@ export function deployPlaybooks(id) {
 
 export function createProjectFromRepo(repoPath) {
   return post('/projects/from-repo', { repo_path: repoPath });
-}
-
-export function scanTokens(id) {
-  return post(`/projects/${id}/scan-tokens`);
 }
 
 export function seedDemoProject() {

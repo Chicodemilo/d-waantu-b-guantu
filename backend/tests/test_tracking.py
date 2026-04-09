@@ -120,6 +120,7 @@ class TestSummary:
         assert "time_seconds" in total
         assert "tokens" in total
         assert "overhead_time_seconds" in total
+        assert "overhead_tokens" in total
 
     def test_summary_empty_project(self, client, make_project):
         project = make_project()

@@ -105,6 +105,25 @@ def log_overhead_stop(db: Session, project_id: int, agent_id: int) -> TrackingLo
     return entry
 
 
+def log_overhead_tokens(
+    db: Session, project_id: int, agent_id: int, tokens: int, source: str = "hook"
+) -> TrackingLog:
+    """Insert an 'overhead_token_report' event (no ticket)."""
+    entry = TrackingLog(
+        ticket_id=None,
+        agent_id=agent_id,
+        project_id=project_id,
+        sprint_id=None,
+        event_type="overhead_token_report",
+        tokens=tokens,
+        source=source,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
 def compute_ticket_time(db: Session, ticket_id: int) -> int:
     """Sum time between start/stop pairs for a ticket. Returns total seconds."""
     events = list(db.scalars(
@@ -155,6 +174,16 @@ def compute_overhead_time(db: Session, project_id: int) -> int:
             start_time = None
 
     return total_seconds
+
+
+def compute_overhead_tokens(db: Session, project_id: int) -> int:
+    """Sum tokens from overhead_token_report events for a project."""
+    total = db.scalar(
+        select(func.coalesce(func.sum(TrackingLog.tokens), 0))
+        .where(TrackingLog.project_id == project_id)
+        .where(TrackingLog.event_type == "overhead_token_report")
+    )
+    return total or 0
 
 
 def get_project_summary(db: Session, project_id: int) -> dict:
@@ -270,6 +299,7 @@ def get_project_summary(db: Session, project_id: int) -> dict:
         .where(TrackingLog.event_type == "token_report")
     ) or 0
     overhead_time = compute_overhead_time(db, project_id)
+    overhead_tokens = compute_overhead_tokens(db, project_id)
 
     return {
         "per_ticket": per_ticket,
@@ -279,5 +309,6 @@ def get_project_summary(db: Session, project_id: int) -> dict:
             "time_seconds": total_time,
             "tokens": total_tokens,
             "overhead_time_seconds": overhead_time,
+            "overhead_tokens": overhead_tokens,
         },
     }

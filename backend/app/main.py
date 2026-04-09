@@ -16,12 +16,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
 from app.middleware.activity_logger import ActivityLoggerMiddleware
+from app.middleware.error_logger import ErrorLoggerMiddleware
 from app.routers import (
     activity_logs,
     agents,
     alerts,
     comments,
     epics,
+    errors,
     failure_records,
     hooks,
     instructions,
@@ -47,6 +49,7 @@ app = FastAPI(title="Local Agent Tracker", lifespan=lifespan)
 
 if os.getenv("TESTING") != "1":
     app.add_middleware(ActivityLoggerMiddleware)
+    app.add_middleware(ErrorLoggerMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -76,4 +79,5 @@ app.include_router(tokens.router)
 app.include_router(failure_records.router)
 app.include_router(tracking.router)
 app.include_router(hooks.router)
+app.include_router(errors.router)
 app.include_router(status.router)

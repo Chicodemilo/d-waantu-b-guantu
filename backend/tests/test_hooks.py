@@ -683,5 +683,85 @@ class TestEndToEndRollup:
         })
         summary = client.get("/api/tracking/summary", params={"project_id": pid}).json()
         assert summary["project_total"]["overhead_time_seconds"] >= 1
+        assert summary["project_total"]["overhead_tokens"] == 1200
         # Overhead tokens are not in per_ticket
         assert summary["per_ticket"] == []
+
+
+class TestTLFallback:
+    """When a main CLI session has no agent name, attribute to TL as overhead."""
+
+    def test_main_session_attributed_to_tl(
+        self, client, hook_project, hook_agent_tl, make_transcript,
+    ):
+        pid = hook_project["id"]
+        _assign_agent(client, pid, hook_agent_tl["id"])
+        sid = _session_id()
+
+        # No agent_name — simulates user running Claude Code directly
+        client.post("/api/hooks/session-start", json={
+            "session_id": sid,
+            "cwd": "/tmp/test-project",
+        })
+
+        r = client.get(f"/api/hooks/sessions/{sid}")
+        session = r.json()
+        assert session["agent_id"] == hook_agent_tl["id"]
+        assert session["session_type"] == "main"
+
+    def test_main_session_tokens_go_to_overhead(
+        self, client, hook_project, hook_agent_tl, make_transcript,
+    ):
+        pid = hook_project["id"]
+        _assign_agent(client, pid, hook_agent_tl["id"])
+        sid = _session_id()
+
+        # No agent_name in transcript either
+        transcript = make_transcript(
+            agent_name=None,
+            messages=[{"input_tokens": 500, "output_tokens": 300}],
+        )
+
+        client.post("/api/hooks/session-start", json={
+            "session_id": sid,
+            "cwd": "/tmp/test-project",
+        })
+        client.post("/api/hooks/session-end", json={
+            "session_id": sid,
+            "transcript_path": transcript,
+            "hook_event": "SessionEnd",
+        })
+
+        summary = client.get("/api/tracking/summary", params={"project_id": pid}).json()
+        assert summary["project_total"]["overhead_tokens"] == 800
+        assert summary["per_ticket"] == []
+
+    def test_no_tl_agent_fires_unattributed_alert(
+        self, client, hook_project, make_transcript, make_agent,
+    ):
+        """If no TL is assigned to the project, tokens are unattributed → alert."""
+        pid = hook_project["id"]
+        # Assign a worker (not TL) so project has agents but no TL
+        worker = make_agent(name="Worker", role="frontend-worker")
+        _assign_agent(client, pid, worker["id"])
+        sid = _session_id()
+
+        transcript = make_transcript(
+            agent_name=None,
+            messages=[{"input_tokens": 200, "output_tokens": 100}],
+        )
+
+        client.post("/api/hooks/session-start", json={
+            "session_id": sid,
+            "cwd": "/tmp/test-project",
+        })
+        client.post("/api/hooks/session-end", json={
+            "session_id": sid,
+            "transcript_path": transcript,
+            "hook_event": "SessionEnd",
+        })
+
+        # Should have an unattributed alert
+        alerts = client.get("/api/alerts").json()
+        unattributed = [a for a in alerts if "Unattributed" in a.get("title", "")]
+        assert len(unattributed) >= 1
