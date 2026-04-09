@@ -1,0 +1,70 @@
+/* Path: src/styles/hooks.css */
+/* File: hooks.css */
+/* Created: 2026-04-09 */
+/* Purpose: Styles for LiveSessions component — active hook session display */
+/* Last Modified: 2026-04-09 */
+
+.live-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live-sessions__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background-color: var(--bg-alt);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.live-sessions__item:hover {
+  border-color: var(--green-dim);
+}
+
+.live-sessions__dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  background-color: var(--green);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.live-sessions__agent {
+  color: var(--orange);
+  font-weight: 600;
+  min-width: 120px;
+}
+
+.live-sessions__type {
+  color: var(--gray-light);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 80px;
+}
+
+.live-sessions__elapsed {
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+}
+
+.live-sessions__tokens {
+  color: var(--gray-light);
+  margin-left: auto;
+}
+
+.live-sessions__empty {
+  color: var(--gray);
+  font-size: 12px;
+  padding: 8px 0;
+}

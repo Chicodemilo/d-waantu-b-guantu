@@ -21,6 +21,7 @@ import SprintVelocity from '../components/sprints/SprintVelocity';
 import EpicList from '../components/epics/EpicList';
 import AlertBanner from '../components/common/AlertBanner';
 import ActivityFeed from '../components/project/ActivityFeed';
+import LiveSessions from '../components/project/LiveSessions';
 
 import '../styles/dashboard.css';
 
@@ -45,7 +46,7 @@ function ProjectPage() {
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState(null);
-  const [jiraKeyInput, setJiraKeyInput] = useState('');
+  const [jiraKeyInput, setJiraKeyInput] = useState(''); // unused but kept for state cleanup
   const [jiraSaving, setJiraSaving] = useState(false);
   const [jiraDisabling, setJiraDisabling] = useState(false);
   const [jiraConfirmDisable, setJiraConfirmDisable] = useState(false);
@@ -116,11 +117,13 @@ function ProjectPage() {
     }
   };
 
-  const handleJiraSave = async () => {
-    if (!jiraKeyInput.trim()) return;
+  const handleJiraEnable = async () => {
     setJiraSaving(true);
     try {
-      await updateProject(id, { jira_project_key: jiraKeyInput.trim().toUpperCase() });
+      await updateProject(id, {
+        jira_project_key: project.prefix,
+        jira_base_url: 'https://roadvantage.atlassian.net',
+      });
     } catch {
       // next poll will refresh
     } finally {
@@ -351,27 +354,22 @@ function ProjectPage() {
                   )}
                 </>
               ) : (
-                <>
-                  <input
-                    type="text"
-                    className="jira-key-input"
-                    placeholder="PROJ"
-                    value={jiraKeyInput}
-                    onChange={(e) => setJiraKeyInput(e.target.value)}
-                    maxLength={20}
-                  />
-                  <button
-                    className="sync-btn"
-                    onClick={handleJiraSave}
-                    disabled={jiraSaving || !jiraKeyInput.trim()}
-                  >
-                    {jiraSaving ? '$ saving...' : '$ enable jira'}
-                  </button>
-                </>
+                <button
+                  className="sync-btn"
+                  onClick={handleJiraEnable}
+                  disabled={jiraSaving}
+                >
+                  {jiraSaving ? '$ enabling...' : '$ enable jira'}
+                </button>
               )}
             </div>
           </div>
         )}
+      </div>
+
+      <div>
+        <div className="dashboard__section-title">Live Sessions</div>
+        <LiveSessions projectId={id} />
       </div>
 
       {alerts.length > 0 && (

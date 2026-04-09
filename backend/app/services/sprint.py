@@ -26,7 +26,6 @@ from app.models.sprint import Sprint, SprintStatus
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket, TicketStatus, TicketType
 from app.schemas.sprint import SprintCreate, SprintUpdate
-from app.services.token_scan import run_token_scan
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 logger = logging.getLogger(__name__)
@@ -283,37 +282,8 @@ def _on_sprint_completed(db: Session, sprint: Sprint) -> None:
 
     db.commit()
 
-    # Trigger token attribution scan — failure must not block sprint close
-    try:
-        scan_result = run_token_scan(sprint.project_id)
-        if scan_result.get("sessions_attributed", 0) > 0:
-            tl = _find_agent_by_role(db, sprint.project_id, "team-lead")
-            if tl:
-                db.add(Alert(
-                    project_id=sprint.project_id,
-                    raised_by_agent_id=tl.id,
-                    title=f"Token scan after S{sprint.sprint_number}: {scan_result['total_tokens']:,} tokens attributed",
-                    body=f"Attributed {scan_result['total_tokens']:,} tokens across {scan_result['sessions_attributed']} session(s).",
-                    severity=AlertSeverity.info,
-                    status=AlertStatus.open,
-                ))
-                db.commit()
-    except Exception as exc:
-        logger.warning("Token scan failed during sprint close: %s", exc)
-        try:
-            tl = _find_agent_by_role(db, sprint.project_id, "team-lead")
-            if tl:
-                db.add(Alert(
-                    project_id=sprint.project_id,
-                    raised_by_agent_id=tl.id,
-                    title="Token scan failed during sprint close",
-                    body=f"Error: {str(exc)[:500]}. Sprint was closed successfully — token attribution can be run manually via POST /api/projects/:id/scan-tokens.",
-                    severity=AlertSeverity.warning,
-                    status=AlertStatus.open,
-                ))
-                db.commit()
-        except Exception:
-            pass
+    # Token attribution is now handled in real-time by lifecycle hooks.
+    # Manual scan is still available via POST /api/projects/:id/scan-tokens.
 
 
 def delete_sprint(db: Session, sprint: Sprint) -> None:

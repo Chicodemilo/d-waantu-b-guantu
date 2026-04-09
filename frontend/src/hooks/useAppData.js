@@ -22,6 +22,7 @@ import { getInstructions } from '../api/instructions';
 import { getActivityLogs } from '../api/activityLogs';
 import { getProjectAgents } from '../api/projectAgents';
 import { getTestRuns } from '../api/testResults';
+import { getHookSessions } from '../api/hooks';
 
 import { POLLING_ACTIVE_INTERVAL, POLLING_IDLE_INTERVAL, ACTIVITY_LOG_LIMIT } from '../config';
 
@@ -56,6 +57,7 @@ function useAppData() {
           activityLogs,
           projectAgents,
           testRuns,
+          hookSessions,
         ] = await Promise.all([
           getProjects(),
           getSprints(),
@@ -68,6 +70,7 @@ function useAppData() {
           getActivityLogs({ limit: ACTIVITY_LOG_LIMIT }),
           getProjectAgents(),
           getTestRuns().catch(() => []),
+          getHookSessions().catch(() => []),
         ]);
 
         if (cancelled) return;
@@ -83,6 +86,7 @@ function useAppData() {
         state.setActivityLog(activityLogs.map(parseActivityDetails));
         state.setProjectAgents(projectAgents);
         state.setTestRuns(testRuns.map(parseActivityDetails));
+        state.setHookSessions(hookSessions);
         state.updateLastPolled();
       } catch (err) {
         console.error('[useAppData] fetch error:', err);

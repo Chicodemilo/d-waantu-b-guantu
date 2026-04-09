@@ -23,6 +23,7 @@ from app.routers import (
     comments,
     epics,
     failure_records,
+    hooks,
     instructions,
     playbooks,
     project_agents,
@@ -74,4 +75,5 @@ app.include_router(playbooks.router)
 app.include_router(tokens.router)
 app.include_router(failure_records.router)
 app.include_router(tracking.router)
+app.include_router(hooks.router)
 app.include_router(status.router)

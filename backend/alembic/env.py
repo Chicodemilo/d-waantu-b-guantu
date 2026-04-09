@@ -13,7 +13,7 @@ from app.database import Base  # noqa: E402
 from app.models import (  # noqa: E402, F401
     Project, Sprint, Epic, Agent, ProjectAgent,
     Ticket, Comment, Alert, Instruction, ActivityLog,
-    TestResult,
+    TestResult, HookSession,
 )
 
 config = context.config

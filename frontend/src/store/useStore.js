@@ -124,6 +124,12 @@ const useStore = create((set, get) => ({
       polling: { ...state.polling, lastUpdated: new Date().toISOString() },
     })),
 
+  // Hook Sessions (passive tracking)
+  hookSessions: [],
+  setHookSessions: (hookSessions) => set({ hookSessions }),
+  getHookSessionsByProject: (projectId) =>
+    get().hookSessions.filter((s) => s.project_id === Number(projectId)),
+
   // Infra warnings (from /api/status)
   infraWarnings: [],
   setInfraWarnings: (warnings) => set({ infraWarnings: warnings || [] }),
