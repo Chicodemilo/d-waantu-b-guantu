@@ -1,5 +1,23 @@
 # Handoff — 2026-04-09
 
+## Known Bugs (not yet ticketed)
+
+### DELETE /api/tickets/{id} returns 500 — missing FK cascade (discovered 2026-04-13)
+The delete endpoint fails on every ticket because child tables reference `tickets.id` without `ON DELETE CASCADE` on the FK and without `cascade="all, delete-orphan"` on the SQLAlchemy relationships.
+
+Affected child tables: `status_history`, `comments`, `alerts`, `test_results`, `failure_records`, `tracking_log`, `hook_sessions`.
+
+Workaround used 2026-04-13: direct SQL against `local_agent_tracker` DB to clean up 17 orphaned CI dupes. See Claims Images repo reports/dwb_orphans_2026-04-13.md for the deleted ticket list.
+
+Fix: add `cascade="all, delete-orphan"` to the `Ticket.relationship(...)` declarations for each child, OR set `ondelete="CASCADE"` on the FK columns and use `passive_deletes=True` on the relationships. Needs a DWB + Jira ticket before touching.
+
+### TicketStatus enum has no `won't_do` value (discovered 2026-04-13)
+The `TicketStatus` enum in `app/models/ticket.py` only allows `backlog | todo | in_progress | in_review | done`. There's no way to mark a ticket as "closed but not delivered" — tickets closed as Won't Do get set to `done` as the least-bad proxy. Sprint metrics can't distinguish closed-delivered from closed-not-delivered without filtering by Jira mirror state or by comment content.
+
+Workaround used 2026-04-13: CI-085 / POR-5394 closed `status=done` with a comment documenting the Won't Do rationale; Jira side carries the true "Won't Do" state via `dwb2jira ticket transition --to "Won't Do"`.
+
+Fix: add `won_t_do` (or `cancelled`) to the `TicketStatus` enum, migration to allow the new value, update any status-filtering queries that assumed the old enum set.
+
 ## What happened this session
 
 ### 1. Directory + repo rename

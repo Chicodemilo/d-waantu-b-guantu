@@ -270,7 +270,7 @@ Add context to tickets. Use for status updates, review notes, questions.
 POST /api/comments
 {
   "ticket_id": 5,
-  "agent_id": 1,
+  "author_agent_id": 1,
   "body": "Schema created. Migration ran. All endpoints verified."
 }
 ```

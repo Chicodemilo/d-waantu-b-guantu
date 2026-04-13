@@ -120,7 +120,7 @@ Comments are how the PM leaves a paper trail. Use them liberally.
 POST /api/comments
 {
   "ticket_id": 12,
-  "agent_id": 2,
+  "author_agent_id": 2,
   "body": "Checked frontend build — CSS regression on the sidebar. Flagging for next sprint."
 }
 ```
