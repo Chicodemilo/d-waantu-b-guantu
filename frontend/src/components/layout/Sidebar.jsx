@@ -70,7 +70,6 @@ function Sidebar({ open, onNavClick }) {
   };
 
   const isDashboardActive = location.pathname === '/';
-  const isInstructionsActive = location.pathname === '/instructions';
   const isSystemTestsActive = location.pathname.startsWith('/tests');
   const isSystemDocsActive = location.pathname === '/docs';
   const isErrorLogActive = location.pathname === '/errors';
@@ -86,11 +85,6 @@ function Sidebar({ open, onNavClick }) {
           <li>
             <NavLink to="/" className={caretLinkClass(isDashboardActive)} end onClick={onNavClick}>
               dashboard
-            </NavLink>
-          </li>
-          <li>
-            <NavLink to="/instructions" className={caretLinkClass(isInstructionsActive)} onClick={onNavClick}>
-              agent_rules
             </NavLink>
           </li>
           <li className="sidebar__link-with-info">
