@@ -142,158 +142,177 @@ function ProjectPage() {
         </button>
 
           <div className={`project-tools__body${toolsExpanded ? ' project-tools__body--open' : ''}`}>
-            <div className="project-tools__group">
-              <button
-                className="sync-btn"
-                onClick={handleArchiveToggle}
-                disabled={archiving}
-              >
-                {archiving
-                  ? (project.status === 'archived' ? '$ unarchiving...' : '$ archiving...')
-                  : (project.status === 'archived' ? '$ unarchive' : '$ archive project')}
-              </button>
-              {!confirmDelete ? (
-                <button
-                  className="sync-btn sync-btn--danger"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  $ delete project
-                </button>
-              ) : (
-                <span className="project-actions__confirm">
-                  <span className="project-actions__confirm-text">are you sure? this deletes everything.</span>
-                  <button
-                    className="sync-btn sync-btn--danger"
-                    onClick={handleDelete}
-                    disabled={deleting}
-                  >
-                    {deleting ? '$ deleting...' : '$ yes, delete'}
-                  </button>
-                  <button
-                    className="sync-btn"
-                    onClick={() => setConfirmDelete(false)}
-                  >
-                    $ cancel
-                  </button>
-                </span>
-              )}
-            </div>
 
-            <div className="project-tools__group">
-              <span className="project-gates__label">
-                Sprint Gates
-                <span className="tooltip-trigger">
-                  ?
-                  <span className="tooltip-content">
-                    When enabled, these gates must pass before a sprint can be closed.
-                    <ul className="tooltip-list">
-                      <li><strong>Force Headers</strong> — require code headers on all files</li>
-                      <li><strong>Force Coverage</strong> — new endpoints must have test files</li>
-                      <li><strong>Force Tests</strong> — test suite must run before sprint close</li>
-                    </ul>
-                  </span>
-                </span>
-              </span>
-              {[
-                { field: 'force_headers', label: 'Force Headers' },
-                { field: 'force_test_coverage', label: 'Force Coverage' },
-                { field: 'force_test_run', label: 'Force Tests' },
-              ].map(({ field, label }) => (
-                <button
-                  key={field}
-                  className={`project-gate__toggle${project[field] ? ' project-gate__toggle--on' : ''}`}
-                  onClick={() => handleToggleGate(field)}
-                  disabled={toggling[field]}
-                >
-                  {label} [{project[field] ? 'ON' : 'OFF'}]
-                </button>
-              ))}
-            </div>
-
-            <div className="project-tools__group">
-              <span className="project-gates__label">
-                Doc Gates
-                <span className="tooltip-trigger">
-                  ?
-                  <span className="tooltip-content">
-                    When enabled, these documents must exist before work can proceed.
-                    <ul className="tooltip-list">
-                      <li><strong>Force INITIAL.md</strong> — require requirements and phases document</li>
-                      <li><strong>Force ARCHITECTURE.md</strong> — require system design document</li>
-                      <li><strong>Force TEAM.md</strong> — require team roster and agent playbooks</li>
-                      <li><strong>Force HANDOFF.md</strong> — require handoff notes for session continuity</li>
-                    </ul>
-                  </span>
-                </span>
-              </span>
-              {[
-                { field: 'force_initial_md', label: 'Force INITIAL.md' },
-                { field: 'force_architecture_md', label: 'Force ARCHITECTURE.md' },
-                { field: 'force_team_md', label: 'Force TEAM.md' },
-                { field: 'force_handoff_md', label: 'Force HANDOFF.md' },
-              ].map(({ field, label }) => (
-                <button
-                  key={field}
-                  className={`project-gate__toggle${project[field] ? ' project-gate__toggle--on' : ''}`}
-                  onClick={() => handleToggleGate(field)}
-                  disabled={toggling[field]}
-                >
-                  {label} [{project[field] ? 'ON' : 'OFF'}]
-                </button>
-              ))}
-            </div>
-
-            <div className="project-tools__group">
-              <span className="project-gates__label">
-                Jira Integration
-                <span className="tooltip-trigger">
-                  ?
-                  <span className="tooltip-content">
-                    Links this project to a Jira project for ticket tracking. Disabling removes all Jira issue links from tickets in this project. Your Jira data is never modified.
-                  </span>
-                </span>
-              </span>
-              {project.jira_project_key ? (
-                <>
-                  <span className="jira-key-display">{project.jira_project_key}</span>
-                  {!jiraConfirmDisable ? (
-                    <button
-                      className="sync-btn sync-btn--danger"
-                      onClick={() => setJiraConfirmDisable(true)}
-                    >
-                      $ disable jira
-                    </button>
-                  ) : (
-                    <span className="project-actions__confirm">
-                      <span className="project-actions__confirm-text">
-                        This will remove Jira links from {jiraLinkedCount} ticket{jiraLinkedCount !== 1 ? 's' : ''}. Jira issues are not affected. Continue?
-                      </span>
-                      <button
-                        className="sync-btn sync-btn--danger"
-                        onClick={handleJiraDisable}
-                        disabled={jiraDisabling}
-                      >
-                        {jiraDisabling ? '$ disabling...' : '$ yes, disable'}
-                      </button>
-                      <button
-                        className="sync-btn"
-                        onClick={() => setJiraConfirmDisable(false)}
-                      >
-                        $ cancel
-                      </button>
-                    </span>
-                  )}
-                </>
-              ) : (
+            <div className="project-tools__section">
+              <div className="project-tools__section-title">Project Actions</div>
+              <div className="project-tools__row">
                 <button
                   className="sync-btn"
-                  onClick={handleJiraEnable}
-                  disabled={jiraSaving}
+                  onClick={handleArchiveToggle}
+                  disabled={archiving}
                 >
-                  {jiraSaving ? '$ enabling...' : '$ enable jira'}
+                  {archiving
+                    ? (project.status === 'archived' ? '$ unarchiving...' : '$ archiving...')
+                    : (project.status === 'archived' ? '$ unarchive' : '$ archive project')}
                 </button>
+                <span className="tooltip-trigger">
+                  ?
+                  <span className="tooltip-content">
+                    Archives the project, hiding it from the active dashboard. All data is preserved. Unarchive to restore.
+                  </span>
+                </span>
+              </div>
+              <div className="project-tools__row">
+                {!confirmDelete ? (
+                  <>
+                    <button
+                      className="sync-btn sync-btn--danger"
+                      onClick={() => setConfirmDelete(true)}
+                    >
+                      $ delete project
+                    </button>
+                    <span className="tooltip-trigger">
+                      ?
+                      <span className="tooltip-content">
+                        Permanently deletes this project and ALL associated data: tickets, sprints, epics, agents, test results, alerts, tracking logs. This cannot be undone.
+                      </span>
+                    </span>
+                  </>
+                ) : (
+                  <span className="project-actions__confirm">
+                    <span className="project-actions__confirm-text">are you sure? this deletes everything.</span>
+                    <button
+                      className="sync-btn sync-btn--danger"
+                      onClick={handleDelete}
+                      disabled={deleting}
+                    >
+                      {deleting ? '$ deleting...' : '$ yes, delete'}
+                    </button>
+                    <button
+                      className="sync-btn"
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      $ cancel
+                    </button>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="project-tools__section">
+              <div className="project-tools__section-title">Sprint Gates</div>
+              {[
+                { field: 'force_headers', label: 'Force Headers', tip: 'Require code headers on all source files. Not yet enforced automatically.' },
+                { field: 'force_test_coverage', label: 'Force Coverage', tip: 'Every API router must have a corresponding test file before sprint close.' },
+                { field: 'force_test_run', label: 'Force Tests', tip: 'At least one test run must be recorded during the sprint before it can be closed.' },
+              ].map(({ field, label, tip }) => (
+                <div key={field} className="project-tools__row">
+                  <button
+                    className={`project-gate__toggle${project[field] ? ' project-gate__toggle--on' : ''}`}
+                    onClick={() => handleToggleGate(field)}
+                    disabled={toggling[field]}
+                  >
+                    {label} [{project[field] ? 'ON' : 'OFF'}]
+                  </button>
+                  <span className="tooltip-trigger">
+                    ?
+                    <span className="tooltip-content">{tip}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="project-tools__section">
+              <div className="project-tools__section-title">Doc Gates</div>
+              {[
+                { field: 'force_initial_md', label: 'Force INITIAL.md', file: 'INITIAL.md', tip: 'INITIAL.md must exist at the repo root. Contains project requirements, phases, and design decisions.' },
+                { field: 'force_architecture_md', label: 'Force ARCHITECTURE.md', file: 'ARCHITECTURE.md', tip: 'ARCHITECTURE.md must exist at the repo root. Contains system design, data model, and API reference.' },
+                { field: 'force_team_md', label: 'Force TEAM.md', file: 'TEAM.md', tip: 'TEAM.md must exist at the repo root. Live team roster with agent names, roles, and playbook paths.' },
+                { field: 'force_handoff_md', label: 'Force HANDOFF.md', file: 'HANDOFF.md', tip: 'HANDOFF.md must exist at the repo root. Session continuity notes — current state, decisions, gotchas.' },
+              ].map(({ field, label, file, tip }) => (
+                <div key={field} className="project-tools__row">
+                  <button
+                    className={`project-gate__toggle${project[field] ? ' project-gate__toggle--on' : ''}`}
+                    onClick={() => handleToggleGate(field)}
+                    disabled={toggling[field]}
+                  >
+                    {label} [{project[field] ? 'ON' : 'OFF'}]
+                  </button>
+                  <span className="tooltip-trigger">
+                    ?
+                    <span className="tooltip-content">{tip}</span>
+                  </span>
+                  {project.repo_path && (
+                    <span className="project-tools__path">{project.repo_path}/{file}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="project-tools__section">
+              <div className="project-tools__section-title">Jira Integration</div>
+              {project.jira_project_key ? (
+                <>
+                  <div className="project-tools__row">
+                    <span className="jira-key-display">{project.jira_project_key}</span>
+                  </div>
+                  <div className="project-tools__row">
+                    {!jiraConfirmDisable ? (
+                      <>
+                        <button
+                          className="sync-btn sync-btn--danger"
+                          onClick={() => setJiraConfirmDisable(true)}
+                        >
+                          $ disable jira
+                        </button>
+                        <span className="tooltip-trigger">
+                          ?
+                          <span className="tooltip-content">
+                            Removes all Jira issue links from tickets in this project. Your Jira data is never modified. You can re-enable at any time.
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <span className="project-actions__confirm">
+                        <span className="project-actions__confirm-text">
+                          This will remove Jira links from {jiraLinkedCount} ticket{jiraLinkedCount !== 1 ? 's' : ''}. Jira issues are not affected. Continue?
+                        </span>
+                        <button
+                          className="sync-btn sync-btn--danger"
+                          onClick={handleJiraDisable}
+                          disabled={jiraDisabling}
+                        >
+                          {jiraDisabling ? '$ disabling...' : '$ yes, disable'}
+                        </button>
+                        <button
+                          className="sync-btn"
+                          onClick={() => setJiraConfirmDisable(false)}
+                        >
+                          $ cancel
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="project-tools__row">
+                  <button
+                    className="sync-btn"
+                    onClick={handleJiraEnable}
+                    disabled={jiraSaving}
+                  >
+                    {jiraSaving ? '$ enabling...' : '$ enable jira'}
+                  </button>
+                  <span className="tooltip-trigger">
+                    ?
+                    <span className="tooltip-content">
+                      Links this project to a Jira project for ticket tracking. Uses the project prefix as the Jira project key.
+                    </span>
+                  </span>
+                </div>
               )}
             </div>
+
           </div>
       </div>
 

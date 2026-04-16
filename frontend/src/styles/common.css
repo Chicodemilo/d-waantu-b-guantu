@@ -769,6 +769,42 @@
   border-bottom: none;
 }
 
+.project-tools__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-tools__section:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.project-tools__section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+  margin-bottom: 2px;
+}
+
+.project-tools__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-tools__path {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--gray);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .project-gates {
   display: flex;
   align-items: center;
