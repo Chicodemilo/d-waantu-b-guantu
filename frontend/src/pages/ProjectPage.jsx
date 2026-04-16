@@ -317,7 +317,7 @@ function ProjectPage() {
       </div>
 
       <div>
-        <div className="dashboard__section-title">Live Sessions</div>
+        <div className="dashboard__section-title">Team Status</div>
         <LiveSessions projectId={id} />
       </div>
 

@@ -1,27 +1,87 @@
 /* Path: src/styles/hooks.css */
 /* File: hooks.css */
 /* Created: 2026-04-09 */
-/* Purpose: Styles for LiveSessions component — active hook session display */
-/* Last Modified: 2026-04-09 */
+/* Purpose: Styles for Team Status panel — agent roster with live/offline indicators, elapsed time, current ticket */
+/* Last Modified: 2026-04-16 */
 
 .live-sessions {
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+  font-size: 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  overflow: hidden;
 }
 
-.live-sessions__item {
+.live-sessions__header {
+  display: grid;
+  grid-template-columns: 50px 1fr 60px 80px 100px;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+}
+
+.live-sessions__row {
+  display: grid;
+  grid-template-columns: 50px 1fr 60px 80px 100px;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+
+.live-sessions__row:last-child {
+  border-bottom: none;
+}
+
+.live-sessions__row--active {
+  background-color: rgba(74, 222, 128, 0.03);
+}
+
+.live-sessions__col-status {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  background-color: var(--bg-alt);
-  border: 1px solid var(--border);
-  font-size: 13px;
+  justify-content: center;
 }
 
-.live-sessions__item:hover {
-  border-color: var(--green-dim);
+.live-sessions__col-name {
+  color: var(--orange);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-sessions__col-type {
+  color: var(--gray-light);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.live-sessions__col-time {
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.live-sessions__col-ticket {
+  text-align: right;
+}
+
+.live-sessions__col-ticket a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.live-sessions__col-ticket a:hover {
+  color: var(--green-bright);
+  text-decoration: underline;
 }
 
 .live-sessions__dot {
@@ -33,38 +93,18 @@
   animation: pulse-dot 2s ease-in-out infinite;
 }
 
+.live-sessions__dot--inactive {
+  background-color: var(--gray);
+  animation: none;
+}
+
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
 
-.live-sessions__agent {
-  color: var(--orange);
-  font-weight: 600;
-  min-width: 120px;
-}
-
-.live-sessions__type {
-  color: var(--gray-light);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  min-width: 80px;
-}
-
-.live-sessions__elapsed {
-  color: var(--green);
-  font-variant-numeric: tabular-nums;
-  min-width: 60px;
-}
-
-.live-sessions__tokens {
-  color: var(--gray-light);
-  margin-left: auto;
-}
-
 .live-sessions__empty {
   color: var(--gray);
   font-size: 12px;
-  padding: 8px 0;
+  padding: 12px;
 }
