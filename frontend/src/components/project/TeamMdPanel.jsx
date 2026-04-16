@@ -2,7 +2,7 @@
 // File: TeamMdPanel.jsx
 // Created: 2026-04-16
 // Purpose: Collapsible read-only panel displaying TEAM.md content from project docs endpoint
-// Caller: ProjectPage.jsx
+// Caller: ProjectAgentsPage.jsx
 // Callees: react (useState, useEffect), api/docs (getProjectDocs), styles/docs.css
 // Data In: props { projectId }
 // Data Out: Default export TeamMdPanel component

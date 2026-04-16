@@ -1,3 +1,13 @@
+# Path: alembic/versions/3769113c20b0_add_force_team_md_gate.py
+# File: 3769113c20b0_add_force_team_md_gate.py
+# Created: 2026-04-16
+# Purpose: Add force_team_md boolean gate column to projects table (default True)
+# Caller: alembic upgrade head
+# Callees: alembic.op
+# Data In: N/A (DDL migration)
+# Data Out: N/A (DDL migration)
+# Last Modified: 2026-04-16
+
 """add force_team_md gate
 
 Revision ID: 3769113c20b0

@@ -56,7 +56,7 @@ function ProjectAgentsPage() {
         </tbody>
       </table>
       {agents.length === 0 && (
-        <div className="empty-state">No agents assigned to this project</div>
+        <div className="empty-state">No team members assigned to this project</div>
       )}
     </div>
   );

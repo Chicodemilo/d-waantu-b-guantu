@@ -1,12 +1,12 @@
 # Path: app/routers/projects.py
 # File: projects.py
 # Created: 2026-03-29
-# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, docs, activity-feed
+# Purpose: Project HTTP endpoints — CRUD, from-repo, gates (incl. force_team_md), overhead, docs, activity-feed
 # Caller: app/main.py
 # Callees: app/services/project.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status)
-# Last Modified: 2026-03-29
+# Last Modified: 2026-04-16
 
 import json
 import re

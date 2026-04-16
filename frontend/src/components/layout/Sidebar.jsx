@@ -6,7 +6,7 @@
 // Callees: react (useState), react-router-dom (NavLink, useLocation), useStore
 // Data In: projects from store, current location pathname, open prop, onNavClick callback
 // Data Out: default export Sidebar component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-04-16
 
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';

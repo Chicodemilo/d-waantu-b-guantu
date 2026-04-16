@@ -1,12 +1,12 @@
 # Path: app/routers/playbooks.py
 # File: playbooks.py
 # Created: 2026-03-29
-# Purpose: Playbook listing and deployment to project repos
+# Purpose: Playbook listing and deployment (TL, PM, worker) to project repos
 # Caller: app/main.py
 # Callees: app/services/project.py, pathlib, shutil
 # Data In: HTTP requests
 # Data Out: JSON responses (playbook list, deploy status)
-# Last Modified: 2026-03-29
+# Last Modified: 2026-04-16
 
 import shutil
 from pathlib import Path

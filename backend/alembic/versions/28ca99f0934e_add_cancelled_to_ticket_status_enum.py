@@ -1,3 +1,13 @@
+# Path: alembic/versions/28ca99f0934e_add_cancelled_to_ticket_status_enum.py
+# File: 28ca99f0934e_add_cancelled_to_ticket_status_enum.py
+# Created: 2026-04-16
+# Purpose: Add 'cancelled' value to tickets.status ENUM column
+# Caller: alembic upgrade head
+# Callees: alembic.op
+# Data In: N/A (DDL migration)
+# Data Out: N/A (DDL migration)
+# Last Modified: 2026-04-16
+
 """add cancelled to ticket status enum
 
 Revision ID: 28ca99f0934e

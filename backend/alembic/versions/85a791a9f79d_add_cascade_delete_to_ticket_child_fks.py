@@ -1,3 +1,13 @@
+# Path: alembic/versions/85a791a9f79d_add_cascade_delete_to_ticket_child_fks.py
+# File: 85a791a9f79d_add_cascade_delete_to_ticket_child_fks.py
+# Created: 2026-04-16
+# Purpose: Add ON DELETE CASCADE to all ticket child table foreign keys
+# Caller: alembic upgrade head
+# Callees: alembic.op
+# Data In: N/A (DDL migration)
+# Data Out: N/A (DDL migration)
+# Last Modified: 2026-04-16
+
 """add cascade delete to ticket child FKs
 
 Revision ID: 85a791a9f79d

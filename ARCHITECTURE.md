@@ -55,10 +55,13 @@ Project
 │   └── Ticket
 │       ├── StatusHistory (every status transition)
 │       ├── TrackingLog (start/stop/token events)
+│       ├── HookSession (passive tracking sessions)
 │       ├── Comment
 │       ├── FailureRecord (optional)
+│       ├── TestResult (optional)
 │       └── Alert (optional)
 ├── ProjectAgent (join table)
+├── HookSession (passive tracking)
 ├── Instruction (scoped)
 ├── ActivityLog (auto-populated by middleware)
 ├── TrackingLog (time/token events)
@@ -93,11 +96,13 @@ Agent (standalone)
 | pm_overhead_tokens       | BIGINT       | PM overhead accumulator                  |
 | tl_overhead_time_seconds | BIGINT       |                                          |
 | pm_overhead_time_seconds | BIGINT       |                                          |
+| jira_project_key         | VARCHAR(50)  | Optional Jira project key                |
 | force_headers            | BOOL         | Sprint gate: require code headers        |
 | force_test_coverage      | BOOL         | Sprint gate: require test coverage       |
 | force_test_run           | BOOL         | Sprint gate: require passing test run    |
 | force_initial_md         | BOOL         | Sprint gate: require INITIAL.md          |
 | force_architecture_md    | BOOL         | Sprint gate: require ARCHITECTURE.md     |
+| force_team_md            | BOOL         | Sprint gate: require TEAM.md (default True) |
 | created_at, updated_at   | DATETIME     |                                          |
 
 #### sprints
@@ -113,7 +118,7 @@ Agent (standalone)
 | start_date    | DATE         |                                |
 | end_date      | DATE         |                                |
 
-Completion triggers: validates 5 sprint gates + unreviewed failure records, creates alerts for team-lead/pm/tester, auto-creates test ticket for next sprint, runs token attribution scan.
+Completion triggers: validates 7 sprint gates + unreviewed failure records, creates alerts for team-lead/pm/tester, auto-creates test ticket for next sprint.
 
 #### epics
 | Column      | Type         | Notes                              |
@@ -152,10 +157,11 @@ Completion triggers: validates 5 sprint gates + unreviewed failure records, crea
 | assigned_agent_id | FK→agents    | Nullable                                  |
 | ticket_number     | INT          |                                           |
 | ticket_key        | VARCHAR(50)  | Unique, e.g. "DWB-042"                   |
+| jira_issue_key    | VARCHAR(100) | Unique, nullable — 1:1 Jira mapping       |
 | title             | VARCHAR(500) |                                           |
 | description       | TEXT         |                                           |
 | ticket_type       | ENUM         | task, bug, story                          |
-| status            | ENUM         | backlog, todo, in_progress, in_review, done|
+| status            | ENUM         | backlog, todo, in_progress, in_review, done, cancelled|
 | tokens_used       | BIGINT       | Cumulative token count                    |
 | time_spent_seconds| BIGINT       | Auto-computed from status_history         |
 | token_source      | VARCHAR(50)  | transcript_scan, manual_estimate, unknown |
@@ -178,7 +184,7 @@ On status change: records StatusHistory, inserts TrackingLog start/stop events, 
 | timestamp  | DATETIME    | Default: now()                                      |
 | source     | VARCHAR(50) | Nullable (e.g. "transcript_scan", "manual")         |
 
-Central event log for all time and token tracking. Used to compute ticket time-in-progress, token totals, overhead time, and project-wide summaries. No ORM relationships — purely audit/event-sourcing.
+Central event log for all time and token tracking. Used to compute ticket time-in-progress, token totals, overhead time, and project-wide summaries. Has `back_populates` relationship to Ticket for cascade delete support.
 
 #### status_history
 | Column              | Type        | Notes                          |
@@ -279,6 +285,28 @@ Populated automatically by the ActivityLoggerMiddleware on every POST/PATCH/DELE
 | triggered_context | VARCHAR(200) | Optional description          |
 
 On create with status="failed": auto-creates failure_records for each failed test in details JSON.
+
+#### hook_sessions
+| Column          | Type         | Notes                                     |
+|-----------------|--------------|-------------------------------------------|
+| id              | BIGINT PK    |                                           |
+| session_id      | VARCHAR(255) | Claude Code session ID                    |
+| agent_name      | VARCHAR(255) | Resolved agent name from transcript       |
+| agent_id        | FK→agents    | Nullable, resolved on session end         |
+| project_id      | FK→projects  | NOT NULL                                  |
+| ticket_id       | FK→tickets   | Nullable (workers), CASCADE on delete     |
+| sprint_id       | FK→sprints   | Nullable                                  |
+| status          | ENUM         | active, completed, error                  |
+| role            | VARCHAR(100) | Agent role (team-lead, backend-worker...) |
+| tokens_in       | INT          | Input tokens from transcript              |
+| tokens_out      | INT          | Output tokens from transcript             |
+| transcript_path | TEXT         | Path to JSONL transcript file             |
+| started_at      | DATETIME     |                                           |
+| ended_at        | DATETIME     |                                           |
+| raw_hook_data   | JSON         | Full hook payload for debugging           |
+| created_at      | DATETIME     |                                           |
+
+Tracks Claude Code lifecycle hook sessions. Created on SessionStart, updated on SessionEnd with token counts parsed from transcript. Workers get tokens attributed to their in_progress ticket; TL/PM get project overhead.
 
 ---
 
@@ -447,6 +475,14 @@ The tracking API is the central event log for time and token tracking. `attribut
 | PATCH  | /api/failure-records/{id}    |                                                         | Update record      |
 | DELETE | /api/failure-records/{id}    |                                                         | Delete record      |
 
+#### /api/hooks
+| Method | Path                       | Query Params         | Purpose                        |
+|--------|----------------------------|----------------------|--------------------------------|
+| POST   | /api/hooks/session-start   |                      | Receive SessionStart hook data |
+| POST   | /api/hooks/session-end     |                      | Receive SessionEnd hook data   |
+| GET    | /api/hooks/sessions        | project_id, status   | List hook sessions             |
+| GET    | /api/hooks/sessions/{id}   |                      | Get session by ID              |
+
 #### /api/tokens
 | Method | Path              | Purpose                                          |
 |--------|-------------------|--------------------------------------------------|
@@ -487,7 +523,7 @@ The tracking API is the central event log for time and token tracking. `attribut
 /projects/:id/tickets/:ticketId      → TicketDetailPage
 /projects/:id/sprints/:sprintId      → SprintPage
 /projects/:id/epics/:epicId          → EpicPage
-/projects/:id/agents                 → ProjectAgentsPage
+/projects/:id/agents                 → ProjectAgentsPage (labeled "Team" in nav)
 /projects/:id/agents/:agentId        → AgentPage
 /projects/:id/tests                  → ProjectTestsPage
 /projects/:id/docs                   → DocsPage
@@ -503,8 +539,8 @@ The tracking API is the central event log for time and token tracking. `attribut
 - **Failure record review form** — PM can update failure_type, notes, root_cause, resolution, mark resolved
 - **Test performance tab** — duration charts, drill-down to individual tests, average/diff metrics
 - **Test count sparklines** — inline pass/fail trends on project and sprint views
-- **Token scan button** — triggers POST /api/projects/:id/scan-tokens from the UI
-- **Tracking summary** — time/token rollups from /api/tracking/summary
+- **TEAM.md panel** — read-only display on the Team page, collapsible, shows roster + continuity notes
+- **Tracking summary** — time/token rollups from /api/tracking/summary (passive via hooks)
 - **Adaptive polling** — 2s when active, 10s when idle
 
 ### API Client Layer
@@ -577,42 +613,36 @@ Runs the pytest suite and optionally POSTs results to the API.
 
 Activates venv automatically, loads `.env` for DB settings. Uses `pytest-json-report` for structured output. Per-test durations computed by summing setup + call + teardown phase durations. POST payload matches `TestResultCreate` schema. Failed test results auto-create failure_records.
 
-### attribute_tokens.py
+### Claude Code Lifecycle Hooks (primary token/time tracking)
 
-Scans Claude Code transcript JSONL files and attributes tokens to tickets via the tracking API.
+Token and time attribution is handled passively by hooks configured in `.claude/settings.json`. No scripts to run — it's automatic.
+
+- **SessionStart** → `POST /api/hooks/session-start` — creates hook_session, logs start event
+- **SessionEnd** → `POST /api/hooks/session-end` — parses JSONL transcript for tokens, resolves agent, logs stop + token events
+- **SubagentStop** → same as SessionEnd for teammate transcripts
+
+Workers get tokens on their in_progress ticket. TL/PM get overhead. Key files:
+- `app/services/hook_tracking.py` — all business logic
+- `app/routers/hooks.py` — 4 endpoints
+- `app/models/hook_session.py` — session state model
+
+### attribute_tokens.py (manual fallback)
+
+Scans Claude Code transcript JSONL files and attributes tokens to tickets. Kept as a backfill/recovery tool — hooks are the primary mechanism.
 
 ```
 python scripts/attribute_tokens.py                         # scan + attribute
 python scripts/attribute_tokens.py --dry-run               # scan only
 python scripts/attribute_tokens.py --project-id 1          # specific project
-python scripts/attribute_tokens.py --force                  # re-process all
 ```
 
-Workflow:
-1. Finds transcript dirs under `~/.claude/projects/` matching `d-waantu_b-guantu`
-2. For each JSONL file: reads agentName, counts tokens, resolves agent ID
-3. Skips overhead roles (team-lead, pm) and already-attributed sessions
-4. Finds agent's in_progress/todo ticket and POSTs to `POST /api/tracking/tokens`
-5. Outputs JSON summary on last line (consumed by API endpoint and shell wrapper)
+### run_token_scan.sh (manual fallback)
 
-State file (`/tmp/lat_token_attribution_state.json`) tracks attributed sessions. Sanity cap: 50M tokens. Always exits 0.
-
-### run_token_scan.sh
-
-Shell wrapper for `attribute_tokens.py`. Parses args, activates venv, loads .env, runs the scanner, and posts a summary alert to the API.
-
-```
-./scripts/run_token_scan.sh --project-id 1
-./scripts/run_token_scan.sh --project-id 1 --dry-run
-```
+Shell wrapper for `attribute_tokens.py`.
 
 ### report_tokens.py (DEPRECATED)
 
-Replaced by the hook-based tracking system. The hooks router (`app/routers/hooks.py`) and hook tracking service (`app/services/hook_tracking.py`) now handle all real-time token/time tracking via Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop). Hook configuration is in `.claude/settings.json`.
-
-Hook event types: `Stop`, `SubagentStop`, `TeammateIdle`.
-
-Posts to `POST /api/tickets/:id/tokens` for work, `POST /api/projects/:id/overhead` for overhead roles. Delta tracking via state file prevents double-counting. Always exits 0. On failure, posts an info alert.
+Fully replaced by hook-based tracking. Do not use.
 
 ### sync_instructions.py
 
@@ -702,7 +732,7 @@ alembic downgrade -1       # rollback one
 ## 8. Key Business Logic
 
 ### Sprint Completion Gates
-Projects enforce up to 6 gates via `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_headers` flags, plus unreviewed failure records check. Sprint service validates these before allowing status → completed.
+Projects enforce up to 7 gates via `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_team_md`, `force_headers` flags, plus unreviewed failure records check. Sprint service validates these before allowing status → completed.
 
 ### Auto-Assignment
 - Ticket `sprint_id` auto-assigned to the project's active sprint on creation
@@ -716,11 +746,11 @@ Projects enforce up to 6 gates via `force_test_run`, `force_test_coverage`, `for
 - Rework detection: in_progress after done creates failure_record + PM alert
 
 ### Token Tracking
+- **Primary (passive):** Claude Code lifecycle hooks automatically capture tokens and time via `POST /api/hooks/session-start` and `POST /api/hooks/session-end`. Workers get tokens on their in_progress ticket; TL/PM get overhead. Zero manual intervention needed.
 - Per-ticket via tracking API: `POST /api/tracking/tokens` inserts event + increments ticket
 - Per-ticket legacy: `POST /api/tickets/{id}/tokens` increments directly (also inserts tracking event)
 - Per-project overhead: `POST /api/projects/{id}/overhead` increments `tl_overhead_tokens` or `pm_overhead_tokens`
-- Transcript scan: `POST /api/projects/{id}/scan-tokens` runs attribute_tokens.py → posts to tracking API
-- Auto-scan on sprint close
+- Transcript scan (fallback): `POST /api/projects/{id}/scan-tokens` runs attribute_tokens.py for backfilling
 - Audit: `GET /api/tokens/audit` cross-checks totals and flags discrepancies
 - Attribution detail: `GET /api/tickets/{id}/token-attribution`
 - Project summary: `GET /api/tracking/summary` — per-ticket, per-agent, per-sprint rollups
@@ -738,5 +768,8 @@ Projects enforce up to 6 gates via `force_test_run`, `force_test_coverage`, `for
 - Sprint gate: unreviewed stubs block close
 - Summary endpoint: aggregated by type, agent, sprint, trend
 
+### Ticket Deletion Cascade
+Deleting a ticket cascades through: comments, status_history, alerts, test_results, failure_records, tracking_log, hook_sessions — all via `ondelete=CASCADE` on FKs and `cascade="all, delete-orphan"` / `cascade="all, delete"` on relationships.
+
 ### Project Deletion Cascade
-Deleting a project cascades through: alerts, test_results, activity_logs, instructions, tickets (and their comments, status_history, tracking_log entries), failure_records, project_agents, sprints, epics.
+Deleting a project cascades through: alerts, test_results, activity_logs, instructions, tickets (and their children per above), failure_records, project_agents, sprints, epics.

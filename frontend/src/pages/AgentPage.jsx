@@ -30,7 +30,7 @@ function AgentPage() {
   return (
     <div>
       <div className="page-title">
-        <Link to={`/projects/${id}/agents`}>&larr; Back to agents</Link>
+        <Link to={`/projects/${id}/agents`}>&larr; Back to team</Link>
       </div>
       <AgentDetail agentId={agentId} />
       {applicable.length > 0 && (

@@ -1,12 +1,12 @@
 # Path: app/models/ticket.py
 # File: ticket.py
 # Created: 2026-03-29
-# Purpose: Ticket ORM model with status/type enums
+# Purpose: Ticket ORM model with status/type enums and cascade-delete child relationships
 # Caller: app/services/ticket.py
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Ticket, TicketStatus, TicketType
-# Last Modified: 2026-03-29
+# Last Modified: 2026-04-16
 
 import enum
 from datetime import datetime

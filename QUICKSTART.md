@@ -87,7 +87,11 @@ cd backend && source .venv/bin/activate
 pytest tests/ -v
 ```
 
-## Scan tokens from transcripts
+## Token tracking
+
+Token and time tracking is **automatic** via Claude Code lifecycle hooks — no manual steps needed. When agents work, hooks fire and attribute tokens to tickets.
+
+To manually backfill or recover tokens from transcripts:
 
 ```bash
 curl -X POST http://localhost:8000/api/projects/1/scan-tokens

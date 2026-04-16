@@ -106,13 +106,13 @@ Project → Epic → Sprint → Ticket
 
 Every ticket MUST have a sprint, every sprint an epic, every epic a project. Enforced at the API level — missing parents return 400.
 
-**Projects** have a unique prefix (e.g., `DWB`) for ticket keys, optional `repo_path` for filesystem validation, and 5 sprint gate toggles.
+**Projects** have a unique prefix (e.g., `DWB`) for ticket keys, optional `repo_path` for filesystem validation, and 7 sprint gate toggles.
 
 **Epics** group related work. Statuses: `open` → `in_progress` → `completed`.
 
 **Sprints** are time-boxed iterations under an epic. Statuses: `planned` → `active` → `completed`. Sprint names are auto-generated from goals. Completing a sprint triggers gate validation, token scan, alerts, and auto-test-ticket creation.
 
-**Tickets** are work items with a `ticket_key` (e.g., `DWB-042`), type (`task`/`bug`/`story`), and status (`backlog` → `todo` → `in_progress` → `in_review` → `done`).
+**Tickets** are work items with a `ticket_key` (e.g., `DWB-042`), type (`task`/`bug`/`story`), and status (`backlog` → `todo` → `in_progress` → `in_review` → `done` / `cancelled`).
 
 ### Auto-assignment
 
@@ -135,7 +135,23 @@ Agent definitions live in `.claude/agents/`. Spawning a teammate by name auto-lo
 | `@system-ops` | `.claude/agents/system-ops.md` | Docker, scripts, infrastructure |
 | `@tester` | `.claude/agents/tester.md` | pytest, vitest, test coverage, bug filing |
 
+All workers also receive the general worker playbook: `.claude/agents/worker.md`.
+
 **The PM is mandatory on every team.** Minimum team: `@team-lead` + `@pm`. Add workers as needed.
+
+### Deployable Playbooks
+
+Master playbooks live in `docs/` and are deployed to other project repos via `POST /api/projects/{id}/deploy-playbooks`:
+
+| Playbook | File | Audience |
+|----------|------|----------|
+| Team Lead | `docs/team_lead_playbook.md` | TL agents |
+| PM | `docs/pm_playbook.md` | PM agents |
+| Worker | `docs/worker_playbook.md` | All agents |
+
+### TEAM.md
+
+Each project should have a `TEAM.md` at the repo root defining the team roster (name, duty, playbook path) and session continuity notes. Enforced by the `force_team_md` gate (enabled by default on all projects). A template is available at `.claude/agents/TEAM.md.template`.
 
 Agents are assigned to projects via `project_agents`. This controls alert routing and enables dynamic role lookups — no hardcoded agent IDs in business logic.
 
@@ -204,7 +220,7 @@ Trigger via API: `POST /api/projects/{id}/scan-tokens`
 
 ## Sprint Gates
 
-Five boolean toggles that gate sprint completion:
+Seven boolean toggles that gate sprint completion:
 
 | Toggle | What it checks |
 |--------|---------------|
@@ -212,7 +228,9 @@ Five boolean toggles that gate sprint completion:
 | `force_test_coverage` | Every router has a corresponding test file |
 | `force_initial_md` | `INITIAL.md` exists at repo root |
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
+| `force_team_md` | `TEAM.md` exists at repo root (default: enabled) |
 | `force_headers` | Reserved for v2 |
+| Failure records | Unreviewed stubs block close (always enforced) |
 
 Additionally, **unreviewed failure records** on sprint tickets block closure. If any `failure_record` has `failure_type="TBD"` or is an auto-detected rework stub, the PM must review it first.
 
@@ -287,7 +305,7 @@ Or trigger via API: `POST /api/system/run-tests`
 POST /api/projects/seed-demo
 ```
 
-Creates a fully-populated demo project (prefix `DMO`) with 5 agents, 3 epics, 6 sprints, 30 tickets, test results, failure records, and alerts. Idempotent — re-seeding deletes and recreates the DMO project. Also creates a fake repo at `/tmp/dwb-demo-project` with README.md, INITIAL.md, and ARCHITECTURE.md so doc gates pass. Great for testing the dashboard without setting up a real project.
+Creates a fully-populated demo project (prefix `DMO`) with 5 agents, 3 epics, 6 sprints, 30 tickets, test results, failure records, and alerts. Idempotent — re-seeding deletes and recreates the DMO project. Also creates a fake repo at `/tmp/dwb-demo-project` with README.md, INITIAL.md, ARCHITECTURE.md, and TEAM.md so doc gates pass. Great for testing the dashboard without setting up a real project.
 
 ### From repo (recommended)
 
@@ -461,11 +479,20 @@ All endpoints prefixed with `/api`. Interactive docs at `http://localhost:8000/d
 |--------|------|-------------|
 | GET | `/api/tokens/audit` | Token usage audit |
 
+### Hooks — `/api/hooks`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/hooks/session-start` | Receive SessionStart hook data |
+| POST | `/api/hooks/session-end` | Receive SessionEnd/SubagentStop hook data |
+| GET | `/api/hooks/sessions` | List hook sessions |
+| GET | `/api/hooks/sessions/{id}` | Get session by ID |
+
 ### Playbooks — `/api/playbooks`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/playbooks` | List available playbooks |
+| GET | `/api/playbooks` | List available playbooks (TL, PM, worker) |
 
 ### System — `/api/system`, `/api/status`
 
@@ -520,16 +547,20 @@ d-waantu_b-guantu/
 ├── INITIAL.md
 ├── ARCHITECTURE.md
 ├── QUICKSTART.md
-├── .claude/agents/          # Agent definitions (auto-loaded)
+├── TEAM.md                  # Team roster + session continuity
+├── .claude/agents/          # Agent definitions (auto-loaded by Claude Code)
 │   ├── team-lead.md
 │   ├── pm.md
 │   ├── frontend-worker.md
 │   ├── backend-worker.md
 │   ├── system-ops.md
-│   └── tester.md
-├── docs/
+│   ├── tester.md
+│   ├── worker.md            # General worker playbook (all agents)
+│   └── TEAM.md.template     # Template for new project TEAM.md files
+├── docs/                    # Deployable playbooks (pushed to other projects)
 │   ├── team_lead_playbook.md
 │   ├── pm_playbook.md
+│   ├── worker_playbook.md
 │   └── PASSIVE_TRACKING_PLAN.md
 ├── backend/
 │   ├── alembic/             # Database migrations
