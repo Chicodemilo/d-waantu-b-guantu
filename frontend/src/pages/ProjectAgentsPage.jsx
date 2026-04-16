@@ -1,16 +1,17 @@
 // Path: src/pages/ProjectAgentsPage.jsx
 // File: ProjectAgentsPage.jsx
 // Created: 2026-03-29
-// Purpose: Lists all agents assigned to a project in a table with name, role, description, and status
+// Purpose: Lists all agents assigned to a project with TEAM.md panel (when force_team_md enabled) and agent table
 // Caller: App.jsx (route: /projects/:id/agents)
-// Callees: react-router-dom, ../store/useStore, ../components/common/StatusBadge
+// Callees: react-router-dom, ../store/useStore, ../components/common/StatusBadge, ../components/project/TeamMdPanel
 // Data In: Route param (id), project and agents from Zustand store
 // Data Out: Default export ProjectAgentsPage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-04-16
 
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import StatusBadge from '../components/common/StatusBadge';
+import TeamMdPanel from '../components/project/TeamMdPanel';
 
 function ProjectAgentsPage() {
   const { id } = useParams();
@@ -21,8 +22,13 @@ function ProjectAgentsPage() {
     <div>
       <div className="page-title">
         <Link to={`/projects/${id}`}>&larr; Back to project</Link>
-        <span>{project ? `${project.prefix} Agents` : 'Agents'}</span>
+        <span>{project ? `${project.prefix} Team` : 'Team'}</span>
       </div>
+      {project?.force_team_md && (
+        <div className="team-md-panel__wrapper">
+          <TeamMdPanel projectId={id} />
+        </div>
+      )}
       <table className="data-table">
         <thead>
           <tr>

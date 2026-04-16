@@ -50,7 +50,7 @@ function Sidebar({ open, onNavClick }) {
             </li>
             <li>
               <NavLink to={`/projects/${p.id}/agents`} className={linkClass} onClick={onNavClick}>
-                agents
+                team
               </NavLink>
             </li>
             <li>

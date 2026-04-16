@@ -35,7 +35,7 @@ function Header({ onMenuClick }) {
     if (path.includes('/epics/')) return 'Epic Detail';
     if (path.includes('/docs')) return 'Docs';
     if (path.match(/\/projects\/\d+\/agents\/\d+/)) return 'Agent Detail';
-    if (path.match(/\/projects\/\d+\/agents$/)) return 'Project Agents';
+    if (path.match(/\/projects\/\d+\/agents$/)) return 'Team';
     if (path.includes('/projects/')) return 'Project Overview';
     return "D'Waantu B'Guantu";
   };

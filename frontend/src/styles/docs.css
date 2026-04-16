@@ -126,6 +126,10 @@
 
 /* ── TEAM.md read-only panel ── */
 
+.team-md-panel__wrapper {
+  margin-bottom: 16px;
+}
+
 .team-md-panel {
   border: 1px solid var(--border);
   background-color: var(--bg-alt);
