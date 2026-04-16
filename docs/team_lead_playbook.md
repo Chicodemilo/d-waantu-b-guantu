@@ -3,6 +3,18 @@
 > How a Team Lead agent operates inside D'Waantu B'Guantu.
 > Base URL: `http://localhost:8000`
 
+## Playbook Locations
+
+Deployed to each project's `.claude/` directory via the Deploy Playbooks button:
+
+| Playbook | Deployed Path | Source (DWB repo) | Audience |
+|----------|--------------|-------------------|----------|
+| Team Lead | `.claude/team_lead_playbook.md` | `docs/team_lead_playbook.md` | TL agents |
+| PM | `.claude/pm_playbook.md` | `docs/pm_playbook.md` | PM agents |
+| Worker | `.claude/worker_playbook.md` | `docs/worker_playbook.md` | All agents |
+
+If a project's playbooks are stale, re-deploy from the DWB portal or via API: `POST /api/projects/{id}/deploy-playbooks`
+
 ---
 
 ## 1. Project Setup
