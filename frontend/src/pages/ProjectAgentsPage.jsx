@@ -60,7 +60,12 @@ function ProjectAgentsPage() {
           <span className="tooltip-trigger">
             ?
             <span className="tooltip-content">
-              Deploys master playbooks from DWB's docs/ folder into this project's .claude/ directory. Includes Team Lead, PM, and Worker playbooks — giving all agents their operating procedures for this project.
+              Deploys master playbooks from DWB's docs/ folder into this project's .claude/ directory.
+              <ul className="tooltip-list">
+                <li>Overwrites: Team Lead, PM, and Worker playbooks</li>
+                <li>Creates (if missing): project rules files for TL, PM, and workers</li>
+                <li>Project rules are never overwritten — safe to re-deploy</li>
+              </ul>
             </span>
           </span>
           {deployResult === 'done' && <span className="sync-btn__status">{'\u2713'} deployed</span>}
