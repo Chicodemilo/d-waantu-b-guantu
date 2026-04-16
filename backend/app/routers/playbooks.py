@@ -25,6 +25,7 @@ DOCS_DIR = Path(__file__).resolve().parents[3] / "docs"
 PLAYBOOK_FILES = {
     "team_lead": "team_lead_playbook.md",
     "pm": "pm_playbook.md",
+    "worker": "worker_playbook.md",
 }
 
 

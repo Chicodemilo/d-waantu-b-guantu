@@ -180,6 +180,24 @@ The TL moves tickets through this pipeline:
 - `in_review` — work is done, TL is reviewing
 - `done` — accepted and closed
 
+### Required table format for proposed tickets
+
+When proposing tickets (sprint kickoff, mid-sprint changes, close-out reports), always present them in this table format:
+
+| DWB Ticket | Jira Ticket | DWB Sprint | Jira Epic | Jira Sprint | Title | Proposed Status | Current Status |
+|------------|-------------|------------|-----------|-------------|-------|-----------------|----------------|
+| CI-105 | POR-??? | Sprint 4 | POR-5152 | We Are Dashboard | Example task title | todo | — |
+| CI-??? | POR-??? | Sprint 4 | POR-5152 | We Are Dashboard | Another task | todo | — |
+
+**Column definitions:**
+- **Proposed Status** — the status the ticket should be created at or moved to. One of: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `cancelled`.
+- **Current Status** — the ticket's actual status right now. Use `—` for tickets that don't exist yet. This column lets Miles see the delta between where things are and where the TL wants them to be.
+
+**When to use each:**
+- **Sprint kickoff proposals** — Proposed Status = `todo` (or `done` for retroactive tickets), Current Status = `—`
+- **Mid-sprint status updates** — Proposed Status = what you want to change it to, Current Status = what it is now
+- **Sprint close-out reports** — Proposed Status = `done`, Current Status = actual status (flags anything not finished)
+
 ### Assigning work
 Set `assigned_agent_id` when creating or updating a ticket. An unassigned ticket has `null` for this field.
 
