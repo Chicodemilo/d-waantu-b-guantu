@@ -32,11 +32,12 @@ function LiveSessions({ projectId }) {
   const activeSessions = sessions.filter((s) => s.status === 'active');
   const [, setTick] = useState(0);
 
+  const hasActive = activeSessions.length > 0;
   useEffect(() => {
-    if (activeSessions.length === 0) return;
+    if (!hasActive) return;
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, [activeSessions.length]);
+  }, [hasActive]);
 
   if (agents.length === 0) {
     return (

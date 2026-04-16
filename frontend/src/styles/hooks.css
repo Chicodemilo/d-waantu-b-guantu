@@ -15,7 +15,7 @@
 
 .live-sessions__header {
   display: grid;
-  grid-template-columns: 50px 1fr 60px 80px 100px;
+  grid-template-columns: 40px 120px 60px 100px 1fr;
   gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
@@ -28,7 +28,7 @@
 
 .live-sessions__row {
   display: grid;
-  grid-template-columns: 50px 1fr 60px 80px 100px;
+  grid-template-columns: 40px 120px 60px 100px 1fr;
   gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
