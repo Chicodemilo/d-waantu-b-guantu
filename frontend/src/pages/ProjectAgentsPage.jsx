@@ -59,8 +59,7 @@ function ProjectAgentsPage() {
               </td>
             </tr>
             );
-          }
-          ))}
+          })}
         </tbody>
       </table>
       {agents.length === 0 && (
