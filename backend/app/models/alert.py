@@ -40,7 +40,7 @@ class Alert(Base):
         BigInteger, ForeignKey("agents.id"), nullable=False, index=True
     )
     ticket_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tickets.id"), nullable=True, index=True
+        BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)

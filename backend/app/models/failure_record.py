@@ -24,7 +24,7 @@ class FailureRecord(Base):
         BigInteger, ForeignKey("projects.id"), nullable=False, index=True
     )
     ticket_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tickets.id"), nullable=True, index=True
+        BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True, index=True
     )
     sprint_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("sprints.id"), nullable=False, index=True
@@ -51,7 +51,7 @@ class FailureRecord(Base):
 
     # Relationships
     project: Mapped["Project"] = relationship()  # noqa: F821
-    ticket: Mapped["Ticket | None"] = relationship()  # noqa: F821
+    ticket: Mapped["Ticket | None"] = relationship(back_populates="failure_records")  # noqa: F821
     sprint: Mapped["Sprint"] = relationship()  # noqa: F821
     agent: Mapped["Agent"] = relationship(foreign_keys=[agent_id])  # noqa: F821
     logged_by_agent: Mapped["Agent"] = relationship(foreign_keys=[logged_by_agent_id])  # noqa: F821

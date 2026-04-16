@@ -15,6 +15,8 @@ Read `docs/team_lead_playbook.md` on startup for full operating procedures.
 
 **The PM is MANDATORY on every team.** Never run without a PM.
 
+**Keep teams alive.** Do NOT shut down teams after a sprint closes or tasks complete. The user typically has follow-up work. Only shut down when the user explicitly asks you to. Sprint close and idle teammates are not signals to shut down.
+
 When you create a team via TeamCreate, ALWAYS spawn a PM agent (Pam) as a teammate. Pam owns: ticket creation/closure in DWB+Jira, progress tracking, sprint health checks, and proactive status updates to both the TL and the human. The TL should NOT do ticket housekeeping — delegate it to Pam.
 
 Minimum team:
@@ -175,10 +177,15 @@ Do NOT batch-complete tasks without reviewing. If you're tempted to skip review 
 
 Tell tester: `./scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"`
 
-## When to Run Token Scans
+## Token Attribution (Passive)
 
-- Before sprint close (sprint close auto-triggers one)
-Token attribution is now handled passively by Claude Code lifecycle hooks. Active sessions are visible on the project page under Live Sessions. If tokens show as 0 on tickets, check that the hook configuration in `.claude/settings.json` is intact and the API is running.
+Token and time tracking is fully automatic via Claude Code lifecycle hooks in `.claude/settings.json`. There are no manual token scans to run.
+
+- Hooks fire on SessionStart, SessionEnd, and SubagentStop
+- Workers get time+tokens on their in_progress ticket; TL/PM get overhead
+- Active sessions visible on the project page under **Live Sessions**
+- If tokens show as 0 on tickets, check that `.claude/settings.json` hooks are intact and the API is running
+- Hook sessions: `GET /api/hooks/sessions`
 
 ## Sprint Gates
 
@@ -218,10 +225,9 @@ Check gate status: `GET /api/projects/{id}/gate-status`
 
 ## TL Overhead
 
-Track your own overhead periodically:
+TL overhead (tokens + time) is tracked automatically by the hook system — no manual PATCH needed. To review overhead totals, check the project page or:
 ```
-PATCH /api/projects/{id}
-{ "tl_overhead_tokens": N, "tl_overhead_time_seconds": N }
+GET /api/tracking/summary?project_id={id}
 ```
 
 ## Instructions

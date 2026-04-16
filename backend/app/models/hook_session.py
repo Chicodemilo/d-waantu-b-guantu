@@ -12,7 +12,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, JSON, String, Text, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -42,7 +42,7 @@ class HookSession(Base):
         BigInteger, ForeignKey("projects.id"), nullable=False, index=True
     )
     ticket_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tickets.id"), nullable=True, index=True
+        BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True, index=True
     )
     sprint_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("sprints.id"), nullable=True, index=True
@@ -64,3 +64,6 @@ class HookSession(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )
+
+    # Relationships
+    ticket: Mapped["Ticket | None"] = relationship(back_populates="hook_sessions")  # noqa: F821

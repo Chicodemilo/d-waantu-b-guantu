@@ -17,7 +17,7 @@ to tracking.py for authoritative event logging.
 
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -145,7 +145,7 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
     # Parse transcript for tokens and timing
     token_total = 0
     token_breakdown = None
-    end_time = datetime.utcnow()
+    end_time = datetime.now(UTC)
 
     if transcript_path:
         parsed = parse_transcript(transcript_path)

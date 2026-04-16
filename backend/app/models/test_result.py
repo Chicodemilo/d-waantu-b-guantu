@@ -52,7 +52,7 @@ class TestResult(Base):
         BigInteger, ForeignKey("sprints.id"), nullable=True, index=True
     )
     ticket_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tickets.id"), nullable=True, index=True
+        BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True, index=True
     )
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     triggered_by: Mapped[str] = mapped_column(String(100), nullable=False, default="manual")
@@ -64,4 +64,4 @@ class TestResult(Base):
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="test_results")  # noqa: F821
     sprint: Mapped["Sprint | None"] = relationship()  # noqa: F821
-    ticket: Mapped["Ticket | None"] = relationship()  # noqa: F821
+    ticket: Mapped["Ticket | None"] = relationship(back_populates="test_results")  # noqa: F821

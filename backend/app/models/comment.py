@@ -21,7 +21,7 @@ class Comment(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     ticket_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tickets.id"), nullable=False, index=True
+        BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True
     )
     author_agent_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("agents.id"), nullable=False, index=True

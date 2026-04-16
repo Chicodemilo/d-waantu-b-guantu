@@ -125,18 +125,18 @@ POST /api/alerts/dismiss-all
 
 ## Token Tracking
 
-### PM overhead
-Update periodically (cumulative, not reset):
-```
-PATCH /api/projects/{id}
-{ "pm_overhead_tokens": N, "pm_overhead_time_seconds": N }
-```
+### How it works (passive)
+Token and time attribution is handled automatically by Claude Code lifecycle hooks configured in `.claude/settings.json`. Hooks fire on SessionStart, SessionEnd, and SubagentStop — no manual reporting needed.
+
+- Workers get time+tokens attributed to their in_progress ticket
+- TL/PM overhead is tracked automatically via hook sessions
+- Active sessions are visible on the project page under **Live Sessions**
 
 ### Agent efficiency
 Check completed tickets: `GET /api/tickets?project_id=1&status=done` — flag outliers in `tokens_used`.
 
 ### Auto-alerts
-When a ticket closes with 0 tokens, an alert fires automatically. The PM should investigate: was this a no-op ticket or did someone forget to report tokens?
+When a ticket closes with 0 tokens, an alert fires automatically. The PM should investigate: was this a no-op ticket, or is the hook configuration broken? Check that `.claude/settings.json` hooks are intact and the API is running.
 
 ## Failure Logging
 

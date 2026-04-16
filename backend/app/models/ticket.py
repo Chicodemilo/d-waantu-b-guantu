@@ -29,6 +29,7 @@ class TicketStatus(str, enum.Enum):
     in_progress = "in_progress"
     in_review = "in_review"
     done = "done"
+    cancelled = "cancelled"
 
 
 class Ticket(Base):
@@ -74,5 +75,10 @@ class Ticket(Base):
     epic: Mapped["Epic | None"] = relationship(back_populates="tickets")  # noqa: F821
     sprint: Mapped["Sprint"] = relationship(back_populates="tickets")  # noqa: F821
     assigned_agent: Mapped["Agent | None"] = relationship(back_populates="assigned_tickets")  # noqa: F821
-    comments: Mapped[list["Comment"]] = relationship(back_populates="ticket")  # noqa: F821
-    alerts: Mapped[list["Alert"]] = relationship(back_populates="ticket")  # noqa: F821
+    comments: Mapped[list["Comment"]] = relationship(back_populates="ticket", cascade="all, delete-orphan")  # noqa: F821
+    alerts: Mapped[list["Alert"]] = relationship(back_populates="ticket", cascade="all, delete")  # noqa: F821
+    status_history: Mapped[list["StatusHistory"]] = relationship(back_populates="ticket", cascade="all, delete-orphan")  # noqa: F821
+    test_results: Mapped[list["TestResult"]] = relationship(back_populates="ticket", cascade="all, delete")  # noqa: F821
+    failure_records: Mapped[list["FailureRecord"]] = relationship(back_populates="ticket", cascade="all, delete")  # noqa: F821
+    tracking_logs: Mapped[list["TrackingLog"]] = relationship(back_populates="ticket", cascade="all, delete")  # noqa: F821
+    hook_sessions: Mapped[list["HookSession"]] = relationship(back_populates="ticket", cascade="all, delete")  # noqa: F821

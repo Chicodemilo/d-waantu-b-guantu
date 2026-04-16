@@ -21,7 +21,7 @@ class StatusHistory(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     ticket_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tickets.id"), nullable=False, index=True
+        BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True
     )
     old_status: Mapped[str] = mapped_column(String(50), nullable=False)
     new_status: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -33,5 +33,5 @@ class StatusHistory(Base):
     )
 
     # Relationships
-    ticket: Mapped["Ticket"] = relationship()  # noqa: F821
+    ticket: Mapped["Ticket"] = relationship(back_populates="status_history")  # noqa: F821
     changed_by_agent: Mapped["Agent | None"] = relationship()  # noqa: F821
