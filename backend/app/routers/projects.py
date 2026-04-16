@@ -10,6 +10,7 @@
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -342,6 +343,49 @@ def list_project_docs(project_id: int, db: Session = Depends(get_db)):
             "content": content,
         })
     return docs
+
+
+_PLAYBOOK_FILES = [
+    "team_lead_playbook.md",
+    "pm_playbook.md",
+    "worker_playbook.md",
+    "project_rules_team_lead.md",
+    "project_rules_pm.md",
+    "project_rules_worker.md",
+]
+
+
+@router.get("/{project_id}/playbook-files")
+def list_project_playbook_files(project_id: int, db: Session = Depends(get_db)):
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not project.repo_path:
+        raise HTTPException(400, "Project has no repo_path configured")
+
+    claude_dir = Path(project.repo_path) / ".claude"
+    files = []
+    for name in _PLAYBOOK_FILES:
+        filepath = claude_dir / name
+        exists = filepath.is_file()
+        content = None
+        last_modified = None
+        if exists:
+            try:
+                content = filepath.read_text(encoding="utf-8")
+            except Exception:
+                content = None
+            last_modified = datetime.fromtimestamp(
+                filepath.stat().st_mtime, tz=timezone.utc
+            ).isoformat()
+        files.append({
+            "name": name,
+            "path": str(filepath),
+            "exists": exists,
+            "content": content,
+            "last_modified": last_modified,
+        })
+    return files
 
 
 @router.get("/{project_id}/activity-feed")

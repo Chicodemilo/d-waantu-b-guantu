@@ -46,14 +46,21 @@ function TeamMdPanel({ projectId }) {
     return null;
   }
 
+  const formatDate = (dateStr) => {
+    if (!dateStr) return null;
+    return new Date(dateStr).toLocaleDateString();
+  };
+
   if (!teamDoc.exists) {
     return (
       <div className="team-md-panel">
-        <div className="team-md-panel__header">
+        <div className="team-md-panel__header team-md-panel__header--static">
           <span className="team-md-panel__name team-md-panel__name--missing">TEAM.md</span>
           <span className="team-md-panel__badge">missing</span>
+          <span className="team-md-panel__meta">
+            <span className="team-md-panel__path">{teamDoc.path}</span>
+          </span>
         </div>
-        <div className="team-md-panel__path">{teamDoc.path}</div>
       </div>
     );
   }
@@ -66,6 +73,12 @@ function TeamMdPanel({ projectId }) {
       >
         <span className={`team-md-panel__caret${expanded ? ' team-md-panel__caret--open' : ''}`}>&gt;</span>
         <span className="team-md-panel__name">TEAM.md</span>
+        <span className="team-md-panel__meta">
+          <span className="team-md-panel__path">{teamDoc.path}</span>
+          {teamDoc.last_modified && (
+            <span className="team-md-panel__date">{formatDate(teamDoc.last_modified)}</span>
+          )}
+        </span>
       </button>
       {expanded && (
         <div className="team-md-panel__body">

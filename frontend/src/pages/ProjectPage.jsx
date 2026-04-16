@@ -1,7 +1,7 @@
 // Path: src/pages/ProjectPage.jsx
 // File: ProjectPage.jsx
 // Created: 2026-03-29
-// Purpose: Project detail page with tools (deploy, scan, archive, delete), sprint gates, doc gates (incl. force_team_md), alerts, sprint progress, overhead, velocity, and epics
+// Purpose: Project detail page with tools (archive, delete), sprint gates, doc gates (incl. force_team_md, force_handoff_md), alerts, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
 // Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/OverheadTracker, ../components/project/ActivityFeed, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
 import ProjectHeader from '../components/project/ProjectHeader';
-import { deployPlaybooks, updateProject, deleteProject, disableJira } from '../api/projects';
+import { updateProject, deleteProject, disableJira } from '../api/projects';
 import { dismissAllAlerts, getAlerts } from '../api/alerts';
 import SprintProgress from '../components/project/SprintProgress';
 import OverheadTracker from '../components/project/OverheadTracker';
@@ -35,8 +35,6 @@ function ProjectPage() {
     (a) => a.project_id === Number(id) && a.status === 'open'
   );
 
-  const [deploying, setDeploying] = useState(false);
-  const [deployResult, setDeployResult] = useState(null);
   const [archiving, setArchiving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -47,19 +45,6 @@ function ProjectPage() {
   const [jiraSaving, setJiraSaving] = useState(false);
   const [jiraDisabling, setJiraDisabling] = useState(false);
   const [jiraConfirmDisable, setJiraConfirmDisable] = useState(false);
-
-  const handleDeploy = async () => {
-    setDeploying(true);
-    setDeployResult(null);
-    try {
-      await deployPlaybooks(id);
-      setDeployResult('done');
-    } catch {
-      setDeployResult('error');
-    } finally {
-      setDeploying(false);
-    }
-  };
 
   const handleArchiveToggle = async () => {
     setArchiving(true);
@@ -157,26 +142,6 @@ function ProjectPage() {
         </button>
 
           <div className={`project-tools__body${toolsExpanded ? ' project-tools__body--open' : ''}`}>
-            {project.repo_path && (
-              <div className="project-tools__group">
-                <button
-                  className="sync-btn"
-                  onClick={handleDeploy}
-                  disabled={deploying}
-                >
-                  {deploying ? '$ deploying...' : '$ deploy playbooks'}
-                </button>
-                <span className="tooltip-trigger">
-                  ?
-                  <span className="tooltip-content">
-                    Deploys master playbooks from DWB's docs/ folder into this project's .claude/ directory. Includes Team Lead, PM, and Worker playbooks — giving all agents their operating procedures for this project.
-                  </span>
-                </span>
-                {deployResult === 'done' && <span className="sync-btn__status">{'\u2713'} deployed</span>}
-                {deployResult === 'error' && <span className="sync-btn__status" style={{ color: 'var(--red)' }}>deploy failed</span>}
-              </div>
-            )}
-
             <div className="project-tools__group">
               <button
                 className="sync-btn"

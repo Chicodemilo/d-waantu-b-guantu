@@ -124,6 +124,15 @@
   overflow-y: auto;
 }
 
+/* ── Deploy button on Team page ── */
+
+.team-deploy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 /* ── TEAM.md read-only panel ── */
 
 .team-md-panel__wrapper {
@@ -194,10 +203,33 @@
   border-radius: 2px;
 }
 
+.team-md-panel__header--static {
+  cursor: default;
+}
+
+.team-md-panel__header--static:hover {
+  opacity: 1;
+}
+
+.team-md-panel__meta {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .team-md-panel__path {
-  padding: 0 12px 8px 12px;
   font-size: 11px;
   color: var(--gray);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-md-panel__date {
+  font-size: 11px;
+  color: var(--gray);
+  white-space: nowrap;
 }
 
 .team-md-panel__body {
@@ -213,5 +245,128 @@
   white-space: pre-wrap;
   word-wrap: break-word;
   max-height: 400px;
+  overflow-y: auto;
+}
+
+.playbook-inspector__wrapper {
+  margin-top: 24px;
+}
+
+/* ── Playbook Inspector ── */
+
+.playbook-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.playbook-inspector__loading {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--gray);
+}
+
+.playbook-file {
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}
+
+.playbook-file__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.playbook-file__header:hover {
+  opacity: 0.85;
+}
+
+.playbook-file__header--static {
+  cursor: default;
+}
+
+.playbook-file__header--static:hover {
+  opacity: 1;
+}
+
+.playbook-file__caret {
+  font-size: 14px;
+  color: var(--green);
+  font-weight: 400;
+  min-width: 14px;
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.playbook-file__caret--open {
+  transform: rotate(90deg);
+  color: var(--orange);
+}
+
+.playbook-file__name {
+  color: var(--green-bright);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.playbook-file__name--missing {
+  color: var(--gray);
+}
+
+.playbook-file__badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray);
+  border: 1px solid var(--gray);
+  padding: 1px 6px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.playbook-file__meta {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.playbook-file__path {
+  font-size: 11px;
+  color: var(--gray);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playbook-file__date {
+  font-size: 11px;
+  color: var(--gray);
+  white-space: nowrap;
+}
+
+.playbook-file__body {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+
+.playbook-file__content {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--green);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 500px;
   overflow-y: auto;
 }

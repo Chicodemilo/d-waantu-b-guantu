@@ -45,3 +45,7 @@ export function seedDemoProject() {
 export function disableJira(id) {
   return post(`/projects/${id}/disable-jira`);
 }
+
+export function getPlaybookFiles(id) {
+  return get(`/projects/${id}/playbook-files`);
+}
