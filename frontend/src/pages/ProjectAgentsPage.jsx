@@ -105,7 +105,6 @@ function ProjectAgentsPage() {
       )}
       {project?.repo_path && (
         <div className="playbook-inspector__wrapper">
-          <div className="dashboard__section-title">Playbooks &amp; Project Rules</div>
           <PlaybookInspector projectId={id} />
         </div>
       )}

@@ -1,7 +1,7 @@
 // Path: src/components/project/PlaybookInspector.jsx
 // File: PlaybookInspector.jsx
 // Created: 2026-04-16
-// Purpose: Collapsible panel listing all 6 playbook files with expandable content, path, and last-modified date
+// Purpose: Split view of playbook files (3 generic playbooks + 3 project rules) with expandable content, tooltips, path, and date
 // Caller: ProjectAgentsPage.jsx
 // Callees: react (useState, useEffect), api/projects (getPlaybookFiles), styles/docs.css
 // Data In: props { projectId }
@@ -85,6 +85,9 @@ function PlaybookInspector({ projectId }) {
     );
   }
 
+  const playbooks = files.filter((f) => f.name.includes('playbook'));
+  const projectRules = files.filter((f) => f.name.includes('project_rules'));
+
   if (files.length === 0) {
     return (
       <div className="playbook-inspector">
@@ -95,9 +98,46 @@ function PlaybookInspector({ projectId }) {
 
   return (
     <div className="playbook-inspector">
-      {files.map((file) => (
-        <PlaybookFile key={file.name} file={file} />
-      ))}
+      {playbooks.length > 0 && (
+        <div className="playbook-inspector__section">
+          <div className="dashboard__section-title">
+            Playbooks
+            <span className="tooltip-trigger">
+              ?
+              <span className="tooltip-content">
+                Generic operating procedures deployed from DWB.
+                <ul className="tooltip-list">
+                  <li>Overwritten on every deploy — do not put project-specific rules here</li>
+                  <li>Covers: TL operations, PM operations, worker workflow</li>
+                </ul>
+              </span>
+            </span>
+          </div>
+          {playbooks.map((file) => (
+            <PlaybookFile key={file.name} file={file} />
+          ))}
+        </div>
+      )}
+      {projectRules.length > 0 && (
+        <div className="playbook-inspector__section">
+          <div className="dashboard__section-title">
+            Project Rules
+            <span className="tooltip-trigger">
+              ?
+              <span className="tooltip-content">
+                Project-specific rules that persist across deploys.
+                <ul className="tooltip-list">
+                  <li>Created blank on first deploy, never overwritten</li>
+                  <li>Each agent reads their project rules file on startup</li>
+                </ul>
+              </span>
+            </span>
+          </div>
+          {projectRules.map((file) => (
+            <PlaybookFile key={file.name} file={file} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

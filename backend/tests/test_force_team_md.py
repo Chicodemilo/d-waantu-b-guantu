@@ -177,6 +177,7 @@ class TestForceTeamMdSprintClose:
             # force_team_md defaults True, disable others to isolate
             "force_initial_md": False,
             "force_architecture_md": False,
+            "force_handoff_md": False,
             "force_test_run": False,
             "force_test_coverage": False,
         }).json()
@@ -217,6 +218,7 @@ class TestForceTeamMdSprintClose:
             "force_team_md": False,
             "force_initial_md": False,
             "force_architecture_md": False,
+            "force_handoff_md": False,
             "force_test_run": False,
             "force_test_coverage": False,
         }).json()

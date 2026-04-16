@@ -260,6 +260,12 @@
   gap: 2px;
 }
 
+.playbook-inspector__section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .playbook-inspector__loading {
   padding: 8px 12px;
   font-size: 12px;

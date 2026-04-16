@@ -331,16 +331,21 @@ def list_project_docs(project_id: int, db: Session = Depends(get_db)):
         filepath = repo / name
         exists = filepath.is_file()
         content = None
+        last_modified = None
         if exists:
             try:
                 content = filepath.read_text(encoding="utf-8")
             except Exception:
                 content = None
+            last_modified = datetime.fromtimestamp(
+                filepath.stat().st_mtime, tz=timezone.utc
+            ).isoformat()
         docs.append({
             "name": name,
             "path": str(filepath),
             "exists": exists,
             "content": content,
+            "last_modified": last_modified,
         })
     return docs
 

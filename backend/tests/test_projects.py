@@ -53,6 +53,7 @@ class TestGetProject:
             "tl_overhead_time_seconds", "pm_overhead_time_seconds",
             "force_headers", "force_test_coverage", "force_test_run",
             "force_initial_md", "force_architecture_md", "force_team_md",
+            "force_handoff_md",
             "created_at", "updated_at",
         }
         assert set(data.keys()) == expected_keys

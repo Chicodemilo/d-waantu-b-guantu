@@ -56,6 +56,16 @@ function TeamMdPanel({ projectId }) {
       <div className="team-md-panel">
         <div className="team-md-panel__header team-md-panel__header--static">
           <span className="team-md-panel__name team-md-panel__name--missing">TEAM.md</span>
+          <span className="tooltip-trigger">
+            ?
+            <span className="tooltip-content">
+              Live team roster for this project.
+              <ul className="tooltip-list">
+                <li>Starts with mandatory agents (Archie + Pam), grows as workers are added</li>
+                <li>Enforced by the force_team_md gate — must exist before sprint close</li>
+              </ul>
+            </span>
+          </span>
           <span className="team-md-panel__badge">missing</span>
           <span className="team-md-panel__meta">
             <span className="team-md-panel__path">{teamDoc.path}</span>
@@ -73,6 +83,16 @@ function TeamMdPanel({ projectId }) {
       >
         <span className={`team-md-panel__caret${expanded ? ' team-md-panel__caret--open' : ''}`}>&gt;</span>
         <span className="team-md-panel__name">TEAM.md</span>
+        <span className="tooltip-trigger">
+          ?
+          <span className="tooltip-content">
+            Live team roster for this project.
+            <ul className="tooltip-list">
+              <li>Starts with mandatory agents (Archie + Pam), grows as workers are added</li>
+              <li>Enforced by the force_team_md gate — must exist before sprint close</li>
+            </ul>
+          </span>
+        </span>
         <span className="team-md-panel__meta">
           <span className="team-md-panel__path">{teamDoc.path}</span>
           {teamDoc.last_modified && (

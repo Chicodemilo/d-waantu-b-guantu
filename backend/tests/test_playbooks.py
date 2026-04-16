@@ -6,7 +6,7 @@
 # Callees:       GET/POST /api/playbooks, POST /api/projects/:id/deploy-playbooks
 # Data In:       Factory-created projects via conftest fixtures; temp playbook files
 # Data Out:      Assertions on HTTP status codes and deployed playbook content
-# Last Modified: 2026-03-29
+# Last Modified: 2026-04-16
 
 """Tests for /api/playbooks and /api/projects/:id/deploy-playbooks."""
 
@@ -35,7 +35,7 @@ class TestListPlaybooks:
         names = [pb["name"] for pb in playbooks]
         # These should exist if docs/ has the playbook files
         for name in names:
-            assert name in ("team_lead", "pm")
+            assert name in ("team_lead", "pm", "worker")
 
 
 class TestDeployPlaybooks:
@@ -68,7 +68,9 @@ class TestDeployPlaybooks:
                 assert len(data["deployed"]) > 0
                 # Verify files were actually written
                 target = Path(data["target_dir"])
-                for filename in data["deployed"]:
+                for entry in data["deployed"]:
+                    # Deployed entries may have a suffix like " (created)"
+                    filename = entry.split(" (")[0]
                     assert (target / filename).is_file()
             else:
                 # 500 if no playbook files in docs/ — acceptable in test env
