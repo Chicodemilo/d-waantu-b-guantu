@@ -33,25 +33,33 @@ function ProjectAgentsPage() {
         <thead>
           <tr>
             <th>Name</th>
+            <th>Type</th>
             <th>Role</th>
             <th>Description</th>
             <th>Status</th>
           </tr>
         </thead>
         <tbody>
-          {agents.map((agent) => (
+          {agents.map((agent) => {
+            const type = agent.role === 'team-lead' ? 'TL'
+              : agent.role === 'pm' ? 'PM'
+              : 'Worker';
+            return (
             <tr key={agent.id} className="data-table__row--clickable">
               <td>
                 <Link to={`/projects/${id}/agents/${agent.id}`}>
                   {agent.name}
                 </Link>
               </td>
+              <td>{type}</td>
               <td>{agent.role}</td>
               <td>{agent.description}</td>
               <td>
                 <StatusBadge status={agent.is_active ? 'active' : 'inactive'} />
               </td>
             </tr>
+            );
+          }
           ))}
         </tbody>
       </table>
