@@ -794,6 +794,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: 25px;
+  padding-top: 5px;
 }
 
 .project-tools__path {
