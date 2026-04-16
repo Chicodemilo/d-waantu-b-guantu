@@ -6,6 +6,19 @@
 
 ---
 
+## On Spawn — Read These First
+
+When you start a session, read these files at the project repo root before doing anything else:
+
+1. **Your role-specific playbook** — the `.claude/agents/{role}.md` file for your role
+2. **HANDOFF.md** — session continuity notes (current state, decisions, gotchas)
+3. **ARCHITECTURE.md** — system design and data model
+4. **README.md** — project overview, setup, API reference
+
+This gives you full context without needing to ask the TL. If any of these files don't exist, proceed with what you have and flag it.
+
+---
+
 ## API
 
 **Base URL:** `http://localhost:8000/api`

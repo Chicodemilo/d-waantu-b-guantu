@@ -369,6 +369,7 @@ def _create_demo_repo(repo_dir: Path) -> None:
     (repo_dir / "INITIAL.md").write_text(_INITIAL_MD, encoding="utf-8")
     (repo_dir / "ARCHITECTURE.md").write_text(_ARCHITECTURE_MD, encoding="utf-8")
     (repo_dir / "TEAM.md").write_text("# Team — Demo Project\n\nDemo team roster.\n", encoding="utf-8")
+    (repo_dir / "HANDOFF.md").write_text("# Handoff — Demo Project\n\nDemo handoff notes.\n", encoding="utf-8")
 
 
 def seed_demo_project(db: Session) -> dict:

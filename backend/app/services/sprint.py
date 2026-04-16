@@ -163,6 +163,7 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
             (project.force_initial_md, "INITIAL.md"),
             (project.force_architecture_md, "ARCHITECTURE.md"),
             (project.force_team_md, "TEAM.md"),
+            (project.force_handoff_md, "HANDOFF.md"),
         ]:
             if toggle:
                 path = Path(project.repo_path) / filename

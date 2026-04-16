@@ -222,6 +222,7 @@ _DOC_GATES = [
     ("force_initial_md", "INITIAL.md"),
     ("force_architecture_md", "ARCHITECTURE.md"),
     ("force_team_md", "TEAM.md"),
+    ("force_handoff_md", "HANDOFF.md"),
 ]
 
 
@@ -312,7 +313,7 @@ def list_project_tests(
     )
 
 
-_DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md", "INITIAL.md", "TEAM.md"]
+_DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md", "INITIAL.md", "TEAM.md", "HANDOFF.md"]
 
 
 @router.get("/{project_id}/docs")

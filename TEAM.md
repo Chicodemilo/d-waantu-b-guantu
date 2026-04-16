@@ -1,26 +1,64 @@
 # Team — D'Waantu B'Guantu
 
-## Roster
+> This file is the live roster for this project. It starts with mandatory agents and grows as the TL spins up workers. Update it when the team composition changes.
 
-> Archie and Pam are mandatory on every project. Add workers based on project needs.
+## Mandatory (always present)
 
-### Mandatory
+| Name | Role | Duty | Playbook |
+|------|------|------|----------|
+| Archie | team-lead | Plans sprints, assigns tickets, reviews work, orchestrates agents | `.claude/agents/team-lead.md` |
+| Pam | pm | Tracks tickets, monitors progress, sprint health, alerts, failure logging | `.claude/agents/pm.md` |
 
-| Name | Duty | Playbook |
-|------|------|----------|
-| Archie | Team lead — plans sprints, assigns tickets, reviews work, orchestrates agents | `.claude/agents/team-lead.md` |
-| Pam | Project manager — tracks tickets, monitors progress, sprint health, alerts | `.claude/agents/pm.md` |
+## Workers (added when team spins up)
 
-### Workers
+| Name | Role | Duty | Playbook |
+|------|------|------|----------|
+| | | | |
 
-| Name | Duty | Playbook |
-|------|------|----------|
-| Devin | Backend — FastAPI, SQLAlchemy, Alembic migrations, Python services | `.claude/agents/backend-worker.md` |
-| Pixel | Frontend — React, Vite, Zustand, plain CSS, component development | `.claude/agents/frontend-worker.md` |
-| Bolt | System ops — Docker, scripts, env vars, infrastructure, DevOps | `.claude/agents/system-ops.md` |
-| Sage | Tester — pytest, vitest, test coverage, test runner, bug filing | `.claude/agents/tester.md` |
+> All agents also receive the general worker playbook: `.claude/agents/worker.md`
 
-> All workers also receive the general worker playbook: `.claude/agents/worker.md`
+## Naming Convention
+
+Name agents by **matching as many leading letters of the role as possible to a real human name.** Three-letter matches are better than two. This makes it easy to remember who does what.
+
+**Fixed names** (always use these):
+| Role | Default Name |
+|------|-------------|
+| pm | **Pam** |
+| tester | **Chester** |
+
+**Standard roles:**
+| Role | Default Name |
+|------|-------------|
+| frontend-worker | **Freddie** |
+| backend-worker | **Barry** |
+| system-ops | **Sylvie** |
+
+**Custom roles** (follow the same leading-letters pattern):
+| Role | Example Names |
+|------|--------------|
+| designer | **Des**mond, **Des**iree |
+| researcher | **Res**a, **Re**my |
+| devops | **Dev**on, **Dev**in |
+| analyst | **Ana**stasia, **An**dre |
+| reviewer | **Rev**a, **Re**ggie |
+| security | **Sec**ily, **Seb**astian |
+| database | **Da**rcy, **Dan**te |
+| architect | **Arc**hie, **Ari**adne |
+| mobile | **Mo**ira, **Mor**ris |
+| docs-writer | **Dol**ores, **Dom**inic |
+| data-engineer | **Da**phne, **Dan**iel |
+| infra | **Ing**rid, **Irv**ing |
+| qa | **Qu**inn |
+| ux | **Ur**sula |
+| api-worker | **Apr**il |
+| migrator | **Mi**tch, **Min**a |
+| performance | **Per**cy, **Pet**ra |
+| scheduler | **Sca**rlett |
+
+If you spawn a role not listed here, follow the pattern: match as many leading letters as possible to a real human name. Three letters is ideal, two is the minimum.
+
+The `role` field in the DB maps to the Claude teammate name (e.g., role="pm" → @pm). The `name` field is the display name (e.g., "Pam").
 
 ## Project Context
 
@@ -28,23 +66,3 @@
 - **Prefix:** DWB
 - **Repo:** /Users/mchick/Dev/d-waantu_b-guantu
 - **Jira:** none
-
-## Session Continuity
-
-### Current State
-Sprint 46 active — Team Manifest & Worker Playbook (epic 17). Adding force_team_md gate, worker.md playbook, and TEAM.md template.
-
-### Active Decisions
-- Passive hook-based token tracking (Sprint 43) — no manual token reporting
-- Plain CSS only, terminal aesthetic
-- PM is mandatory on every team
-- Teams stay alive until user says to shut down
-- MySQL DB name stays `local_agent_tracker` (legacy, not changing)
-
-### Gotchas
-- Alembic autogenerate can't detect MySQL enum changes — write manual migrations for enum ALTER
-- Frontend vitest has 23 pre-existing mock failures (`response.text is not a function`) — not blocking
-- `deploy-playbooks` endpoint pushes agent playbooks to other project repos
-
-### Last Session
-Sprint 45 completed — FK cascade on ticket child tables, `cancelled` enum value, datetime.utcnow() deprecation fix, TL+PM playbook updates for passive tracking. 413 backend tests passing.

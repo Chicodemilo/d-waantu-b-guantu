@@ -48,7 +48,7 @@ After creating a project, immediately:
 GET /api/projects/{id}/gate-status
 ```
 
-This returns which documentation gates are passing or failing. If `force_initial_md` or `force_architecture_md` are enabled (they are by default for from-repo projects), the gate will fail until those files exist.
+This returns which documentation gates are passing or failing. Gates enabled by default: `force_initial_md`, `force_architecture_md`, `force_team_md`, `force_handoff_md`.
 
 ### Handle empty repos
 If the repo is empty or has no meaningful structure:
@@ -56,12 +56,21 @@ If the repo is empty or has no meaningful structure:
 2. Update the project with their answers: `PATCH /api/projects/{id}` (description, name)
 3. Write `INITIAL.md` at the repo root covering: why, requirements, phases, design decisions, constraints, success criteria
 4. Write `ARCHITECTURE.md` once the system design is decided
+5. Write `TEAM.md` using the template (`.claude/agents/TEAM.md.template`) — start with Archie + Pam, add workers as you spawn them
+6. Write `HANDOFF.md` — initial session state, decisions, gotchas
+
+### TEAM.md — Live Roster
+`TEAM.md` is the live team roster at the project repo root. It starts with mandatory agents (Archie + Pam) and grows as you spin up workers. Update it when the team composition changes. Agent naming conventions live here — not in the TL playbook.
+
+### HANDOFF.md — Session Continuity
+`HANDOFF.md` carries context from session to session. Read it at the start of every session. Update it at the end with: current state, new decisions, gotchas, and a brief summary of what happened.
 
 ### Create initial structure
 1. Create the first epic: `POST /api/epics` — name it after the first major milestone
 2. Create the first sprint: `POST /api/sprints` — set a goal, assign a start/end date
 3. Assign agents to the project: `POST /api/project-agents` — at minimum, assign TL, PM, and one worker
-4. Have the PM check gate status and raise alerts for anything missing
+4. Update `TEAM.md` with the workers you spawned
+5. Have the PM check gate status and raise alerts for anything missing
 
 ---
 

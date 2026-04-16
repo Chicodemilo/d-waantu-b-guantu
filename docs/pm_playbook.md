@@ -345,12 +345,17 @@ PATCH /api/tickets/{id}
 
 ---
 
-## Note: Auto-Loading Instructions
+## Session Startup
 
-Like the TL, the PM should load its instructions at session start:
+At the start of every session, the PM should:
 
-1. `GET /api/instructions?scope=agent&agent_id={pm_agent_id}` — PM-specific rules
-2. `GET /api/instructions?scope=global` — global rules
-3. `GET /api/instructions?scope=project&project_id={id}` — project rules
+1. Read `HANDOFF.md` at the project repo root — session continuity notes
+2. Read `TEAM.md` — current team roster
+3. Load instructions:
+   - `GET /api/instructions?scope=agent&agent_id={pm_agent_id}` — PM-specific rules
+   - `GET /api/instructions?scope=global` — global rules
+   - `GET /api/instructions?scope=project&project_id={id}` — project rules
 
-This ensures the PM operates under the current rule set every session. If the instruction sync-check shows drift between Claude memory and DB instructions (`GET /api/instructions/sync-check`), the PM should flag it — stale rules lead to inconsistent behavior.
+## HANDOFF.md
+
+The PM shares responsibility with the TL for keeping `HANDOFF.md` current. At session end, verify it reflects: current sprint state, any new decisions, gotchas discovered, and what happened this session.

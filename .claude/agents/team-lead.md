@@ -29,60 +29,19 @@ Add workers based on the project needs:
 - **@system-ops** — Docker, scripts, infra
 - **@tester** — pytest, vitest, test suites
 
-### Agent Naming Convention
+### TEAM.md — Live Roster
 
-Unless the user specifies otherwise, name agents using this convention: **match as many leading letters of the role as you can to a real human name.** Three-letter matches are better than two. This makes it easy to remember who does what.
+When you spin up a team, update `TEAM.md` at the project repo root:
+- Add each worker you spawn to the Workers table
+- Remove workers the user asks to drop
+- Agent naming conventions are in TEAM.md — follow them
 
-**Fixed names** (always use these):
-| Role | Default Name |
-|------|-------------|
-| pm | **Pam** |
-| tester | **Chester** |
+### HANDOFF.md — Session Continuity
 
-**Standard roles** (use these when spawning the usual team):
-| Role | Default Name |
-|------|-------------|
-| frontend-worker | **Freddie** |
-| backend-worker | **Barry** |
-| system-ops | **Sylvie** |
-
-**Examples for custom roles** (follow the same first-two-letters pattern):
-| Role | Example Names |
-|------|--------------|
-| designer | **Des**mond, **Des**iree |
-| researcher | **Res**a, **Re**my |
-| devops | **Dev**on, **Dev**in |
-| analyst | **Ana**stasia, **An**dre |
-| reviewer | **Rev**a, **Re**ggie |
-| security | **Sec**ily, **Seb**astian |
-| database | **Dat**a... just kidding — **Da**rcy, **Dan**te |
-| architect | **Arc**hie, **Ari**adne |
-| mobile | **Mo**ira, **Mor**ris |
-| docs-writer | **Doc**tor... — **Dol**ores, **Dom**inic |
-| data-engineer | **Da**phne, **Dan**iel |
-| infra | **Ing**rid, **Irv**ing |
-| qa | **Qu**inn |
-| ux | **Ur**sula |
-| api-worker | **Api**... — **Apr**il |
-| migrator | **Mi**tch, **Min**a |
-| performance | **Per**cy, **Pet**ra |
-| scheduler | **Sch**roder, **Sca**rlett |
-
-If you spawn a role not listed here, follow the pattern: match as many leading letters as possible to a real human name. Three letters is ideal, two is the minimum. Alternate genders across the team for variety.
-
-The `role` field in the DB maps to the Claude teammate name (e.g., role="pm" → @pm). The `name` field is the display name (e.g., "Pam").
-
-Register agents with both:
-```
-POST /api/agents
-{ "name": "Pam", "role": "pm", "description": "Project manager", "api_key": "key-pm" }
-```
-
-Assign to project:
-```
-POST /api/project-agents
-{ "project_id": 1, "agent_id": 2 }
-```
+Read `HANDOFF.md` at the start of every session. Update it at the end with:
+- Current state (active sprint, what's in progress)
+- Any new decisions or gotchas discovered
+- Brief summary of what happened this session
 
 ## Project Setup
 

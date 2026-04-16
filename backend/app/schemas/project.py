@@ -29,6 +29,7 @@ class ProjectCreate(BaseModel):
     force_initial_md: bool = False
     force_architecture_md: bool = False
     force_team_md: bool = True
+    force_handoff_md: bool = True
 
 
 class ProjectUpdate(BaseModel):
@@ -48,6 +49,7 @@ class ProjectUpdate(BaseModel):
     force_initial_md: bool | None = None
     force_architecture_md: bool | None = None
     force_team_md: bool | None = None
+    force_handoff_md: bool | None = None
 
 
 class ProjectOverheadIncrement(BaseModel):
@@ -77,5 +79,6 @@ class ProjectRead(BaseModel):
     force_initial_md: bool
     force_architecture_md: bool
     force_team_md: bool
+    force_handoff_md: bool
     created_at: datetime
     updated_at: datetime

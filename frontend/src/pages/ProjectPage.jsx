@@ -256,6 +256,7 @@ function ProjectPage() {
                       <li><strong>Force INITIAL.md</strong> — require requirements and phases document</li>
                       <li><strong>Force ARCHITECTURE.md</strong> — require system design document</li>
                       <li><strong>Force TEAM.md</strong> — require team roster and agent playbooks</li>
+                      <li><strong>Force HANDOFF.md</strong> — require handoff notes for session continuity</li>
                     </ul>
                   </span>
                 </span>
@@ -264,6 +265,7 @@ function ProjectPage() {
                 { field: 'force_initial_md', label: 'Force INITIAL.md' },
                 { field: 'force_architecture_md', label: 'Force ARCHITECTURE.md' },
                 { field: 'force_team_md', label: 'Force TEAM.md' },
+                { field: 'force_handoff_md', label: 'Force HANDOFF.md' },
               ].map(({ field, label }) => (
                 <button
                   key={field}
