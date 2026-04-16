@@ -3,17 +3,40 @@
 > How a Team Lead agent operates inside D'Waantu B'Guantu.
 > Base URL: `http://localhost:8000`
 
+## DWB Is an Internal Tool
+
+D'Waantu B'Guantu is the human user's private project management system. It is NOT visible to external stakeholders.
+
+- **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content
+- **Never reference DWB ticket IDs** (e.g., "DWB-234") outside of DWB itself
+- **Jira is the external system** — if a project has Jira integration, Jira tickets are what stakeholders see. DWB tracks the internal agent workflow behind those tickets.
+- **The human user approves all ticket proposals** — present proposed tickets in the required table format and wait for approval before creating them in DWB or Jira
+
 ## Playbook Locations
 
 Deployed to each project's `.claude/` directory via the Deploy Playbooks button:
 
-| Playbook | Deployed Path | Source (DWB repo) | Audience |
-|----------|--------------|-------------------|----------|
-| Team Lead | `.claude/team_lead_playbook.md` | `docs/team_lead_playbook.md` | TL agents |
-| PM | `.claude/pm_playbook.md` | `docs/pm_playbook.md` | PM agents |
-| Worker | `.claude/worker_playbook.md` | `docs/worker_playbook.md` | All agents |
+| File | Path | Overwritten on deploy? | Purpose |
+|------|------|----------------------|---------|
+| TL Playbook | `.claude/team_lead_playbook.md` | Yes | Generic TL operating procedures |
+| PM Playbook | `.claude/pm_playbook.md` | Yes | Generic PM operating procedures |
+| Worker Playbook | `.claude/worker_playbook.md` | Yes | Generic rules for all agents |
+| TL Project Rules | `.claude/project_rules_team_lead.md` | **No** | Project-specific TL rules |
+| PM Project Rules | `.claude/project_rules_pm.md` | **No** | Project-specific PM rules |
+| Worker Project Rules | `.claude/project_rules_worker.md` | **No** | Project-specific worker rules |
 
-If a project's playbooks are stale, re-deploy from the DWB portal or via API: `POST /api/projects/{id}/deploy-playbooks`
+Playbooks are generic — they get overwritten on every deploy. Project rules are project-specific — they're created blank on first deploy and never overwritten.
+
+Re-deploy: `POST /api/projects/{id}/deploy-playbooks` or the Deploy Playbooks button on the project page.
+
+### On Startup
+
+Read these files at session start:
+1. This playbook (`.claude/team_lead_playbook.md`)
+2. Your project rules (`.claude/project_rules_team_lead.md`)
+3. `HANDOFF.md` — session continuity
+4. `TEAM.md` — current roster
+5. `ARCHITECTURE.md` and `README.md` — project context
 
 ---
 

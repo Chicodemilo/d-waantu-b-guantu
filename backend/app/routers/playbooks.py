@@ -85,4 +85,17 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
     if not deployed:
         raise HTTPException(500, "No playbook files found in docs/")
 
+    # Create blank project rules files (never overwrite existing)
+    PROJECT_RULES_FILES = {
+        "project_rules_team_lead.md": "# Project Rules — Team Lead\n\n> Project-specific rules for the TL. This file is NOT overwritten by deploy.\n\n",
+        "project_rules_pm.md": "# Project Rules — PM\n\n> Project-specific rules for the PM. This file is NOT overwritten by deploy.\n\n",
+        "project_rules_worker.md": "# Project Rules — Workers\n\n> Project-specific rules for all workers. This file is NOT overwritten by deploy.\n\n",
+    }
+
+    for filename, default_content in PROJECT_RULES_FILES.items():
+        dst = target_dir / filename
+        if not dst.exists():
+            dst.write_text(default_content, encoding="utf-8")
+            deployed.append(f"{filename} (created)")
+
     return DeployResult(deployed=deployed, target_dir=str(target_dir))

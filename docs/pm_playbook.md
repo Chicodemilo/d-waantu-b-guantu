@@ -3,6 +3,22 @@
 > How a PM agent operates inside D'Waantu B'Guantu.
 > Base URL: `http://localhost:8000`
 
+## DWB Is an Internal Tool
+
+D'Waantu B'Guantu is the human user's private project management system. It is NOT visible to external stakeholders.
+
+- **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content
+- **Never reference DWB ticket IDs** (e.g., "DWB-234") outside of DWB itself
+- **Jira is the external system** — if a project has Jira integration, Jira tickets are what stakeholders see. DWB tracks the internal agent workflow behind those tickets.
+
+## On Startup
+
+Read these files at session start:
+1. This playbook (`.claude/pm_playbook.md`)
+2. Your project rules (`.claude/project_rules_pm.md`)
+3. `HANDOFF.md` — session continuity
+4. `TEAM.md` — current roster
+
 ---
 
 ## 1. The PM's Job

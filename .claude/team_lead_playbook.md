@@ -3,6 +3,41 @@
 > How a Team Lead agent operates inside D'Waantu B'Guantu.
 > Base URL: `http://localhost:8000`
 
+## DWB Is an Internal Tool
+
+D'Waantu B'Guantu is the human user's private project management system. It is NOT visible to external stakeholders.
+
+- **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content
+- **Never reference DWB ticket IDs** (e.g., "DWB-234") outside of DWB itself
+- **Jira is the external system** — if a project has Jira integration, Jira tickets are what stakeholders see. DWB tracks the internal agent workflow behind those tickets.
+- **The human user approves all ticket proposals** — present proposed tickets in the required table format and wait for approval before creating them in DWB or Jira
+
+## Playbook Locations
+
+Deployed to each project's `.claude/` directory via the Deploy Playbooks button:
+
+| File | Path | Overwritten on deploy? | Purpose |
+|------|------|----------------------|---------|
+| TL Playbook | `.claude/team_lead_playbook.md` | Yes | Generic TL operating procedures |
+| PM Playbook | `.claude/pm_playbook.md` | Yes | Generic PM operating procedures |
+| Worker Playbook | `.claude/worker_playbook.md` | Yes | Generic rules for all agents |
+| TL Project Rules | `.claude/project_rules_team_lead.md` | **No** | Project-specific TL rules |
+| PM Project Rules | `.claude/project_rules_pm.md` | **No** | Project-specific PM rules |
+| Worker Project Rules | `.claude/project_rules_worker.md` | **No** | Project-specific worker rules |
+
+Playbooks are generic — they get overwritten on every deploy. Project rules are project-specific — they're created blank on first deploy and never overwritten.
+
+Re-deploy: `POST /api/projects/{id}/deploy-playbooks` or the Deploy Playbooks button on the project page.
+
+### On Startup
+
+Read these files at session start:
+1. This playbook (`.claude/team_lead_playbook.md`)
+2. Your project rules (`.claude/project_rules_team_lead.md`)
+3. `HANDOFF.md` — session continuity
+4. `TEAM.md` — current roster
+5. `ARCHITECTURE.md` and `README.md` — project context
+
 ---
 
 ## 1. Project Setup
@@ -48,7 +83,7 @@ After creating a project, immediately:
 GET /api/projects/{id}/gate-status
 ```
 
-This returns which documentation gates are passing or failing. If `force_initial_md` or `force_architecture_md` are enabled (they are by default for from-repo projects), the gate will fail until those files exist.
+This returns which documentation gates are passing or failing. Gates enabled by default: `force_initial_md`, `force_architecture_md`, `force_team_md`, `force_handoff_md`.
 
 ### Handle empty repos
 If the repo is empty or has no meaningful structure:
@@ -56,12 +91,21 @@ If the repo is empty or has no meaningful structure:
 2. Update the project with their answers: `PATCH /api/projects/{id}` (description, name)
 3. Write `INITIAL.md` at the repo root covering: why, requirements, phases, design decisions, constraints, success criteria
 4. Write `ARCHITECTURE.md` once the system design is decided
+5. Write `TEAM.md` using the template (`.claude/agents/TEAM.md.template`) — start with Archie + Pam, add workers as you spawn them
+6. Write `HANDOFF.md` — initial session state, decisions, gotchas
+
+### TEAM.md — Live Roster
+`TEAM.md` is the live team roster at the project repo root. It starts with mandatory agents (Archie + Pam) and grows as you spin up workers. Update it when the team composition changes. Agent naming conventions live here — not in the TL playbook.
+
+### HANDOFF.md — Session Continuity
+`HANDOFF.md` carries context from session to session. Read it at the start of every session. Update it at the end with: current state, new decisions, gotchas, and a brief summary of what happened.
 
 ### Create initial structure
 1. Create the first epic: `POST /api/epics` — name it after the first major milestone
 2. Create the first sprint: `POST /api/sprints` — set a goal, assign a start/end date
 3. Assign agents to the project: `POST /api/project-agents` — at minimum, assign TL, PM, and one worker
-4. Have the PM check gate status and raise alerts for anything missing
+4. Update `TEAM.md` with the workers you spawned
+5. Have the PM check gate status and raise alerts for anything missing
 
 ---
 
@@ -179,6 +223,24 @@ The TL moves tickets through this pipeline:
 - `in_progress` — agent is actively working on it
 - `in_review` — work is done, TL is reviewing
 - `done` — accepted and closed
+
+### Required table format for proposed tickets
+
+When proposing tickets (sprint kickoff, mid-sprint changes, close-out reports), always present them in this table format:
+
+| DWB Ticket | Jira Ticket | DWB Sprint | Jira Epic | Jira Sprint | Title | Proposed Status | Current Status |
+|------------|-------------|------------|-----------|-------------|-------|-----------------|----------------|
+| CI-105 | POR-??? | Sprint 4 | POR-5152 | We Are Dashboard | Example task title | todo | — |
+| CI-??? | POR-??? | Sprint 4 | POR-5152 | We Are Dashboard | Another task | todo | — |
+
+**Column definitions:**
+- **Proposed Status** — the status the ticket should be created at or moved to. One of: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `cancelled`.
+- **Current Status** — the ticket's actual status right now. Use `—` for tickets that don't exist yet. This column lets Miles see the delta between where things are and where the TL wants them to be.
+
+**When to use each:**
+- **Sprint kickoff proposals** — Proposed Status = `todo` (or `done` for retroactive tickets), Current Status = `—`
+- **Mid-sprint status updates** — Proposed Status = what you want to change it to, Current Status = what it is now
+- **Sprint close-out reports** — Proposed Status = `done`, Current Status = actual status (flags anything not finished)
 
 ### Assigning work
 Set `assigned_agent_id` when creating or updating a ticket. An unassigned ticket has `null` for this field.

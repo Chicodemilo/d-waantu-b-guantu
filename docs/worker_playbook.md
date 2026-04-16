@@ -6,14 +6,19 @@
 
 ---
 
+## DWB Is an Internal Tool
+
+D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself.
+
 ## On Spawn — Read These First
 
-When you start a session, read these files at the project repo root before doing anything else:
+When you start a session, read these files before doing anything else:
 
-1. **Your role-specific playbook** — the `.claude/agents/{role}.md` file for your role
-2. **HANDOFF.md** — session continuity notes (current state, decisions, gotchas)
-3. **ARCHITECTURE.md** — system design and data model
-4. **README.md** — project overview, setup, API reference
+1. **Your role-specific playbook** — `.claude/agents/{role}.md` (if it exists)
+2. **Your project rules** — `.claude/project_rules_worker.md` (project-specific rules)
+3. **HANDOFF.md** — session continuity notes (current state, decisions, gotchas)
+4. **ARCHITECTURE.md** — system design and data model
+5. **README.md** — project overview, setup, API reference
 
 This gives you full context without needing to ask the TL. If any of these files don't exist, proceed with what you have and flag it.
 
