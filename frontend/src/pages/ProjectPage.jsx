@@ -169,7 +169,7 @@ function ProjectPage() {
                 <span className="tooltip-trigger">
                   ?
                   <span className="tooltip-content">
-                    Copies TL and PM playbooks into this project's .claude/ directory so agents can read them.
+                    Deploys master playbooks from DWB's docs/ folder into this project's .claude/ directory. Includes Team Lead, PM, and Worker playbooks — giving all agents their operating procedures for this project.
                   </span>
                 </span>
                 {deployResult === 'done' && <span className="sync-btn__status">{'\u2713'} deployed</span>}
