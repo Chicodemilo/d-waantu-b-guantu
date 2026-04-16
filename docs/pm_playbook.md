@@ -11,6 +11,15 @@ D'Waantu B'Guantu is the human user's private project management system. It is N
 - **Never reference DWB ticket IDs** (e.g., "DWB-234") outside of DWB itself
 - **Jira is the external system** — if a project has Jira integration, Jira tickets are what stakeholders see. DWB tracks the internal agent workflow behind those tickets.
 
+## Ticket Status Drives the Dashboard
+
+The Team Status panel on the project page is **driven by ticket status**. An agent shows as "working" if they have an `in_progress` ticket. This means:
+
+- **Moving tickets to `in_progress` promptly is critical** — if a worker starts but the ticket isn't moved, the dashboard won't reflect their activity
+- **Moving tickets OUT of `in_progress` when done is equally critical** — stale in_progress tickets make the dashboard show phantom workers
+- **Only one `in_progress` ticket per agent matters** — the most recently updated one is displayed
+- This is deterministic — no manual registration or hooks needed. Keep ticket statuses accurate and the dashboard stays accurate.
+
 ## On Startup
 
 Read these files at session start:
