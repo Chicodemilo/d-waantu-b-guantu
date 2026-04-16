@@ -1,12 +1,12 @@
 // Path: src/pages/ProjectPage.jsx
 // File: ProjectPage.jsx
 // Created: 2026-03-29
-// Purpose: Project detail page with tools (deploy, scan, archive, delete), sprint gates, alerts, sprint progress, overhead, velocity, and epics
+// Purpose: Project detail page with tools (deploy, scan, archive, delete), sprint gates, doc gates (incl. force_team_md), TEAM.md panel, alerts, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
-// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/OverheadTracker, ../components/project/ActivityFeed, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
+// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/OverheadTracker, ../components/project/ActivityFeed, ../components/project/TeamMdPanel, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-04-16
 
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -22,6 +22,7 @@ import EpicList from '../components/epics/EpicList';
 import AlertBanner from '../components/common/AlertBanner';
 import ActivityFeed from '../components/project/ActivityFeed';
 import LiveSessions from '../components/project/LiveSessions';
+import TeamMdPanel from '../components/project/TeamMdPanel';
 
 import '../styles/dashboard.css';
 
@@ -256,6 +257,7 @@ function ProjectPage() {
                     <ul className="tooltip-list">
                       <li><strong>Force INITIAL.md</strong> — require requirements and phases document</li>
                       <li><strong>Force ARCHITECTURE.md</strong> — require system design document</li>
+                      <li><strong>Force TEAM.md</strong> — require team roster and agent playbooks</li>
                     </ul>
                   </span>
                 </span>
@@ -263,6 +265,7 @@ function ProjectPage() {
               {[
                 { field: 'force_initial_md', label: 'Force INITIAL.md' },
                 { field: 'force_architecture_md', label: 'Force ARCHITECTURE.md' },
+                { field: 'force_team_md', label: 'Force TEAM.md' },
               ].map(({ field, label }) => (
                 <button
                   key={field}
@@ -328,6 +331,13 @@ function ProjectPage() {
             </div>
           </div>
       </div>
+
+      {project.force_team_md && (
+        <div>
+          <div className="dashboard__section-title">Team Roster</div>
+          <TeamMdPanel projectId={id} />
+        </div>
+      )}
 
       <div>
         <div className="dashboard__section-title">Live Sessions</div>

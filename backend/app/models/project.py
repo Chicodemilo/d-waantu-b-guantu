@@ -46,6 +46,7 @@ class Project(Base):
     force_test_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_initial_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_architecture_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    force_team_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

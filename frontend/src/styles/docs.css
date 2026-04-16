@@ -1,8 +1,8 @@
 /* Path: src/styles/docs.css */
 /* File: docs.css */
 /* Created: 2026-03-29 */
-/* Purpose: Styles for project and system docs pages — doc cards, expand/collapse, content display */
-/* Last Modified: 2026-04-09 */
+/* Purpose: Styles for project and system docs pages — doc cards, expand/collapse, content display, TEAM.md panel */
+/* Last Modified: 2026-04-16 */
 
 .docs-list {
   display: flex;
@@ -121,5 +121,93 @@
   white-space: pre-wrap;
   word-wrap: break-word;
   max-height: 600px;
+  overflow-y: auto;
+}
+
+/* ── TEAM.md read-only panel ── */
+
+.team-md-panel {
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}
+
+.team-md-panel__loading {
+  display: block;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--gray);
+}
+
+.team-md-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.team-md-panel__header:hover {
+  opacity: 0.85;
+}
+
+.team-md-panel__caret {
+  font-size: 14px;
+  color: var(--green);
+  font-weight: 400;
+  min-width: 14px;
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.team-md-panel__caret--open {
+  transform: rotate(90deg);
+  color: var(--orange);
+}
+
+.team-md-panel__name {
+  color: var(--green-bright);
+  font-weight: 500;
+}
+
+.team-md-panel__name--missing {
+  color: var(--gray);
+}
+
+.team-md-panel__badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray);
+  border: 1px solid var(--gray);
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.team-md-panel__path {
+  padding: 0 12px 8px 12px;
+  font-size: 11px;
+  color: var(--gray);
+}
+
+.team-md-panel__body {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+
+.team-md-panel__content {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--green);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 400px;
   overflow-y: auto;
 }

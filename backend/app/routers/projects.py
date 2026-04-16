@@ -221,6 +221,7 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
 _DOC_GATES = [
     ("force_initial_md", "INITIAL.md"),
     ("force_architecture_md", "ARCHITECTURE.md"),
+    ("force_team_md", "TEAM.md"),
 ]
 
 
@@ -311,7 +312,7 @@ def list_project_tests(
     )
 
 
-_DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md", "INITIAL.md"]
+_DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md", "INITIAL.md", "TEAM.md"]
 
 
 @router.get("/{project_id}/docs")

@@ -1,0 +1,46 @@
+# Team — {PROJECT_NAME}
+
+## Roster
+
+> Archie and Pam are mandatory on every project. Add workers based on project needs.
+
+### Mandatory
+
+| Name | Duty | Playbook |
+|------|------|----------|
+| Archie | Team lead — plans sprints, assigns tickets, reviews work, orchestrates agents | `.claude/agents/team-lead.md` |
+| Pam | Project manager — tracks tickets, monitors progress, sprint health, alerts | `.claude/agents/pm.md` |
+
+### Workers
+
+| Name | Duty | Playbook |
+|------|------|----------|
+| Devin | Backend — FastAPI, SQLAlchemy, Alembic migrations, Python services | `.claude/agents/backend-worker.md` |
+| Pixel | Frontend — React, Vite, Zustand, plain CSS, component development | `.claude/agents/frontend-worker.md` |
+| Bolt | System ops — Docker, scripts, env vars, infrastructure, DevOps | `.claude/agents/system-ops.md` |
+| Sage | Tester — pytest, vitest, test coverage, test runner, bug filing | `.claude/agents/tester.md` |
+
+> All workers also receive the general worker playbook: `.claude/agents/worker.md`
+
+## Project Context
+
+- **DWB Project ID:** {PROJECT_ID}
+- **Prefix:** {PREFIX}
+- **Repo:** {REPO_PATH}
+- **Jira:** {JIRA_PROJECT_KEY or "none"}
+
+## Session Continuity
+
+> Notes that carry from session to session. Update this section at the end of each work session.
+
+### Current State
+<!-- What's the project status? What sprint is active? What's in progress? -->
+
+### Active Decisions
+<!-- Architecture decisions, conventions, or patterns adopted this project. -->
+
+### Gotchas
+<!-- Things that tripped agents up. Non-obvious behavior. Workarounds in effect. -->
+
+### Last Session
+<!-- Brief summary of what happened in the most recent session. -->
