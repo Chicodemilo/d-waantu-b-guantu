@@ -160,32 +160,6 @@ PATCH /api/projects/{id}
 
 Check gate status: `GET /api/projects/{id}/gate-status`
 
-## Key Endpoints
-
-| Action | Endpoint |
-|--------|----------|
-| Create project from repo | POST /api/projects/from-repo |
-| List projects | GET /api/projects |
-| Gate status | GET /api/projects/{id}/gate-status |
-| Create/list agents | POST/GET /api/agents |
-| Assign agent | POST /api/project-agents |
-| Create/list epics | POST/GET /api/epics |
-| Create/list sprints | POST/GET /api/sprints |
-| Create/list tickets | POST/GET /api/tickets |
-| Update ticket | PATCH /api/tickets/{id} |
-| Post tokens | POST /api/tickets/{id}/tokens |
-| Token audit | GET /api/tokens/audit |
-| Hook session start | POST /api/hooks/session-start |
-| Hook session end | POST /api/hooks/session-end |
-| List hook sessions | GET /api/hooks/sessions |
-| Create/list alerts | POST/GET /api/alerts |
-| Dismiss all alerts | POST /api/alerts/dismiss-all |
-| Failure summary | GET /api/failure-records/summary |
-| Post test results | POST /api/test-results |
-| Activity feed | GET /api/activity-logs |
-| Instructions | GET /api/instructions |
-| Deploy playbooks | POST /api/projects/{id}/deploy-playbooks |
-
 ## TL Overhead
 
 TL overhead (tokens + time) is tracked automatically by the hook system — no manual PATCH needed. To review overhead totals, check the project page or:
@@ -206,7 +180,3 @@ GET /api/instructions?scope=global
 GET /api/instructions?scope=project&project_id={pid}
 GET /api/instructions?scope=agent&agent_id={tl_agent_id}
 ```
-
-## STOP Means Stop
-
-When the user says **STOP**, **PAUSE**, or **HALT**: immediately cease ALL activity. No tool calls, no messages to teammates, no cleanup. This overrides everything.

@@ -1,12 +1,12 @@
 # Path: app/routers/projects.py
 # File: projects.py
 # Created: 2026-03-29
-# Purpose: Project HTTP endpoints — CRUD, from-repo, gates (incl. force_team_md), overhead, docs, activity-feed
+# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, docs, activity-feed, token-budget
 # Caller: app/main.py
 # Callees: app/services/project.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
-# Data Out: JSON responses (ProjectRead, gate status)
-# Last Modified: 2026-04-16
+# Data Out: JSON responses (ProjectRead, gate status, token budget)
+# Last Modified: 2026-04-17
 
 import json
 import re
@@ -439,3 +439,142 @@ def get_project_activity_feed(
             "created_at": row.created_at.isoformat() if row.created_at else None,
         })
     return feed
+
+
+# --- Token budget ---
+
+_TOKEN_CEILINGS = {
+    "agent_def": 800,
+    "playbook": 2500,
+    "claude_md": 1500,
+    "project_rules": 500,
+    "handoff": 1500,
+    "team": 500,
+}
+
+# Which files each role reads at startup
+_ROLE_FILES = {
+    "team-lead": ["CLAUDE.md", "team-lead.md"],
+    "pm": ["CLAUDE.md", "pm.md"],
+    "frontend-worker": ["CLAUDE.md", "worker.md", "frontend-worker.md"],
+    "backend-worker": ["CLAUDE.md", "worker.md", "backend-worker.md"],
+    "tester": ["CLAUDE.md", "worker.md", "tester.md"],
+}
+
+
+def _classify_file(name: str) -> str:
+    lower = name.lower()
+    if lower == "claude.md":
+        return "claude_md"
+    if lower == "handoff.md":
+        return "handoff"
+    if lower == "team.md":
+        return "team"
+    if "project_rules" in lower:
+        return "project_rules"
+    if lower.endswith("_playbook.md"):
+        return "playbook"
+    # Files in agents/ directory
+    return "agent_def"
+
+
+def _estimate_tokens(text: str) -> int:
+    return int(len(text.split()) * 1.3)
+
+
+@router.get("/{project_id}/token-budget")
+def get_token_budget(project_id: int, db: Session = Depends(get_db)):
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not project.repo_path:
+        raise HTTPException(400, "Project has no repo_path configured")
+
+    repo = Path(project.repo_path)
+    files = []
+    file_token_map: dict[str, int] = {}  # name -> tokens for startup calc
+
+    # Root-level context files
+    for name in ["CLAUDE.md", "HANDOFF.md", "TEAM.md"]:
+        filepath = repo / name
+        if filepath.is_file():
+            try:
+                text = filepath.read_text(encoding="utf-8")
+            except Exception:
+                text = ""
+            tokens = _estimate_tokens(text)
+            category = _classify_file(name)
+            ceiling = _TOKEN_CEILINGS.get(category, 1000)
+            ratio = tokens / ceiling if ceiling > 0 else 0
+            status = "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
+            files.append({
+                "path": str(filepath),
+                "name": name,
+                "tokens": tokens,
+                "ceiling": ceiling,
+                "status": status,
+            })
+            file_token_map[name] = tokens
+
+    # Agent definitions: .claude/agents/*.md
+    agents_dir = repo / ".claude" / "agents"
+    if agents_dir.is_dir():
+        for filepath in sorted(agents_dir.glob("*.md")):
+            if filepath.name.upper().endswith(".TEMPLATE"):
+                continue
+            try:
+                text = filepath.read_text(encoding="utf-8")
+            except Exception:
+                text = ""
+            tokens = _estimate_tokens(text)
+            category = _classify_file(filepath.name)
+            ceiling = _TOKEN_CEILINGS.get(category, 800)
+            ratio = tokens / ceiling if ceiling > 0 else 0
+            status = "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
+            files.append({
+                "path": str(filepath),
+                "name": f".claude/agents/{filepath.name}",
+                "tokens": tokens,
+                "ceiling": ceiling,
+                "status": status,
+            })
+            file_token_map[filepath.name] = tokens
+
+    # Playbooks and project rules: .claude/*_playbook.md, .claude/project_rules_*.md
+    claude_dir = repo / ".claude"
+    if claude_dir.is_dir():
+        for pattern in ["*_playbook.md", "project_rules_*.md"]:
+            for filepath in sorted(claude_dir.glob(pattern)):
+                try:
+                    text = filepath.read_text(encoding="utf-8")
+                except Exception:
+                    text = ""
+                tokens = _estimate_tokens(text)
+                category = _classify_file(filepath.name)
+                ceiling = _TOKEN_CEILINGS.get(category, 1000)
+                ratio = tokens / ceiling if ceiling > 0 else 0
+                status = (
+                    "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
+                )
+                files.append({
+                    "path": str(filepath),
+                    "name": f".claude/{filepath.name}",
+                    "tokens": tokens,
+                    "ceiling": ceiling,
+                    "status": status,
+                })
+                file_token_map[filepath.name] = tokens
+
+    total_tokens = sum(f["tokens"] for f in files)
+
+    # Team startup cost: sum of files each role reads
+    team_startup = 0
+    for _role, role_files in _ROLE_FILES.items():
+        for fname in role_files:
+            team_startup += file_token_map.get(fname, 0)
+
+    return {
+        "files": files,
+        "total_tokens": total_tokens,
+        "team_startup_cost": team_startup,
+    }

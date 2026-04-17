@@ -28,6 +28,19 @@ class AgentUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class AgentListRead(BaseModel):
+    """Slim schema for list responses — excludes api_key."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str | None
+    role: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 class AgentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

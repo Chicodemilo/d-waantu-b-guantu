@@ -47,6 +47,17 @@ class SendToTeamResponse(BaseModel):
     alerts_count: int
 
 
+class AlertSlimRead(BaseModel):
+    """Slim schema for ?fields=slim list responses."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    severity: AlertSeverity
+    status: AlertStatus
+    project_id: int
+
+
 class AlertRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

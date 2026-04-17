@@ -60,6 +60,20 @@ class StaleCheckResponse(BaseModel):
     alert_id: int | None = None
 
 
+class TicketSlimRead(BaseModel):
+    """Slim schema for ?fields=slim list responses."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ticket_key: str
+    title: str
+    status: TicketStatus
+    sprint_id: int
+    project_id: int
+    assigned_agent_id: int | None
+    ticket_type: TicketType
+
+
 class TicketRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

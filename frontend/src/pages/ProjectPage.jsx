@@ -21,6 +21,7 @@ import EpicList from '../components/epics/EpicList';
 import AlertBanner from '../components/common/AlertBanner';
 import ActivityFeed from '../components/project/ActivityFeed';
 import LiveSessions from '../components/project/LiveSessions';
+import TokenBudget from '../components/project/TokenBudget';
 import '../styles/dashboard.css';
 
 function ProjectPage() {
@@ -329,6 +330,8 @@ function ProjectPage() {
 
           </div>
       </div>
+
+      <TokenBudget projectId={id} />
 
       <div>
         <div className="dashboard__section-title">Team Status</div>

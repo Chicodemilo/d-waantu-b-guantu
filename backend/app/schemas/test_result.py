@@ -30,6 +30,27 @@ class TestResultCreate(BaseModel):
     triggered_context: str | None = None
 
 
+class TestResultListRead(BaseModel):
+    """Slim schema for list responses — excludes `details` (can be 65k+ chars)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    sprint_id: int | None
+    ticket_id: int | None
+    run_at: datetime
+    suite: str
+    total_tests: int
+    passed: int
+    failed: int
+    skipped: int
+    duration_seconds: float
+    status: str
+    triggered_by: str
+    triggered_context: str | None
+    created_at: datetime
+
+
 class TestResultRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

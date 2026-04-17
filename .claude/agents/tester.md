@@ -101,20 +101,6 @@ POST /api/tickets
 
 ## Rules
 
-### Code Headers Mandatory
-Every new test file MUST have a code header:
-```python
-# Path: tests/test_example.py
-# File: test_example.py
-# Created: YYYY-MM-DD
-# Purpose: Tests for example CRUD and business logic
-# Caller: pytest
-# Callees: FastAPI TestClient → app routers
-# Data In: Factory fixtures
-# Data Out: Assertions
-# Last Modified: YYYY-MM-DD
-```
-
 ### Test Naming
 Use descriptive names: `test_create_ticket_auto_assigns_sprint`, `test_sprint_close_blocked_by_unresolved_failures`, not `test_1` or `test_basic`.
 
@@ -128,7 +114,3 @@ Tests hit the real test database. The fixture system handles isolation via trans
 4. Post results: `./scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"`
 5. Move to in_review: `PATCH /api/tickets/{id} {"status": "in_review"}`
 6. Message the team lead with results summary
-
-## STOP Means Stop
-
-When the user says **STOP**, **PAUSE**, or **HALT**: immediately cease ALL activity. No tool calls, no messages, no cleanup. This overrides everything.

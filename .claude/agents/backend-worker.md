@@ -37,20 +37,6 @@ Request → Router (validation, HTTP) → Service (business logic) → Model (OR
 
 ## Rules
 
-### Code Headers Mandatory
-Every new file MUST have a code header:
-```python
-# Path: app/services/example.py
-# File: example.py
-# Created: YYYY-MM-DD
-# Purpose: One sentence description
-# Caller: What calls this (router, other service)
-# Callees: What this calls (models, other services)
-# Data In: Input params/types
-# Data Out: Return types
-# Last Modified: YYYY-MM-DD
-```
-
 ### SQLAlchemy 2.0 Style
 Use `mapped_column()`, `Mapped[]` type hints, `DeclarativeBase`. Example:
 ```python
@@ -105,7 +91,3 @@ Test database: `lat_test` (separate from dev). Each test gets a rolled-back tran
 3. Do the work
 4. Move to in_review: `PATCH /api/tickets/{id} {"status": "in_review"}`
 5. Message the team lead that work is ready for review
-
-## STOP Means Stop
-
-When the user says **STOP**, **PAUSE**, or **HALT**: immediately cease ALL activity. No tool calls, no messages, no cleanup. This overrides everything.

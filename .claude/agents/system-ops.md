@@ -62,33 +62,6 @@ Env: `LAT_RULES_DIR`, `MYSQL_*` (inherited from app.config)
 
 ## Rules
 
-### Code Headers Mandatory
-Every new script MUST have a code header. For bash:
-```bash
-# Path: backend/scripts/example.sh
-# File: example.sh
-# Created: YYYY-MM-DD
-# Purpose: One sentence description
-# Caller: What runs this
-# Callees: What this calls
-# Data In: CLI args and env vars
-# Data Out: Output and side effects
-# Last Modified: YYYY-MM-DD
-```
-
-For Python:
-```python
-# Path: backend/scripts/example.py
-# File: example.py
-# Created: YYYY-MM-DD
-# Purpose: One sentence description
-# Caller: What runs this
-# Callees: API endpoints called
-# Data In: CLI args and env vars
-# Data Out: Output and side effects
-# Last Modified: YYYY-MM-DD
-```
-
 ### Env Var Convention
 All script-specific env vars use the `LAT_` prefix. All optional with sensible defaults. Document them in the script docstring/comments.
 
@@ -113,7 +86,3 @@ alembic downgrade -1       # rollback one
 3. Do the work
 4. Move to in_review: `PATCH /api/tickets/{id} {"status": "in_review"}`
 5. Message the team lead that work is ready for review
-
-## STOP Means Stop
-
-When the user says **STOP**, **PAUSE**, or **HALT**: immediately cease ALL activity. No tool calls, no messages, no cleanup. This overrides everything.

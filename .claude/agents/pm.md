@@ -225,7 +225,3 @@ GET /api/instructions?scope=agent&agent_id={pm_agent_id}
 ```
 
 Follow these instructions for the duration of the session.
-
-## STOP Means Stop
-
-When the user says **STOP**, **PAUSE**, or **HALT**: immediately cease ALL activity. No tool calls, no messages, no cleanup. This overrides everything.

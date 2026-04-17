@@ -12,13 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.agent import AgentCreate, AgentRead, AgentUpdate
+from app.schemas.agent import AgentCreate, AgentListRead, AgentRead, AgentUpdate
 from app.services import agent as svc
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 
-@router.get("", response_model=list[AgentRead])
+@router.get("", response_model=list[AgentListRead])
 def list_agents(
     role: str | None = Query(None),
     is_active: bool | None = Query(None),

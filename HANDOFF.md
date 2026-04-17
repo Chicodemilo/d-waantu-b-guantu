@@ -4,7 +4,7 @@
 
 ## Current State
 
-Sprint 53 active. 5 sprints this session (48-52). 426 backend tests passing. README and ARCHITECTURE fully overhauled. Team is up and idle (Archie, Pam, Barry, Freddie).
+Sprint 54 complete (investigation). Sprint 55 planned but not yet created — waiting on user approval. Team is up: Archie, Pam, Barry, Freddie on team dwb-s52. 426 backend tests passing.
 
 ## Active Decisions
 
@@ -43,10 +43,30 @@ None currently open.
 
 ## What Needs Doing Next
 
-1. **Token efficiency** — investigate ways to lighten token usage when using the DWB system. Agents burn context reading playbooks, API calls, status checks. Find ways to reduce overhead without losing capability.
-2. **Update HANDOFF.md at CI project** — the CI project's HANDOFF may reference register/deregister endpoints that no longer exist.
+1. **Sprint 55 — Fix token/time display across frontend and backend** (approved plan, tickets not yet created):
+   - DWB-272: Hooks increment ticket.tokens_used and project overhead on token attribution (Barry). In hook_tracking.py, after `tracking.log_tokens()` calls in both `_handle_subagent_stop` and `handle_session_end`, also increment `ticket.tokens_used`. Same for project overhead fields.
+   - DWB-273: Enrich per_ticket tracking summary response with `title` and `assigned_agent_id` — TimeTokens breakdown needs these fields (Barry)
+   - DWB-274: Fix all frontend field name mismatches (Freddie). 6 root causes across 16 display points:
+     - `.time` → `.time_seconds` in 6 components (ProjectHeader, ProjectCard, CrossProjectSummary, TimeTokens, SprintProgress, EpicList)
+     - `.tokens_used` → `.tokens` and `.time_spent_seconds` → `.time_seconds` in TimeTokens per_ticket breakdown
+     - `.tokens` → `.total_tokens` in TokenAudit agent rows
+     - `.overhead_tokens` → sum of `.tl_overhead` + `.pm_overhead` in TokenAudit project rows
+   - DWB-275: Render OverheadTracker on ProjectPage or remove dead import (Freddie)
+   - Dependency: DWB-273 should complete before the TimeTokens part of DWB-274
+2. **Token efficiency** — investigate ways to lighten token usage when using the DWB system
+3. **Update HANDOFF.md at CI project** — may reference dead register/deregister endpoints
 
 ## Last Session (2026-04-17)
+
+### Sprint 53 — Doc Updates for Token Attribution Fix
+- Updated 6 doc files (ARCHITECTURE, playbooks, agent defs) to reflect expanded _resolve_ticket lookup chain (in_progress > todo > in_review > done within 5 min)
+- Single-ticket sprint (DWB-269)
+
+### Sprint 54 — Investigate Token/Time Display Gaps
+- Freddie audited all 16 frontend display points for tokens/time — found 6 field name mismatches and 1 backend data population gap
+- Barry audited backend data chain — hook_sessions have 120M tokens logged, but tracking.log_tokens() never increments ticket.tokens_used. Only 2 token_report events in tracking_log for worker sessions.
+- Root cause: two layers — (1) hooks don't write to ticket fields, (2) frontend reads wrong property names from API responses
+- DWB-270 (frontend audit) and DWB-271 (backend audit) both done
 
 ### Sprint 52 — Token Attribution Fix
 - Fixed `_resolve_ticket()` in hook_tracking.py — was only checking `in_progress` and `todo`, now checks `in_review` and `done` (within 5 min)

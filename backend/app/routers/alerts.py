@@ -13,21 +13,24 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.alert import AlertSeverity, AlertStatus
-from app.schemas.alert import AlertCreate, AlertRead, AlertUpdate, DismissAllRequest, DismissAllResponse, RunTestsRequest, SendToTeamResponse
+from app.schemas.alert import AlertCreate, AlertRead, AlertSlimRead, AlertUpdate, DismissAllRequest, DismissAllResponse, RunTestsRequest, SendToTeamResponse
 from app.services import alert as svc
 from app.services import project as project_svc
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 
-@router.get("", response_model=list[AlertRead])
+@router.get("")
 def list_alerts(
     project_id: int | None = Query(None),
     severity: AlertSeverity | None = Query(None),
     status: AlertStatus | None = Query(None),
+    fields: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.list_alerts(db, project_id=project_id, severity=severity, status=status)
+    alerts = svc.list_alerts(db, project_id=project_id, severity=severity, status=status)
+    schema = AlertSlimRead if fields == "slim" else AlertRead
+    return [schema.model_validate(a) for a in alerts]
 
 
 @router.post("/send-to-team", response_model=SendToTeamResponse)

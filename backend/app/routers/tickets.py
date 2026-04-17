@@ -14,13 +14,13 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.ticket import TicketStatus, TicketType
 from app.schemas.status_history import StatusHistoryRead
-from app.schemas.ticket import StaleCheckInput, StaleCheckResponse, TicketCreate, TicketRead, TicketTokenIncrement, TicketUpdate
+from app.schemas.ticket import StaleCheckInput, StaleCheckResponse, TicketCreate, TicketRead, TicketSlimRead, TicketTokenIncrement, TicketUpdate
 from app.services import ticket as svc
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 
-@router.get("", response_model=list[TicketRead])
+@router.get("")
 def list_tickets(
     project_id: int | None = Query(None),
     sprint_id: int | None = Query(None),
@@ -28,9 +28,10 @@ def list_tickets(
     assigned_agent_id: int | None = Query(None),
     status: TicketStatus | None = Query(None),
     ticket_type: TicketType | None = Query(None),
+    fields: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.list_tickets(
+    tickets = svc.list_tickets(
         db,
         project_id=project_id,
         sprint_id=sprint_id,
@@ -39,6 +40,8 @@ def list_tickets(
         status=status,
         ticket_type=ticket_type,
     )
+    schema = TicketSlimRead if fields == "slim" else TicketRead
+    return [schema.model_validate(t) for t in tickets]
 
 
 @router.post("/stale-check", response_model=StaleCheckResponse)

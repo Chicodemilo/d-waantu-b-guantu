@@ -35,6 +35,18 @@ class SprintUpdate(BaseModel):
     end_date: date | None = None
 
 
+class SprintSlimRead(BaseModel):
+    """Slim schema for ?fields=slim list responses."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    sprint_number: int
+    name: str
+    status: SprintStatus
+    goal: str | None
+    project_id: int
+
+
 class SprintRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -11,15 +11,6 @@ D'Waantu B'Guantu is the human user's private project management system. It is N
 - **Never reference DWB ticket IDs** (e.g., "DWB-234") outside of DWB itself
 - **Jira is the external system** — if a project has Jira integration, Jira tickets are what stakeholders see. DWB tracks the internal agent workflow behind those tickets.
 
-## Ticket Status Drives the Dashboard
-
-The Team Status panel on the project page is **driven by ticket status**. An agent shows as "working" if they have an `in_progress` ticket. This means:
-
-- **Moving tickets to `in_progress` promptly is critical** — if a worker starts but the ticket isn't moved, the dashboard won't reflect their activity
-- **Moving tickets OUT of `in_progress` when done is equally critical** — stale in_progress tickets make the dashboard show phantom workers
-- **Only one `in_progress` ticket per agent matters** — the most recently updated one is displayed
-- This is deterministic — no manual registration or hooks needed. Keep ticket statuses accurate and the dashboard stays accurate.
-
 ## On Startup
 
 Read these files at session start:
@@ -278,34 +269,12 @@ POST /api/alerts
 
 ## 6. Tracking — AUTOMATIC
 
-**Time and token tracking is fully passive.** You do NOT need to manually update overhead or token counts. Claude Code lifecycle hooks capture everything automatically.
+Time and token tracking is fully passive via Claude Code lifecycle hooks. See CLAUDE.md for how attribution works.
 
-### How it works
-When any Claude Code session starts or ends, hooks fire and:
-1. Parse the JSONL transcript for token counts (input + output + cache)
-2. Log start/end time as `tracking_log` events
-3. Attribute to the correct agent and ticket (or project overhead for TL/PM)
+- `GET /api/tracking/summary?project_id=1` — per-ticket, per-agent, per-sprint rollups
+- `GET /api/hooks/sessions?project_id=1` — active/completed hook sessions
 
-- **PM sessions** → logged as overhead time + tokens on the project
-- **TL sessions** → same, overhead
-- **Worker sessions** → logged on their in_progress ticket
-
-### Checking the data
-```
-GET /api/tracking/summary?project_id=1
-```
-Returns per-ticket, per-agent, per-sprint, and project-level rollups including overhead.
-
-```
-GET /api/hooks/sessions?project_id=1
-```
-Shows active and completed hook sessions — who worked, for how long, how many tokens.
-
-### Agent efficiency
 Review the tracking summary for outliers. If one ticket consumed 10x the tokens of similar tickets, investigate via activity logs and flag to the TL.
-
-### Hook-based tracking
-Token attribution is handled passively by Claude Code lifecycle hooks (`SessionStart`, `SessionEnd`, `SubagentStop`). These POST to `/api/hooks/session-start` and `/api/hooks/session-end` automatically. Active sessions are visible on the project page under Live Sessions.
 
 ---
 
@@ -436,19 +405,3 @@ PATCH /api/tickets/{id}
 7. Raise alerts for anything that needs attention
 8. Review tracking summary: `GET /api/tracking/summary?project_id=1` (time + tokens captured automatically via hooks)
 
----
-
-## Session Startup
-
-At the start of every session, the PM should:
-
-1. Read `HANDOFF.md` at the project repo root — session continuity notes
-2. Read `TEAM.md` — current team roster
-3. Load instructions:
-   - `GET /api/instructions?scope=agent&agent_id={pm_agent_id}` — PM-specific rules
-   - `GET /api/instructions?scope=global` — global rules
-   - `GET /api/instructions?scope=project&project_id={id}` — project rules
-
-## HANDOFF.md
-
-The PM shares responsibility with the TL for keeping `HANDOFF.md` current. At session end, verify it reflects: current sprint state, any new decisions, gotchas discovered, and what happened this session.

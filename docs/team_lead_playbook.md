@@ -36,7 +36,8 @@ Read these files at session start:
 2. Your project rules (`.claude/project_rules_team_lead.md`)
 3. `HANDOFF.md` — session continuity
 4. `TEAM.md` — current roster
-5. `ARCHITECTURE.md` and `README.md` — project context
+
+Read `ARCHITECTURE.md` and `README.md` only when doing cross-cutting work that spans multiple systems.
 
 ---
 
@@ -247,28 +248,9 @@ Set `assigned_agent_id` when creating or updating a ticket. An unassigned ticket
 
 ### Tracking effort — AUTOMATIC
 
-**You do NOT need to manually track tokens or time.** The system captures both passively via Claude Code lifecycle hooks.
-
-When any Claude Code session starts or ends (yours, teammates, subagents), hooks automatically:
-1. Log start/end time via `tracking_log` events
-2. Parse the JSONL transcript for token usage
-3. Attribute to the agent's active ticket — in_progress, in_review, or recently done (workers) or project overhead (TL/PM)
-
-This means:
-- **Your TL sessions** → logged as overhead time + tokens on the project
-- **Worker sessions** → logged as time + tokens on their active ticket
-- **PM sessions** → logged as overhead time + tokens on the project
-
-To check the current tracking state:
-```
-GET /api/tracking/summary?project_id=1
-```
-Returns per-ticket, per-agent, per-sprint, and project-level rollups.
-
-To see active/recent hook sessions:
-```
-GET /api/hooks/sessions?project_id=1
-```
+Time and token tracking is fully passive via Claude Code lifecycle hooks. See CLAUDE.md for how attribution works. Check current state:
+- `GET /api/tracking/summary?project_id=1` — per-ticket, per-agent, per-sprint rollups
+- `GET /api/hooks/sessions?project_id=1` — active/recent hook sessions
 
 ### Querying tickets
 - By project: `GET /api/tickets?project_id=1`
@@ -279,52 +261,7 @@ GET /api/hooks/sessions?project_id=1
 
 ---
 
-## 6. Instructions — Behavioral Rules
-
-Instructions tell agents how to behave. Three scopes:
-
-### Global (applies to all agents on all projects)
-```
-POST /api/instructions
-{
-  "scope": "global",
-  "title": "Commit message style",
-  "body": "Use conventional commits. No AI attribution."
-}
-```
-
-### Project-scoped
-```
-POST /api/instructions
-{
-  "scope": "project",
-  "project_id": 1,
-  "title": "CSS rules",
-  "body": "Plain CSS only. No Tailwind."
-}
-```
-
-### Agent-scoped
-```
-POST /api/instructions
-{
-  "scope": "agent",
-  "agent_id": 3,
-  "title": "Backend standards",
-  "body": "Follow existing patterns in app/models, app/routers, etc."
-}
-```
-
-List and filter: `GET /api/instructions?scope=project&project_id=1`
-
-### Sync with Claude memory
-The system can compare instructions against Claude's memory files:
-- `GET /api/instructions/sync-check` — see what's matched, memory-only, or db-only
-- `POST /api/instructions/sync` — import unmatched memory entries as global instructions
-
----
-
-## 7. Comments
+## 6. Comments
 
 Add context to tickets. Use for status updates, review notes, questions.
 
@@ -502,14 +439,3 @@ The TL should regularly check:
 7. Log activity for significant decisions
 8. Check tracking summary: `GET /api/tracking/summary?project_id=1` (time + tokens captured automatically via hooks)
 
----
-
-## Note: Auto-Loading Instructions
-
-Consider loading agent-scoped instructions automatically when a TL agent starts a session. A startup script could:
-
-1. `GET /api/instructions?scope=agent&agent_id={tl_agent_id}` — fetch TL-specific rules
-2. `GET /api/instructions?scope=global` — fetch global rules
-3. `GET /api/instructions?scope=project&project_id={id}` — fetch project rules
-
-Inject these into the agent's system prompt or context. This ensures every session starts with the full rule set without the TL having to remember to check.

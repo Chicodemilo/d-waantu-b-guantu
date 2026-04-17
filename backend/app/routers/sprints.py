@@ -13,19 +13,22 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.sprint import SprintStatus
-from app.schemas.sprint import SprintCreate, SprintRead, SprintUpdate
+from app.schemas.sprint import SprintCreate, SprintRead, SprintSlimRead, SprintUpdate
 from app.services import sprint as svc
 
 router = APIRouter(prefix="/api/sprints", tags=["sprints"])
 
 
-@router.get("", response_model=list[SprintRead])
+@router.get("")
 def list_sprints(
     project_id: int | None = Query(None),
     status: SprintStatus | None = Query(None),
+    fields: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.list_sprints(db, project_id=project_id, status=status)
+    sprints = svc.list_sprints(db, project_id=project_id, status=status)
+    schema = SprintSlimRead if fields == "slim" else SprintRead
+    return [schema.model_validate(s) for s in sprints]
 
 
 @router.get("/{sprint_id}", response_model=SprintRead)

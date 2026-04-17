@@ -14,13 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.test_result import TestResult
-from app.schemas.test_result import TestResultCreate, TestResultRead
+from app.schemas.test_result import TestResultCreate, TestResultListRead, TestResultRead
 from app.services import test_result as svc
 
 router = APIRouter(prefix="/api/test-results", tags=["test-results"])
 
 
-@router.get("", response_model=list[TestResultRead])
+@router.get("", response_model=list[TestResultListRead])
 def list_test_results(
     project_id: int | None = Query(None),
     suite: str | None = Query(None),

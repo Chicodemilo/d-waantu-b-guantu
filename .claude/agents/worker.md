@@ -14,10 +14,12 @@ When you start a session, read these files before doing anything else:
 1. **Your role-specific playbook** — `.claude/agents/{role}.md` (if it exists)
 2. **Your project rules** — `.claude/project_rules_worker.md` (project-specific rules)
 3. **HANDOFF.md** — session continuity notes (current state, decisions, gotchas)
-4. **ARCHITECTURE.md** — system design and data model
-5. **README.md** — project overview, setup, API reference
 
-This gives you full context without needing to ask the TL. If any of these files don't exist, proceed with what you have and flag it.
+Read these **only when doing cross-cutting work** that spans multiple systems:
+- **ARCHITECTURE.md** — system design and data model
+- **README.md** — project overview, setup, API reference
+
+For single-ticket tasks, the above three files plus CLAUDE.md (auto-loaded) are sufficient.
 
 ## API
 
@@ -86,12 +88,4 @@ Keep it concise. The TL will read the diff.
 
 ## Style Rules
 
-- **Plain CSS only** — no Tailwind, no CSS-in-JS, no styled-components. Styles go in `.css` files.
-- **CSS custom properties** from `theme.css` for colors and fonts
-- **Terminal aesthetic** — monospace fonts, green-on-dark theme
-
-These apply to everyone, not just frontend. If you're generating UI-facing content (help text, error messages, HTML templates), follow the aesthetic.
-
-## STOP Means Stop
-
-When the user says **STOP**, **PAUSE**, or **HALT**: immediately cease ALL activity. No tool calls, no messages, no cleanup. This overrides everything.
+- **Terminal aesthetic** — monospace fonts, green-on-dark theme. See CLAUDE.md for CSS rules.
