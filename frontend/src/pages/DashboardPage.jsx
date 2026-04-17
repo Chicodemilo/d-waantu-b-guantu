@@ -1,23 +1,21 @@
 // Path: src/pages/DashboardPage.jsx
 // File: DashboardPage.jsx
 // Created: 2026-03-29
-// Purpose: Main dashboard showing project cards, alerts, token usage summary, and agent list
+// Purpose: Main dashboard showing project cards, alerts table (read-only), token usage summary, and agent list
 // Caller: App.jsx (route: /)
-// Callees: react, react-router-dom, ../store/useStore, ../components/dashboard/CrossProjectSummary, ../components/dashboard/ProjectCard, ../components/dashboard/TokenOverview, ../components/common/AlertBanner, ../components/agents/AgentList, ../components/dashboard/TokenAudit, ../api/alerts, ../api/projects, ../styles/dashboard.css
+// Callees: react, react-router-dom (useNavigate, Link), ../store/useStore, ../components/dashboard/CrossProjectSummary, ../components/dashboard/ProjectCard, ../components/dashboard/TokenOverview, ../components/agents/AgentList, ../components/dashboard/TokenAudit, ../api/projects, ../styles/dashboard.css
 // Data In: Projects, alerts, and agents from Zustand store
 // Data Out: Default export DashboardPage component
-// Last Modified: 2026-03-30
+// Last Modified: 2026-04-17
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import CrossProjectSummary from '../components/dashboard/CrossProjectSummary';
 import ProjectCard from '../components/dashboard/ProjectCard';
 import TimeTokens from '../components/dashboard/TimeTokens';
-import AlertBanner from '../components/common/AlertBanner';
 import AgentList from '../components/agents/AgentList';
 import TokenAudit from '../components/dashboard/TokenAudit';
-import { dismissAllAlerts, getAlerts } from '../api/alerts';
 import { createProjectFromRepo, seedDemoProject } from '../api/projects';
 import '../styles/dashboard.css';
 
@@ -25,8 +23,7 @@ function DashboardPage() {
   const navigate = useNavigate();
   const projects = useStore((s) => s.projects).filter((p) => p.status === 'active');
   const openAlerts = useStore((s) => s.getOpenAlerts());
-  const setAlerts = useStore((s) => s.setAlerts);
-  const [dismissing, setDismissing] = useState(false);
+  const getProject = useStore((s) => s.getProject);
   const [addExpanded, setAddExpanded] = useState(false);
   const [repoPath, setRepoPath] = useState('');
   const [adding, setAdding] = useState(false);
@@ -44,19 +41,6 @@ function DashboardPage() {
     }
   };
 
-  const handleDismissAll = async () => {
-    setDismissing(true);
-    try {
-      await dismissAllAlerts();
-      const alerts = await getAlerts();
-      setAlerts(alerts);
-    } catch {
-      // next poll will refresh
-    } finally {
-      setDismissing(false);
-    }
-  };
-
   return (
     <div className="dashboard">
       <div>
@@ -66,23 +50,34 @@ function DashboardPage() {
 
       {openAlerts.length > 0 && (
         <div>
-          <div className="dashboard__section-title">
-            Open Alerts
-            <span className="tooltip-trigger">?<span className="tooltip-content"><strong>Alerts</strong> are flags raised by agents that need human attention. Dismiss to acknowledge, or reply and ask questions in your CLI.<ul className="tooltip-list"><li><strong>Blue</strong> — info (heads up)</li><li><strong>Yellow</strong> — warning (needs attention)</li><li><strong>Red</strong> — critical (urgent action required)</li></ul></span></span>
-            <button
-              className="sync-btn"
-              onClick={handleDismissAll}
-              disabled={dismissing}
-              style={{ marginLeft: '16px' }}
-            >
-              {dismissing ? '$ dismissing...' : '$ dismiss all'}
-            </button>
-          </div>
-          <div className="alerts-container">
-            {[...openAlerts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).map((alert) => (
-              <AlertBanner key={alert.id} alert={alert} />
-            ))}
-          </div>
+          <div className="dashboard__section-title">Open Alerts</div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Severity</th>
+                <th>Title</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...openAlerts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).map((alert) => {
+                const proj = getProject(alert.project_id);
+                return (
+                  <tr key={alert.id}>
+                    <td>
+                      {proj ? (
+                        <Link to={`/projects/${proj.id}`}>{proj.prefix}</Link>
+                      ) : '\u2014'}
+                    </td>
+                    <td>{alert.severity}</td>
+                    <td>{alert.title}</td>
+                    <td>{alert.created_at ? new Date(alert.created_at).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '\u2014'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

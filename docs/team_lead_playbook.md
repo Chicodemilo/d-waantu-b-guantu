@@ -383,12 +383,20 @@ Checking open alerts is a core TL duty — not a scheduled task, but something w
 
 ### When to check
 
-Check `GET /api/alerts?project_id={pid}&status=open` at these natural breakpoints:
+Check `GET /api/alerts?project_id={pid}&status=open` **and** check if `.claude/ALERTS_PENDING.md` exists at these natural breakpoints:
 
 1. **After accepting or closing a ticket** — you just freed up capacity, check if anything needs attention
 2. **When a teammate goes idle** with no immediate work to assign — use the downtime to scan for problems
 3. **At sprint transitions** — before opening or closing a sprint, clear the alert queue
 4. **When the human sends a new message** — check before responding so you have full situational awareness
+
+### ALERTS_PENDING.md (human-flagged alerts)
+
+If `.claude/ALERTS_PENDING.md` exists at the project repo root, **read it immediately — it takes priority over the API alert queue.** This file is written by the human via the "Send Alerts to Team" button on the project page. It contains specific alerts the human wants you to act on now.
+
+- Read the file and act on each listed alert
+- The file auto-deletes when all alerts in it are resolved or dismissed
+- If the file exists, handle its contents before moving to the API alert queue
 
 ### How to triage
 

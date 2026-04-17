@@ -6,14 +6,14 @@
 // Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/OverheadTracker, ../components/project/ActivityFeed, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-04-16
+// Last Modified: 2026-04-17
 
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
 import ProjectHeader from '../components/project/ProjectHeader';
 import { updateProject, deleteProject, disableJira } from '../api/projects';
-import { dismissAllAlerts, getAlerts } from '../api/alerts';
+import { dismissAllAlerts, getAlerts, sendAlertsToTeam } from '../api/alerts';
 import SprintProgress from '../components/project/SprintProgress';
 import OverheadTracker from '../components/project/OverheadTracker';
 import TimeTokens from '../components/dashboard/TimeTokens';
@@ -40,6 +40,8 @@ function ProjectPage() {
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState({});
   const [dismissing, setDismissing] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState(null);
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [jiraKeyInput, setJiraKeyInput] = useState(''); // unused but kept for state cleanup
   const [jiraSaving, setJiraSaving] = useState(false);
@@ -83,6 +85,19 @@ function ProjectPage() {
       // next poll will refresh
     } finally {
       setDismissing(false);
+    }
+  };
+
+  const handleSendToTeam = async () => {
+    setSending(true);
+    setSendResult(null);
+    try {
+      await sendAlertsToTeam(id);
+      setSendResult('done');
+    } catch {
+      setSendResult('error');
+    } finally {
+      setSending(false);
     }
   };
 
@@ -334,6 +349,16 @@ function ProjectPage() {
             >
               {dismissing ? '$ dismissing...' : '$ dismiss all'}
             </button>
+            <button
+              className="sync-btn"
+              onClick={handleSendToTeam}
+              disabled={sending}
+              style={{ marginLeft: '8px' }}
+            >
+              {sending ? '$ sending...' : '$ send to team'}
+            </button>
+            {sendResult === 'done' && <span className="sync-btn__status">{'\u2713'} sent</span>}
+            {sendResult === 'error' && <span className="sync-btn__status" style={{ color: 'var(--red)' }}>send failed</span>}
           </div>
           <div className="alerts-container">
             {[...alerts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).map((alert) => (

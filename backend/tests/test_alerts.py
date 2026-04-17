@@ -98,7 +98,7 @@ class TestGetAlert:
         expected_keys = {
             "id", "project_id", "raised_by_agent_id", "ticket_id",
             "title", "body", "severity", "status",
-            "created_at", "resolved_at",
+            "created_at", "resolved_at", "user_sent_at",
         }
         assert set(data.keys()) == expected_keys
 

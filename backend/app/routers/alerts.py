@@ -1,7 +1,7 @@
 # Path: app/routers/alerts.py
 # File: alerts.py
 # Created: 2026-03-29
-# Purpose: Alert HTTP endpoints — CRUD, dismiss-all, run-tests
+# Purpose: Alert HTTP endpoints — CRUD, dismiss-all, send-to-team, run-tests
 # Caller: app/main.py
 # Callees: app/services/alert.py
 # Data In: HTTP requests
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.alert import AlertSeverity, AlertStatus
-from app.schemas.alert import AlertCreate, AlertRead, AlertUpdate, DismissAllRequest, DismissAllResponse, RunTestsRequest
+from app.schemas.alert import AlertCreate, AlertRead, AlertUpdate, DismissAllRequest, DismissAllResponse, RunTestsRequest, SendToTeamResponse
 from app.services import alert as svc
 from app.services import project as project_svc
 
@@ -28,6 +28,17 @@ def list_alerts(
     db: Session = Depends(get_db),
 ):
     return svc.list_alerts(db, project_id=project_id, severity=severity, status=status)
+
+
+@router.post("/send-to-team", response_model=SendToTeamResponse)
+def send_to_team(project_id: int = Query(...), db: Session = Depends(get_db)):
+    """Write open alerts to .claude/ALERTS_PENDING.md in the project repo."""
+    project = project_svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not project.repo_path:
+        raise HTTPException(400, "Project has no repo_path configured")
+    return svc.send_to_team(db, project)
 
 
 @router.post("/dismiss-all", response_model=DismissAllResponse)

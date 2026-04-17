@@ -5,7 +5,7 @@
 # Caller: app/routers/alerts.py
 # Callees: pydantic
 # Data In: JSON request body
-# Data Out: AlertCreate, AlertUpdate, AlertRead
+# Data Out: AlertCreate, AlertUpdate, AlertRead, SendToTeamResponse
 # Last Modified: 2026-03-29
 
 from datetime import datetime
@@ -42,6 +42,11 @@ class AlertUpdate(BaseModel):
     resolved_at: datetime | None = None
 
 
+class SendToTeamResponse(BaseModel):
+    file_written: str
+    alerts_count: int
+
+
 class AlertRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -55,3 +60,4 @@ class AlertRead(BaseModel):
     status: AlertStatus
     created_at: datetime
     resolved_at: datetime | None
+    user_sent_at: datetime | None

@@ -73,7 +73,7 @@ POST /api/projects
 
 ## Alert Triage
 
-Checking open alerts is a core TL duty. Check `GET /api/alerts?project_id={pid}&status=open` at natural breakpoints: after accepting/closing a ticket, when a teammate goes idle, at sprint transitions, and when the human sends a new message. Triage: handle simple alerts directly, delegate investigation to the PM, escalate critical issues to the human. See `docs/team_lead_playbook.md` section 8b for full procedures.
+Checking open alerts is a core TL duty. Check `GET /api/alerts?project_id={pid}&status=open` **and** check if `.claude/ALERTS_PENDING.md` exists at natural breakpoints: after accepting/closing a ticket, when a teammate goes idle, at sprint transitions, and when the human sends a new message. If `ALERTS_PENDING.md` exists, read it immediately and act on its contents first — it's written by the human via "Send Alerts to Team" and takes priority. It auto-deletes when all alerts are resolved/dismissed. Triage: handle simple alerts directly, delegate investigation to the PM, escalate critical issues to the human. See `docs/team_lead_playbook.md` section 8b for full procedures.
 
 ## Sprint & Ticket Planning
 

@@ -54,6 +54,7 @@ class Alert(Base):
         DateTime, nullable=False, server_default=func.now()
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    user_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="alerts")  # noqa: F821
