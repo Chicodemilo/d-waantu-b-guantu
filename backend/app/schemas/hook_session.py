@@ -1,11 +1,11 @@
 # Path: app/schemas/hook_session.py
 # File: hook_session.py
 # Created: 2026-04-09
-# Purpose: Pydantic schemas for hook session endpoints and teammate registration
+# Purpose: Pydantic schemas for hook session endpoints
 # Caller: app/routers/hooks.py
 # Callees: pydantic
-# Data In: JSON request body from Claude Code hooks and teammate registration
-# Data Out: HookEventInput, RegisterAgentInput, DeregisterAgentInput, HookSessionRead
+# Data In: JSON request body from Claude Code hooks
+# Data Out: HookEventInput, HookSessionRead
 # Last Modified: 2026-04-16
 
 from datetime import datetime
@@ -26,19 +26,6 @@ class HookEventInput(BaseModel):
     cwd: str | None = None
     agent_name: str | None = None
     hook_event: str | None = None
-
-
-class RegisterAgentInput(BaseModel):
-    """Register a teammate as an active hook session."""
-    project_id: int
-    agent_id: int
-    agent_name: str
-
-
-class DeregisterAgentInput(BaseModel):
-    """Deregister (complete) a teammate's active hook session."""
-    project_id: int
-    agent_id: int
 
 
 class HookSessionRead(BaseModel):
