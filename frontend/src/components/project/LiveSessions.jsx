@@ -1,16 +1,17 @@
 // Path: src/components/project/LiveSessions.jsx
 // File: LiveSessions.jsx
 // Created: 2026-04-09
-// Purpose: Team status panel — shows all project agents, working status driven by in_progress tickets, elapsed time since ticket update
+// Purpose: Team status panel — shows all project agents, working status driven by in_progress tickets, elapsed time since ticket update, stale ticket detection at 10-min intervals
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect), react-router-dom (Link), store/useStore, styles/hooks.css
+// Callees: react (useState, useEffect, useRef), react-router-dom (Link), store/useStore, config (API_BASE_URL), styles/hooks.css
 // Data In: projectId prop
 // Data Out: Default export LiveSessions component
-// Last Modified: 2026-04-16
+// Last Modified: 2026-04-17
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
+import { API_BASE_URL } from '../../config';
 import '../../styles/hooks.css';
 
 function formatElapsed(timestamp) {
@@ -29,15 +30,60 @@ function LiveSessions({ projectId }) {
   const agents = useStore((s) => s.getAgentsByProject(projectId));
   const tickets = useStore((s) => s.tickets);
   const [, setTick] = useState(0);
+  const staleAlertedRef = useRef({});
 
   const projectTickets = tickets.filter(
     (t) => t.project_id === Number(projectId) && t.status === 'in_progress'
   );
   const hasWorking = projectTickets.length > 0;
 
+  // Refs for stale closure safety inside setInterval
+  const projectTicketsRef = useRef(projectTickets);
+  projectTicketsRef.current = projectTickets;
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+
   useEffect(() => {
     if (!hasWorking) return;
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    const id = setInterval(() => {
+      setTick((t) => t + 1);
+
+      // Stale ticket detection
+      const currentTickets = projectTicketsRef.current;
+      const currentAgents = agentsRef.current;
+      const currentIds = new Set(currentTickets.map((t) => t.id));
+
+      // Clean up entries for tickets no longer in_progress
+      for (const ticketId of Object.keys(staleAlertedRef.current)) {
+        if (!currentIds.has(Number(ticketId))) {
+          delete staleAlertedRef.current[ticketId];
+        }
+      }
+
+      // Check each in_progress ticket for stale thresholds (10, 20, 30...)
+      currentTickets.forEach((ticket) => {
+        if (!ticket.updated_at) return;
+        const ts = ticket.updated_at.endsWith('Z') ? ticket.updated_at : ticket.updated_at + 'Z';
+        const elapsedMinutes = (Date.now() - new Date(ts).getTime()) / 60000;
+        const currentThreshold = Math.floor(elapsedMinutes / 10) * 10;
+        const lastAlerted = staleAlertedRef.current[ticket.id] || 0;
+
+        if (currentThreshold >= 10 && currentThreshold > lastAlerted) {
+          staleAlertedRef.current[ticket.id] = currentThreshold;
+          const agent = currentAgents.find((a) => a.id === ticket.assigned_agent_id);
+          fetch(`${API_BASE_URL}/tickets/stale-check`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ticket_id: ticket.id,
+              project_id: ticket.project_id,
+              minutes_stale: currentThreshold,
+              agent_name: agent ? agent.name : 'unknown',
+            }),
+          }).catch(() => {});
+        }
+      });
+    }, 1000);
     return () => clearInterval(id);
   }, [hasWorking]);
 

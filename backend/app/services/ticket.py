@@ -269,6 +269,54 @@ def get_ticket_history(db: Session, ticket_id: int) -> list[StatusHistory]:
     return list(db.scalars(stmt).all())
 
 
+def stale_check(db: Session, ticket: Ticket, project_id: int, minutes_stale: int, agent_name: str) -> dict:
+    """Check for existing stale alert and create one if none exists. Returns {alert_created, alert_id}."""
+    # Dedup: look for an open/acknowledged alert matching this ticket + threshold
+    existing = db.scalars(
+        select(Alert)
+        .where(Alert.ticket_id == ticket.id)
+        .where(Alert.status.in_([AlertStatus.open, AlertStatus.acknowledged]))
+        .where(Alert.title.contains(ticket.ticket_key))
+        .where(Alert.title.contains(f"{minutes_stale}m"))
+    ).first()
+    if existing:
+        return {"alert_created": False, "alert_id": None}
+
+    # Resolve who raises the alert: PM for the project, fallback to ticket's assigned agent
+    raiser_id = db.scalars(
+        select(Agent.id)
+        .join(ProjectAgent, ProjectAgent.agent_id == Agent.id)
+        .where(ProjectAgent.project_id == project_id)
+        .where(Agent.role == "pm")
+        .limit(1)
+    ).first()
+    if not raiser_id:
+        raiser_id = ticket.assigned_agent_id
+    if not raiser_id:
+        # Last resort: any agent on the project
+        raiser_id = db.scalars(
+            select(ProjectAgent.agent_id)
+            .where(ProjectAgent.project_id == project_id)
+            .limit(1)
+        ).first()
+    if not raiser_id:
+        raise HTTPException(400, "No agent found for this project to raise the alert")
+
+    alert = Alert(
+        project_id=project_id,
+        raised_by_agent_id=raiser_id,
+        ticket_id=ticket.id,
+        title=f"{ticket.ticket_key} stale — in_progress for {minutes_stale}m",
+        body=f"Assigned to {agent_name}. Ticket has been in_progress for {minutes_stale} minutes with no updated_at change.",
+        severity=AlertSeverity.warning,
+        status=AlertStatus.open,
+    )
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+    return {"alert_created": True, "alert_id": alert.id}
+
+
 def delete_ticket(db: Session, ticket: Ticket) -> None:
     db.delete(ticket)
     db.commit()

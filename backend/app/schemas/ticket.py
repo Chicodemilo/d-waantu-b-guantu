@@ -5,7 +5,7 @@
 # Caller: app/routers/tickets.py
 # Callees: pydantic
 # Data In: JSON request body
-# Data Out: TicketCreate, TicketUpdate, TicketRead, TicketTokenIncrement
+# Data Out: TicketCreate, TicketUpdate, TicketRead, TicketTokenIncrement, StaleCheckInput, StaleCheckResponse
 # Last Modified: 2026-03-29
 
 from datetime import datetime
@@ -46,6 +46,18 @@ class TicketTokenIncrement(BaseModel):
     tokens_used: int = 0
     time_spent_seconds: int = 0
     source: str | None = None
+
+
+class StaleCheckInput(BaseModel):
+    ticket_id: int
+    project_id: int
+    minutes_stale: int
+    agent_name: str
+
+
+class StaleCheckResponse(BaseModel):
+    alert_created: bool
+    alert_id: int | None = None
 
 
 class TicketRead(BaseModel):

@@ -80,5 +80,6 @@ class ProjectRead(BaseModel):
     force_architecture_md: bool
     force_team_md: bool
     force_handoff_md: bool
+    playbooks_deployed_at: datetime | None
     created_at: datetime
     updated_at: datetime

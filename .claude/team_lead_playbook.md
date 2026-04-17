@@ -377,6 +377,47 @@ PATCH /api/alerts/{id}
 
 ---
 
+## 8b. Alert Triage at Natural Cadence Points
+
+Checking open alerts is a core TL duty — not a scheduled task, but something woven into your natural workflow rhythm.
+
+### When to check
+
+Check `GET /api/alerts?project_id={pid}&status=open` at these natural breakpoints:
+
+1. **After accepting or closing a ticket** — you just freed up capacity, check if anything needs attention
+2. **When a teammate goes idle** with no immediate work to assign — use the downtime to scan for problems
+3. **At sprint transitions** — before opening or closing a sprint, clear the alert queue
+4. **When the human sends a new message** — check before responding so you have full situational awareness
+
+### How to triage
+
+| Alert Type | Examples | Action |
+|------------|----------|--------|
+| Simple / self-service | Stale ticket (agent confirmed dead), zero-token warning on a no-op ticket | Handle directly — move ticket, dismiss alert, leave a comment |
+| Needs investigation | Stale ticket (unclear if agent is alive), unexpected failure record, gate failure | Delegate to PM — ask Pam to investigate and report back |
+| Critical / human decision | DB errors, agent stuck in loop, scope questions, compliance issues | Escalate to the human via alert + direct message |
+
+### What alert types surface here
+
+This catches everything the system and PM raise:
+- **Stale ticket alerts** — in_progress too long with no activity
+- **Zero-token warnings** — ticket closed with 0 tokens (hook misconfiguration or no-op)
+- **Failure record stubs** — rework detected, PM needs to classify
+- **Gate failures** — missing docs, no test run
+- **PM-raised warnings** — blockers, scope questions, agent issues
+- **Sprint health flags** — burndown off track, pileup in one status
+
+### After triaging
+
+- **Acknowledge** alerts you've seen and are handling: `PATCH /api/alerts/{id} { "status": "acknowledged" }`
+- **Resolve** alerts that are dealt with: `PATCH /api/alerts/{id} { "status": "resolved" }`
+- **Dismiss all** if the queue is stale after a sprint close: `POST /api/alerts/dismiss-all`
+
+Don't let open alerts accumulate — an ignored alert queue trains everyone to ignore alerts.
+
+---
+
 ## 9. Activity Log
 
 Log significant events for audit trail.

@@ -9,6 +9,7 @@
 # Last Modified: 2026-04-16
 
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -97,5 +98,8 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
         if not dst.exists():
             dst.write_text(default_content, encoding="utf-8")
             deployed.append(f"{filename} (created)")
+
+    project.playbooks_deployed_at = datetime.now(timezone.utc)
+    db.commit()
 
     return DeployResult(deployed=deployed, target_dir=str(target_dir))

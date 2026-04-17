@@ -120,12 +120,18 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
 def handle_session_end(db: Session, hook_data: dict) -> HookSession:
     """Handle a SessionEnd or SubagentStop hook event.
 
-    1. Find or create HookSession
-    2. Parse transcript for tokens and timestamps
-    3. Resolve agent and work context
-    4. Log stop + tokens via tracking.py
-    5. Update session: completed, total_tokens, end_time
+    SubagentStop events are detected and routed to _handle_subagent_stop()
+    which creates a separate HookSession keyed on agent_id, NOT session_id.
+    This avoids colliding with the parent TL session.
+
+    SessionEnd events follow the existing flow unchanged.
     """
+    # Detect SubagentStop — route to dedicated handler
+    if hook_data.get("hook_event_name") == "SubagentStop" or (
+        hook_data.get("agent_type") and hook_data.get("agent_id")
+    ):
+        return _handle_subagent_stop(db, hook_data)
+
     session_id = hook_data.get("session_id", "")
     if not session_id:
         raise ValueError("session_id is required")
@@ -380,6 +386,117 @@ def get_session(db: Session, session_id: str) -> HookSession | None:
     return db.scalar(
         select(HookSession).where(HookSession.session_id == session_id)
     )
+
+
+def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
+    """Handle a SubagentStop hook event — creates a separate teammate session.
+
+    SubagentStop sends agent_id (unique per subagent), agent_type (teammate
+    role/name), and agent_transcript_path (subagent-specific transcript).
+    The session_id in SubagentStop is the PARENT session — we must NOT
+    look it up or modify it.
+    """
+    subagent_id = hook_data.get("agent_id", "")
+    if not subagent_id:
+        raise ValueError("agent_id is required for SubagentStop")
+
+    # Idempotent: check if we already processed this subagent
+    existing = db.scalar(
+        select(HookSession).where(HookSession.session_id == subagent_id)
+    )
+    if existing and existing.status == HookSessionStatus.completed:
+        return existing
+
+    # Parse the subagent's transcript (NOT the parent's)
+    agent_transcript_path = hook_data.get("agent_transcript_path")
+    token_total = 0
+    token_breakdown = None
+    end_time = datetime.now(UTC)
+
+    if agent_transcript_path:
+        parsed = parse_transcript(agent_transcript_path)
+        token_total = parsed["total_tokens"]
+        token_breakdown = parsed["breakdown"]
+        if parsed.get("end_time"):
+            end_time = parsed["end_time"]
+
+    # Resolve project from cwd
+    cwd = hook_data.get("cwd", "")
+    project = _resolve_project(db, cwd)
+    if not project:
+        raise ValueError(f"No project found for cwd: {cwd}")
+
+    # Map agent_type to DWB agent (agent_type contains the role/name)
+    agent_type = hook_data.get("agent_type")
+    agent = resolve_agent(db, agent_type, project.id) if agent_type else None
+
+    # If agent_type doesn't match a DWB agent (e.g. "Explore" subagent),
+    # attribute to the TL as overhead
+    if not agent:
+        agent = _fallback_tl_agent(db, project.id)
+
+    session_type = _determine_session_type(agent)
+
+    # Resolve work context for workers
+    ticket = None
+    sprint_id = None
+    if agent and agent.role not in OVERHEAD_ROLES:
+        ticket = _resolve_ticket(db, agent, project.id)
+        if ticket:
+            sprint_id = ticket.sprint_id
+
+    if existing:
+        # Update the existing active session
+        session = existing
+        session.agent_id = agent.id if agent else None
+        session.ticket_id = ticket.id if ticket else None
+        session.sprint_id = sprint_id
+        session.session_type = session_type
+        session.agent_name = agent_type
+    else:
+        # Create new session keyed on subagent_id
+        session = HookSession(
+            session_id=subagent_id,
+            transcript_path=agent_transcript_path,
+            agent_id=agent.id if agent else None,
+            project_id=project.id,
+            ticket_id=ticket.id if ticket else None,
+            sprint_id=sprint_id,
+            status=HookSessionStatus.active,
+            session_type=session_type,
+            agent_name=agent_type,
+        )
+        db.add(session)
+        db.flush()
+
+    # Mark completed with token data
+    session.end_time = end_time
+    session.total_tokens = token_total
+    session.token_breakdown = token_breakdown
+    session.status = HookSessionStatus.completed
+    session.hook_event = "SubagentStop"
+
+    db.commit()
+    db.refresh(session)
+
+    # Log stop + tokens through tracking.py
+    if agent:
+        if session.ticket_id and agent.role not in OVERHEAD_ROLES:
+            tracking.log_stop(db, session.ticket_id, agent.id)
+            if token_total > 0:
+                tracking.log_tokens(
+                    db, session.ticket_id, agent.id, token_total, source="hook"
+                )
+        else:
+            tracking.log_overhead_stop(db, session.project_id, agent.id)
+            if token_total > 0:
+                tracking.log_overhead_tokens(
+                    db, session.project_id, agent.id, token_total, source="hook"
+                )
+    elif token_total > 0:
+        _create_unattributed_alert(db, session)
+
+    return session
 
 
 # --- Internal helpers ---

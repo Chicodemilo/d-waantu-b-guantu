@@ -5,7 +5,7 @@
 # Caller: app/main.py
 # Callees: app/services/ticket.py
 # Data In: HTTP requests
-# Data Out: JSON responses (TicketRead, StatusHistoryRead, attribution dict)
+# Data Out: JSON responses (TicketRead, StatusHistoryRead, attribution dict, StaleCheckResponse)
 # Last Modified: 2026-03-29
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.ticket import TicketStatus, TicketType
 from app.schemas.status_history import StatusHistoryRead
-from app.schemas.ticket import TicketCreate, TicketRead, TicketTokenIncrement, TicketUpdate
+from app.schemas.ticket import StaleCheckInput, StaleCheckResponse, TicketCreate, TicketRead, TicketTokenIncrement, TicketUpdate
 from app.services import ticket as svc
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -39,6 +39,15 @@ def list_tickets(
         status=status,
         ticket_type=ticket_type,
     )
+
+
+@router.post("/stale-check", response_model=StaleCheckResponse)
+def stale_check(data: StaleCheckInput, db: Session = Depends(get_db)):
+    """Check if a ticket is stale and create a deduped warning alert."""
+    ticket = svc.get_ticket(db, data.ticket_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+    return svc.stale_check(db, ticket, data.project_id, data.minutes_stale, data.agent_name)
 
 
 @router.get("/{ticket_id}", response_model=TicketRead)

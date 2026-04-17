@@ -43,23 +43,9 @@ DWB enforces these gates on sprint close:
 
 Plus: unreviewed failure records (type=TBD) block close.
 
-## Agent Registration
+## Team Status (Ticket-Driven)
 
-When the TL spawns or shuts down teammates, register/deregister them:
-
-```bash
-# Register
-curl -X POST http://localhost:8000/api/hooks/register-agent \
-  -H "Content-Type: application/json" -H "X-Agent-ID: 2" \
-  -d '{"project_id": 1, "agent_id": N, "agent_name": "role"}'
-
-# Deregister
-curl -X POST http://localhost:8000/api/hooks/deregister-agent \
-  -H "Content-Type: application/json" -H "X-Agent-ID: 2" \
-  -d '{"project_id": 1, "agent_id": N}'
-```
-
-This drives the Team Status panel on the project page. Register on spawn, deregister on shutdown.
+Team Status is driven by ticket status — no registration or hooks needed. An agent shows as "working" if they have an `in_progress` ticket. Move tickets to `in_progress` promptly when starting work, and out of `in_progress` when done. Stale tickets (in_progress for 10+ minutes) trigger automatic alerts.
 
 ## Alert Patterns
 

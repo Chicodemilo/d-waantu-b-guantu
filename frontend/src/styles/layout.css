@@ -20,14 +20,17 @@
   grid-area: sidebar;
   background-color: var(--bg-alt);
   border-right: 1px solid var(--border);
-  padding: 16px 0;
+  padding: 0 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
 
 .sidebar__logo {
-  padding: 0 16px 16px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 8px;
   font-size: 13px;

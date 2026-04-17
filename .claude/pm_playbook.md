@@ -208,6 +208,74 @@ POST /api/alerts
 
 ---
 
+## 5b. Handling Stale Ticket Alerts
+
+The system fires a stale ticket alert when a ticket has been `in_progress` for 10+ minutes with no `updated_at` change. These alerts repeat every 10 minutes until the ticket status changes — acting promptly reduces noise.
+
+### What it means
+
+A stale ticket usually means one of:
+- The assigned agent's session ended (crashed, timed out, or was shut down) without moving the ticket out of `in_progress`
+- The agent is alive but working slowly on a large task
+- The agent lost context and is stuck
+
+### How to investigate
+
+1. **Check hook sessions for the agent:**
+   ```
+   GET /api/hooks/sessions?project_id={pid}
+   ```
+   Look for the agent's most recent session. If it shows `status: "completed"` with an `ended_at` timestamp, the agent is no longer running.
+
+2. **Check activity logs:**
+   ```
+   GET /api/activity-logs?agent_id={agent_id}&limit=5
+   ```
+   If the last activity was 15+ minutes ago and the session is closed, the agent is dead.
+
+3. **Ping the agent via SendMessage** if you're unsure — a live agent will respond.
+
+### What action to take
+
+| Situation | Action |
+|-----------|--------|
+| Agent session ended, no recent activity | Move ticket back to `todo`, leave a comment noting the agent dropped off, alert the TL |
+| Agent is alive but slow | Leave the ticket, dismiss the alert, optionally leave a comment |
+| Agent is alive but appears stuck (no progress in logs) | Ping the agent, flag to TL if no response |
+| Agent never started (ticket was moved to `in_progress` prematurely) | Move ticket back to `todo`, comment on the mis-assignment |
+
+### Moving a stale ticket back
+
+```
+PATCH /api/tickets/{id}
+{ "status": "todo" }
+```
+
+Always leave a comment explaining why:
+```
+POST /api/comments
+{
+  "ticket_id": {id},
+  "author_agent_id": {pm_agent_id},
+  "body": "Moved back to todo — agent session ended without completing work. No activity in 20+ minutes."
+}
+```
+
+Then alert the TL so they can reassign:
+```
+POST /api/alerts
+{
+  "project_id": {pid},
+  "raised_by_agent_id": {pm_agent_id},
+  "ticket_id": {id},
+  "title": "Stale ticket reset — needs reassignment",
+  "body": "DWB-XXX was in_progress but the assigned agent's session ended. Moved back to todo. TL should reassign.",
+  "severity": "warning"
+}
+```
+
+---
+
 ## 6. Tracking — AUTOMATIC
 
 **Time and token tracking is fully passive.** You do NOT need to manually update overhead or token counts. Claude Code lifecycle hooks capture everything automatically.

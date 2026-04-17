@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom, ../store/useStore, ../api/projects (deployPlaybooks), ../components/common/StatusBadge, ../components/project/TeamMdPanel, ../components/project/PlaybookInspector, ../styles/docs.css
 // Data In: Route param (id), project and agents from Zustand store
 // Data Out: Default export ProjectAgentsPage component
-// Last Modified: 2026-04-16
+// Last Modified: 2026-04-17
 
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -68,6 +68,15 @@ function ProjectAgentsPage() {
               </ul>
             </span>
           </span>
+          {project.playbooks_deployed_at && (
+            <span style={{ color: 'var(--gray-light)', fontSize: '11px' }}>
+              last deployed: {(() => {
+                const ts = project.playbooks_deployed_at.endsWith('Z') ? project.playbooks_deployed_at : project.playbooks_deployed_at + 'Z';
+                const d = new Date(ts);
+                return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+              })()}
+            </span>
+          )}
           {deployResult === 'done' && <span className="sync-btn__status">{'\u2713'} deployed</span>}
           {deployResult === 'error' && <span className="sync-btn__status" style={{ color: 'var(--red)' }}>deploy failed</span>}
         </div>

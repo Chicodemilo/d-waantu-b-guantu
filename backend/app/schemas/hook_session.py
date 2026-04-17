@@ -5,7 +5,7 @@
 # Caller: app/routers/hooks.py
 # Callees: pydantic
 # Data In: JSON request body from Claude Code hooks
-# Data Out: HookEventInput, HookSessionRead
+# Data Out: HookEventInput (incl. SubagentStop fields), HookSessionRead
 # Last Modified: 2026-04-16
 
 from datetime import datetime
@@ -20,12 +20,20 @@ class HookEventInput(BaseModel):
 
     Claude Code sends JSON via stdin to hook commands. The exact shape
     varies by event type, but these are the fields we care about.
+
+    SessionStart/SessionEnd send: session_id, transcript_path, cwd, hook_event_name
+    SubagentStop additionally sends: agent_type, agent_id, agent_transcript_path
     """
     session_id: str | None = None
     transcript_path: str | None = None
     cwd: str | None = None
     agent_name: str | None = None
     hook_event: str | None = None
+    # SubagentStop-specific fields
+    hook_event_name: str | None = None
+    agent_type: str | None = None
+    agent_id: str | None = None
+    agent_transcript_path: str | None = None
 
 
 class HookSessionRead(BaseModel):
