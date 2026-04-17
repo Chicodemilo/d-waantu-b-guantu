@@ -123,7 +123,7 @@ Request -> ActivityLoggerMiddleware -> Router -> Service -> Model -> DB
 - **Routers** (`app/routers/`): Define endpoints, validate input via Pydantic, inject DB session via `Depends(get_db)`. 18 router files.
 - **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution, tracking events, demo seeding). 16 service files.
 - **Models** (`app/models/`): SQLAlchemy 2.0 ORM classes with Mapped types and relationships. 16 model files.
-- **Schemas** (`app/schemas/`): Pydantic v2 models with ConfigDict(from_attributes=True) for Create, Update, Read per entity.
+- **Schemas** (`app/schemas/`): Pydantic v2 models with ConfigDict(from_attributes=True) for Create, Update, Read per entity. List endpoints use slim schemas that strip heavy fields (e.g., `TestResultListRead` omits `details`, `AgentListRead` omits `api_key`). Tickets, alerts, and sprints support `?fields=slim` for minimal payloads.
 - **Middleware** (`app/middleware/`): ActivityLoggerMiddleware auto-logs all mutations.
 
 ### ActivityLoggerMiddleware
@@ -157,12 +157,13 @@ Disabled during testing (`TESTING=1` env var).
 | GET    | /api/projects/{id}/tests              | suite, status, limit | Project test runs          |
 | GET    | /api/projects/{id}/docs               |                      | Read project doc files     |
 | GET    | /api/projects/{id}/playbook-files     |                      | List playbook files in .claude/ |
+| GET    | /api/projects/{id}/token-budget       |                      | Context file token counts + ceilings |
 | GET    | /api/projects/{id}/activity-feed      | limit                | Activity log with agents   |
 
 #### /api/sprints
 | Method | Path                | Query Params       | Purpose        |
 |--------|---------------------|--------------------|----------------|
-| GET    | /api/sprints        | project_id, status | List sprints   |
+| GET    | /api/sprints        | project_id, status, fields | List sprints (`?fields=slim`) |
 | GET    | /api/sprints/{id}   |                    | Get sprint     |
 | POST   | /api/sprints        |                    | Create sprint  |
 | PATCH  | /api/sprints/{id}   |                    | Update sprint  |
@@ -197,7 +198,7 @@ Disabled during testing (`TESTING=1` env var).
 #### /api/tickets
 | Method | Path                               | Query Params                                                          | Purpose             |
 |--------|------------------------------------|-----------------------------------------------------------------|---------------------|
-| GET    | /api/tickets                       | project_id, sprint_id, epic_id, assigned_agent_id, status, ticket_type | List tickets        |
+| GET    | /api/tickets                       | project_id, sprint_id, epic_id, assigned_agent_id, status, ticket_type, fields | List tickets (`?fields=slim` for minimal payload) |
 | POST   | /api/tickets/stale-check           |                                                                 | Deduped stale alert |
 | GET    | /api/tickets/{id}                  |                                                                 | Get ticket          |
 | POST   | /api/tickets                       |                                                                 | Create ticket       |
@@ -215,7 +216,7 @@ Disabled during testing (`TESTING=1` env var).
 | POST   | /api/tracking/tokens      | Log token report (ticket_id, agent_id, tokens, source) |
 | POST   | /api/tracking/overhead/start | Log overhead start (project_id, agent_id) |
 | POST   | /api/tracking/overhead/stop  | Log overhead stop (project_id, agent_id)  |
-| GET    | /api/tracking/summary     | Full rollup (per_ticket, per_agent, per_sprint, project_total) |
+| GET    | /api/tracking/summary     | Full rollup (per_ticket with title/agent, per_agent, per_sprint, project_total) |
 
 #### /api/comments
 | Method | Path                 | Query Params               | Purpose        |
@@ -228,7 +229,7 @@ Disabled during testing (`TESTING=1` env var).
 #### /api/alerts
 | Method | Path                    | Query Params                  | Purpose            |
 |--------|-------------------------|-------------------------------|--------------------|
-| GET    | /api/alerts             | project_id, severity, status  | List alerts        |
+| GET    | /api/alerts             | project_id, severity, status, fields | List alerts (`?fields=slim`) |
 | GET    | /api/alerts/{id}        |                               | Get alert          |
 | POST   | /api/alerts             |                               | Create alert       |
 | PATCH  | /api/alerts/{id}        |                               | Update alert       |
@@ -546,7 +547,7 @@ Projects enforce up to 8 gates via `force_test_run`, `force_test_coverage`, `for
 - Rework detection: in_progress after done creates failure_record + PM alert
 
 ### Token Tracking
-- **Primary (passive):** Claude Code lifecycle hooks automatically capture tokens and time via `POST /api/hooks/session-start` and `POST /api/hooks/session-end`. Workers get tokens on their active ticket (in_progress, in_review, or recently done); TL/PM get overhead.
+- **Primary (passive):** Claude Code lifecycle hooks automatically capture tokens and time via `POST /api/hooks/session-start` and `POST /api/hooks/session-end`. Workers get tokens on their active ticket (`in_progress` > `todo` > `in_review` > recently `done` within 5 min); TL/PM get overhead. Hooks increment `ticket.tokens_used` directly and project overhead fields (`tl_overhead_tokens`, `pm_overhead_tokens`).
 - **Per-ticket via tracking API:** `POST /api/tracking/tokens` inserts event + increments ticket
 - **Per-ticket legacy:** `POST /api/tickets/{id}/tokens` increments directly (also inserts tracking event)
 - **Per-project overhead:** `POST /api/projects/{id}/overhead` increments `tl_overhead_tokens` or `pm_overhead_tokens`

@@ -1,6 +1,12 @@
 # D'Waantu B'Guantu (DWB)
 
-A multi-agent workflow dashboard for tracking Claude Code teammate progress, managing sprints, enforcing completion gates, and accounting for time and token spend. Built to coordinate autonomous AI agents working as a software team.
+A multi-agent workflow dashboard that makes Claude Code teams **cheaper, clearer, and smarter**.
+
+- **Token efficiency** — structured playbooks and slim API responses mean agents spend context on work, not re-reading docs. Token budget monitoring warns before bloat creeps in.
+- **Team visibility** — real-time insight into what every agent is doing, which tickets are moving, and where things are stuck.
+- **Session continuity** — HANDOFF.md, playbooks, and project rules carry knowledge between sessions. New sessions pick up where the last one left off.
+
+**Contributing** — DWB is open source. If something's broken, inefficient, or could be better, open a PR. No process ceremony — just make it better.
 
 ---
 
@@ -88,8 +94,10 @@ The `tracking_log` table is the source of truth. It records discrete events: `st
 
 **Tokens** — captured passively via Claude Code lifecycle hooks:
 - `SessionStart` → `POST /api/hooks/session-start` → creates hook session, logs start
-- `SessionEnd` → `POST /api/hooks/session-end` → parses JSONL transcript for tokens, logs stop + tokens
+- `SessionEnd` → `POST /api/hooks/session-end` → parses JSONL transcript, logs stop + tokens, increments `ticket.tokens_used`
 - `SubagentStop` → same endpoint for teammate transcripts
+
+**Attribution priority:** Workers get tokens on their active ticket: `in_progress` > `todo` > `in_review` > recently `done` (5 min window). Unmatched TL/PM sessions go to project overhead fields (`tl_overhead_tokens`, `pm_overhead_tokens`).
 
 Hook config lives in `.claude/settings.json`. Zero manual intervention needed.
 
@@ -184,6 +192,8 @@ Run history: `GET /api/test-results/performance`
 
 93 endpoints across 18 routers. Full interactive docs at http://localhost:8000/docs.
 
+**Slim responses:** List endpoints strip heavy fields by default — test-results omit `details` (can be 65k+), agents omit `api_key`. Tickets, alerts, and sprints support `?fields=slim` for minimal payloads (id, key fields, status only).
+
 Standard CRUD exists for all resources (projects, epics, sprints, tickets, agents, alerts, comments, instructions, failure records, activity logs, test results). Below are the non-obvious and automation endpoints:
 
 | Method | Path | Description |
@@ -196,6 +206,7 @@ Standard CRUD exists for all resources (projects, epics, sprints, tickets, agent
 | GET | `/api/projects/{id}/activity-feed` | Activity feed (newest first) |
 | GET | `/api/projects/{id}/docs` | Scan project doc files |
 | GET | `/api/projects/{id}/playbook-files` | List deployed playbook files |
+| GET | `/api/projects/{id}/token-budget` | Context file token counts + ceilings |
 | POST | `/api/tickets/stale-check` | Stale ticket alert (called by frontend timer) |
 | POST | `/api/tracking/start` | Log work start |
 | POST | `/api/tracking/stop` | Log work stop |
