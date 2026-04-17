@@ -192,4 +192,4 @@ Failure types: A–G (manual taxonomy), rework (auto-detected), test_failure (au
 | List hook sessions | GET /api/hooks/sessions |
 | Deploy playbooks | POST /api/projects/:id/deploy-playbooks |
 
-See README.md for the full 83-endpoint reference.
+See README.md for the full 93-endpoint reference.
