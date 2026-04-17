@@ -17,7 +17,7 @@ to tracking.py for authoritative event logging.
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
@@ -582,7 +582,9 @@ def _resolve_ticket(db: Session, agent: Agent, project_id: int) -> Ticket | None
     Priority:
     1. In-progress ticket assigned to this agent
     2. Todo ticket assigned to this agent (most recently updated)
-    3. None (unattributed)
+    3. In-review ticket assigned to this agent (most recently updated)
+    4. Done ticket assigned to this agent (only if updated within last 5 minutes)
+    5. None (unattributed)
     """
     # In-progress ticket assigned to this agent
     ticket = db.scalar(
@@ -602,6 +604,35 @@ def _resolve_ticket(db: Session, agent: Agent, project_id: int) -> Ticket | None
         .where(Ticket.project_id == project_id)
         .where(Ticket.assigned_agent_id == agent.id)
         .where(Ticket.status == TicketStatus.todo)
+        .order_by(Ticket.updated_at.desc())
+        .limit(1)
+    )
+    if ticket:
+        return ticket
+
+    # Fallback: in_review ticket assigned to this agent
+    # Workers move tickets to in_review before session ends, so SubagentStop
+    # often fires after the status change.
+    ticket = db.scalar(
+        select(Ticket)
+        .where(Ticket.project_id == project_id)
+        .where(Ticket.assigned_agent_id == agent.id)
+        .where(Ticket.status == TicketStatus.in_review)
+        .order_by(Ticket.updated_at.desc())
+        .limit(1)
+    )
+    if ticket:
+        return ticket
+
+    # Fallback: recently-done ticket assigned to this agent (within 5 minutes)
+    # Catches cases where TL accepts a ticket quickly before SubagentStop fires.
+    cutoff = datetime.now(UTC) - timedelta(minutes=5)
+    ticket = db.scalar(
+        select(Ticket)
+        .where(Ticket.project_id == project_id)
+        .where(Ticket.assigned_agent_id == agent.id)
+        .where(Ticket.status == TicketStatus.done)
+        .where(Ticket.updated_at >= cutoff)
         .order_by(Ticket.updated_at.desc())
         .limit(1)
     )
