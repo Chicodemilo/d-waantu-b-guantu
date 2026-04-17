@@ -51,33 +51,38 @@ function DashboardPage() {
       {openAlerts.length > 0 && (
         <div>
           <div className="dashboard__section-title">Open Alerts</div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Severity</th>
-                <th>Title</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...openAlerts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).map((alert) => {
-                const proj = getProject(alert.project_id);
-                return (
-                  <tr key={alert.id}>
-                    <td>
-                      {proj ? (
-                        <Link to={`/projects/${proj.id}`}>{proj.prefix}</Link>
-                      ) : '\u2014'}
-                    </td>
-                    <td>{alert.severity}</td>
-                    <td>{alert.title}</td>
-                    <td>{alert.created_at ? new Date(alert.created_at).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '\u2014'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Severity</th>
+                  <th>Title</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...openAlerts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).map((alert) => {
+                  const proj = getProject(alert.project_id);
+                  const severityColor = alert.severity === 'critical' ? 'var(--red)'
+                    : alert.severity === 'warning' ? 'var(--yellow)'
+                    : 'var(--blue)';
+                  return (
+                    <tr key={alert.id}>
+                      <td>
+                        {proj ? (
+                          <Link to={`/projects/${proj.id}`}>{proj.prefix}</Link>
+                        ) : '\u2014'}
+                      </td>
+                      <td style={{ color: severityColor }}>{alert.severity}</td>
+                      <td>{alert.title}</td>
+                      <td>{alert.created_at ? new Date(alert.created_at).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '\u2014'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
