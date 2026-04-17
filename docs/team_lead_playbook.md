@@ -252,7 +252,7 @@ Set `assigned_agent_id` when creating or updating a ticket. An unassigned ticket
 When any Claude Code session starts or ends (yours, teammates, subagents), hooks automatically:
 1. Log start/end time via `tracking_log` events
 2. Parse the JSONL transcript for token usage
-3. Attribute to the agent's in_progress ticket (workers) or project overhead (TL/PM)
+3. Attribute to the agent's active ticket — in_progress, in_review, or recently done (workers) or project overhead (TL/PM)
 
 This means:
 - **Your TL sessions** → logged as overhead time + tokens on the project

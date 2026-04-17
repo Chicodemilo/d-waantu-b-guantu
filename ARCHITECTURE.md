@@ -449,7 +449,7 @@ Token and time attribution is handled passively by hooks configured in `.claude/
 
 SubagentStop creates a separate HookSession keyed on `agent_id` (not the parent `session_id`). Unmatched agent types (e.g. "Explore" subagent) fall back to TL as overhead.
 
-Workers get tokens attributed to their in_progress ticket. TL/PM get project overhead. Key files:
+Workers get tokens attributed to their active ticket (in_progress, in_review, or recently done). TL/PM get project overhead. Key files:
 - `app/services/hook_tracking.py` — all business logic
 - `app/routers/hooks.py` — 4 endpoints (never return 5xx)
 - `app/models/hook_session.py` — session state model
@@ -546,7 +546,7 @@ Projects enforce up to 8 gates via `force_test_run`, `force_test_coverage`, `for
 - Rework detection: in_progress after done creates failure_record + PM alert
 
 ### Token Tracking
-- **Primary (passive):** Claude Code lifecycle hooks automatically capture tokens and time via `POST /api/hooks/session-start` and `POST /api/hooks/session-end`. Workers get tokens on their in_progress ticket; TL/PM get overhead.
+- **Primary (passive):** Claude Code lifecycle hooks automatically capture tokens and time via `POST /api/hooks/session-start` and `POST /api/hooks/session-end`. Workers get tokens on their active ticket (in_progress, in_review, or recently done); TL/PM get overhead.
 - **Per-ticket via tracking API:** `POST /api/tracking/tokens` inserts event + increments ticket
 - **Per-ticket legacy:** `POST /api/tickets/{id}/tokens` increments directly (also inserts tracking event)
 - **Per-project overhead:** `POST /api/projects/{id}/overhead` increments `tl_overhead_tokens` or `pm_overhead_tokens`

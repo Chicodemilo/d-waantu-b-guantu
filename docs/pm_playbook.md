@@ -288,7 +288,7 @@ When any Claude Code session starts or ends, hooks fire and:
 
 - **PM sessions** → logged as overhead time + tokens on the project
 - **TL sessions** → same, overhead
-- **Worker sessions** → logged on their in_progress ticket
+- **Worker sessions** → logged on their active ticket (in_progress, in_review, or recently done)
 
 ### Checking the data
 ```

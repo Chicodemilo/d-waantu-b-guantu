@@ -137,7 +137,7 @@ POST /api/alerts/dismiss-all
 ### How it works (passive)
 Token and time attribution is handled automatically by Claude Code lifecycle hooks configured in `.claude/settings.json`. Hooks fire on SessionStart, SessionEnd, and SubagentStop — no manual reporting needed.
 
-- Workers get time+tokens attributed to their in_progress ticket
+- Workers get time+tokens attributed to their active ticket (in_progress, in_review, or recently done)
 - TL/PM overhead is tracked automatically via hook sessions
 - Active sessions are visible on the project page under **Live Sessions**
 

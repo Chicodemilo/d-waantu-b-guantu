@@ -145,7 +145,7 @@ Tell tester: `./scripts/run_tests.sh --post --project-id 1 --triggered-by "teste
 Token and time tracking is fully automatic via Claude Code lifecycle hooks in `.claude/settings.json`. There are no manual token scans to run.
 
 - Hooks fire on SessionStart, SessionEnd, and SubagentStop
-- Workers get time+tokens on their in_progress ticket; TL/PM get overhead
+- Workers get time+tokens on their active ticket (in_progress, in_review, or recently done); TL/PM get overhead
 - Active sessions visible on the project page under **Live Sessions**
 - If tokens show as 0 on tickets, check that `.claude/settings.json` hooks are intact and the API is running
 - Hook sessions: `GET /api/hooks/sessions`

@@ -4,7 +4,7 @@
 
 ## Current State
 
-Sprint 51 completed. 4 sprints this session (48-51). 426 backend tests passing. README and ARCHITECTURE fully overhauled. Team is up and idle (Archie, Pam, Barry, Freddie).
+Sprint 53 active. 5 sprints this session (48-52). 426 backend tests passing. README and ARCHITECTURE fully overhauled. Team is up and idle (Archie, Pam, Barry, Freddie).
 
 ## Active Decisions
 
@@ -44,10 +44,15 @@ None currently open.
 ## What Needs Doing Next
 
 1. **Token efficiency** — investigate ways to lighten token usage when using the DWB system. Agents burn context reading playbooks, API calls, status checks. Find ways to reduce overhead without losing capability.
-2. **Test SubagentStop fix live** — the field mismatch fix (DWB-261) was committed but hasn't been validated with a real CI team session yet. Run a team and verify teammate hook sessions appear in the DB with correct tokens.
-3. **Update HANDOFF.md at CI project** — the CI project's HANDOFF may reference register/deregister endpoints that no longer exist.
+2. **Update HANDOFF.md at CI project** — the CI project's HANDOFF may reference register/deregister endpoints that no longer exist.
 
 ## Last Session (2026-04-17)
+
+### Sprint 52 — Token Attribution Fix
+- Fixed `_resolve_ticket()` in hook_tracking.py — was only checking `in_progress` and `todo`, now checks `in_review` and `done` (within 5 min)
+- Root cause of all zero-token tickets reported by CI team: workers move tickets to `in_review` before SubagentStop fires, so token attribution found nothing
+- Updated 6 doc files (ARCHITECTURE, playbooks, agent defs) to reflect expanded lookup chain
+- Single-ticket sprint (DWB-268)
 
 ### Sprint 48 — Cleanup
 - Removed dead register-agent and deregister-agent endpoints from hooks.py + schemas
