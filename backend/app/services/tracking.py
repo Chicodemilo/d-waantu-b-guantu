@@ -194,6 +194,8 @@ def get_project_summary(db: Session, project_id: int) -> dict:
         select(
             TrackingLog.ticket_id,
             Ticket.ticket_key,
+            Ticket.title.label("ticket_title"),
+            Ticket.assigned_agent_id,
             TrackingLog.agent_id,
             Agent.name.label("agent_name"),
             Agent.role.label("agent_role"),
@@ -202,7 +204,7 @@ def get_project_summary(db: Session, project_id: int) -> dict:
         .join(Agent, TrackingLog.agent_id == Agent.id)
         .where(TrackingLog.project_id == project_id)
         .where(TrackingLog.ticket_id.isnot(None))
-        .group_by(TrackingLog.ticket_id, Ticket.ticket_key, TrackingLog.agent_id, Agent.name, Agent.role)
+        .group_by(TrackingLog.ticket_id, Ticket.ticket_key, Ticket.title, Ticket.assigned_agent_id, TrackingLog.agent_id, Agent.name, Agent.role)
     ).all()
 
     per_ticket = []
@@ -216,6 +218,8 @@ def get_project_summary(db: Session, project_id: int) -> dict:
         per_ticket.append({
             "ticket_id": row.ticket_id,
             "ticket_key": row.ticket_key,
+            "title": row.ticket_title,
+            "assigned_agent_id": row.assigned_agent_id,
             "time_seconds": time_s,
             "tokens": tokens,
             "agent": row.agent_name,

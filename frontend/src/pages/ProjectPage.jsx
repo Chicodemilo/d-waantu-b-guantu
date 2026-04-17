@@ -15,7 +15,6 @@ import ProjectHeader from '../components/project/ProjectHeader';
 import { updateProject, deleteProject, disableJira } from '../api/projects';
 import { dismissAllAlerts, getAlerts, sendAlertsToTeam } from '../api/alerts';
 import SprintProgress from '../components/project/SprintProgress';
-import OverheadTracker from '../components/project/OverheadTracker';
 import TimeTokens from '../components/dashboard/TimeTokens';
 import SprintVelocity from '../components/sprints/SprintVelocity';
 import EpicList from '../components/epics/EpicList';

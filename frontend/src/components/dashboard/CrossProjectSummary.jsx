@@ -47,7 +47,7 @@ function CrossProjectSummary() {
     const s = summaries[p.id];
     if (s) {
       totalTokens += (s.project_total.tokens || 0) + (s.project_total.overhead_tokens || 0);
-      totalTime += s.project_total.time || 0;
+      totalTime += s.project_total.time_seconds || 0;
     }
   }
 

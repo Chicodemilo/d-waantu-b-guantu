@@ -31,7 +31,7 @@ function ProjectCard({ project }) {
   }, [project.id]);
 
   const totalTokens = summary ? (summary.project_total.tokens || 0) : 0;
-  const totalTime = summary ? (summary.project_total.time || 0) : 0;
+  const totalTime = summary ? (summary.project_total.time_seconds || 0) : 0;
 
   return (
     <Link to={`/projects/${project.id}`} className="project-card">

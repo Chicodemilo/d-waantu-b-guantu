@@ -249,12 +249,26 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
                 tracking.log_tokens(
                     db, session.ticket_id, agent.id, token_total, source="hook"
                 )
+                # Also increment the ticket's tokens_used field
+                ticket = db.get(Ticket, session.ticket_id)
+                if ticket:
+                    ticket.tokens_used += token_total
+                    ticket.token_source = "hook"
+                    db.commit()
         else:
             tracking.log_overhead_stop(db, session.project_id, agent.id)
             if token_total > 0:
                 tracking.log_overhead_tokens(
                     db, session.project_id, agent.id, token_total, source="hook"
                 )
+                # Also increment project overhead fields
+                project = db.get(Project, session.project_id)
+                if project:
+                    if agent.role == "pm":
+                        project.pm_overhead_tokens += token_total
+                    else:
+                        project.tl_overhead_tokens += token_total
+                    db.commit()
     elif token_total > 0:
         # No TL agent on project — truly unattributed
         _create_unattributed_alert(db, session)
@@ -487,12 +501,26 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
                 tracking.log_tokens(
                     db, session.ticket_id, agent.id, token_total, source="hook"
                 )
+                # Also increment the ticket's tokens_used field
+                ticket = db.get(Ticket, session.ticket_id)
+                if ticket:
+                    ticket.tokens_used += token_total
+                    ticket.token_source = "hook"
+                    db.commit()
         else:
             tracking.log_overhead_stop(db, session.project_id, agent.id)
             if token_total > 0:
                 tracking.log_overhead_tokens(
                     db, session.project_id, agent.id, token_total, source="hook"
                 )
+                # Also increment project overhead fields
+                project = db.get(Project, session.project_id)
+                if project:
+                    if agent.role == "pm":
+                        project.pm_overhead_tokens += token_total
+                    else:
+                        project.tl_overhead_tokens += token_total
+                    db.commit()
     elif token_total > 0:
         _create_unattributed_alert(db, session)
 

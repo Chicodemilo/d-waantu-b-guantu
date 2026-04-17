@@ -58,8 +58,8 @@ function TTSection({ title, tooltip, columns, rows, tickets }) {
                         <div key={t.ticket_key || t.id} className="tt-breakdown__row">
                           <span className="tt-breakdown__key">{t.ticket_key}</span>
                           <span className="tt-breakdown__title">{t.title}</span>
-                          <span className="tt-breakdown__tokens">{formatTokens(t.tokens_used || 0)}</span>
-                          <span className="tt-breakdown__time">{formatTime(t.time_spent_seconds || 0)}</span>
+                          <span className="tt-breakdown__tokens">{formatTokens(t.tokens || 0)}</span>
+                          <span className="tt-breakdown__time">{formatTime(t.time_seconds || 0)}</span>
                         </div>
                       ))}
                     </div>
@@ -122,7 +122,7 @@ function TimeTokens({ projectId }) {
   const projectRows = projects.map((p) => {
     const summary = summaries[p.id];
     const tokens = summary ? (summary.project_total.tokens || 0) + (summary.project_total.overhead_tokens || 0) : 0;
-    const time = summary ? (summary.project_total.time || 0) : 0;
+    const time = summary ? (summary.project_total.time_seconds || 0) : 0;
     return {
       label: p.prefix,
       tokensDisplay: formatTokens(tokens),
@@ -137,7 +137,7 @@ function TimeTokens({ projectId }) {
     const key = `${a.name}/${a.role}`;
     if (!agentMap[key]) agentMap[key] = { label: key, tokens: 0, time: 0, agent_id: a.agent_id };
     agentMap[key].tokens += (a.tokens || 0);
-    agentMap[key].time += (a.time || 0);
+    agentMap[key].time += (a.time_seconds || 0);
   }
   const agentRows = Object.values(agentMap).map((a) => ({
     label: a.label,
@@ -152,7 +152,7 @@ function TimeTokens({ projectId }) {
     const key = `${a.name}/${a.role}`;
     if (!overheadMap[key]) overheadMap[key] = { label: key, tokens: 0, time: 0, agent_id: a.agent_id };
     overheadMap[key].tokens += (a.tokens || 0);
-    overheadMap[key].time += (a.time || 0);
+    overheadMap[key].time += (a.time_seconds || 0);
   }
   const overheadRows = Object.values(overheadMap).map((a) => ({
     label: a.label,

@@ -58,7 +58,7 @@ function EpicList({ projectId }) {
         for (const sid of epicSprintIds) {
           const st = sprintTrackingMap[sid];
           if (st) {
-            epicTime += st.time || 0;
+            epicTime += st.time_seconds || 0;
             epicTokens += st.tokens || 0;
           }
         }

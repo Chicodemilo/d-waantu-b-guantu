@@ -40,7 +40,7 @@ function SprintProgress({ projectId }) {
     ? (summary.per_sprint || []).find((s) => s.sprint_id === activeSprint.id)
     : null;
   const totalTokens = sprintTracking ? (sprintTracking.tokens || 0) : 0;
-  const totalSeconds = sprintTracking ? (sprintTracking.time || 0) : 0;
+  const totalSeconds = sprintTracking ? (sprintTracking.time_seconds || 0) : 0;
 
   return (
     <div className="ascii-chart">

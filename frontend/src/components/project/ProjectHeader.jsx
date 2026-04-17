@@ -73,7 +73,7 @@ function ProjectHeader({ project }) {
   }, [project?.id]);
 
   const totalTokens = summary ? (summary.project_total.tokens || 0) : 0;
-  const totalTime = summary ? (summary.project_total.time || 0) : 0;
+  const totalTime = summary ? (summary.project_total.time_seconds || 0) : 0;
 
   if (!project) return null;
 

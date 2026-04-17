@@ -89,7 +89,7 @@ function TokenAudit() {
                   <span className="token-audit__label">{p.prefix || p.project_name || `project ${p.project_id}`}</span>
                   <span className="token-audit__value">
                     {(p.ticket_tokens || 0).toLocaleString()} tickets
-                    {p.overhead_tokens != null && ` + ${p.overhead_tokens.toLocaleString()} overhead`}
+                    {(p.tl_overhead != null || p.pm_overhead != null) && ` + ${((p.tl_overhead || 0) + (p.pm_overhead || 0)).toLocaleString()} overhead`}
                   </span>
                 </div>
               ))}
@@ -104,7 +104,7 @@ function TokenAudit() {
                 .map((a, i) => (
                 <div key={i} className="token-audit__row">
                   <span className="token-audit__label">{agentNameMap[a.agent_id] || a.agent_name || `agent ${a.agent_id}`}</span>
-                  <span className="token-audit__value">{(a.tokens || 0).toLocaleString()}</span>
+                  <span className="token-audit__value">{(a.total_tokens || 0).toLocaleString()}</span>
                 </div>
               ))}
             </div>
