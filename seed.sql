@@ -70,12 +70,12 @@ INSERT INTO epics (id, project_id, name, description, status) VALUES
 -- ============================================================
 -- SPRINTS
 -- ============================================================
-INSERT INTO sprints (id, project_id, name, goal, sprint_number, status, start_date, end_date) VALUES
-(1, 1, 'Project Tests + Archive/Delete',                        'Scaffold frontend + DB models',       1, 'completed', '2026-03-20', '2026-03-23'),
-(2, 1, 'Token Tracking Hooks',                                 'API layer + live data wiring',        2, 'active',    '2026-03-24', '2026-03-27'),
-(3, 1, 'Overhead Tracking + Agent Naming + Test Cadence',      'Instruction management + polish',     3, 'planned',   '2026-03-28', '2026-03-31'),
-(4, 2, 'INGEST Sprint 1', 'CSV and XML connectors',              1, 'active',    '2026-03-22', '2026-03-28'),
-(5, 3, 'RECON Sprint 1',  'Ledger diff prototype',               1, 'active',    '2026-03-18', '2026-03-25');
+INSERT INTO sprints (id, project_id, epic_id, name, goal, sprint_number, status, start_date, end_date) VALUES
+(1, 1, 1, 'Project Tests + Archive/Delete',                        'Scaffold frontend + DB models',       1, 'completed', '2026-03-20', '2026-03-23'),
+(2, 1, 3, 'Token Tracking Hooks',                                 'API layer + live data wiring',        2, 'active',    '2026-03-24', '2026-03-27'),
+(3, 1, 4, 'Overhead Tracking + Agent Naming + Test Cadence',      'Instruction management + polish',     3, 'planned',   '2026-03-28', '2026-03-31'),
+(4, 2, 5, 'INGEST Sprint 1', 'CSV and XML connectors',              1, 'active',    '2026-03-22', '2026-03-28'),
+(5, 3, 7, 'RECON Sprint 1',  'Ledger diff prototype',               1, 'active',    '2026-03-18', '2026-03-25');
 
 -- ============================================================
 -- TICKETS
