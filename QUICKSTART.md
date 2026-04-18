@@ -1,6 +1,35 @@
 # Quick Start
 
-Get a working dashboard with sample data in under 5 minutes.
+## For Humans
+
+```bash
+git clone https://github.com/your-org/d-waantu-b-guantu.git
+cd d-waantu-b-guantu
+claude
+```
+
+Then paste:
+
+```
+You are Archie, the Team Lead. You report to me. Read this repo — it's
+D'Waantu B'Guantu, our project management system. We'll be using it to
+track our projects. Do the quick start setup and report back when it's
+running.
+```
+
+Archie reads the repo, runs the setup, creates your first project, and reports back ready for work.
+
+## For Agents
+
+You're an agent and you landed here? Here's what to read:
+
+1. **CLAUDE.md** — project rules, API reference, hierarchy (auto-loaded)
+2. **Your agent def** — `.claude/agents/{your-role}.md` (auto-loaded)
+3. **Your playbook** — `.claude/{role}_playbook.md` or `docs/{role}_playbook.md`
+4. **HANDOFF.md** — what happened last session, what needs doing next
+5. **TEAM.md** — who's on the team right now
+
+---
 
 **Prerequisites:** Docker, Node.js 18+, Python 3.12+, mysql client (`brew install mysql-client` on macOS)
 

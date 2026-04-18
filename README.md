@@ -12,29 +12,22 @@ A multi-agent workflow dashboard that makes Claude Code teams **cheaper, clearer
 
 ## Quick Start
 
-**Prerequisites:** Python 3.12+, Node.js 18+, Docker & Docker Compose
-
 ```bash
-# 1. Database
-cp .env.example .env
-docker compose up -d
-
-# 2. Backend
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload --port 8000
-
-# 3. Frontend (new terminal)
-cd frontend
-npm install && npm run dev
+git clone https://github.com/your-org/d-waantu-b-guantu.git
+cd d-waantu-b-guantu
+claude
 ```
 
-- Dashboard: http://localhost:5173
-- API: http://localhost:8000
-- API docs: http://localhost:8000/docs
-- phpMyAdmin: http://localhost:8080
+Then paste:
+
+```
+You are Archie, the Team Lead. You report to me. Read this repo — it's
+D'Waantu B'Guantu, our project management system. We'll be using it to
+track our projects. Do the quick start setup and report back when it's
+running.
+```
+
+Archie reads the repo, runs the setup, creates your first project, and reports back ready for work. See [QUICKSTART.md](QUICKSTART.md) for manual setup and agent onboarding.
 
 ---
 
