@@ -1,8 +1,7 @@
 # Worker Playbook (All Agents)
 
-> Common rules and workflow for all agents on any project.
-> This playbook is automatically deployed to every project alongside the TL and PM playbooks.
-> Your role-specific playbook supplements this with domain details.
+> Common rules and workflow for all agents. Loaded automatically alongside TL/PM playbooks.
+> Your role-specific playbook (`.claude/agents/{role}.md`) supplements this.
 
 ---
 
@@ -12,102 +11,35 @@ D'Waantu B'Guantu is the human user's private project management system. **Never
 
 ## On Spawn — Read These First
 
-When you start a session, read these files before doing anything else:
-
-1. **Your role-specific playbook** — `.claude/agents/{role}.md` (if it exists)
-2. **Your project rules** — `.claude/project_rules_worker.md` (project-specific rules)
-3. **HANDOFF.md** — session continuity notes (current state, decisions, gotchas)
-4. **ARCHITECTURE.md** — system design and data model
-5. **README.md** — project overview, setup, API reference
-
-This gives you full context without needing to ask the TL. If any of these files don't exist, proceed with what you have and flag it.
-
----
+Before doing anything, read: (1) `.claude/agents/{role}.md`, (2) `.claude/project_rules_worker.md`, (3) `HANDOFF.md`, (4) `ARCHITECTURE.md`, (5) `README.md`. If any are missing, proceed with what you have and flag it.
 
 ## API
 
-**Base URL:** `http://localhost:8000/api`
-
-All ticket and project interactions go through the DWB API. Use curl for API calls.
-
----
+**Base URL:** `http://localhost:8000/api` — All ticket/project interactions go through the DWB API. Use curl.
 
 ## Code Headers — Mandatory
 
-Every new file MUST have a code header. The format varies by language but the fields are the same:
-
-**Python / Bash:**
-```python
-# Path: relative/path/to/file.py
-# File: file.py
-# Created: YYYY-MM-DD
-# Purpose: One sentence description
-# Caller: What calls this
-# Callees: What this calls
-# Data In: Input params/types
-# Data Out: Return types
-# Last Modified: YYYY-MM-DD
-```
-
-**JavaScript / JSX:**
-```javascript
-// Path: src/components/example/MyComponent.jsx
-// File: MyComponent.jsx
-// Created: YYYY-MM-DD
-// Purpose: One sentence description
-// Caller: What renders/calls this
-// Callees: Child components, hooks, API calls
-// Data In: Props or arguments
-// Data Out: What it renders/returns
-// Last Modified: YYYY-MM-DD
-```
-
-When editing an existing file that already has a header, update the `Last Modified` date.
-
----
+Every new file MUST have a code header. See `docs/rules/global/code-header-format.md` for the format. When editing a file that already has a header, update the `Last Modified` date.
 
 ## Git Commit Rules
 
-- **NEVER** add `Co-Authored-By` lines or any AI/Claude attribution to commits
-- **NEVER** mention "Claude", "Opus", or any model name in commit messages
-- Do NOT commit unless the team lead tells you to — the TL reviews and commits
-
----
+- **NEVER** add `Co-Authored-By` lines or any AI/Claude attribution to commits.
+- **NEVER** mention "Claude", "Opus", or any model name in commit messages.
+- Do NOT commit unless the TL tells you to — the TL reviews and commits.
 
 ## Ticket Workflow
 
-When assigned a ticket:
-
-1. Move to in_progress: `PATCH /api/tickets/{id}` with `{"status": "in_progress"}`
-2. Do the work
-3. Move to in_review: `PATCH /api/tickets/{id}` with `{"status": "in_review"}`
-4. Message the team lead that work is ready for review
-
-If you get blocked, message the team lead immediately — don't sit on it.
-
----
+When assigned a ticket: (1) PATCH `/api/tickets/{id}` with `{"status": "in_progress"}`, (2) do the work, (3) PATCH with `{"status": "in_review"}`, (4) message the TL that work is ready. If blocked, message the TL immediately — don't sit on it.
 
 ## Reporting Status
 
-When you finish a task, message the team lead with:
-- What you did (brief)
-- What files you changed
-- Anything unexpected or worth noting
-- Whether changes are staged/committed or unstaged
-
-Keep it concise. The TL will read the diff.
-
----
+When done, message the TL: what you did, files changed, anything unexpected, whether changes are staged/committed or unstaged. Keep it concise — the TL will read the diff.
 
 ## Style Rules
 
-- **Plain CSS only** — no Tailwind, no CSS-in-JS, no styled-components. Styles go in `.css` files.
-- **CSS custom properties** from `theme.css` for colors and fonts
-- **Terminal aesthetic** — monospace fonts, green-on-dark theme
-
-These apply to everyone, not just frontend. If you're generating UI-facing content (help text, error messages, HTML templates), follow the aesthetic.
-
----
+- **Plain CSS only** — no Tailwind, no CSS-in-JS, no styled-components. Styles in `.css` files.
+- Use **CSS custom properties** from `theme.css` for colors and fonts.
+- **Terminal aesthetic** — monospace fonts, green-on-dark theme. Applies to all UI-facing content.
 
 ## STOP Means Stop
 

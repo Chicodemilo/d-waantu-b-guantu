@@ -1,407 +1,116 @@
 # PM Playbook
 
-> How a PM agent operates inside D'Waantu B'Guantu.
 > Base URL: `http://localhost:8000`
-
-## DWB Is an Internal Tool
-
-D'Waantu B'Guantu is the human user's private project management system. It is NOT visible to external stakeholders.
-
-- **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content
-- **Never reference DWB ticket IDs** (e.g., "DWB-234") outside of DWB itself
-- **Jira is the external system** — if a project has Jira integration, Jira tickets are what stakeholders see. DWB tracks the internal agent workflow behind those tickets.
 
 ## On Startup
 
-Read these files at session start:
-1. This playbook (`.claude/pm_playbook.md`)
-2. Your project rules (`.claude/project_rules_pm.md`)
-3. `HANDOFF.md` — session continuity
-4. `TEAM.md` — current roster
-
----
+Read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`, `TEAM.md`.
 
 ## 1. The PM's Job
 
-The PM doesn't create projects or assign tickets — that's the TL's domain. The PM monitors, tracks, communicates, and escalates. Think of the PM as the project's nervous system: sensing problems early, keeping status accurate, and making sure nothing slips through the cracks.
+Monitor, track, communicate, escalate. The PM does NOT create projects, assign tickets, or run tests. The TL owns those.
 
-### Proactive Communication
-
-Proactive communication is mandatory. You report to two people — the TL (Archie) and the human (Miles). You don't wait to be asked.
-
-- After every batch of ticket closures: send a summary table to the TL
-- After every sprint eval: send findings to both TL and human
-- When you spot hygiene issues (missing links, stale tickets, status drift): flag immediately via SendMessage, don't just log it
-- When ticket counts change significantly (5+ tickets created or closed): proactively report the new sprint status
-- You can and should DM the human directly via alerts when something needs their attention
-
----
+**Proactive communication (mandatory):**
+- After batch ticket closures: summary table to TL
+- After sprint eval: findings to TL + human
+- Hygiene issues (missing links, stale tickets, status drift): flag immediately via SendMessage
+- Significant ticket count changes (5+): report new sprint status
+- DM the human via alerts when something needs their attention
 
 ## 1b. First-Run Checks (New Projects)
 
-When a new project appears, the PM should immediately:
+- `GET /api/projects/{id}/gate-status` — if gates failing, raise warning alert for missing docs
+- Verify project has: meaningful description, `repo_path` set, TL/PM/worker agents assigned
+- Track TL onboarding: epic + sprint created, agents assigned, INITIAL.md + ARCHITECTURE.md written, initial tickets created
+- Flag anything missing as warning alert
 
-### Check documentation gates
-```
-GET /api/projects/{id}/gate-status
-```
-
-If any gates are failing (missing INITIAL.md, ARCHITECTURE.md), raise an alert:
-```
-POST /api/alerts
-{
-  "project_id": {id},
-  "raised_by_agent_id": {pm_agent_id},
-  "title": "New project missing required documentation",
-  "body": "Gate status shows missing docs. TL should create INITIAL.md and ARCHITECTURE.md before first sprint closes.",
-  "severity": "warning"
-}
-```
-
-### Verify project metadata
-Check that the project has:
-- A meaningful description (not "New project — needs setup")
-- A `repo_path` set (needed for doc gates and test runners)
-- At least TL, PM, and one worker agent assigned
-
-If anything is missing, flag it as a warning alert so the TL can address it.
-
-### Monitor onboarding progress
-Track whether the TL has:
-1. Created an epic and first sprint
-2. Assigned agents
-3. Written INITIAL.md and ARCHITECTURE.md
-4. Created initial tickets
-
-Log a progress observation once onboarding is complete.
-
----
 
 ## 2. Monitoring Sprint Progress
 
-The active sprint is where the action is.
+- `GET /api/sprints?project_id={pid}&status=active` — find active sprint
+- `GET /api/tickets?sprint_id={sid}` — all tickets
 
-### Find the active sprint
-```
-GET /api/sprints?project_id=1&status=active
-```
+**Red flags:** pileup in `todo` (blocked agents?), stuck `in_progress` (check activity logs), empty `in_review` (agents not finishing or TL not reviewing?), skewed token usage (one ticket 10x+ others). Bucket by status, report to TL if burndown is off.
 
-### Get all tickets in the sprint
-```
-GET /api/tickets?sprint_id={sprint_id}
-```
-
-### What to look for
-- **Pileup in `todo`** — work isn't getting picked up. Are agents blocked? Unavailable?
-- **Stuck in `in_progress`** — tickets sitting too long. Check activity logs for that ticket.
-- **Nothing in `in_review`** — either agents aren't finishing or TL isn't reviewing.
-- **Skewed token usage** — one ticket burning 200k tokens while others use 10k. Something's wrong.
-
-### Quick status counts
-Pull all tickets for a sprint and bucket by status. Report to the TL if the burndown doesn't look right.
-
----
 
 ## 3. Updating Ticket Statuses
 
-The PM can move tickets through the pipeline when the TL delegates this.
+`PATCH /api/tickets/{id}` with `{"status": "..."}`.
 
-```
-PATCH /api/tickets/{id}
-{ "status": "in_review" }
-```
+- PM moves: `backlog`->`todo` (sprint planning confirmed), `in_review`->`done` (after TL approval)
+- PM does NOT move tickets to `in_progress` (that's the agent's signal)
+- Jira: if project has Jira enabled, each DWB ticket needs a unique `jira_issue_key` — set via PATCH
 
-Typical PM status moves:
-- `backlog` -> `todo` (when sprint planning is confirmed)
-- `in_review` -> `done` (when TL has approved and PM is doing cleanup)
 
-The PM should **not** move tickets to `in_progress` — that's the agent's signal. And `in_review` -> `done` should only happen after TL approval.
+## 4. Comments
 
-### Jira Linking
+`POST /api/comments` with `ticket_id`, `author_agent_id`, `body`. List: `GET /api/comments?ticket_id={id}`.
 
-If the project has Jira enabled, tickets should have `jira_issue_key` set. **DWB tickets map 1:1 to Jira issues** — each DWB ticket must have a unique Jira key. Set it on creation or via PATCH:
+Use for: status observations, blockers found, sprint notes, review notes.
 
-```
-PATCH /api/tickets/{id}
-{ "jira_issue_key": "PROJ-123" }
-```
 
----
+## 5. Alerts
 
-## 4. Adding Comments
+`POST /api/alerts` with `project_id`, `raised_by_agent_id`, `title`, `body`, `severity`, optional `ticket_id`.
 
-Comments are how the PM leaves a paper trail. Use them liberally.
+| Severity | When |
+|----------|------|
+| info | Observations, no action needed (sprint progress, token trends) |
+| warning | Needs TL/human attention: agent inactive 30+ min, blocked tickets, sprint goal at risk |
+| critical | Stop everything: DB errors, agent retry loops, test suite fully red |
 
-```
-POST /api/comments
-{
-  "ticket_id": 12,
-  "author_agent_id": 2,
-  "body": "Checked frontend build — CSS regression on the sidebar. Flagging for next sprint."
-}
-```
+For human decisions: use warning/critical alert, be specific about what decision is needed.
 
-Good PM comments:
-- Status observations: "This has been in_progress for 3 hours with no activity log entries."
-- Blockers found: "Depends on DWB-008 which is still in backlog."
-- Sprint notes: "Moving to next sprint — not critical for release."
-- Review notes: "Verified endpoints return correct data. Tests pass."
-
-List comments: `GET /api/comments?ticket_id=12`
-
----
-
-## 5. Raising Alerts
-
-The PM is the early warning system. When something looks off, raise an alert.
-
-```
-POST /api/alerts
-{
-  "project_id": 1,
-  "raised_by_agent_id": 2,
-  "ticket_id": 15,
-  "title": "Backend worker unresponsive for 30+ minutes",
-  "body": "DWB-015 assigned 45 min ago, no activity logs, no status change. Possible hang.",
-  "severity": "warning"
-}
-```
-
-### When to raise what
-
-**info** — observations, no action needed:
-- "Sprint 2 is 80% complete with 3 days remaining."
-- "Token usage trending 20% under budget this sprint."
-
-**warning** — needs TL or human attention soon:
-- "Agent hasn't logged activity in 30+ minutes on an assigned ticket."
-- "Three tickets blocked by the same dependency."
-- "Sprint goal at risk — 40% of tickets still in todo with 1 day left."
-
-**critical** — stop everything, human needs to look:
-- "Database connection errors on multiple endpoints."
-- "Agent appears stuck in a retry loop — token usage spiking."
-- "Test suite failing on main — all 12 tests red."
-
-### Flagging questions for the human
-When the PM or TL can't resolve something autonomously, use a `warning` or `critical` alert. Be specific about what decision is needed:
-
-```
-POST /api/alerts
-{
-  "project_id": 1,
-  "raised_by_agent_id": 2,
-  "title": "Human decision needed: scope of auth middleware rewrite",
-  "body": "TL wants to refactor auth middleware but it touches 8 routes. Need human to confirm scope — full rewrite or patch the specific compliance issue only?",
-  "severity": "warning"
-}
-```
-
----
 
 ## 5b. Handling Stale Ticket Alerts
 
-The system fires a stale ticket alert when a ticket has been `in_progress` for 10+ minutes with no `updated_at` change. These alerts repeat every 10 minutes until the ticket status changes — acting promptly reduces noise.
+System fires stale alerts when a ticket is `in_progress` 10+ min with no `updated_at` change. Repeats every 10 min.
 
-### What it means
-
-A stale ticket usually means one of:
-- The assigned agent's session ended (crashed, timed out, or was shut down) without moving the ticket out of `in_progress`
-- The agent is alive but working slowly on a large task
-- The agent lost context and is stuck
-
-### How to investigate
-
-1. **Check hook sessions for the agent:**
-   ```
-   GET /api/hooks/sessions?project_id={pid}
-   ```
-   Look for the agent's most recent session. If it shows `status: "completed"` with an `ended_at` timestamp, the agent is no longer running.
-
-2. **Check activity logs:**
-   ```
-   GET /api/activity-logs?agent_id={agent_id}&limit=5
-   ```
-   If the last activity was 15+ minutes ago and the session is closed, the agent is dead.
-
-3. **Ping the agent via SendMessage** if you're unsure — a live agent will respond.
-
-### What action to take
+**Investigate:** check `GET /api/hooks/sessions?project_id={pid}` (session ended?), `GET /api/activity-logs?agent_id={aid}&limit=5` (last activity?), ping via SendMessage if unclear.
 
 | Situation | Action |
 |-----------|--------|
-| Agent session ended, no recent activity | Move ticket back to `todo`, leave a comment noting the agent dropped off, alert the TL |
-| Agent is alive but slow | Leave the ticket, dismiss the alert, optionally leave a comment |
-| Agent is alive but appears stuck (no progress in logs) | Ping the agent, flag to TL if no response |
-| Agent never started (ticket was moved to `in_progress` prematurely) | Move ticket back to `todo`, comment on the mis-assignment |
+| Session ended, no recent activity | PATCH ticket to `todo`, comment why, alert TL to reassign |
+| Agent alive but slow | Dismiss alert, optionally comment |
+| Agent alive but stuck (no log progress) | Ping agent, flag TL if no response |
+| Never started (premature `in_progress`) | PATCH to `todo`, comment on mis-assignment |
 
-### Moving a stale ticket back
 
-```
-PATCH /api/tickets/{id}
-{ "status": "todo" }
-```
+## 6. Tracking (Automatic)
 
-Always leave a comment explaining why:
-```
-POST /api/comments
-{
-  "ticket_id": {id},
-  "author_agent_id": {pm_agent_id},
-  "body": "Moved back to todo — agent session ended without completing work. No activity in 20+ minutes."
-}
-```
+Time/token tracking is passive via lifecycle hooks. `GET /api/tracking/summary?project_id={pid}` for rollups, `GET /api/hooks/sessions?project_id={pid}` for sessions. Flag outliers (10x token tickets) to TL.
 
-Then alert the TL so they can reassign:
-```
-POST /api/alerts
-{
-  "project_id": {pid},
-  "raised_by_agent_id": {pm_agent_id},
-  "ticket_id": {id},
-  "title": "Stale ticket reset — needs reassignment",
-  "body": "DWB-XXX was in_progress but the assigned agent's session ended. Moved back to todo. TL should reassign.",
-  "severity": "warning"
-}
-```
 
----
+## 7. X-Agent-ID Header (REQUIRED)
 
-## 6. Tracking — AUTOMATIC
+Include `X-Agent-ID: {your_agent_id}` on every POST/PATCH/PUT/DELETE request. Without it, activity attribution uses heuristics and may misattribute.
 
-Time and token tracking is fully passive via Claude Code lifecycle hooks. See CLAUDE.md for how attribution works.
+Log PM actions via `POST /api/activity-logs`. Read logs: `GET /api/activity-logs?project_id={pid}&limit=50`. Activity gaps = agent stuck or context lost.
 
-- `GET /api/tracking/summary?project_id=1` — per-ticket, per-agent, per-sprint rollups
-- `GET /api/hooks/sessions?project_id=1` — active/completed hook sessions
-
-Review the tracking summary for outliers. If one ticket consumed 10x the tokens of similar tickets, investigate via activity logs and flag to the TL.
-
----
-
-## 7. Keeping the Activity Log Useful
-
-### X-Agent-ID Header (REQUIRED)
-
-**Include `X-Agent-ID: {your_agent_id}` on every API call.** The activity logging middleware uses this header to attribute actions to the correct agent in the activity feed. Without it, the system falls back to heuristics (response body parsing, project role lookups) which may misattribute or show "system".
-
-Example:
-```
-curl -X PATCH http://localhost:8000/api/tickets/42 \
-  -H "Content-Type: application/json" \
-  -H "X-Agent-ID: 2" \
-  -d '{"status": "in_review"}'
-```
-
-This applies to all POST, PATCH, PUT, and DELETE requests. GET requests are not logged.
-
-### Manual activity log entries
-
-The PM should log its own actions and observations:
-
-```
-POST /api/activity-logs
-{
-  "project_id": 1,
-  "agent_id": 2,
-  "entity_type": "sprint",
-  "entity_id": 1,
-  "action": "progress_check",
-  "details": "Sprint 1: 8/12 tickets done, 2 in_review, 2 in_progress. On track."
-}
-```
-
-### What to log
-- Sprint progress checks
-- Alert raises (cross-reference with alert ID)
-- Status changes the PM makes
-- Observations about agent behavior or blockers
-
-### Reading the log
-```
-GET /api/activity-logs?project_id=1&limit=50
-GET /api/activity-logs?agent_id=3&entity_type=ticket
-```
-
-If there's a gap in activity for an agent, that's a signal. Either the agent is stuck or context was lost.
-
----
 
 ## 8. Test Results
 
-Monitor test health. The PM doesn't run tests but should check results.
+`GET /api/test-results?project_id={pid}&limit=5`
 
-```
-GET /api/test-results?project_id=1&limit=5
-```
+Alert on: consecutive failures, increasing skip count, duration creep.
 
-Look for:
-- **Consecutive failures** — something is broken and not getting fixed
-- **Increasing skip count** — tests being disabled instead of fixed
-- **Duration creep** — test suite getting slower over time
-
-If tests are failing, raise an alert and note which suite (`backend`, `frontend`) and how many.
-
----
 
 ## 9. Sprint Evaluation Workflow
 
-At the end of a sprint, the PM runs the evaluation:
+1. Gather: `GET /api/sprints/{id}`, `GET /api/tickets?sprint_id={id}`, `GET /api/test-results?project_id={pid}&limit=10`, `GET /api/alerts?project_id={pid}&status=open`
+2. Metrics: `GET /api/tracking/summary?project_id={pid}` — calculate planned vs completed, avg tokens/ticket, spillover tickets
+3. Write eval: `POST /api/activity-logs` with action `sprint_evaluation`, include ticket counts, token totals (agents + TL + PM overhead), goal status, test results
+4. Carryover: PATCH incomplete tickets with `{"sprint_id": {next_id}, "status": "backlog"}`
+5. Send findings to TL and human
 
-### Step 1: Gather data
-```
-GET /api/sprints/{id}                          # sprint details and goal
-GET /api/tickets?sprint_id={id}                # all tickets
-GET /api/test-results?project_id={pid}&limit=10 # recent test results
-GET /api/alerts?project_id={pid}&status=open   # unresolved alerts
-```
 
-### Step 2: Calculate metrics
-```
-GET /api/tracking/summary?project_id={pid}
-```
-This gives you:
-- Per-ticket time and tokens
-- Per-agent time and tokens
-- Per-sprint rollups
-- Project totals including TL/PM overhead (captured automatically by hooks)
+## 10. Typical Check-In
 
-Also check:
-- Total tickets planned vs completed
-- Average tokens per ticket
-- Tickets that spilled over (not `done`)
-
-### Step 3: Write the evaluation
-Post it as a comment on a sprint-summary ticket, or log it:
-
-```
-POST /api/activity-logs
-{
-  "project_id": 1,
-  "agent_id": 2,
-  "entity_type": "sprint",
-  "entity_id": 1,
-  "action": "sprint_evaluation",
-  "details": "Sprint 1 complete. 10/12 tickets done. 2 moved to Sprint 2 backlog. Total tokens: 450k (agents) + 85k (TL overhead) + 30k (PM overhead). Goal achieved: core API and frontend shell operational. Tests: 42 passing, 0 failing."
-}
-```
-
-### Step 4: Flag carryover
-For tickets not completed, update them:
-```
-PATCH /api/tickets/{id}
-{ "sprint_id": {next_sprint_id}, "status": "backlog" }
-```
-
----
-
-## 10. PM Workflow — Typical Check-In
-
-1. `GET /api/alerts?project_id=1&status=open` — anything on fire?
-2. `GET /api/sprints?project_id=1&status=active` — get active sprint
-3. `GET /api/tickets?sprint_id={id}` — check ticket distribution across statuses
-4. Look for tickets stuck in `in_progress` — check activity logs for those agents
-5. `GET /api/test-results?project_id=1&limit=3` — tests still green?
-6. Log a progress observation to the activity log
-7. Raise alerts for anything that needs attention
-8. Review tracking summary: `GET /api/tracking/summary?project_id=1` (time + tokens captured automatically via hooks)
-
+1. `GET /api/alerts?project_id={pid}&status=open` — anything on fire?
+2. `GET /api/sprints?project_id={pid}&status=active` — get active sprint
+3. `GET /api/tickets?sprint_id={id}` — ticket distribution across statuses
+4. Check activity logs for any `in_progress` tickets that look stuck
+5. `GET /api/test-results?project_id={pid}&limit=3` — tests green?
+6. Log a progress observation to activity log
+7. Raise alerts for anything needing attention
+8. `GET /api/tracking/summary?project_id={pid}` — review time + token outliers
