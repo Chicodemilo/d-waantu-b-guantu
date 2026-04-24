@@ -40,21 +40,52 @@ Every new file MUST have a code header. See `docs/rules/global/code-header-forma
 
 ## Ticket Workflow
 
-When assigned a ticket:
+### Discover first (if unsure)
 
-1. Pick it up: `dwb2jira ticket transition POR-KEY --to "In Progress"` (dual-writes Jira + DWB).
-2. Do the work.
-3. Hand off: `dwb2jira ticket transition POR-KEY --to "Ready for Testing/Review" --comment "<commit sha or summary>"`
-   — **Example:** `--comment "abc1234 — added /claims endpoint + 6 tests, all green, unstaged"`.
-   — If your project uses a different review status, run `dwb2jira ticket get POR-KEY` to see available transitions.
+If you don't know what transitions are valid on your assigned ticket — or if this project uses non-standard status labels — run this before anything:
+
+```
+dwb2jira ticket get POR-KEY
+```
+
+Lists the current status + available transitions. Use the exact transition label from this output in your next command.
+
+### Pick up → work → hand off
+
+1. **Pick up:** `dwb2jira ticket transition POR-KEY --to "In Progress"` (dual-writes Jira + DWB).
+2. **Do the work.**
+3. **Hand off:** `dwb2jira ticket transition POR-KEY --to "Ready for Testing/Review" --comment "<commit sha or summary>"`
+   — **Example:** `--comment "abc1234 — added /claims endpoint + 6 tests, all green, unstaged"`
    — **Run the transition BEFORE messaging the TL** — the ticket state should be truth when the TL looks.
-4. Message the TL that work is ready for review. Include: what you did, files changed, staged/committed status, anything unexpected.
+4. **Message the TL** that work is ready for review. Include: what you did, files changed, staged/committed status, anything unexpected.
 
-**If TL returns the ticket:** the TL runs `dwb2jira ticket transition POR-KEY --to "In Progress"` to send it back, and messages you with feedback. Re-read ticket comments for context, do the fixes, re-hand-off via step 3.
+### Jira → DWB status mapping
+
+If you see a DWB-side warning, this is what the tool maps to on the twin:
+
+| Jira target | DWB status |
+|-------------|------------|
+| `To Do` | `todo` |
+| `In Progress` | `in_progress` |
+| `Ready for Testing/Review` | `in_review` |
+| `Done` / `Resolved` / `Closed` / `Won't Do` | `done` |
+
+### Return + failure recovery
+
+**If TL returns the ticket:** TL runs `dwb2jira ticket transition POR-KEY --to "In Progress"` to send it back, and messages you with feedback. Re-read ticket comments for context, do the fixes, re-hand-off via step 3.
 
 **If `ticket transition` fails** (Jira 4xx/5xx, network error): `dwb2jira log --failures --tail 5` shows recent failures with response bodies. Escalate to TL — don't retry blindly; auth/permission errors can't be self-resolved.
 
-**Bail-forward: Jira succeeded but DWB PATCH failed.** The command will warn that the DWB twin is out of sync. Jira is NOT rolled back. Don't panic and don't re-run `ticket transition` — it would re-attempt Jira. Tell the TL; PM can do a one-sided DWB PATCH to realign (see PM playbook § 4).
+**Bail-forward: Jira succeeded but DWB PATCH failed.** The command will warn that the DWB twin is out of sync. Jira is NOT rolled back. **DO NOT re-run `ticket transition`** — it would re-attempt Jira and could double-transition. Tell the TL; PM does a one-sided DWB PATCH to realign:
+
+```bash
+curl -X PATCH http://localhost:8000/api/tickets/{dwb_id} \
+  -H "X-Agent-ID: {pm_id}" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "<mapped-dwb-status>"}'
+```
+
+(PM owns that recovery — it's in their playbook § 4 Exception (a). Shown here so you can sanity-check the fix.)
 
 If you get blocked on the work itself, message the TL immediately — don't sit on it.
 

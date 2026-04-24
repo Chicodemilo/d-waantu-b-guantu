@@ -90,19 +90,34 @@ Then `PATCH /api/tickets/{id}` uses that numeric id. `PATCH /api/tickets/CI-217`
 
 ### Exceptions where raw PATCH IS sanctioned
 
-**(a) TL already transitioned Jira manually (Scenario D above)** — one-sided DWB PATCH to match:
-```
-PATCH /api/tickets/{id} { "status": "done" }
-X-Agent-ID: {pm_id}
-```
-
-**(b) Sprint carryover** — no tool covers sprint-field changes:
-```
-PATCH /api/tickets/{id} { "sprint_id": {next_sprint_id}, "status": "backlog" }
-X-Agent-ID: {pm_id}
+**(a) TL already transitioned Jira manually** — one-sided DWB PATCH to catch DWB up:
+```bash
+curl -X PATCH http://localhost:8000/api/tickets/{id} \
+  -H "X-Agent-ID: {pm_id}" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "done"}'
 ```
 
-**Known gap on (b):** this moves the DWB twin only. The Jira issue stays pinned to the OLD sprint. Stakeholders watching Jira will see the ticket stuck there. Options: (1) flag this to TL at sprint close so the TL manually moves the Jira issue via the UI, or (2) ask TL to run a `dwb2jira` agile sprint-move for each ticket. Don't silently leave Jira mis-sprinted.
+**(b) Sprint carryover** — no tool covers DWB sprint-field changes:
+```bash
+curl -X PATCH http://localhost:8000/api/tickets/{id} \
+  -H "X-Agent-ID: {pm_id}" \
+  -H "Content-Type: application/json" \
+  -d '{"sprint_id": {next_sprint_id}, "status": "backlog"}'
+```
+
+**Known gap on (b):** this moves the DWB twin only. The Jira issue stays pinned to the OLD sprint. Stakeholders watching Jira will see the ticket stuck there. **No `dwb2jira` command currently moves a Jira issue between sprints** — the TL needs to move each Jira issue manually via the Jira UI (or a future tool). Flag the list of carryover tickets to the TL at sprint close so the Jira side gets moved. Don't silently leave Jira mis-sprinted.
+
+### Two warning shapes after `ticket transition`
+
+When `--comment` is used, the tool can surface two different warnings — they have different recovery paths:
+
+| Warning text contains | What failed | Recovery |
+|-----------------------|-------------|----------|
+| `DWB twin status update failed` (or `DWB-side PATCH got ...`) | Jira transitioned, DWB status PATCH failed. **Status drift.** | Use exception (a) above — one-sided DWB PATCH to match Jira. |
+| `DWB_AGENT_ID not set` or `DWB comment skipped` | Jira transitioned + Jira comment posted, but DWB comment skipped. **Comment drift only, status is fine.** | Set `DWB_AGENT_ID` in `.env`, then `POST /api/comments` manually to restore the DWB-side paper trail. |
+
+If a warning doesn't match either shape, escalate to TL with the raw output rather than guessing.
 
 ---
 
