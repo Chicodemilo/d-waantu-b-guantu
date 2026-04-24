@@ -54,6 +54,7 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 - `GET /api/sprints?project_id={pid}&status=active` — find active sprint
 - `GET /api/tickets?sprint_id={sid}` — DWB-side view
 - `dwb2jira report --sprint active` — cross-system (DWB + Jira merged)
+- `dwb2jira epic list --project {JIRA_PROJECT}` — discover epic keys (useful for `--epic` filter)
 
 **Red flags:** pileup in `todo` (blocked agents?), stuck `in_progress` (check activity logs), empty `in_review` (agents not finishing or TL not reviewing?), skewed token usage (one ticket 10x+ others). Bucket by status, report to TL if burndown is off.
 
@@ -171,6 +172,8 @@ System fires stale alerts when a ticket is `in_progress` 10+ min with no `update
 ## 9. X-Agent-ID Header (REQUIRED)
 
 Include `X-Agent-ID: {your_agent_id}` on every POST/PATCH/PUT/DELETE. Without it, activity attribution uses heuristics and may misattribute.
+
+**Discover your own agent id:** `GET /api/agents?role=pm` (filter by role). Also listed in `.claude/project_rules_pm.md` for the current project.
 
 Log PM actions via `POST /api/activity-logs`. Read: `GET /api/activity-logs?project_id={pid}&limit=50`. Activity gaps = agent stuck or context lost.
 

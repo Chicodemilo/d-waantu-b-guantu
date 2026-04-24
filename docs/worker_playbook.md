@@ -17,6 +17,7 @@ All ticket operations go through the D2J (DWB_2_JIRA) CLI — it keeps Jira and 
 - **Pull your ticket:** `dwb2jira report --jira POR-KEY` or `dwb2jira report` (defaults to your assigned work)
 - **Never** PATCH `/api/tickets/{id}` directly for status changes — it updates DWB only and leaves Jira drift. `dwb2jira ticket transition` is the canonical move.
 - **Never** use `dwb2jira ticket update --status` for status changes either — it updates Jira only and leaves DWB drift. `ticket transition` is dual-write aware; `ticket update` is not.
+- **If a teammate already did one of the above by mistake:** treat it like a bail-forward drift — tell the TL, PM does a one-sided DWB PATCH to realign. Don't try to un-do it yourself.
 
 Full reference: `~/Dev/DWB_2_JIRA/README.md`. Status vocabulary (terminal vs non-terminal, Jira↔DWB mapping): `~/Dev/DWB_2_JIRA/README.md §Terminal vs non-terminal status vocabulary`.
 
@@ -70,11 +71,13 @@ If you see a DWB-side warning, this is what the tool maps to on the twin:
 | `Ready for Testing/Review` | `in_review` |
 | `Done` / `Resolved` / `Closed` / `Won't Do` | `done` |
 
+**Custom project statuses:** any non-terminal review-ish label (e.g. `In Review`, `Code Review`, `QA`) maps to `in_review`; any terminal label maps to `done`. If you're unsure, run `ticket get POR-KEY` first and ask the TL if the mapping isn't obvious.
+
 ### Return + failure recovery
 
 **If TL returns the ticket:** TL runs `dwb2jira ticket transition POR-KEY --to "In Progress"` to send it back, and messages you with feedback. Re-read ticket comments for context, do the fixes, re-hand-off via step 3.
 
-**If `ticket transition` fails** (Jira 4xx/5xx, network error): `dwb2jira log --failures --tail 5` shows recent failures with response bodies. Escalate to TL — don't retry blindly; auth/permission errors can't be self-resolved.
+**If `ticket transition` fails** (Jira 4xx/5xx, network error): `dwb2jira log --failures --tail 5` shows recent failures with response bodies. Other `log` flags (`--command`, `--since`, `--json`) are in README §Legacy CLI Reference. Escalate to TL — don't retry blindly; auth/permission errors can't be self-resolved.
 
 **Bail-forward: Jira succeeded but DWB PATCH failed.** The command will warn that the DWB twin is out of sync. Jira is NOT rolled back. **DO NOT re-run `ticket transition`** — it would re-attempt Jira and could double-transition. Tell the TL; PM does a one-sided DWB PATCH to realign:
 
