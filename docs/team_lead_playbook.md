@@ -2,11 +2,31 @@
 
 > Base URL: `http://localhost:8000`
 
+## DWB Is an Internal Tool
+
+D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself. **The human user approves all ticket proposals before anything is created.**
+
+## Canonical Tools
+
+All ticket operations go through the D2J (DWB_2_JIRA) CLI. Don't hand-roll curl for ticket CRUD.
+
+- **Query:** `dwb2jira report` — filterable Jira+DWB merged view. Defaults to assignee=you.
+- **Create:** `dwb2jira create proposal.yaml` — YAML input, preview + approval gate, auto-sprint, auto-DWB twin.
+- **Status change:** `dwb2jira ticket transition POR-KEY --to "Done" [--comment "..."]` — atomic dual-write (Jira + DWB).
+- **Full reference:** `~/Dev/DWB_2_JIRA/README.md`.
+
+---
+
 ## On Startup
 
 1. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`, `TEAM.md`
 2. Read `ARCHITECTURE.md` / `README.md` only for cross-cutting work
 3. Check open alerts (API + `ALERTS_PENDING.md`)
+4. Jump to § 5 for the typical session flow
+
+### Playbook locations
+
+Deployed to each project's `.claude/` via the Deploy Playbooks button. Playbooks get overwritten on deploy; `project_rules_*.md` never are.
 
 ---
 
@@ -37,54 +57,71 @@
 |--------|----------|-------|
 | **Sprints** | | |
 | Create sprint | `POST /api/sprints` | Required: `project_id`, `name`, `goal`, `sprint_number`, dates |
-| Update sprint | `PATCH /api/sprints/{id}` | Statuses: `planned` -> `active` -> `completed`. One active at a time |
-| List sprints | `GET /api/sprints?project_id={id}` | |
+| Update sprint | `PATCH /api/sprints/{id}` | `planned` → `active` → `completed`. One active at a time |
+| List sprints | `GET /api/sprints?project_id={pid}` | Filter `status=active` for hygiene checks |
 | **Epics** | | |
 | Create epic | `POST /api/epics` | Required: `project_id`, `name` |
 | **Agents** | | |
 | Register agent | `POST /api/agents` | Roles: `team_lead`, `pm`, `developer`, `reviewer`, `specialist` |
 | Assign to project | `POST /api/project-agents` | Body: `{ project_id, agent_id }` |
-| List project agents | `GET /api/project-agents?project_id={id}` | |
-| **Tickets** | | |
-| Create ticket | `POST /api/tickets` | Required: `project_id`, `ticket_number`, `ticket_key`, `title`, `status` |
-| Update ticket | `PATCH /api/tickets/{id}` | |
-| Query tickets | `GET /api/tickets` | Filters: `project_id`, `sprint_id`, `assigned_agent_id`, `status` — combinable |
+| List project agents | `GET /api/project-agents?project_id={pid}` | |
+| **Tickets (non-creation ops)** | | |
+| Query | `dwb2jira report` or `GET /api/tickets` | Use `dwb2jira report` for cross-system view. Legacy `ticket list` strips assignee — don't use. |
+| Transition status | `dwb2jira ticket transition POR-KEY --to "..."` | Dual-write. Never PATCH `/api/tickets/{id}` status directly on linked tickets. |
+| Assign | `PATCH /api/tickets/{id}` with `assigned_agent_id` | DWB-side only; Jira assignment is separate |
+| **Creation** | | |
+| New ticket(s) | `dwb2jira create proposal.yaml` | YAML input + approval gate. Never `POST /api/tickets` directly for new tickets. |
 | **Comments** | | |
-| Add comment | `POST /api/comments` | Body: `{ ticket_id, author_agent_id, body }` |
-| List comments | `GET /api/comments?ticket_id={id}` | |
+| Add | `POST /api/comments` | Body: `{ ticket_id, author_agent_id, body }` |
+| List | `GET /api/comments?ticket_id={id}` | |
 | **Alerts** | | |
-| Raise alert | `POST /api/alerts` | Severities: `info`, `warning`, `critical` |
-| Update alert | `PATCH /api/alerts/{id}` | Statuses: `open` -> `acknowledged` -> `resolved` |
-| List open alerts | `GET /api/alerts?project_id={id}&status=open` | |
+| Raise | `POST /api/alerts` | Severities: `info`, `warning`, `critical` |
+| Update | `PATCH /api/alerts/{id}` | `open` → `acknowledged` → `resolved` |
+| List open | `GET /api/alerts?project_id={pid}&status=open` | |
 | Dismiss all | `POST /api/alerts/dismiss-all` | Use after sprint close if queue is stale |
 | **Activity Log** | | |
 | Log event | `POST /api/activity-logs` | Body: `{ project_id, agent_id, entity_type, entity_id, action, details }` |
-| Query log | `GET /api/activity-logs?project_id={id}` | Filters: `entity_type`, `limit` |
+| Query | `GET /api/activity-logs?project_id={pid}` | Filters: `entity_type`, `limit` |
 | **Test Results** | | |
-| Log results | `POST /api/test-results` | Body: `{ project_id, suite, total_tests, passed, failed, status, ... }` |
-| Query results | `GET /api/test-results?project_id={id}` | Filters: `suite`, `status` |
+| Log | `POST /api/test-results` | Body: `{ project_id, suite, total_tests, passed, failed, status, ... }` |
+| Query | `GET /api/test-results?project_id={pid}` | Filters: `suite`, `status` |
 | **Tracking** | | |
-| Usage summary | `GET /api/tracking/summary?project_id={id}` | Per-ticket, per-agent, per-sprint rollups (automatic via hooks) |
-| Hook sessions | `GET /api/hooks/sessions?project_id={id}` | |
+| Usage summary | `GET /api/tracking/summary?project_id={pid}` | Per-ticket/agent/sprint rollups (automatic via hooks) |
+| Hook sessions | `GET /api/hooks/sessions?project_id={pid}` | |
 
 ---
 
 ## 3. Ticket Workflow
 
-Status flow: `backlog` -> `todo` -> `in_progress` -> `in_review` -> `done`
+Status flow: `backlog` → `todo` → `in_progress` → `in_review` → `done`. Time/token tracking is automatic via lifecycle hooks.
 
-The TL moves tickets through this pipeline. Assign via `assigned_agent_id`. Time/token tracking is automatic via lifecycle hooks.
+### Creation flow
 
-### Required table format for proposed tickets
+TL drafts a YAML proposal, Pam (PM) previews + shows human, human approves, Pam submits via `echo Y | dwb2jira create`. Creation atomic across Jira + DWB; human approves before anything exists.
 
-When proposing tickets (sprint kickoff, mid-sprint changes, close-out reports), always use this format:
+### Querying
 
-| DWB Ticket | Jira Ticket | DWB Sprint | Jira Epic | Jira Sprint | Title | Proposed Status | Current Status |
-|------------|-------------|------------|-----------|-------------|-------|-----------------|----------------|
-| CI-105 | POR-??? | Sprint 4 | POR-5152 | We Are Dashboard | Example task title | todo | — |
+- Your work today: `dwb2jira report --status "To Do,In Progress,Ready for Testing/Review"`
+- Last 2 weeks: `dwb2jira report --assignee '*' --updated ">=YYYY-MM-DD"`
+- Single ticket: `dwb2jira report --jira POR-KEY`
 
-- **Proposed Status** — status to create at or move to (`backlog`, `todo`, `in_progress`, `in_review`, `done`, `cancelled`)
-- **Current Status** — actual status now. Use `—` for new tickets. Shows delta between current and proposed state.
+Default `dwb2jira report` returns ALL statuses — add `--status` to filter. Status vocabulary: see `~/Dev/DWB_2_JIRA/README.md`.
+
+### Bulk operations
+
+Bulk ops are rare by design (`create` gate + dual-write tools prevent drift). If you hit a genuine need, propose the batch to the human first — don't hand-roll REST loops without approval.
+
+### Duplicate cleanup
+
+`dwb2jira create` warns on likely duplicates at preview. If you find existing dupes, pick the canonical one and `dwb2jira ticket delete POR-KEY` the others — the DWB twin deletes too.
+
+### Sprint hygiene
+
+Only one sprint should be `active` per project. Check at every transition:
+```
+GET /api/sprints?project_id={pid}&status=active
+PATCH /api/sprints/{id} { "status": "completed" }   # close any stale ones
+```
 
 ---
 
@@ -111,8 +148,10 @@ Don't let open alerts accumulate — an ignored queue trains everyone to ignore 
 ## 5. TL Workflow — Typical Session
 
 1. Check open alerts (`GET /api/alerts?status=open` + `ALERTS_PENDING.md`)
-2. Review active sprint: `GET /api/tickets?sprint_id={id}&status=in_review`
+2. Review active sprint: `dwb2jira report --sprint active --status "Ready for Testing/Review"`
 3. Accept or return reviewed tickets
-4. Create and assign new tickets for next batch of work
-5. Log activity for significant decisions
-6. Check tracking summary: `GET /api/tracking/summary?project_id={id}`
+4. Propose new tickets via YAML → `dwb2jira create --dry-run prop.yaml`, show preview to human
+5. On approval: `echo Y | dwb2jira create prop.yaml` (or hand off to PM)
+6. Assign tickets to agents (update `assigned_agent_id`)
+7. Log significant decisions in the activity log
+8. Check `GET /api/tracking/summary?project_id={pid}` for token outliers

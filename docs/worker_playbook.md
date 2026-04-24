@@ -9,13 +9,24 @@
 
 D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself.
 
+## Canonical Tools
+
+All ticket operations go through the D2J (DWB_2_JIRA) CLI — it keeps Jira and DWB in lockstep.
+
+- **Transition your ticket:** `dwb2jira ticket transition POR-KEY --to "In Progress"` — atomic dual-write (Jira + DWB)
+- **Pull your ticket:** `dwb2jira report --jira POR-KEY` or `dwb2jira report` (defaults to your assigned work)
+- **Never** PATCH `/api/tickets/{id}` directly for status changes — it updates DWB only and leaves Jira drift. `dwb2jira ticket transition` is the canonical move.
+- **Never** use `dwb2jira ticket update --status` for status changes either — it updates Jira only and leaves DWB drift. `ticket transition` is dual-write aware; `ticket update` is not.
+
+Full reference: `~/Dev/DWB_2_JIRA/README.md`. Status vocabulary (terminal vs non-terminal, Jira↔DWB mapping): `~/Dev/DWB_2_JIRA/README.md §Terminal vs non-terminal status vocabulary`.
+
 ## On Spawn — Read These First
 
 Before doing anything, read: (1) `.claude/agents/{role}.md`, (2) `.claude/project_rules_worker.md`, (3) `HANDOFF.md`, (4) `ARCHITECTURE.md`, (5) `README.md`. If any are missing, proceed with what you have and flag it.
 
 ## API
 
-**Base URL:** `http://localhost:8000/api` — All ticket/project interactions go through the DWB API. Use curl.
+**Base URL:** `http://localhost:8000/api` — used by `dwb2jira` and for GET queries. Mutating ticket calls go through `dwb2jira` (see Canonical Tools above).
 
 ## Code Headers — Mandatory
 
@@ -29,17 +40,29 @@ Every new file MUST have a code header. See `docs/rules/global/code-header-forma
 
 ## Ticket Workflow
 
-When assigned a ticket: (1) PATCH `/api/tickets/{id}` with `{"status": "in_progress"}`, (2) do the work, (3) PATCH with `{"status": "in_review"}`, (4) message the TL that work is ready. If blocked, message the TL immediately — don't sit on it.
+When assigned a ticket:
+
+1. Pick it up: `dwb2jira ticket transition POR-KEY --to "In Progress"` (dual-writes Jira + DWB).
+2. Do the work.
+3. Hand off: `dwb2jira ticket transition POR-KEY --to "Ready for Testing/Review" --comment "<commit sha or summary>"`
+   — **Example:** `--comment "abc1234 — added /claims endpoint + 6 tests, all green, unstaged"`.
+   — If your project uses a different review status, run `dwb2jira ticket get POR-KEY` to see available transitions.
+   — **Run the transition BEFORE messaging the TL** — the ticket state should be truth when the TL looks.
+4. Message the TL that work is ready for review. Include: what you did, files changed, staged/committed status, anything unexpected.
+
+**If TL returns the ticket:** the TL runs `dwb2jira ticket transition POR-KEY --to "In Progress"` to send it back, and messages you with feedback. Re-read ticket comments for context, do the fixes, re-hand-off via step 3.
+
+**If `ticket transition` fails** (Jira 4xx/5xx, network error): `dwb2jira log --failures --tail 5` shows recent failures with response bodies. Escalate to TL — don't retry blindly; auth/permission errors can't be self-resolved.
+
+If you get blocked on the work itself, message the TL immediately — don't sit on it.
 
 ## Reporting Status
 
-When done, message the TL: what you did, files changed, anything unexpected, whether changes are staged/committed or unstaged. Keep it concise — the TL will read the diff.
+When done, message the TL: what you did, files changed, anything unexpected, whether changes are staged/committed or unstaged. Keep it concise — the TL reads the diff.
 
 ## Style Rules
 
-- **Plain CSS only** — no Tailwind, no CSS-in-JS, no styled-components. Styles in `.css` files.
-- Use **CSS custom properties** from `theme.css` for colors and fonts.
-- **Terminal aesthetic** — monospace fonts, green-on-dark theme. Applies to all UI-facing content.
+Project-specific style rules (CSS conventions, UI aesthetic, framework bans) live in `.claude/project_rules_worker.md`. Read them at session start.
 
 ## STOP Means Stop
 
