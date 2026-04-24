@@ -54,6 +54,8 @@ When assigned a ticket:
 
 **If `ticket transition` fails** (Jira 4xx/5xx, network error): `dwb2jira log --failures --tail 5` shows recent failures with response bodies. Escalate to TL — don't retry blindly; auth/permission errors can't be self-resolved.
 
+**Bail-forward: Jira succeeded but DWB PATCH failed.** The command will warn that the DWB twin is out of sync. Jira is NOT rolled back. Don't panic and don't re-run `ticket transition` — it would re-attempt Jira. Tell the TL; PM can do a one-sided DWB PATCH to realign (see PM playbook § 4).
+
 If you get blocked on the work itself, message the TL immediately — don't sit on it.
 
 ## Reporting Status

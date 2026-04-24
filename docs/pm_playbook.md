@@ -4,10 +4,10 @@
 
 ## Canonical Tools
 
-- **Query tickets:** `dwb2jira report` — defaults to your tickets. See `~/Dev/DWB_2_JIRA/README.md`.
+- **Query tickets:** `dwb2jira report` — defaults to your tickets. **No-flag default includes EVERY status** (Done too) — add `--status "To Do,In Progress,Ready for Testing/Review"` to filter to open work. See `~/Dev/DWB_2_JIRA/README.md`.
 - **Create tickets:** `dwb2jira create` — YAML input, preview + approval gate, auto-sprint, auto-DWB twin.
 - **Status change on a linked ticket:** `dwb2jira ticket transition {JIRA-KEY} --to "{target}" [--comment "..."]` — atomic dual-write.
-- **Never call Jira/DWB ticket-CRUD endpoints directly; use the tools.** Raw `curl` is reserved for debugging and the one documented exception (sprint carryover, § 4).
+- **Never call Jira/DWB ticket-CRUD endpoints directly; use the tools.** Raw `curl` is reserved for debugging and two documented exceptions (see § 4).
 
 **Before first use of `create`, read the `dwb2jira create` section in `~/Dev/DWB_2_JIRA/README.md` in full** — YAML schema, validation rules, agent-assisted 2-stage flow (`--dry-run` → human approves → `echo Y | ...`), and drift-gate semantics.
 
@@ -71,17 +71,38 @@ dwb2jira ticket transition {JIRA-KEY} --to "{target}" [--comment "..."]
 - PM moves: `backlog` → `todo` (sprint planning confirmed), `in_review` → `done` (after TL approval)
 - PM does NOT move tickets to `in_progress` — that's the worker's signal
 - **If TL already transitioned Jira manually:** check with TL before running; you may need a one-sided DWB PATCH. That's the only time raw status PATCH is acceptable, and only with TL confirmation.
+- **`--comment` requires `DWB_AGENT_ID` in `.env`** — without it, the DWB-side comment is skipped with a warning (Jira still gets the comment). Set it once at environment setup.
 - **Never touch `jira_issue_key` by hand** — `dwb2jira create` sets it; if a link is missing, report it as a tool bug.
 
-### Sprint carryover — the one documented exception to "use the tools"
+### Resolving a DWB numeric id from a Jira key
 
-Carrying unfinished tickets to the next sprint uses raw PATCH because no tool covers sprint-field changes yet:
+The PATCH endpoint needs DWB's numeric `id`, NOT the `CI-###` `ticket_key`. Look it up:
 
+```bash
+# dwb2jira report shows the CI key:
+dwb2jira report --jira POR-5600      # DWB # column = CI-217
+
+# Resolve CI-217 → numeric id via DWB API:
+curl -s "http://localhost:8000/api/tickets?project_id={pid}&jira_issue_key=POR-5600" | jq '.[0].id'
+```
+
+Then `PATCH /api/tickets/{id}` uses that numeric id. `PATCH /api/tickets/CI-217` will 404.
+
+### Exceptions where raw PATCH IS sanctioned
+
+**(a) TL already transitioned Jira manually (Scenario D above)** — one-sided DWB PATCH to match:
+```
+PATCH /api/tickets/{id} { "status": "done" }
+X-Agent-ID: {pm_id}
+```
+
+**(b) Sprint carryover** — no tool covers sprint-field changes:
 ```
 PATCH /api/tickets/{id} { "sprint_id": {next_sprint_id}, "status": "backlog" }
+X-Agent-ID: {pm_id}
 ```
 
-DWB-only field change, so dual-write isn't relevant. Still include `X-Agent-ID`.
+**Known gap on (b):** this moves the DWB twin only. The Jira issue stays pinned to the OLD sprint. Stakeholders watching Jira will see the ticket stuck there. Options: (1) flag this to TL at sprint close so the TL manually moves the Jira issue via the UI, or (2) ask TL to run a `dwb2jira` agile sprint-move for each ticket. Don't silently leave Jira mis-sprinted.
 
 ---
 
