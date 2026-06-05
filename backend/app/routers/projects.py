@@ -468,27 +468,28 @@ def get_project_activity_feed(
 
 # --- Token budget ---
 
-# DWB-327 ceiling rebalance (2026-06-05): agent_def 800→1500, project_rules
-# 500→1000, architecture 4000→6000, readme 2000→2500.
-# Worker agent defs (worker.md, backend-worker.md, frontend-worker.md,
-# tester.md, system-ops.md) carry per-role workflow text that pushed the
-# old 800-token cap into "over" on every sprint close — that content is
-# load-bearing, not bloat. project_rules_* per-project conventions accreted
-# past 500 and trimming them was lossy. ARCHITECTURE.md is genuinely large
-# (data model + hook attribution + API + frontend + scripts + testing +
-# deployment + business logic) — see ARCHITECTURE.md size justification at
-# the top of the file. README.md fits just under 2500 with the bump.
-# CLAUDE.md, HANDOFF.md, INITIAL.md stay at 1500 — trims this cycle land
-# them under without raising caps.
+# Post-DWB-331 rebalance (2026-06-05): after agent-def trim + playbook
+# consolidation, the playbooks absorbed content (Identity flow, Memory Writes,
+# stack details, Session Marker, etc.) and project_rules_worker absorbed the
+# per-role stacks. Caps bumped so the canonical homes aren't starting in
+# red/yellow on a clean repo:
+#   playbook:       2500 → 4000  (PM at ~2860 was over; TL/worker at ~2440 warn)
+#   project_rules:  1000 → 3000  (worker at ~2055 was over)
+#   claude_md:      1500 → 2000  (was 93% warn)
+#   architecture:   6000 → 7500  (was 91% warn)
+#   readme:         2500 → 3500  (was 98% warn)
+#   initial:        1500 → 2000  (was 91% warn)
+# Unchanged: handoff (good headroom), memory_*, agent_def (stubs cap stays;
+# 1500 is wasteful for 50-token stubs but flagged out of scope).
 _TOKEN_CEILINGS = {
     "agent_def": 1500,
-    "playbook": 2500,
-    "claude_md": 1500,
-    "project_rules": 1000,
+    "playbook": 4000,
+    "claude_md": 2000,
+    "project_rules": 3000,
     "handoff": 1500,
-    "architecture": 6000,
-    "readme": 2500,
-    "initial": 1500,
+    "architecture": 7500,
+    "readme": 3500,
+    "initial": 2000,
     "memory_identity": 600,
     "memory_scratchpad": 2000,
     "memory_lessons": 1500,

@@ -178,11 +178,14 @@ class TestTokenBudgetExtended:
         assert not any(n.startswith("memory/Mallory/") for n in names)
 
 
-class TestDWB327CeilingRebalance:
-    """DWB-327: agent_def 800→1500, project_rules 500→1000.
+class TestCeilingRebalance:
+    """Post-DWB-331 ceilings (2026-06-05): playbook 2500→4000,
+    project_rules 1000→3000, claude_md 1500→2000, architecture 6000→7500,
+    readme 2500→3500, initial 1500→2000. agent_def stays at 1500. memory and
+    handoff caps unchanged.
 
-    Asserts the new caps surface on the budget endpoint. If a future ticket
-    tunes them again, the source of truth (_TOKEN_CEILINGS in routers/projects.py)
+    Asserts caps surface on the budget endpoint. If a future ticket tunes
+    them again, the source of truth (_TOKEN_CEILINGS in routers/projects.py)
     must update along with these tests.
     """
 
@@ -195,40 +198,40 @@ class TestDWB327CeilingRebalance:
         )
         assert agent_def["ceiling"] == 1500
 
-    def test_project_rules_ceiling_is_1000(self, client, make_project, tmp_path):
+    def test_project_rules_ceiling_is_3000(self, client, make_project, tmp_path):
         repo = _setup_repo(tmp_path, "DR2", agent_names=[])
         proj = make_project(prefix="DR2", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         rules = next(
             f for f in data["files"] if f["category"] == "project_rules"
         )
-        assert rules["ceiling"] == 1000
+        assert rules["ceiling"] == 3000
 
-    def test_architecture_ceiling_is_6000(self, client, make_project, tmp_path):
+    def test_architecture_ceiling_is_7500(self, client, make_project, tmp_path):
         repo = _setup_repo(tmp_path, "DR3", agent_names=[])
         proj = make_project(prefix="DR3", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         arch = next(
             f for f in data["files"] if f["category"] == "architecture"
         )
-        assert arch["ceiling"] == 6000
+        assert arch["ceiling"] == 7500
 
-    def test_readme_ceiling_is_2500(self, client, make_project, tmp_path):
+    def test_readme_ceiling_is_3500(self, client, make_project, tmp_path):
         repo = _setup_repo(tmp_path, "DR4", agent_names=[])
         proj = make_project(prefix="DR4", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         readme = next(
             f for f in data["files"] if f["category"] == "readme"
         )
-        assert readme["ceiling"] == 2500
+        assert readme["ceiling"] == 3500
 
-    def test_other_ceilings_unchanged_by_rebalance(self, client, make_project, tmp_path):
-        """Spot-check categories that DWB-327 did NOT touch."""
+    def test_playbook_and_claude_md_and_initial_bumped(
+        self, client, make_project, tmp_path
+    ):
         repo = _setup_repo(tmp_path, "DR5", agent_names=[])
         proj = make_project(prefix="DR5", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         by_category = {f["category"]: f["ceiling"] for f in data["files"]}
-        # These were not raised — assert they stayed put.
-        assert by_category["claude_md"] == 1500
-        assert by_category["initial"] == 1500
-        assert by_category["playbook"] == 2500
+        assert by_category["playbook"] == 4000
+        assert by_category["claude_md"] == 2000
+        assert by_category["initial"] == 2000
