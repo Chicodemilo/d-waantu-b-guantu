@@ -1,12 +1,12 @@
 # Path: app/services/sprint.py
 # File: sprint.py
 # Created: 2026-03-29
-# Purpose: Sprint CRUD, completion gates (incl. doc file checks), and post-close automation
+# Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), and post-close automation
 # Caller: app/routers/sprints.py
-# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project)
+# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc
 # Data In: db: Session, SprintCreate/Update
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-04-16
+# Last Modified: 2026-06-04
 
 import logging
 import re
@@ -162,7 +162,6 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
         for toggle, filename in [
             (project.force_initial_md, "INITIAL.md"),
             (project.force_architecture_md, "ARCHITECTURE.md"),
-            (project.force_team_md, "TEAM.md"),
             (project.force_handoff_md, "HANDOFF.md"),
         ]:
             if toggle:
@@ -172,6 +171,31 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                         400,
                         f"Cannot complete sprint: {filename} not found at {path}",
                     )
+
+    # Consolidation gate — every active agent who participated in the sprint
+    # must have an ack row when force_consolidation is enabled (DWB-326).
+    if project.force_consolidation:
+        from app.services import agent_consolidation as consolidation_svc
+        unacked = consolidation_svc.unacked_agents_for_sprint(db, sprint)
+        # Denominator = active participants (the set we actually require acks
+        # from), not all active agents on the project. Pre-DWB-326 this was
+        # all active agents, which made the M/N display misleading when the
+        # active roster was larger than the sprint team.
+        participant_ids = consolidation_svc.participants_for_sprint(db, sprint)
+        total_required = db.scalar(
+            select(func.count()).select_from(Agent)
+            .where(
+                Agent.project_id == project.id,
+                Agent.is_active.is_(True),
+                Agent.id.in_(participant_ids) if participant_ids else Agent.id.is_(None),
+            )
+        ) or 0
+        if unacked:
+            raise HTTPException(
+                400,
+                f"consolidation gate failed: {len(unacked)} of {total_required} "
+                f"agents have not acked ({', '.join(a.name for a in unacked)})",
+            )
 
     # Unreviewed failure records gate — block if stubs exist for sprint tickets
     sprint_ticket_ids = list(db.scalars(

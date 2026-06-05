@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     API_RELOAD: bool = True
     ADMIN_API_KEY: str = "lat-admin-CHANGE-ME-TO-RANDOM-64-CHAR-HEX"
 
+    # Jira (optional — empty disables the /api/jira/* endpoints)
+    JIRA_BASE_URL: str = ""
+    JIRA_EMAIL: str = ""
+    JIRA_API_TOKEN: str = ""
+    JIRA_CACHE_TTL_SECONDS: int = 60
+
+    @property
+    def jira_configured(self) -> bool:
+        return bool(self.JIRA_BASE_URL and self.JIRA_EMAIL and self.JIRA_API_TOKEN)
+
     @property
     def database_url(self) -> str:
         return (

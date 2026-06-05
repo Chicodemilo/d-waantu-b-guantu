@@ -2,18 +2,13 @@
 
 > Project-specific rules for the PM on the DWB project. This file is NOT overwritten by deploy.
 
-## DWB Agent Roster (Project 1)
+## DWB Agent Roster
 
-| agent_id | Name   | Role             | Notes                     |
-|----------|--------|------------------|---------------------------|
-| 1        | Archie | team-lead        | TL — orchestrator         |
-| 2        | Mona   | pm               | You — PM                  |
-| 3        | Pixel  | frontend-worker  | React, CSS, components    |
-| 4        | Devin  | backend-worker   | FastAPI, SQLAlchemy, Alembic |
-| 5        | Bolt   | system-ops       | Docker, scripts, infra    |
-| 6        | Sage   | tester           | pytest, vitest, bug filing|
+Live roster: `GET /api/projects/1/team`. DB-authoritative; do not hard-code names or IDs in this file. Your `agent_id` is **14** (Pam_DWB). Use `X-Agent-ID: 14` on every mutation.
 
-Your agent_id is **2**. Always use `X-Agent-ID: 2` on mutating requests.
+## Hard Limits — Jira Sprint Authority (DWB-323)
+
+PM has **NO authority** over Jira sprints (close/create/edit/delete). Pull/read only. **NEVER run `dwb2jira sprint close`** — Jira sprints span many users and closing one breaks every other assignee. Only DWB sprints are PM-owned. Tickets the user is not the Jira assignee of are also read-only. If TL asks for a Jira sprint op, REFUSE and escalate to the human. Code guard lands in DWB-324.
 
 ## Ticket Numbering
 
@@ -24,34 +19,25 @@ Your agent_id is **2**. Always use `X-Agent-ID: 2` on mutating requests.
 
 ## Sprint Conventions
 
-- Sprint numbers are sequential (currently at 47+)
-- Sprint names auto-generate from the goal — write descriptive goals, not "Sprint N"
-- One active sprint at a time per project
-- Sprints auto-assign to the current epic
-- Epic 17 ("Team Manifest, Playbooks & Gates") is the current epic
+- Sprint numbers sequential (live count: `GET /api/sprints?project_id=1`).
+- Sprint names auto-generate from the goal — write descriptive goals, not "Sprint N".
+- One active sprint at a time per project.
+- Sprints auto-assign to the current epic (live: `GET /api/epics?project_id=1&status=open`).
 
-## Sprint Gates (7 total)
+## Sprint Gates
 
-DWB enforces these gates on sprint close:
-1. `force_test_run` — at least one test run during the sprint
-2. `force_test_coverage` — every router has a test file
-3. `force_initial_md` — INITIAL.md exists in repo
-4. `force_architecture_md` — ARCHITECTURE.md exists in repo
-5. `force_team_md` — TEAM.md exists in repo
-6. `force_handoff_md` — HANDOFF.md exists in repo
-7. `force_headers` — reserved/not yet enforced
+Authoritative list: `GET /api/projects/1/gate-status`. Currently enabled on DWB:
+- `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_consolidation` (DWB-322).
+- `force_headers` reserved/not yet enforced.
+- `force_team_md` removed in DWB-321 (DB-authoritative roster).
 
 Plus: unreviewed failure records (type=TBD) block close.
-
-## Team Status (Ticket-Driven)
-
-Team Status is driven by ticket status — no registration or hooks needed. An agent shows as "working" if they have an `in_progress` ticket. Move tickets to `in_progress` promptly when starting work, and out of `in_progress` when done. Stale tickets (in_progress for 10+ minutes) trigger automatic alerts.
 
 ## Alert Patterns
 
 - **0-token done tickets** — info alert fires automatically. Usually means hooks aren't attributing. Investigate if persistent.
 - **Sprint close** — auto-creates alerts for TL, PM, tester + test ticket for next sprint.
-- **Doc gate failures** — critical alert for TL. Check that INITIAL.md, ARCHITECTURE.md, TEAM.md, HANDOFF.md all exist.
+- **Doc gate failures** — critical alert for TL. Check that INITIAL.md, ARCHITECTURE.md, HANDOFF.md all exist. (TEAM.md is deprecated — roster lives in DB.)
 - **Rework detected** — info alert for PM when ticket goes back to in_progress after done. Auto-creates failure record stub.
 
 ## Common Workflows
@@ -68,4 +54,4 @@ When a blocker finishes, immediately move the dependent ticket to `in_progress` 
 6. Report to TL with scorecard
 
 ### Token attribution
-Currently showing 0 on most tickets — hooks not fully attributing. Flag this if it persists but don't block sprints on it.
+Hook-driven (DWB-304/307). If a done ticket shows 0 tokens, check the agent's session marker resolved correctly (`GET /api/hooks/sessions?status=orphan`).

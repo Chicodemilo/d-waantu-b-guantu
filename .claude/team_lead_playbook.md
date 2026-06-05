@@ -1,441 +1,233 @@
 # Team Lead Playbook
 
-> How a Team Lead agent operates inside D'Waantu B'Guantu.
 > Base URL: `http://localhost:8000`
 
 ## DWB Is an Internal Tool
 
-D'Waantu B'Guantu is the human user's private project management system. It is NOT visible to external stakeholders.
+D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself. **The human user approves all ticket proposals before anything is created.**
 
-- **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content
-- **Never reference DWB ticket IDs** (e.g., "DWB-234") outside of DWB itself
-- **Jira is the external system** — if a project has Jira integration, Jira tickets are what stakeholders see. DWB tracks the internal agent workflow behind those tickets.
-- **The human user approves all ticket proposals** — present proposed tickets in the required table format and wait for approval before creating them in DWB or Jira
+## Canonical Tools
 
-## Playbook Locations
+All ticket operations go through the D2J (DWB_2_JIRA) CLI. Don't hand-roll curl for ticket CRUD.
 
-Deployed to each project's `.claude/` directory via the Deploy Playbooks button:
+- **Query:** `dwb2jira report` — filterable Jira+DWB merged view. Defaults to assignee=you.
+- **Create:** `dwb2jira create proposal.yaml` — YAML input, preview + approval gate, auto-sprint, auto-DWB twin.
+- **Status change:** `dwb2jira ticket transition POR-KEY --to "Done" [--comment "..."]` — atomic dual-write (Jira + DWB).
+- **Full reference:** `~/Dev/DWB_2_JIRA/README.md`.
 
-| File | Path | Overwritten on deploy? | Purpose |
-|------|------|----------------------|---------|
-| TL Playbook | `.claude/team_lead_playbook.md` | Yes | Generic TL operating procedures |
-| PM Playbook | `.claude/pm_playbook.md` | Yes | Generic PM operating procedures |
-| Worker Playbook | `.claude/worker_playbook.md` | Yes | Generic rules for all agents |
-| TL Project Rules | `.claude/project_rules_team_lead.md` | **No** | Project-specific TL rules |
-| PM Project Rules | `.claude/project_rules_pm.md` | **No** | Project-specific PM rules |
-| Worker Project Rules | `.claude/project_rules_worker.md` | **No** | Project-specific worker rules |
+---
 
-Playbooks are generic — they get overwritten on every deploy. Project rules are project-specific — they're created blank on first deploy and never overwritten.
+## On Startup
 
-Re-deploy: `POST /api/projects/{id}/deploy-playbooks` or the Deploy Playbooks button on the project page.
+1. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`
+2. Fetch the live team roster: `GET /api/projects/{project_id}/team` — the DB is authoritative, not a checked-in file
+3. Read `ARCHITECTURE.md` / `README.md` only for cross-cutting work
+4. Check open alerts (API + `ALERTS_PENDING.md`)
+5. Jump to § 5 for the typical session flow
 
-### On Startup
+### Playbook locations
 
-Read these files at session start:
-1. This playbook (`.claude/team_lead_playbook.md`)
-2. Your project rules (`.claude/project_rules_team_lead.md`)
-3. `HANDOFF.md` — session continuity
-4. `TEAM.md` — current roster
-
-Read `ARCHITECTURE.md` and `README.md` only when doing cross-cutting work that spans multiple systems.
+Deployed to each project's `.claude/` via the Deploy Playbooks button. Playbooks get overwritten on deploy; `project_rules_*.md` never are.
 
 ---
 
 ## 1. Project Setup
 
-Before anything moves, the project needs to exist.
+| Action | Endpoint | Notes |
+|--------|----------|-------|
+| Create from repo | `POST /api/projects/from-repo` | Body: `{ "repo_path": "..." }` — auto-populates from repo metadata |
+| Create manually | `POST /api/projects` | Required: `prefix`, `name`, `description`. Optional: `repo_path`, `status` |
+| Update project | `PATCH /api/projects/{id}` | |
+| Check gates | `GET /api/projects/{id}/gate-status` | Shows which doc gates pass/fail |
 
-### Quick start — from an existing repo
+### First-Run Checklist (New Projects)
 
-```
-POST /api/projects/from-repo
-{ "repo_path": "/path/to/repo" }
-```
+1. Check gate status — handle failures
+2. For empty repos: ask user for goals/constraints, then write `INITIAL.md`, `ARCHITECTURE.md`, `HANDOFF.md`
+3. Create first epic, first sprint, assign agents (TL + PM + worker minimum) — agents go in the DB via `POST /api/agents` + `POST /api/project-agents`
+4. Have PM check gates and raise alerts for gaps
 
-This scans the repo for `package.json`, `pyproject.toml`, `README.md`, and auto-populates prefix, name, and description. It also enables `force_initial_md` and `force_architecture_md` gates by default.
-
-### Manual creation
-
-```
-POST /api/projects
-{
-  "prefix": "DWB",
-  "name": "D'Waantu B'Guantu",
-  "description": "Local agent tracker — sprint management for AI agents",
-  "repo_path": "/Users/mchick/Dev/d-waantu_b-guantu"
-}
-```
-
-Fields that matter:
-- `prefix` — short uppercase tag (max 6 chars), used to generate ticket keys (e.g. `DWB-001`)
-- `repo_path` — optional filesystem path to the repo, useful for test runners and scripts
-- `status` — one of `active`, `paused`, `completed`, `archived`. Default: `active`
-
-Update with `PATCH /api/projects/{id}`.
+The team roster lives in the DB. `HANDOFF.md` = session continuity — read on start, update on end. Naming conventions for new agents are in § Naming Convention below.
 
 ---
 
-## 1b. First-Run Checklist (New Projects)
+## 2. API Reference
 
-After creating a project, immediately:
-
-### Check gate status
-```
-GET /api/projects/{id}/gate-status
-```
-
-This returns which documentation gates are passing or failing. Gates enabled by default: `force_initial_md`, `force_architecture_md`, `force_team_md`, `force_handoff_md`.
-
-### Handle empty repos
-If the repo is empty or has no meaningful structure:
-1. Ask the user: *"What is this project? What's the goal? What are the constraints?"*
-2. Update the project with their answers: `PATCH /api/projects/{id}` (description, name)
-3. Write `INITIAL.md` at the repo root covering: why, requirements, phases, design decisions, constraints, success criteria
-4. Write `ARCHITECTURE.md` once the system design is decided
-5. Write `TEAM.md` using the template (`.claude/agents/TEAM.md.template`) — start with Archie + Pam, add workers as you spawn them
-6. Write `HANDOFF.md` — initial session state, decisions, gotchas
-
-### TEAM.md — Live Roster
-`TEAM.md` is the live team roster at the project repo root. It starts with mandatory agents (Archie + Pam) and grows as you spin up workers. Update it when the team composition changes. Agent naming conventions live here — not in the TL playbook.
-
-### HANDOFF.md — Session Continuity
-`HANDOFF.md` carries context from session to session. Read it at the start of every session. Update it at the end with: current state, new decisions, gotchas, and a brief summary of what happened.
-
-### Create initial structure
-1. Create the first epic: `POST /api/epics` — name it after the first major milestone
-2. Create the first sprint: `POST /api/sprints` — set a goal, assign a start/end date
-3. Assign agents to the project: `POST /api/project-agents` — at minimum, assign TL, PM, and one worker
-4. Update `TEAM.md` with the workers you spawned
-5. Have the PM check gate status and raise alerts for anything missing
-
----
-
-## 2. Sprints
-
-Sprints give work a timebox and a goal.
-
-```
-POST /api/sprints
-{
-  "project_id": 1,
-  "name": "Sprint 1 — Foundation",
-  "goal": "Core models, API, basic frontend shell",
-  "sprint_number": 1,
-  "start_date": "2026-03-25",
-  "end_date": "2026-04-01"
-}
-```
-
-Sprint statuses: `planned` -> `active` -> `completed`
-
-Move a sprint to `active` when work begins:
-```
-PATCH /api/sprints/{id}
-{ "status": "active" }
-```
-
-Only one sprint should be `active` at a time. Close it when the timebox ends or when all tickets are `done`.
-
-List sprints for a project: `GET /api/sprints?project_id=1`
+| Action | Endpoint | Notes |
+|--------|----------|-------|
+| **Sprints** | | |
+| Create sprint | `POST /api/sprints` | Required: `project_id`, `name`, `goal`, `sprint_number`, dates |
+| Update sprint | `PATCH /api/sprints/{id}` | `planned` → `active` → `completed`. One active at a time |
+| List sprints | `GET /api/sprints?project_id={pid}` | Filter `status=active` for hygiene checks |
+| **Epics** | | |
+| Create epic | `POST /api/epics` | Required: `project_id`, `name` |
+| **Agents** | | |
+| Register agent | `POST /api/agents` | Body REQUIRES `project_id` (since DWB-287). Roles: `team_lead`, `pm`, `developer`, `reviewer`, `specialist`. UNIQUE(project_id, name) enforced. |
+| Assign to project | `POST /api/project-agents` | Body: `{ project_id, agent_id }` |
+| List project agents | `GET /api/project-agents?project_id={pid}` | |
+| **Tickets (non-creation ops)** | | |
+| Query | `dwb2jira report` or `GET /api/tickets` | Use `dwb2jira report` for cross-system view. Legacy `ticket list` strips assignee — don't use. |
+| Transition status | `dwb2jira ticket transition POR-KEY --to "..."` | Dual-write. Never PATCH `/api/tickets/{id}` status directly on linked tickets. |
+| Assign | `PATCH /api/tickets/{id}` with `assigned_agent_id` | DWB-side only; Jira assignment is separate |
+| **Creation** | | |
+| New ticket(s) | `dwb2jira create proposal.yaml` | YAML input + approval gate. Never `POST /api/tickets` directly for new tickets. |
+| **Comments** | | |
+| Add | `POST /api/comments` | Body: `{ ticket_id, author_agent_id, body }` |
+| List | `GET /api/comments?ticket_id={id}` | |
+| **Alerts** | | |
+| Raise | `POST /api/alerts` | Severities: `info`, `warning`, `critical` |
+| Update | `PATCH /api/alerts/{id}` | `open` → `acknowledged` → `resolved` |
+| List open | `GET /api/alerts?project_id={pid}&status=open` | |
+| Dismiss all | `POST /api/alerts/dismiss-all` | Use after sprint close if queue is stale |
+| **Activity Log** | | |
+| Log event | `POST /api/activity-logs` | Body: `{ project_id, agent_id, entity_type, entity_id, action, details }` |
+| Query | `GET /api/activity-logs?project_id={pid}` | Filters: `entity_type`, `limit` |
+| **Test Results** | | |
+| Log | `POST /api/test-results` | Body: `{ project_id, suite, total_tests, passed, failed, status, ... }` |
+| Query | `GET /api/test-results?project_id={pid}` | Filters: `suite`, `status` |
+| **Tracking** | | |
+| Usage summary | `GET /api/tracking/summary?project_id={pid}` | Per-ticket/agent/sprint rollups (automatic via hooks) |
+| Hook sessions | `GET /api/hooks/sessions?project_id={pid}` | |
 
 ---
 
-## 3. Epics
+## 3. Ticket Workflow
 
-Epics group related tickets under a theme.
+Status flow: `backlog` → `todo` → `in_progress` → `in_review` → `done`. Time/token tracking is automatic via lifecycle hooks.
 
+### Creation flow
+
+TL drafts a YAML proposal, Pam (PM) previews + shows human, human approves, Pam submits via `echo Y | dwb2jira create`. Creation atomic across Jira + DWB; human approves before anything exists.
+
+### Querying
+
+- Your work today: `dwb2jira report --status "To Do,In Progress,Ready for Testing/Review"`
+- Last 2 weeks: `dwb2jira report --assignee '*' --updated ">=YYYY-MM-DD"`
+- Single ticket: `dwb2jira report --jira POR-KEY`
+
+Default `dwb2jira report` returns ALL statuses — add `--status` to filter. Status vocabulary: see `~/Dev/DWB_2_JIRA/README.md`.
+
+### Bulk operations
+
+Bulk ops are rare by design (`create` gate + dual-write tools prevent drift). If you hit a genuine need, propose the batch to the human first — don't hand-roll REST loops without approval.
+
+### Duplicate cleanup
+
+`dwb2jira create` warns on likely duplicates at preview. If you find existing dupes, pick the canonical one and `dwb2jira ticket delete POR-KEY` the others — the DWB twin deletes too.
+
+### Sprint hygiene
+
+Only one sprint should be `active` per project. Check at every transition:
 ```
-POST /api/epics
-{
-  "project_id": 1,
-  "name": "Backend API",
-  "description": "All FastAPI models, routes, and services"
-}
-```
-
-Epic statuses: `open` -> `closed`
-
-Use epics to organize work by feature area. A ticket can optionally belong to one epic.
-
----
-
-## 4. Managing Agents
-
-Agents are the workers. Register them globally, then assign to projects.
-
-Register an agent:
-```
-POST /api/agents
-{
-  "name": "backend-worker",
-  "role": "developer",
-  "description": "Handles FastAPI, SQLAlchemy, and Python work"
-}
-```
-
-Roles: `team_lead`, `pm`, `developer`, `reviewer`, `specialist`
-
-Assign to a project:
-```
-POST /api/project-agents
-{
-  "project_id": 1,
-  "agent_id": 3
-}
-```
-
-List agents on a project: `GET /api/project-agents?project_id=1`
-
----
-
-## 5. Tickets — The Core Unit of Work
-
-Every piece of work is a ticket. The TL creates, assigns, and tracks them.
-
-```
-POST /api/tickets
-{
-  "project_id": 1,
-  "sprint_id": 1,
-  "epic_id": 2,
-  "assigned_agent_id": 3,
-  "ticket_number": 1,
-  "ticket_key": "DWB-001",
-  "title": "Create test results DB schema and API endpoints",
-  "description": "Model, schema, service, router for test_results table.",
-  "ticket_type": "task",
-  "status": "todo"
-}
-```
-
-### Ticket types
-- `task` — standard unit of work
-- `bug` — something broken that needs fixing
-- `story` — feature from a user perspective
-
-### Ticket statuses (the flow)
-```
-backlog -> todo -> in_progress -> in_review -> done
-```
-
-The TL moves tickets through this pipeline:
-- `backlog` — known work, not yet planned for a sprint
-- `todo` — planned for current sprint, ready to pick up
-- `in_progress` — agent is actively working on it
-- `in_review` — work is done, TL is reviewing
-- `done` — accepted and closed
-
-### Required table format for proposed tickets
-
-When proposing tickets (sprint kickoff, mid-sprint changes, close-out reports), always present them in this table format:
-
-| DWB Ticket | Jira Ticket | DWB Sprint | Jira Epic | Jira Sprint | Title | Proposed Status | Current Status |
-|------------|-------------|------------|-----------|-------------|-------|-----------------|----------------|
-| CI-105 | POR-??? | Sprint 4 | POR-5152 | We Are Dashboard | Example task title | todo | — |
-| CI-??? | POR-??? | Sprint 4 | POR-5152 | We Are Dashboard | Another task | todo | — |
-
-**Column definitions:**
-- **Proposed Status** — the status the ticket should be created at or moved to. One of: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `cancelled`.
-- **Current Status** — the ticket's actual status right now. Use `—` for tickets that don't exist yet. This column lets Miles see the delta between where things are and where the TL wants them to be.
-
-**When to use each:**
-- **Sprint kickoff proposals** — Proposed Status = `todo` (or `done` for retroactive tickets), Current Status = `—`
-- **Mid-sprint status updates** — Proposed Status = what you want to change it to, Current Status = what it is now
-- **Sprint close-out reports** — Proposed Status = `done`, Current Status = actual status (flags anything not finished)
-
-### Assigning work
-Set `assigned_agent_id` when creating or updating a ticket. An unassigned ticket has `null` for this field.
-
-### Tracking effort — AUTOMATIC
-
-Time and token tracking is fully passive via Claude Code lifecycle hooks. See CLAUDE.md for how attribution works. Check current state:
-- `GET /api/tracking/summary?project_id=1` — per-ticket, per-agent, per-sprint rollups
-- `GET /api/hooks/sessions?project_id=1` — active/recent hook sessions
-
-### Querying tickets
-- By project: `GET /api/tickets?project_id=1`
-- By sprint: `GET /api/tickets?sprint_id=1`
-- By agent: `GET /api/tickets?assigned_agent_id=3`
-- By status: `GET /api/tickets?status=in_progress`
-- Combine filters: `GET /api/tickets?project_id=1&status=todo&sprint_id=1`
-
----
-
-## 6. Comments
-
-Add context to tickets. Use for status updates, review notes, questions.
-
-```
-POST /api/comments
-{
-  "ticket_id": 5,
-  "author_agent_id": 1,
-  "body": "Schema created. Migration ran. All endpoints verified."
-}
-```
-
-List comments on a ticket: `GET /api/comments?ticket_id=5`
-
----
-
-## 8. Alerts — Escalation Path
-
-When something needs human attention or is blocking work, raise an alert.
-
-```
-POST /api/alerts
-{
-  "project_id": 1,
-  "raised_by_agent_id": 1,
-  "ticket_id": 5,
-  "title": "Migration failed on MySQL 8.0",
-  "body": "Alembic autogenerate produced empty migration. Table already existed via create_all.",
-  "severity": "warning"
-}
-```
-
-Severities: `info`, `warning`, `critical`
-
-Alert statuses: `open` -> `acknowledged` -> `resolved`
-
-### When to raise alerts
-- **info** — FYI, no action needed. ("Sprint goal achieved ahead of schedule.")
-- **warning** — needs attention soon. ("Agent blocked on unclear requirements.")
-- **critical** — needs immediate human attention. ("Database connection failing.", "Agent stuck in loop.")
-
-Acknowledge and resolve:
-```
-PATCH /api/alerts/{id}
-{ "status": "acknowledged" }
-
-PATCH /api/alerts/{id}
-{ "status": "resolved", "resolved_at": "2026-03-27T16:00:00" }
+GET /api/sprints?project_id={pid}&status=active
+PATCH /api/sprints/{id} { "status": "completed" }   # close any stale ones
 ```
 
 ---
 
-## 8b. Alert Triage at Natural Cadence Points
+## 4. Alert Triage
 
-Checking open alerts is a core TL duty — not a scheduled task, but something woven into your natural workflow rhythm.
+Check alerts at natural breakpoints: after closing tickets, when agents go idle, at sprint transitions, when the human sends a message.
 
-### When to check
+### ALERTS_PENDING.md
 
-Check `GET /api/alerts?project_id={pid}&status=open` **and** check if `.claude/ALERTS_PENDING.md` exists at these natural breakpoints:
+If `.claude/ALERTS_PENDING.md` exists, **read it immediately — it takes priority.** Written by the human via "Send Alerts to Team" button. Contains alerts requiring immediate action. File auto-deletes when all alerts are resolved/dismissed. Handle before the API alert queue.
 
-1. **After accepting or closing a ticket** — you just freed up capacity, check if anything needs attention
-2. **When a teammate goes idle** with no immediate work to assign — use the downtime to scan for problems
-3. **At sprint transitions** — before opening or closing a sprint, clear the alert queue
-4. **When the human sends a new message** — check before responding so you have full situational awareness
-
-### ALERTS_PENDING.md (human-flagged alerts)
-
-If `.claude/ALERTS_PENDING.md` exists at the project repo root, **read it immediately — it takes priority over the API alert queue.** This file is written by the human via the "Send Alerts to Team" button on the project page. It contains specific alerts the human wants you to act on now.
-
-- Read the file and act on each listed alert
-- The file auto-deletes when all alerts in it are resolved or dismissed
-- If the file exists, handle its contents before moving to the API alert queue
-
-### How to triage
+### Triage table
 
 | Alert Type | Examples | Action |
 |------------|----------|--------|
-| Simple / self-service | Stale ticket (agent confirmed dead), zero-token warning on a no-op ticket | Handle directly — move ticket, dismiss alert, leave a comment |
-| Needs investigation | Stale ticket (unclear if agent is alive), unexpected failure record, gate failure | Delegate to PM — ask Pam to investigate and report back |
-| Critical / human decision | DB errors, agent stuck in loop, scope questions, compliance issues | Escalate to the human via alert + direct message |
+| Simple / self-service | Stale ticket (agent confirmed dead), zero-token no-op | Handle directly — move ticket, dismiss alert, comment |
+| Needs investigation | Unclear stale ticket, unexpected failure, gate failure | Delegate to PM |
+| Critical / human decision | DB errors, agent loop, scope questions, compliance | Escalate to human |
 
-### What alert types surface here
+Don't let open alerts accumulate — an ignored queue trains everyone to ignore alerts.
 
-This catches everything the system and PM raise:
-- **Stale ticket alerts** — in_progress too long with no activity
-- **Zero-token warnings** — ticket closed with 0 tokens (hook misconfiguration or no-op)
-- **Failure record stubs** — rework detected, PM needs to classify
-- **Gate failures** — missing docs, no test run
-- **PM-raised warnings** — blockers, scope questions, agent issues
-- **Sprint health flags** — burndown off track, pileup in one status
-
-### After triaging
-
-- **Acknowledge** alerts you've seen and are handling: `PATCH /api/alerts/{id} { "status": "acknowledged" }`
-- **Resolve** alerts that are dealt with: `PATCH /api/alerts/{id} { "status": "resolved" }`
-- **Dismiss all** if the queue is stale after a sprint close: `POST /api/alerts/dismiss-all`
-
-Don't let open alerts accumulate — an ignored alert queue trains everyone to ignore alerts.
+> **PM Jira authority is strictly read-only at the sprint level.** PMs cannot close/create/edit/delete Jira sprints — only DWB sprints. If you (the TL) need a Jira sprint operation, do it yourself with explicit human approval. See `docs/pm_playbook.md` § Safety — Hard Limits on Jira Manipulation.
 
 ---
 
-## 9. Activity Log
+## 5. TL Workflow — Typical Session
 
-Log significant events for audit trail.
-
-```
-POST /api/activity-logs
-{
-  "project_id": 1,
-  "agent_id": 1,
-  "entity_type": "ticket",
-  "entity_id": 5,
-  "action": "status_change",
-  "details": "Moved DWB-005 from todo to in_progress"
-}
-```
-
-Query: `GET /api/activity-logs?project_id=1&entity_type=ticket&limit=20`
-
----
-
-## 10. Test Results
-
-After running tests, log the results:
-
-```
-POST /api/test-results
-{
-  "project_id": 1,
-  "suite": "backend",
-  "total_tests": 42,
-  "passed": 40,
-  "failed": 2,
-  "skipped": 0,
-  "duration_seconds": 8.3,
-  "status": "failed",
-  "triggered_by": "post-task",
-  "details": "{\"failures\": [\"test_sync_check\", \"test_migration\"]}"
-}
-```
-
-Query: `GET /api/test-results?project_id=1&suite=backend&status=failed`
-
----
-
-## 11. Reading the Dashboard
-
-The TL should regularly check:
-
-1. **Open tickets by status** — are things moving through the pipeline?
-   `GET /api/tickets?project_id=1&status=in_progress`
-
-2. **Active sprint progress** — how many tickets done vs total?
-   `GET /api/tickets?sprint_id={active_sprint_id}`
-
-3. **Unresolved alerts** — anything blocking?
-   `GET /api/alerts?project_id=1&status=open`
-
-4. **Token usage** — are agents burning too many tokens?
-   `GET /api/tracking/summary?project_id=1` — shows per-ticket, per-agent, per-sprint rollups. Tracked automatically via hooks.
-
-5. **Test results** — are tests passing?
-   `GET /api/test-results?project_id=1&limit=5`
-
----
-
-## 12. TL Workflow — Typical Session
-
-1. Check open alerts: `GET /api/alerts?status=open`
-2. Review active sprint: `GET /api/tickets?sprint_id={id}&status=in_review`
+1. Check open alerts (`GET /api/alerts?status=open` + `ALERTS_PENDING.md`)
+2. Review active sprint: `dwb2jira report --sprint active --status "Ready for Testing/Review"`
 3. Accept or return reviewed tickets
-4. Create new tickets for next batch of work
-5. Assign tickets to available agents
-6. Set or update instructions as patterns emerge
-7. Log activity for significant decisions
-8. Check tracking summary: `GET /api/tracking/summary?project_id=1` (time + tokens captured automatically via hooks)
+4. Propose new tickets via YAML → `dwb2jira create --dry-run prop.yaml`, show preview to human
+5. On approval: `echo Y | dwb2jira create prop.yaml` (or hand off to PM)
+6. Assign tickets to agents (update `assigned_agent_id`)
+7. Log significant decisions in the activity log
+8. Check `GET /api/tracking/summary?project_id={pid}` for token outliers
 
+---
+
+## 5a. Sprint Close — Consolidation Gate (REQUIRED)
+
+The TL is the final witness on the `force_consolidation` gate. The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 when an agent's owned files are over ceiling, unless per-file overrides with non-empty reasons are provided. Participant set is narrowed by DWB-326 (only agents with sprint signals — tickets, comments, tracking_log, hook_sessions, activity_log within window).
+
+Before PATCHing a sprint to `completed`:
+
+```bash
+GET /api/projects/{pid}/consolidation-status?sprint_id={sid}
+```
+
+- If `gate_satisfied: true` — every participant acked. Safe to PATCH.
+- If `gate_satisfied: false` — do NOT close. Walk the `agents[]` list, name every `acked: false`, ping with their `owned_over_ceiling_files`.
+
+**TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same file mean the cap is wrong — raise it in `_TOKEN_CEILINGS`.
+
+**Autonomy expectation across the team (DWB-328 lesson):** refusal IS the signal to fix. Workers who get a 400 should trim and retry on their own without waiting for TL guidance. If a worker is idling on a refused ack, that's a worker-side process bug — message them with "trim is the work, not the wait." Don't accept "I tried, was refused, waiting" as a final state.
+
+**TL admin acks** are for edge cases only — e.g. DWB-329 (participants_for_sprint counts admin-only activity_log entries as participation). Document the reason in the ack notes; don't normalize the pattern.
+
+Marking an agent inactive removes them from the gate. Use only when an agent has actually gone dark, not as a workaround for chasing acks.
+
+---
+
+## 6. Naming Convention (for new agents)
+
+Agent names are **unique system-wide** (single `UNIQUE(name)` constraint on `agents` table). When picking a name for a new agent, follow the pattern: match as many leading letters of the role as possible to a real human name. Three-letter matches are better than two.
+
+**Fixed-role defaults** — the canonical name for these roles is the same across every project. Because the name field is system-wide-unique, the second project that needs one of these roles must suffix with `_<PROJECT_PREFIX>`:
+
+| Role | Default | Cross-project pattern |
+|------|---------|----------------------|
+| team-lead | **Archie** | `Archie_DWB`, `Archie_D2J`, `Archie_CI` |
+| pm | **Pam** | `Pam_DWB`, `Pam_CI`, … |
+| tester | **Chester** or **Sage** | `Sage_DWB`, `Chester_D2J`, … |
+
+**Worker-role defaults** — each project usually has at most one, so suffix only on collision:
+
+| Role | Default |
+|------|---------|
+| frontend-worker | **Freddie** or **Pixel** |
+| backend-worker | **Barry** or **Devin** |
+| system-ops | **Sylvie** (or Bolt, deprecated on DWB) |
+
+**Custom roles** — same leading-letter pattern:
+
+| Role | Example names |
+|------|--------------|
+| designer | **Des**mond, **Des**iree |
+| researcher | **Res**a, **Re**my |
+| devops | **Dev**on, **Dev**in |
+| analyst | **Ana**stasia, **An**dre |
+| reviewer | **Rev**a, **Re**ggie |
+| security | **Sec**ily, **Seb**astian |
+| database | **Da**rcy, **Dan**te |
+| architect | **Arc**hie, **Ari**adne |
+| mobile | **Mo**ira, **Mor**ris |
+| docs-writer | **Dol**ores, **Dom**inic |
+| data-engineer | **Da**phne, **Dan**iel |
+| infra | **Ing**rid, **Irv**ing |
+| qa | **Qu**inn |
+| ux | **Ur**sula |
+| api-worker | **Apr**il |
+| migrator | **Mi**tch, **Min**a |
+| performance | **Per**cy, **Pet**ra |
+| scheduler | **Sca**rlett |
+
+If you spawn a role not listed here, follow the pattern: 3-letter prefix > 2-letter. If the name already exists on another project, suffix with `_<PROJECT_PREFIX>`.
+
+The `role` field in the DB maps to the Claude teammate name (e.g., `role="pm"` → `@pm`). The `name` field is the unique display identity.
+
+**Live roster:** the team for any project is at `GET /api/projects/{project_id}/team`. The roster is DB-authoritative — no checked-in TEAM.md file.

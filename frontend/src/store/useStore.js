@@ -9,7 +9,7 @@
 // Last Modified: 2026-03-29
 
 import { create } from 'zustand';
-import { updateAlert } from '../api/alerts';
+import { updateAlert, dismissAllAlerts } from '../api/alerts';
 import { POLLING_IDLE_INTERVAL } from '../config';
 
 const useStore = create((set, get) => ({
@@ -79,6 +79,14 @@ const useStore = create((set, get) => ({
     }));
     updateAlert(id, { status: 'acknowledged' }).catch(() => {});
   },
+  clearAllAlerts: () => {
+    set((state) => ({
+      alerts: state.alerts.map((a) =>
+        a.status === 'open' ? { ...a, status: 'acknowledged' } : a
+      ),
+    }));
+    dismissAllAlerts().catch(() => {});
+  },
 
   // Instructions
   instructions: [],
@@ -133,6 +141,14 @@ const useStore = create((set, get) => ({
   // Infra warnings (from /api/status)
   infraWarnings: [],
   setInfraWarnings: (warnings) => set({ infraWarnings: warnings || [] }),
+
+  // Jira proxy state (lazy — fetched on demand by JiraIssuesPage / ticket badge).
+  jiraConfig: null,        // { configured, base_url, cache_ttl_seconds } or null until first probe
+  setJiraConfig: (cfg) => set({ jiraConfig: cfg }),
+  jiraIssues: {},          // map: issue_key -> normalized issue dict (populated by badge / detail panel)
+  setJiraIssue: (key, issue) =>
+    set((state) => ({ jiraIssues: { ...state.jiraIssues, [key]: issue } })),
+  getJiraIssue: (key) => get().jiraIssues[key],
 }));
 
 export default useStore;

@@ -1,0 +1,458 @@
+/* Path: src/styles/jira.css
+ * File: jira.css
+ * Created: 2026-05-27
+ * Purpose: Styling for the /projects/:id/jira page — list, sprint board, detail panel
+ * Caller: pages/JiraIssuesPage.jsx, components/jira/*
+ * Callees: theme tokens from theme.css
+ * Last Modified: 2026-05-27
+ */
+
+.jira-page {
+  padding: 16px 24px;
+  color: var(--green);
+}
+
+.jira-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0;
+}
+
+.jira-toolbar__tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.jira-tab {
+  background: var(--bg-alt);
+  color: var(--gray-light);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.jira-tab:hover {
+  color: var(--green);
+}
+
+.jira-tab--active {
+  color: var(--green);
+  border-color: var(--green-dim);
+  background: var(--bg-hover);
+}
+
+.jira-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.jira-search__input {
+  flex: 1;
+  background: var(--bg-alt);
+  color: var(--green);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.jira-search__input:focus {
+  outline: none;
+  border-color: var(--green-dim);
+}
+
+.jira-sprint-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  color: var(--gray-light);
+}
+
+.jira-sprint-picker select {
+  background: var(--bg-alt);
+  color: var(--green);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+}
+
+.jira-error {
+  background: var(--bg-alt);
+  border: 1px solid var(--brick-red);
+  color: var(--red);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.jira-content {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.jira-content:has(.jira-detail) {
+  grid-template-columns: 1fr 360px;
+}
+
+/* ── List view ──────────────────────────────────────────────── */
+
+.jira-issue-list {
+  border: 1px solid var(--border);
+  background: var(--bg-alt);
+}
+
+.jira-row {
+  display: grid;
+  grid-template-columns: 110px 90px 110px minmax(200px, 1fr) 140px 140px 100px;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  align-items: center;
+  font-size: 13px;
+}
+
+.jira-row:last-child {
+  border-bottom: none;
+}
+
+.jira-row:hover {
+  background: var(--bg-hover);
+}
+
+.jira-row--selected {
+  background: var(--bg-hover);
+  border-left: 2px solid var(--green-dim);
+  padding-left: 10px;
+}
+
+.jira-row--header {
+  font-weight: 700;
+  color: var(--gray-light);
+  cursor: default;
+  background: var(--bg);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.jira-row--header:hover {
+  background: var(--bg);
+}
+
+.jira-row__key a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.jira-row__key a:hover {
+  color: var(--blue-dim);
+  text-decoration: underline;
+}
+
+.jira-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jira-row__type,
+.jira-row__parent,
+.jira-row__assignee,
+.jira-row__updated {
+  color: var(--gray-light);
+}
+
+/* ── Sprint board ──────────────────────────────────────────── */
+
+.jira-board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.jira-board__col {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  min-height: 200px;
+}
+
+.jira-board__col-title {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--green);
+}
+
+.jira-board__count {
+  color: var(--gray-light);
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+.jira-board__cards {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jira-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.jira-card:hover {
+  border-color: var(--green-dim);
+}
+
+.jira-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.jira-card__key {
+  color: var(--blue);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.jira-card__type {
+  color: var(--gray-light);
+  font-size: 11px;
+}
+
+.jira-card__title {
+  color: var(--green);
+  margin-bottom: 6px;
+}
+
+.jira-card__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.jira-card__assignee {
+  color: var(--gray-light);
+}
+
+/* ── Detail panel ──────────────────────────────────────────── */
+
+.jira-detail {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  padding: 16px;
+  position: sticky;
+  top: 16px;
+  align-self: start;
+}
+
+.jira-detail__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.jira-detail__key {
+  color: var(--blue);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.jira-detail__key:hover {
+  text-decoration: underline;
+}
+
+.jira-detail__close {
+  background: transparent;
+  color: var(--gray-light);
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.jira-detail__close:hover {
+  color: var(--red);
+}
+
+.jira-detail__title {
+  font-size: 14px;
+  color: var(--green);
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.jira-detail__list {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 6px 12px;
+  font-size: 13px;
+  margin: 0;
+}
+
+.jira-detail__list dt {
+  color: var(--gray-light);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  align-self: center;
+}
+
+.jira-detail__list dd {
+  color: var(--green);
+  margin: 0;
+}
+
+/* ── Status pills (reused by list, board, detail) ─────────── */
+
+.jira-status {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  color: var(--gray-light);
+  background: var(--bg);
+}
+
+.jira-status--to-do {
+  color: var(--gray-light);
+  border-color: var(--gray);
+}
+
+.jira-status--in-progress {
+  color: var(--orange);
+  border-color: var(--orange);
+}
+
+.jira-status--done {
+  color: var(--green-bright);
+  border-color: var(--green-dim);
+}
+
+/* ── Ticket-list Jira badge augmentation ──────────────────── */
+
+.jira-badge__status {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--gray-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.jira-badge__status--in-progress { color: var(--orange); }
+.jira-badge__status--done        { color: var(--green-bright); }
+.jira-badge__status--to-do       { color: var(--gray-light); }
+
+/* ── Rollup page ──────────────────────────────────────────── */
+
+.jira-sync-result {
+  background: var(--bg-alt);
+  border: 1px solid var(--green-dim);
+  color: var(--green);
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.jira-rollup {
+  border: 1px solid var(--border);
+  background: var(--bg-alt);
+}
+
+.jira-rollup__row {
+  display: grid;
+  grid-template-columns: 100px minmax(180px, 1fr) 70px 70px 70px 90px 70px 200px;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 13px;
+}
+
+.jira-rollup__row:last-child {
+  border-bottom: none;
+}
+
+.jira-rollup__row--header {
+  background: var(--bg);
+  color: var(--gray-light);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+}
+
+.jira-rollup__epic a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.jira-rollup__epic a:hover {
+  text-decoration: underline;
+}
+
+.jira-rollup__no-epic {
+  color: var(--gray-light);
+  font-style: italic;
+}
+
+.jira-rollup__summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--green);
+}
+
+.jira-rollup__counts {
+  text-align: right;
+  color: var(--gray-light);
+  font-variant-numeric: tabular-nums;
+}
+
+.jira-rollup__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jira-rollup__bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  position: relative;
+}
+
+.jira-rollup__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--green-dim);
+  transition: width 0.3s ease;
+}
+
+.jira-rollup__bar-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--green);
+  min-width: 48px;
+  text-align: right;
+}

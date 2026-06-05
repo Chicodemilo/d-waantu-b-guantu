@@ -17,26 +17,9 @@ You are the **Team Lead (Archie)**. Your job is to:
 
 ## Agent Definitions
 
-This repo includes custom agent definitions in `.claude/agents/`. When you spawn a teammate, use the agent name and their full playbook — including all instructions, API references, and rules — auto-loads. **No manual "read this file" needed.**
+Custom agent definitions in `.claude/agents/` auto-load when you spawn a teammate. Available roles: `@team-lead`, `@pm`, `@frontend-worker`, `@backend-worker`, `@system-ops`, `@tester`, `@docs-writer`. `role` field maps to the teammate name.
 
-| Spawn as | Definition file | Role |
-|----------|----------------|------|
-| `@team-lead` | `.claude/agents/team-lead.md` | Orchestrator — spawns teams, plans sprints, assigns work |
-| `@pm` | `.claude/agents/pm.md` | Project manager — monitors progress, manages tickets, logs failures |
-| `@frontend-worker` | `.claude/agents/frontend-worker.md` | React, Vite, Zustand, plain CSS, component development |
-| `@backend-worker` | `.claude/agents/backend-worker.md` | FastAPI, SQLAlchemy 2.0, Alembic migrations, Python services |
-| `@system-ops` | `.claude/agents/system-ops.md` | Docker, scripts, env vars, infrastructure, DevOps |
-| `@tester` | `.claude/agents/tester.md` | pytest, vitest, test coverage, test runner, bug filing |
-
-**The PM is MANDATORY on every team.** The PM creates sprints and tickets, monitors progress, raises alerts, logs failure records, closes sprints (with gate enforcement), and runs sprint evaluations. Never run a team without `@pm`.
-
-Every team needs at minimum:
-- **@team-lead** (you) — orchestrator
-- **@pm** (REQUIRED) — project manager
-
-Then add workers based on the project: `@frontend-worker`, `@backend-worker`, `@system-ops`, `@tester`.
-
-Agent names in the DWB system match Claude Code teammate names. The `role` field on agents maps to the teammate name (e.g., `role="backend-worker"` matches `@backend-worker`).
+**Team composition:** TL always. PM only when ≥3 parallel workers (small teams skip PM, TL drives directly). Add workers per project need.
 
 ## How to Start a Project
 
@@ -60,17 +43,16 @@ curl -X POST http://localhost:8000/api/projects/from-repo \
 This auto-detects the project name, prefix, and description from the repo.
 
 ### 3. Create agents and assign them
-```bash
-# Create agents matching your Claude teammates
-curl -X POST http://localhost:8000/api/agents \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Archie", "role": "team-lead", "description": "Team lead", "api_key": "key-1"}'
+`agents.name` is UNIQUE system-wide. Fixed-role agents that appear on multiple projects use `_<PROJECT_PREFIX>` suffix (e.g., `Archie_DWB`, `Pam_DWB`). Workers without cross-project collisions keep their plain name.
 
-# Assign to project
+```bash
+curl -X POST http://localhost:8000/api/agents \
+  -d '{"project_id": 1, "name": "Archie_DWB", "role": "team-lead", "api_key": "key-1"}'
 curl -X POST http://localhost:8000/api/project-agents \
-  -H "Content-Type: application/json" \
-  -d '{"project_id": 1, "agent_id": 1}'
+  -d '{"project_id": 1, "agent_id": 13}'
 ```
+
+**Live roster:** `GET /api/projects/{id}/team` (DB-authoritative). Agent identity flow + spawn-time marker writing — see `docs/team_lead_playbook.md`.
 
 ### 4. Create first epic and sprint
 ```bash
@@ -114,21 +96,14 @@ Projects can optionally link to a Jira project. When enabled:
 
 ## Sprint Gates
 
-Projects can have validation gates that block sprint closure:
-- **force_test_run** — a test run must be posted during the sprint
-- **force_test_coverage** — all API routers must have corresponding test files
-- **force_initial_md** — INITIAL.md must exist in the repo
-- **force_architecture_md** — ARCHITECTURE.md must exist in the repo
-- **force_headers** — (not yet enforced)
-
-Enable via PATCH /api/projects/:id or the toggle switches on the project page.
+Live list: `GET /api/projects/{id}/gate-status`. Current gates: `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_consolidation`. `force_headers` reserved. Enable/disable via PATCH /api/projects/:id or the toggle switches.
 
 ## Sprint Workflow
 
 1. PM creates sprint with a goal
 2. Team lead assigns tickets to agents
 3. Agents work tickets, PM monitors
-4. Tester runs tests: `./scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"`
+4. Tester runs tests: `./backend/scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"`
 5. PM closes sprint (gates checked automatically)
 6. Sprint close auto-creates: test ticket for next sprint, alerts to team
 
@@ -151,12 +126,12 @@ Failure types: A–G (manual taxonomy), rework (auto-detected), test_failure (au
 
 ## Key Rules
 
-- **STOP/PAUSE/HALT** from the user = immediately cease ALL activity. No tool calls, no messages, nothing. Absolute priority.
-- **No Co-Authored-By** or AI attribution in git commits
-- **Plain CSS only** — no Tailwind, no CSS-in-JS, styles in .css files
-- **Code headers mandatory** on all files (see instructions page for format)
-- **Sprint names must be descriptive** — "Token Tracking Hooks" not "Sprint 2"
-- **PM is mandatory** — never run a team without a PM agent
+- **STOP/PAUSE/HALT** = immediately cease ALL activity. Absolute priority.
+- **No Co-Authored-By** or AI attribution in commits.
+- **Plain CSS only** — no Tailwind, no CSS-in-JS.
+- **Code headers** mandatory on new files.
+- **Sprint names descriptive** (from the goal, not "Sprint N").
+- **PM only when ≥3 workers** — small teams (1-2 workers) skip PM, TL drives.
 
 ## API Quick Reference
 

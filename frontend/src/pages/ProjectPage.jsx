@@ -1,12 +1,12 @@
 // Path: src/pages/ProjectPage.jsx
 // File: ProjectPage.jsx
 // Created: 2026-03-29
-// Purpose: Project detail page with tools (archive, delete), sprint gates, doc gates (incl. force_team_md, force_handoff_md), alerts, sprint progress, overhead, velocity, and epics
+// Purpose: Project detail page with tools (archive, delete), sprint gates (incl. force_consolidation), doc gates (incl. force_handoff_md), alerts, consolidation status panel, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
-// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/OverheadTracker, ../components/project/ActivityFeed, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
+// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-04-17
+// Last Modified: 2026-06-04
 
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -22,6 +22,7 @@ import AlertBanner from '../components/common/AlertBanner';
 import ActivityFeed from '../components/project/ActivityFeed';
 import LiveSessions from '../components/project/LiveSessions';
 import TokenBudget from '../components/project/TokenBudget';
+import ConsolidationStatus from '../components/project/ConsolidationStatus';
 import '../styles/dashboard.css';
 
 function ProjectPage() {
@@ -220,6 +221,7 @@ function ProjectPage() {
                 { field: 'force_headers', label: 'Force Headers', tip: 'Require code headers on all source files. Not yet enforced automatically.' },
                 { field: 'force_test_coverage', label: 'Force Coverage', tip: 'Every API router must have a corresponding test file before sprint close.' },
                 { field: 'force_test_run', label: 'Force Tests', tip: 'At least one test run must be recorded during the sprint before it can be closed.' },
+                { field: 'force_consolidation', label: 'Consolidation at sprint close', tip: 'Every project agent must acknowledge consolidation of their owned over-ceiling docs before the sprint can be closed. Agents POST to /api/agents/:id/consolidate-complete; gate status is shown in the Consolidation panel.' },
               ].map(({ field, label, tip }) => (
                 <div key={field} className="project-tools__row">
                   <button
@@ -242,7 +244,6 @@ function ProjectPage() {
               {[
                 { field: 'force_initial_md', label: 'Force INITIAL.md', file: 'INITIAL.md', tip: 'INITIAL.md must exist at the repo root. Contains project requirements, phases, and design decisions.' },
                 { field: 'force_architecture_md', label: 'Force ARCHITECTURE.md', file: 'ARCHITECTURE.md', tip: 'ARCHITECTURE.md must exist at the repo root. Contains system design, data model, and API reference.' },
-                { field: 'force_team_md', label: 'Force TEAM.md', file: 'TEAM.md', tip: 'TEAM.md must exist at the repo root. Live team roster with agent names, roles, and playbook paths.' },
                 { field: 'force_handoff_md', label: 'Force HANDOFF.md', file: 'HANDOFF.md', tip: 'HANDOFF.md must exist at the repo root. Session continuity notes — current state, decisions, gotchas.' },
               ].map(({ field, label, file, tip }) => (
                 <div key={field} className="project-tools__row">
@@ -333,6 +334,8 @@ function ProjectPage() {
 
       <TokenBudget projectId={id} />
 
+      <ConsolidationStatus projectId={id} />
+
       <div>
         <div className="dashboard__section-title">Team Status</div>
         <LiveSessions projectId={id} />
@@ -401,6 +404,16 @@ function ProjectPage() {
       <div>
         <div className="dashboard__section-title">
           <Link to={`/projects/${id}/tickets`}>View All Tickets &rarr;</Link>
+          {project.jira_project_key && (
+            <>
+              <Link to={`/projects/${id}/jira`} style={{ marginLeft: '24px' }}>
+                View Jira Issues &rarr;
+              </Link>
+              <Link to={`/projects/${id}/jira-rollup`} style={{ marginLeft: '24px' }}>
+                Jira Rollup &rarr;
+              </Link>
+            </>
+          )}
         </div>
       </div>
 

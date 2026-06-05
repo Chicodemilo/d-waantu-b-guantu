@@ -6,7 +6,7 @@
 # Callees: app/models/hook_session.py, app/services/tracking.py, app/models/alert.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, tracking_log events via tracking.py
-# Last Modified: 2026-04-09
+# Last Modified: 2026-06-05
 
 """Service layer for passive hook-based time and token tracking.
 
@@ -17,6 +17,9 @@ to tracking.py for authoritative event logging.
 
 import json
 import logging
+import os
+import re
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -31,11 +34,37 @@ from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
 from app.models.ticket import Ticket, TicketStatus
 from app.services import tracking
+from app.services.failed_hook import log_failed_hook
 
 logger = logging.getLogger(__name__)
 
 # Roles treated as overhead (not ticket work)
 OVERHEAD_ROLES = {"team-lead", "pm"}
+
+# Subdirectory under <project.repo_path>/.claude where per-session marker
+# files live. Each marker is a JSON file named <session_id> containing
+# {"agent_id": int} written by whatever component spawns the session.
+_SESSION_MARKER_SUBPATH = ".claude/agents/active"
+
+# DWB-304 pending-marker convention.
+#
+# CC's SubagentStop hook fires with an internally-generated session_id that
+# the spawning TL cannot pre-compute. To attribute subagents correctly the TL
+# writes a "pending" marker BEFORE calling Task(), keyed on agent identity
+# rather than session_id:
+#
+#     pending-<agent_id>-<unix_ms>-<rand4hex>
+#
+# The resolver, when it can't find a marker named for the actual session_id,
+# falls back to the oldest unconsumed pending marker for this project and
+# atomically renames it to the session_id (the rename serves as the consume
+# signal). Concurrent SubagentStops are race-safe because os.rename is atomic
+# on POSIX — only one caller wins per pending marker.
+_PENDING_MARKER_RE = re.compile(r"^pending-(\d+)-(\d+)-([0-9a-fA-F]{4})$")
+
+# Pending markers older than this are garbage-collected on encounter. Most
+# Task() spawns finish in seconds; 1h is generous and covers long workflows.
+_PENDING_MARKER_STALE_SECONDS = 3600
 
 
 def handle_session_start(db: Session, hook_data: dict) -> HookSession:
@@ -68,13 +97,23 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
     if not project:
         raise ValueError(f"No project found for cwd: {cwd}")
 
-    # Try to get agent name from hook data or transcript
-    agent_name = hook_data.get("agent_name")
-    if not agent_name and transcript_path:
-        agent_name = _read_agent_name_from_transcript(transcript_path)
+    # 1. Authoritative path — read the session marker file. When the marker
+    #    is missing or unparseable, log to failed_hooks and fall back to the
+    #    transcript-name resolve below. The marker fixes the PM=50-tokens
+    #    attribution drift (DWB-294).
+    agent = resolve_agent_from_marker(
+        db, project, session_id,
+        hook_event=hook_data.get("hook_event_name") or "SessionStart",
+        hook_data=hook_data,
+    )
+    agent_name: str | None = agent.name if agent else None
 
-    # Resolve agent and session type
-    agent = resolve_agent(db, agent_name, project.id) if agent_name else None
+    # 2. Fallback path — extract agentName from hook data or transcript.
+    if not agent:
+        agent_name = hook_data.get("agent_name")
+        if not agent_name and transcript_path:
+            agent_name = _read_agent_name_from_transcript(transcript_path)
+        agent = resolve_agent(db, agent_name, project.id) if agent_name else None
 
     # Main CLI session (no agent name) → attribute as TL overhead
     if not agent:
@@ -167,11 +206,19 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         if not project:
             raise ValueError(f"No project found for cwd: {cwd}")
 
-        agent_name = hook_data.get("agent_name")
-        if not agent_name and transcript_path:
-            agent_name = _read_agent_name_from_transcript(transcript_path)
+        # Authoritative marker first (DWB-294).
+        agent = resolve_agent_from_marker(
+            db, project, session_id,
+            hook_event=hook_event or hook_data.get("hook_event_name") or "SessionEnd",
+            hook_data=hook_data,
+        )
+        agent_name: str | None = agent.name if agent else None
 
-        agent = resolve_agent(db, agent_name, project.id) if agent_name else None
+        if not agent:
+            agent_name = hook_data.get("agent_name")
+            if not agent_name and transcript_path:
+                agent_name = _read_agent_name_from_transcript(transcript_path)
+            agent = resolve_agent(db, agent_name, project.id) if agent_name else None
 
         # Main CLI session (no agent name) → attribute as TL overhead
         if not agent:
@@ -210,11 +257,23 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         if not session.agent_id:
             agent = None
             agent_name = None
-            if transcript_path:
-                agent_name = _read_agent_name_from_transcript(transcript_path)
+            # Authoritative marker first (DWB-294).
+            project = db.get(Project, session.project_id)
+            if project is not None:
+                agent = resolve_agent_from_marker(
+                    db, project, session_id,
+                    hook_event=hook_event or hook_data.get("hook_event_name") or "SessionEnd",
+                    hook_data=hook_data,
+                )
+                if agent:
+                    agent_name = agent.name
+            if not agent:
+                if transcript_path:
+                    agent_name = _read_agent_name_from_transcript(transcript_path)
+                if agent_name:
+                    agent = resolve_agent(db, agent_name, session.project_id)
             if agent_name:
                 session.agent_name = agent_name
-                agent = resolve_agent(db, agent_name, session.project_id)
             # Still no agent? Fall back to TL
             if not agent:
                 agent = _fallback_tl_agent(db, session.project_id)
@@ -258,22 +317,143 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         else:
             tracking.log_overhead_stop(db, session.project_id, agent.id)
             if token_total > 0:
+                # log_overhead_tokens atomically updates the per-role bucket
+                # on the project row — see DWB-305 / tracking.py.
                 tracking.log_overhead_tokens(
                     db, session.project_id, agent.id, token_total, source="hook"
                 )
-                # Also increment project overhead fields
-                project = db.get(Project, session.project_id)
-                if project:
-                    if agent.role == "pm":
-                        project.pm_overhead_tokens += token_total
-                    else:
-                        project.tl_overhead_tokens += token_total
-                    db.commit()
     elif token_total > 0:
         # No TL agent on project — truly unattributed
         _create_unattributed_alert(db, session)
 
     return session
+
+
+def _parse_transcript_lines(lines_iter, *, agent_name_filter: str | None = None) -> dict:
+    """Shared transcript-line scanner. Sums usage entries; if
+    agent_name_filter is set, only counts lines whose `agentName` matches.
+
+    Returns the same shape as parse_transcript().
+    """
+    total = 0
+    breakdown = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
+    last_timestamp = None
+
+    for line in lines_iter:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        # When filtering, only count lines tagged with the subagent's name.
+        if agent_name_filter is not None and entry.get("agentName") != agent_name_filter:
+            # Still let timestamps update — they bound the parent's wall time.
+            ts = entry.get("timestamp")
+            if ts:
+                try:
+                    last_timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    pass
+            continue
+
+        # Extract usage — nested under message.usage for assistant entries.
+        usage = entry.get("message", {}).get("usage") or entry.get("usage")
+        if usage:
+            inp = usage.get("input_tokens", 0)
+            out = usage.get("output_tokens", 0)
+            cache_create = usage.get("cache_creation_input_tokens", 0)
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            total += inp + out + cache_create + cache_read
+            breakdown["input"] += inp
+            breakdown["output"] += out
+            breakdown["cache_creation"] += cache_create
+            breakdown["cache_read"] += cache_read
+
+        ts = entry.get("timestamp")
+        if ts:
+            try:
+                last_timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                pass
+
+    return {
+        "total_tokens": total,
+        "breakdown": breakdown,
+        "end_time": last_timestamp,
+    }
+
+
+def _parse_subagent_from_projects_dir(
+    synthetic_path: str, agent_name: str
+) -> dict:
+    """DWB-311 fallback. When the SubagentStop hook payload's
+    `agent_transcript_path` points at a synthetic path like
+    `/projects/<project>/<parent_uuid>/subagents/agent-<sid>.jsonl` that
+    doesn't actually exist on disk, walk the project's `.jsonl` siblings
+    (the real per-session transcripts) and accumulate usage entries
+    tagged with `agentName == agent_name`.
+
+    Returns the same shape as parse_transcript(). On any failure or zero
+    match, returns a zero result so the caller can continue normally.
+
+    Path structure assumption (matches Claude Code's hook payload format
+    as of 2026-06-05): `<synthetic>.parent.parent.parent` is the CC
+    projects directory containing the real `*.jsonl` session files. If
+    the layout ever changes, this returns zero and the symptom is
+    "tokens not landing" — same observable as the pre-fix bug.
+    """
+    if not agent_name:
+        return {"total_tokens": 0,
+                "breakdown": {"input": 0, "output": 0,
+                              "cache_creation": 0, "cache_read": 0},
+                "end_time": None}
+
+    try:
+        projects_dir = Path(synthetic_path).parent.parent.parent
+    except (ValueError, OSError):
+        return {"total_tokens": 0,
+                "breakdown": {"input": 0, "output": 0,
+                              "cache_creation": 0, "cache_read": 0},
+                "end_time": None}
+
+    if not projects_dir.exists() or not projects_dir.is_dir():
+        return {"total_tokens": 0,
+                "breakdown": {"input": 0, "output": 0,
+                              "cache_creation": 0, "cache_read": 0},
+                "end_time": None}
+
+    # Accumulate across all sibling jsonls. Most projects have just a
+    # handful (one per CC session) and we want every matching line.
+    aggregated_total = 0
+    aggregated_breakdown = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
+    latest_timestamp = None
+
+    for jsonl_path in projects_dir.glob("*.jsonl"):
+        try:
+            with jsonl_path.open("r") as fh:
+                parsed = _parse_transcript_lines(fh, agent_name_filter=agent_name)
+        except OSError as e:
+            logger.warning(
+                "DWB-311 fallback: could not read %s while looking for "
+                "subagent agentName=%s: %s",
+                jsonl_path, agent_name, e,
+            )
+            continue
+        aggregated_total += parsed["total_tokens"]
+        for k, v in parsed["breakdown"].items():
+            aggregated_breakdown[k] += v
+        if parsed.get("end_time"):
+            if latest_timestamp is None or parsed["end_time"] > latest_timestamp:
+                latest_timestamp = parsed["end_time"]
+
+    return {
+        "total_tokens": aggregated_total,
+        "breakdown": aggregated_breakdown,
+        "end_time": latest_timestamp,
+    }
 
 
 def parse_transcript(path: str) -> dict:
@@ -286,55 +466,233 @@ def parse_transcript(path: str) -> dict:
             "end_time": datetime | None,
         }
     """
-    total = 0
-    breakdown = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
-    last_timestamp = None
-
     transcript = Path(path)
     if not transcript.exists():
         logger.warning("Transcript not found: %s", path)
-        return {"total_tokens": 0, "breakdown": breakdown, "end_time": None}
+        return {
+            "total_tokens": 0,
+            "breakdown": {"input": 0, "output": 0,
+                          "cache_creation": 0, "cache_read": 0},
+            "end_time": None,
+        }
 
     try:
         with transcript.open("r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                # Extract usage — nested under message.usage for assistant entries
-                usage = entry.get("message", {}).get("usage") or entry.get("usage")
-                if usage:
-                    inp = usage.get("input_tokens", 0)
-                    out = usage.get("output_tokens", 0)
-                    cache_create = usage.get("cache_creation_input_tokens", 0)
-                    cache_read = usage.get("cache_read_input_tokens", 0)
-                    total += inp + out + cache_create + cache_read
-                    breakdown["input"] += inp
-                    breakdown["output"] += out
-                    breakdown["cache_creation"] += cache_create
-                    breakdown["cache_read"] += cache_read
-
-                # Track last timestamp for end_time
-                ts = entry.get("timestamp")
-                if ts:
-                    try:
-                        last_timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    except (ValueError, AttributeError):
-                        pass
+            return _parse_transcript_lines(f)
     except OSError:
         logger.warning("Could not read transcript: %s", path)
-        return {"total_tokens": 0, "breakdown": breakdown, "end_time": None}
+        return {
+            "total_tokens": 0,
+            "breakdown": {"input": 0, "output": 0,
+                          "cache_creation": 0, "cache_read": 0},
+            "end_time": None,
+        }
 
-    return {
-        "total_tokens": total,
-        "breakdown": breakdown,
-        "end_time": last_timestamp,
-    }
+
+def resolve_agent_from_marker(
+    db: Session,
+    project: Project,
+    session_id: str,
+    *,
+    hook_event: str,
+    hook_data: dict,
+) -> Agent | None:
+    """Read .claude/agents/active/<session_id> marker and resolve the agent.
+
+    Returns the Agent on success, or None if the marker is missing,
+    unparseable, or its agent_id doesn't resolve. On every failure, writes a
+    FailedHook row with a specific reason so the diagnostic isn't silent.
+
+    Resolution order:
+
+      1. Strict literal lookup: <session_id> file. Used by main-CC sessions
+         where the TL knows the session_id and can pre-write a matching
+         marker, and by direct-write tests.
+      2. DWB-304 pending-marker fallback: when the literal file is missing,
+         scan for the oldest unconsumed `pending-<agent_id>-<ms>-<rand>`
+         marker that belongs to this project and atomically rename it to
+         <session_id>. CC's SubagentStop session_ids are generated internally
+         and can't be pre-computed by the TL, so the TL writes pending markers
+         keyed on agent identity instead. The rename is the consume signal —
+         os.rename is atomic, so concurrent SubagentStops can't double-claim.
+
+    The marker file is authoritative when present: it skips the role/name
+    resolve heuristics that historically lost attribution (the PM=50-tokens
+    bug). When absent, callers fall back to the existing resolve_agent path.
+    """
+    if not project.repo_path or not session_id:
+        return None
+
+    marker_dir = Path(project.repo_path) / _SESSION_MARKER_SUBPATH
+    marker_path = marker_dir / session_id
+
+    # Step 1: strict literal lookup.
+    if marker_path.is_file():
+        return _read_marker_and_resolve(
+            db, project, marker_path, session_id, hook_event,
+        )
+
+    # Step 2: pending-marker fallback (DWB-304).
+    claimed = _claim_pending_marker(marker_dir, project.id, marker_path, hook_event)
+    if claimed:
+        return _read_marker_and_resolve(
+            db, project, marker_path, session_id, hook_event,
+        )
+
+    # Step 3: no marker — diagnostic + bow out.
+    log_failed_hook(
+        hook_event=hook_event,
+        status_code=None,
+        raw_payload={"session_id": session_id, "marker_path": str(marker_path)},
+        error=f"marker_missing: no session marker at {marker_path}",
+    )
+    return None
+
+
+def _read_marker_and_resolve(
+    db: Session,
+    project: Project,
+    marker_path: Path,
+    session_id: str,
+    hook_event: str,
+) -> Agent | None:
+    """Read a marker file, look up its agent, and project-guard the result.
+
+    Shared by both the strict-literal and pending-fallback paths so the
+    JSON parse + agent lookup + project guard logic stays in one place.
+    """
+    try:
+        raw = marker_path.read_text(encoding="utf-8", errors="replace")
+        data = json.loads(raw)
+        if not isinstance(data, dict) or "agent_id" not in data:
+            raise ValueError("marker missing 'agent_id' field")
+        agent_id = int(data["agent_id"])
+    except (OSError, ValueError, TypeError) as e:
+        log_failed_hook(
+            hook_event=hook_event,
+            status_code=None,
+            raw_payload={"session_id": session_id, "marker_path": str(marker_path)},
+            error=f"marker_unparseable: {type(e).__name__}: {e}",
+        )
+        return None
+
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        log_failed_hook(
+            hook_event=hook_event,
+            status_code=None,
+            raw_payload={"session_id": session_id, "marker_agent_id": agent_id},
+            error=f"marker_agent_unknown: agent_id={agent_id} not found",
+        )
+        return None
+    if agent.project_id is not None and agent.project_id != project.id:
+        log_failed_hook(
+            hook_event=hook_event,
+            status_code=None,
+            raw_payload={
+                "session_id": session_id,
+                "marker_agent_id": agent_id,
+                "marker_project_id": project.id,
+                "agent_project_id": agent.project_id,
+            },
+            error=(
+                f"marker_project_mismatch: agent {agent_id} belongs to "
+                f"project {agent.project_id}, marker fired in project {project.id}"
+            ),
+        )
+        return None
+    return agent
+
+
+def _claim_pending_marker(
+    marker_dir: Path,
+    project_id: int,
+    target_path: Path,
+    hook_event: str,
+) -> bool:
+    """Find the oldest unconsumed pending-* marker for this project and rename it
+    to `target_path` (the actual SubagentStop session_id). Returns True if a
+    marker was successfully claimed, False otherwise.
+
+    Lazy garbage-collection: any pending marker older than
+    `_PENDING_MARKER_STALE_SECONDS` (mtime-based) is unlinked during the scan.
+
+    Race safety: os.rename is atomic on POSIX. If two SubagentStops fire at
+    the same moment, only one rename succeeds for any given pending marker;
+    the loser gets FileNotFoundError and proceeds to the next-oldest candidate.
+
+    Project safety: each pending marker's JSON is read and its `project_id`
+    must match `project.id`, so a stale marker from a different project can't
+    be erroneously consumed.
+    """
+    if not marker_dir.is_dir():
+        return False
+
+    now = time.time()
+    candidates: list[tuple[int, Path]] = []  # (unix_ms_from_filename, path)
+
+    try:
+        entries = list(marker_dir.iterdir())
+    except OSError:
+        return False
+
+    for entry in entries:
+        m = _PENDING_MARKER_RE.match(entry.name)
+        if not m:
+            continue
+
+        # Staleness check — unlink and skip. Use mtime rather than filename ms
+        # so a clock-skewed filename can still be GC'd.
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError:
+            continue
+        if (now - mtime) > _PENDING_MARKER_STALE_SECONDS:
+            try:
+                entry.unlink()
+            except OSError:
+                pass
+            continue
+
+        # Project guard — read the JSON, drop markers that don't belong here.
+        try:
+            data = json.loads(entry.read_text(encoding="utf-8", errors="replace"))
+            marker_pid = data.get("project_id") if isinstance(data, dict) else None
+        except (OSError, ValueError, TypeError):
+            # Unparseable markers are NOT claimable; we don't want to
+            # claim-then-fail-to-parse and orphan the rename. Skip.
+            continue
+        if marker_pid is not None and int(marker_pid) != project_id:
+            continue
+
+        unix_ms = int(m.group(2))
+        candidates.append((unix_ms, entry))
+
+    # Oldest unix_ms first → that's the spawn the TL kicked off first.
+    candidates.sort(key=lambda t: t[0])
+
+    for _, pending_path in candidates:
+        try:
+            os.rename(pending_path, target_path)
+        except FileNotFoundError:
+            # Another resolver instance already claimed this marker.
+            continue
+        except OSError as e:
+            # Treat any other rename failure as a hard miss for this marker
+            # but keep trying the next-oldest.
+            log_failed_hook(
+                hook_event=hook_event,
+                status_code=None,
+                raw_payload={
+                    "pending_path": str(pending_path),
+                    "target_path": str(target_path),
+                },
+                error=f"pending_claim_rename_failed: {type(e).__name__}: {e}",
+            )
+            continue
+        return True
+
+    return False
 
 
 def resolve_agent(db: Session, agent_name: str | None, project_id: int) -> Agent | None:
@@ -395,6 +753,38 @@ def list_sessions(
     return list(db.scalars(stmt).all())
 
 
+def list_orphan_sessions(
+    db: Session,
+    project_id: int | None = None,
+    cutoff_minutes: int = 30,
+) -> list[tuple[HookSession, int]]:
+    """Active hook sessions whose start_time is older than `cutoff_minutes`.
+
+    Returns (session, elapsed_seconds) tuples so the diagnostic endpoint can
+    surface elapsed time without re-walking timestamps client-side.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.utcnow() - timedelta(minutes=cutoff_minutes)
+    stmt = (
+        select(HookSession)
+        .where(HookSession.status == HookSessionStatus.active)
+        .where(HookSession.start_time < cutoff)
+    )
+    if project_id is not None:
+        stmt = stmt.where(HookSession.project_id == project_id)
+    stmt = stmt.order_by(HookSession.start_time.asc())
+    rows = list(db.scalars(stmt).all())
+
+    now = datetime.utcnow()
+    paired: list[tuple[HookSession, int]] = []
+    for row in rows:
+        # HookSession.start_time is stored as naive UTC; subtract naive `now`.
+        elapsed = int((now - row.start_time).total_seconds())
+        paired.append((row, elapsed))
+    return paired
+
+
 def get_session(db: Session, session_id: str) -> HookSession | None:
     """Get a single hook session by its Claude Code session_id."""
     return db.scalar(
@@ -440,14 +830,42 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
     if not project:
         raise ValueError(f"No project found for cwd: {cwd}")
 
-    # Map agent_type to DWB agent (agent_type contains the role/name)
-    agent_type = hook_data.get("agent_type")
-    agent = resolve_agent(db, agent_type, project.id) if agent_type else None
+    # 1. Authoritative marker — keyed on subagent_id (DWB-294).
+    agent = resolve_agent_from_marker(
+        db, project, subagent_id,
+        hook_event=hook_data.get("hook_event_name") or "SubagentStop",
+        hook_data=hook_data,
+    )
 
-    # If agent_type doesn't match a DWB agent (e.g. "Explore" subagent),
-    # attribute to the TL as overhead
+    # 2. Fallback to legacy agent_type resolve.
+    agent_type = hook_data.get("agent_type")
+    if not agent:
+        agent = resolve_agent(db, agent_type, project.id) if agent_type else None
+
+    # If still nothing (e.g. "Explore" subagent), attribute to the TL as overhead
     if not agent:
         agent = _fallback_tl_agent(db, project.id)
+
+    # DWB-311 — primary parse returned zero AND the synthetic agent_transcript_path
+    # doesn't exist on disk. This is the production failure mode: Claude Code's
+    # SubagentStop hook reports `<projects>/<x>/<parent_uuid>/subagents/agent-<sid>.jsonl`
+    # but that file is never written; the subagent's tokens are interleaved in
+    # the parent session's top-level .jsonl tagged with `agentName`. Walk the
+    # project's .jsonl siblings filtering by the resolved agent's name.
+    if (
+        token_total == 0
+        and agent_transcript_path
+        and not Path(agent_transcript_path).exists()
+        and agent
+    ):
+        fallback = _parse_subagent_from_projects_dir(
+            agent_transcript_path, agent.name
+        )
+        if fallback["total_tokens"] > 0:
+            token_total = fallback["total_tokens"]
+            token_breakdown = fallback["breakdown"]
+            if fallback.get("end_time"):
+                end_time = fallback["end_time"]
 
     session_type = _determine_session_type(agent)
 
@@ -510,17 +928,11 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
         else:
             tracking.log_overhead_stop(db, session.project_id, agent.id)
             if token_total > 0:
+                # log_overhead_tokens atomically updates the per-role bucket
+                # on the project row — see DWB-305 / tracking.py.
                 tracking.log_overhead_tokens(
                     db, session.project_id, agent.id, token_total, source="hook"
                 )
-                # Also increment project overhead fields
-                project = db.get(Project, session.project_id)
-                if project:
-                    if agent.role == "pm":
-                        project.pm_overhead_tokens += token_total
-                    else:
-                        project.tl_overhead_tokens += token_total
-                    db.commit()
     elif token_total > 0:
         _create_unattributed_alert(db, session)
 

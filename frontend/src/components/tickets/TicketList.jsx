@@ -8,13 +8,15 @@
 // Data Out: default export TicketList component
 // Last Modified: 2026-03-29
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import { formatTime, formatTokens } from '../../utils/format';
+import { getJiraConfig, searchJiraIssues } from '../../api/jira';
 import TicketFilters from './TicketFilters';
 import StatusBadge from '../common/StatusBadge';
 import '../../styles/tickets.css';
+import '../../styles/jira.css';
 
 function TicketList({ projectId }) {
   const navigate = useNavigate();
@@ -23,6 +25,10 @@ function TicketList({ projectId }) {
   const agents = useStore((s) => s.agents);
   const sprints = useStore((s) => s.sprints);
   const epics = useStore((s) => s.epics);
+  const jiraConfig = useStore((s) => s.jiraConfig);
+  const setJiraConfig = useStore((s) => s.setJiraConfig);
+  const jiraIssues = useStore((s) => s.jiraIssues);
+  const setJiraIssue = useStore((s) => s.setJiraIssue);
   const [showBacklog, setShowBacklog] = useState(false);
   const [filters, setFilters] = useState({
     status: 'all',
@@ -31,6 +37,33 @@ function TicketList({ projectId }) {
     agent_id: 'all',
     epic_id: 'all',
   });
+
+  // Probe Jira config once per session.
+  useEffect(() => {
+    if (jiraConfig !== null) return;
+    getJiraConfig()
+      .then(setJiraConfig)
+      .catch(() => setJiraConfig({ configured: false }));
+  }, [jiraConfig, setJiraConfig]);
+
+  // Lazy-batch-fetch Jira status for any linked tickets we don't have cached.
+  useEffect(() => {
+    if (!project?.jira_project_key || !jiraConfig?.configured) return;
+    const missing = Array.from(new Set(
+      tickets
+        .map((t) => t.jira_issue_key)
+        .filter((k) => k && !jiraIssues[k])
+    ));
+    if (missing.length === 0) return;
+    const jql = `key in (${missing.join(', ')})`;
+    searchJiraIssues(jql, Math.min(missing.length, 100))
+      .then((data) => {
+        for (const issue of data) {
+          if (issue?.key) setJiraIssue(issue.key, issue);
+        }
+      })
+      .catch(() => {/* badge falls back to key-only */});
+  }, [tickets, project?.jira_project_key, jiraConfig?.configured, jiraIssues, setJiraIssue]);
 
   const getAgentName = (agentId) => {
     if (!agentId) return 'unassigned';
@@ -107,13 +140,23 @@ function TicketList({ projectId }) {
             {project?.jira_project_key && (
               <span className="ticket-row__jira">
                 {ticket.jira_issue_key ? (
-                  <a
-                    className="jira-badge"
-                    href={`${project.jira_base_url || 'https://roadvantage.atlassian.net'}/browse/${ticket.jira_issue_key}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                  >{ticket.jira_issue_key}</a>
+                  <>
+                    <a
+                      className="jira-badge"
+                      href={`${project.jira_base_url || 'https://roadvantage.atlassian.net'}/browse/${ticket.jira_issue_key}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                    >{ticket.jira_issue_key}</a>
+                    {jiraIssues[ticket.jira_issue_key]?.status_category && (
+                      <span
+                        className={`jira-badge__status jira-badge__status--${jiraIssues[ticket.jira_issue_key].status_category.toLowerCase().replace(/\s+/g, '-')}`}
+                        title={jiraIssues[ticket.jira_issue_key].status}
+                      >
+                        {jiraIssues[ticket.jira_issue_key].status}
+                      </span>
+                    )}
+                  </>
                 ) : (
                   <span className="jira-badge jira-badge--empty">—</span>
                 )}

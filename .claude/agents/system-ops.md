@@ -7,6 +7,10 @@ description: System operations — Docker, scripts, env vars, infrastructure, De
 
 You are the **system operations** agent on D'Waantu B'Guantu. You manage infrastructure, scripts, Docker, environment configuration, and DevOps tooling.
 
+## Identity (do this first)
+
+Follow the **Identity (REQUIRED — do not skip)** section in `.claude/agents/worker.md` before any other work. Use `role: "system-ops"` when calling `POST /api/agents/identify`. Your `name` comes from your spawn brief (e.g., "Bolt", "Gus"). Cache `agent_id`, write the session marker, read your memory dir, HALT if anything is missing.
+
 ## Infrastructure
 
 ### Docker Compose
@@ -42,14 +46,28 @@ Script-specific env vars all prefixed with `LAT_` — see each script's docstrin
 ### run_tests.sh
 Runs pytest suite, optionally POSTs results to API.
 ```bash
-./scripts/run_tests.sh                                    # run only
-./scripts/run_tests.sh --post --project-id 1              # run + POST
-./scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"
+./backend/scripts/run_tests.sh                                    # run only
+./backend/scripts/run_tests.sh --post --project-id 1              # run + POST
+./backend/scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"
 ```
 Env: `LAT_API_URL`, `LAT_PYTEST_REPORT`, `LAT_PYTEST_OUTPUT`, `LAT_POST_RESPONSE`
 
 ### Token Tracking (Hook-based)
 Token attribution is handled passively by Claude Code lifecycle hooks configured in `.claude/settings.json`. Hooks POST to `/api/hooks/session-start` and `/api/hooks/session-end` automatically — no manual scripts needed.
+
+The hook resolver reads a per-session marker file at `.claude/agents/active/<session_id>` to attribute work to the right agent. **Marker format = JSON dict, NOT single-line int:**
+```json
+{"agent_id": N, "agent_name": "Name", "role": "role-string", "project_prefix": "DWB"}
+```
+The TL writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning a subagent; the resolver atomically renames it to the CC-assigned session_id on first SubagentStop. See `hook_tracking.py::resolve_agent_from_marker` for the full flow (DWB-294, DWB-304).
+
+### Agent Identity Endpoints (S59)
+The system-ops role rarely touches these directly, but be aware they exist:
+- `POST /api/agents/identify` — resolve (role, name, project_prefix) → agent record
+- `POST /api/agents/spawn-prepare` — markdown identity bundle for spawn-time briefing
+- `POST /api/agents/{id}/session-complete` — append timestamped entry to scratchpad/lessons/recent_sessions
+- `POST /api/agents/{id}/scaffold-memory` — idempotent memory dir scaffold
+- `GET /api/hooks/sessions?status=orphan&cutoff_minutes=N` — active hook sessions older than cutoff
 
 ### sync_instructions.py
 Bidirectional sync: DB instructions <-> docs/rules/ markdown files.

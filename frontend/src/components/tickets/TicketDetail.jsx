@@ -14,7 +14,9 @@ import { formatTime } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import TicketComments from './TicketComments';
 import { getTicketHistory, updateTicket } from '../../api/tickets';
+import { getJiraConfig, getJiraIssue } from '../../api/jira';
 import '../../styles/tickets.css';
+import '../../styles/jira.css';
 
 function StatusHistory({ ticketId }) {
   const [history, setHistory] = useState([]);
@@ -68,10 +70,28 @@ function StatusHistory({ ticketId }) {
 
 function JiraLink({ ticket }) {
   const project = useStore((s) => s.getProject(ticket.project_id));
-  const jiraBaseUrl = project?.jira_base_url || 'https://roadvantage.atlassian.net';
+  const jiraConfig = useStore((s) => s.jiraConfig);
+  const setJiraConfig = useStore((s) => s.setJiraConfig);
+  const cachedIssue = useStore((s) => s.jiraIssues[ticket.jira_issue_key]);
+  const setJiraIssue = useStore((s) => s.setJiraIssue);
+  const jiraBaseUrl = project?.jira_base_url || jiraConfig?.base_url || 'https://roadvantage.atlassian.net';
   const [editing, setEditing] = useState(false);
   const [keyInput, setKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Probe Jira config once.
+  useEffect(() => {
+    if (jiraConfig !== null) return;
+    getJiraConfig().then(setJiraConfig).catch(() => setJiraConfig({ configured: false }));
+  }, [jiraConfig, setJiraConfig]);
+
+  // Fetch Jira status for the linked issue if we don't have it cached.
+  useEffect(() => {
+    if (!ticket.jira_issue_key || !jiraConfig?.configured || cachedIssue) return;
+    getJiraIssue(ticket.jira_issue_key)
+      .then((issue) => setJiraIssue(ticket.jira_issue_key, issue))
+      .catch(() => {/* badge falls back to key-only */});
+  }, [ticket.jira_issue_key, jiraConfig?.configured, cachedIssue, setJiraIssue]);
 
   const handleLink = async () => {
     if (!keyInput.trim()) return;
@@ -107,6 +127,14 @@ function JiraLink({ ticket }) {
           target="_blank"
           rel="noopener noreferrer"
         >{ticket.jira_issue_key}</a>
+        {cachedIssue?.status_category && (
+          <span
+            className={`jira-badge__status jira-badge__status--${cachedIssue.status_category.toLowerCase().replace(/\s+/g, '-')}`}
+            title={cachedIssue.status}
+          >
+            {cachedIssue.status}
+          </span>
+        )}
         <button
           className="jira-link__unlink"
           onClick={handleUnlink}

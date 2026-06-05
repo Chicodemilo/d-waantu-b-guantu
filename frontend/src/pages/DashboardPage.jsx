@@ -23,6 +23,7 @@ function DashboardPage() {
   const navigate = useNavigate();
   const projects = useStore((s) => s.projects).filter((p) => p.status === 'active');
   const openAlerts = useStore((s) => s.getOpenAlerts());
+  const clearAllAlerts = useStore((s) => s.clearAllAlerts);
   const getProject = useStore((s) => s.getProject);
   const [addExpanded, setAddExpanded] = useState(false);
   const [repoPath, setRepoPath] = useState('');
@@ -50,7 +51,16 @@ function DashboardPage() {
 
       {openAlerts.length > 0 && (
         <div>
-          <div className="dashboard__section-title">Open Alerts</div>
+          <div className="dashboard__section-title">
+            Open Alerts
+            <button
+              type="button"
+              className="dashboard__section-action"
+              onClick={clearAllAlerts}
+            >
+              clear all
+            </button>
+          </div>
           <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
             <table className="data-table">
               <thead>

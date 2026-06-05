@@ -1,14 +1,14 @@
 # Path: app/routers/test_results.py
 # File: test_results.py
 # Created: 2026-03-29
-# Purpose: Test result HTTP endpoints — list, get, create, performance
+# Purpose: Test result HTTP endpoints — list, get, create, delete, performance
 # Caller: app/main.py
 # Callees: app/services/test_result.py, app/models/test_result.py
 # Data In: HTTP requests
 # Data Out: JSON responses (TestResultRead, performance list)
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-05
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -79,3 +79,12 @@ def get_test_result(result_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=TestResultRead, status_code=201)
 def create_test_result(data: TestResultCreate, db: Session = Depends(get_db)):
     return svc.create_test_result(db, data)
+
+
+@router.delete("/{result_id}", status_code=204)
+def delete_test_result(result_id: int, db: Session = Depends(get_db)):
+    """DWB-310: operator-driven orphan-row cleanup. 204 on success, 404 on missing."""
+    deleted = svc.delete_test_result(db, result_id)
+    if not deleted:
+        raise HTTPException(404, "Test result not found")
+    return Response(status_code=204)

@@ -6,7 +6,7 @@
 # Callees:       GET/POST/PATCH/DELETE /api/alerts, GET /api/alerts/:id
 # Data In:       Factory-created projects, agents via conftest fixtures
 # Data Out:      Assertions on HTTP status codes and JSON response shapes
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-04
 
 """Tests for /api/alerts CRUD, filtering, and run-tests endpoint."""
 
@@ -182,3 +182,127 @@ class TestRunTests:
     def test_run_tests_nonexistent_project_returns_404(self, client):
         r = client.post("/api/alerts/run-tests", json={"project_id": 999999})
         assert r.status_code == 404
+
+
+class TestAutoUnlinkAlertsFile:
+    """DWB-303: global Dismiss All (no project_id) must still unlink
+    ALERTS_PENDING.md on disk. Repro: PM/frontend POSTs `{}` to dismiss-all,
+    the on-disk file stays orphaned because the auto-unlink path used to
+    gate on a project_id the caller never sent."""
+
+    def test_dismiss_all_without_project_id_unlinks_file(
+        self, client, make_agent, tmp_path
+    ):
+        from pathlib import Path
+
+        # Project with a real repo_path so send_to_team can write the file
+        project = client.post("/api/projects", json={
+            "prefix": "ALK1", "name": "AutoUnlink One",
+            "repo_path": str(tmp_path),
+        }).json()
+        agent = make_agent(project_id=project["id"])
+        client.post("/api/alerts", json={
+            "project_id": project["id"], "raised_by_agent_id": agent["id"],
+            "title": "T", "body": "B",
+        })
+        # Write ALERTS_PENDING.md via send-to-team
+        send = client.post(
+            "/api/alerts/send-to-team", params={"project_id": project["id"]}
+        )
+        assert send.status_code == 200
+        alerts_file = Path(tmp_path) / ".claude" / "ALERTS_PENDING.md"
+        assert alerts_file.is_file(), "send-to-team must write the file"
+
+        # The bug: dismiss_all with no project_id used to skip the unlink path.
+        r = client.post("/api/alerts/dismiss-all", json={})
+        assert r.status_code == 200
+        assert r.json()["dismissed"] >= 1
+
+        # Acceptance: file is gone.
+        assert not alerts_file.exists(), (
+            "ALERTS_PENDING.md must be unlinked after global dismiss-all"
+        )
+
+    def test_dismiss_all_unlinks_files_across_projects(
+        self, client, make_agent, tmp_path
+    ):
+        """A single global Dismiss All should clear ALERTS_PENDING.md on
+        every project that has no remaining open alerts."""
+        from pathlib import Path
+
+        repo_a = tmp_path / "a"
+        repo_b = tmp_path / "b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+
+        proj_a = client.post("/api/projects", json={
+            "prefix": "ALKA", "name": "A", "repo_path": str(repo_a),
+        }).json()
+        proj_b = client.post("/api/projects", json={
+            "prefix": "ALKB", "name": "B", "repo_path": str(repo_b),
+        }).json()
+        agent_a = make_agent(project_id=proj_a["id"])
+        agent_b = make_agent(project_id=proj_b["id"])
+
+        for pid, aid in ((proj_a["id"], agent_a["id"]), (proj_b["id"], agent_b["id"])):
+            client.post("/api/alerts", json={
+                "project_id": pid, "raised_by_agent_id": aid,
+                "title": "T", "body": "B",
+            })
+            r = client.post(
+                "/api/alerts/send-to-team", params={"project_id": pid}
+            )
+            assert r.status_code == 200
+
+        file_a = repo_a / ".claude" / "ALERTS_PENDING.md"
+        file_b = repo_b / ".claude" / "ALERTS_PENDING.md"
+        assert file_a.is_file()
+        assert file_b.is_file()
+
+        r = client.post("/api/alerts/dismiss-all", json={})
+        assert r.status_code == 200
+
+        assert not file_a.exists()
+        assert not file_b.exists()
+
+    def test_dismiss_all_keeps_file_when_open_alerts_remain(
+        self, client, make_agent, tmp_path
+    ):
+        """If a project still has open alerts after dismiss-all (e.g.
+        because project_id was scoped to a different project), its
+        ALERTS_PENDING.md must NOT be deleted."""
+        from pathlib import Path
+
+        repo_a = tmp_path / "a"
+        repo_b = tmp_path / "b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+
+        proj_a = client.post("/api/projects", json={
+            "prefix": "ALKC", "name": "A", "repo_path": str(repo_a),
+        }).json()
+        proj_b = client.post("/api/projects", json={
+            "prefix": "ALKD", "name": "B", "repo_path": str(repo_b),
+        }).json()
+        agent_a = make_agent(project_id=proj_a["id"])
+        agent_b = make_agent(project_id=proj_b["id"])
+
+        for pid, aid in ((proj_a["id"], agent_a["id"]), (proj_b["id"], agent_b["id"])):
+            client.post("/api/alerts", json={
+                "project_id": pid, "raised_by_agent_id": aid,
+                "title": "T", "body": "B",
+            })
+            client.post(
+                "/api/alerts/send-to-team", params={"project_id": pid}
+            )
+
+        file_a = repo_a / ".claude" / "ALERTS_PENDING.md"
+        file_b = repo_b / ".claude" / "ALERTS_PENDING.md"
+
+        # Dismiss only project A's alerts. B still has open alerts.
+        r = client.post(
+            "/api/alerts/dismiss-all", json={"project_id": proj_a["id"]}
+        )
+        assert r.status_code == 200
+        assert not file_a.exists()
+        assert file_b.exists()

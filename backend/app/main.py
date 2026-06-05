@@ -11,8 +11,10 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.database import Base, engine
 from app.middleware.activity_logger import ActivityLoggerMiddleware
@@ -27,6 +29,7 @@ from app.routers import (
     failure_records,
     hooks,
     instructions,
+    jira,
     playbooks,
     project_agents,
     projects,
@@ -37,6 +40,7 @@ from app.routers import (
     tokens,
     tracking,
 )
+from app.services.failed_hook import log_failed_hook
 
 
 @asynccontextmanager
@@ -46,6 +50,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Local Agent Tracker", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def hook_payload_validation_handler(request: Request, exc: RequestValidationError):
+    """Default 422 handler, plus side-effect: persist a FailedHook row when the
+    invalid request hit a hook endpoint. Stops silent hook payload-parse fails."""
+    if request.url.path.startswith("/api/hooks/"):
+        try:
+            raw = await request.body()
+        except Exception:
+            raw = None
+        log_failed_hook(
+            hook_event=request.url.path.rsplit("/", 1)[-1],
+            status_code=422,
+            raw_payload=raw,
+            error=f"RequestValidationError: {exc.errors()}",
+        )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 if os.getenv("TESTING") != "1":
     app.add_middleware(ActivityLoggerMiddleware)
@@ -81,3 +103,4 @@ app.include_router(tracking.router)
 app.include_router(hooks.router)
 app.include_router(errors.router)
 app.include_router(status.router)
+app.include_router(jira.router)

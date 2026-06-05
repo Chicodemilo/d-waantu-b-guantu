@@ -6,7 +6,7 @@
 # Callees: app/models (test_result, failure_record, agent, sprint)
 # Data In: db: Session, TestResultCreate
 # Data Out: list[TestResult], TestResult
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-05
 
 import json
 
@@ -41,6 +41,21 @@ def list_test_results(
 
 def get_test_result(db: Session, result_id: int) -> TestResult | None:
     return db.get(TestResult, result_id)
+
+
+def delete_test_result(db: Session, result_id: int) -> bool:
+    """Delete a test_result row by id. Returns True on success, False if missing.
+
+    DWB-310 — operator-driven orphan-row cleanup. Doesn't cascade to
+    failure_records (those are independent diagnostic records); the row is
+    removed in isolation.
+    """
+    result = db.get(TestResult, result_id)
+    if result is None:
+        return False
+    db.delete(result)
+    db.commit()
+    return True
 
 
 def create_test_result(db: Session, data: TestResultCreate) -> TestResult:

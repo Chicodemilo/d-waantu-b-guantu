@@ -6,12 +6,13 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: TestResult
-# Last Modified: 2026-04-16
+# Last Modified: 2026-06-05
 
 import enum
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -54,7 +55,12 @@ class TestResult(Base):
     ticket_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # DWB-308: gate-sized payloads (~85KB) exceeded TEXT's 64KB cap and caused
+    # HTTP 500 on POST. MEDIUMTEXT extends the column to 16MB while keeping
+    # Text semantics on non-MySQL backends.
+    details: Mapped[str | None] = mapped_column(
+        Text().with_variant(MEDIUMTEXT(), "mysql"), nullable=True
+    )
     triggered_by: Mapped[str] = mapped_column(String(100), nullable=False, default="manual")
     triggered_context: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

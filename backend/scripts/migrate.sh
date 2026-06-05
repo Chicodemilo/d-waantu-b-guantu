@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# DWB-330 smoke: gate-refusal test (2026-06-05)
 # Path: backend/scripts/migrate.sh
 # File: migrate.sh
 # Created: 2026-04-01

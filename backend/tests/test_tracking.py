@@ -161,7 +161,9 @@ class TestSummary:
         data = client.get("/api/tracking/summary", params={"project_id": project_id}).json()
         assert len(data["per_agent"]) >= 1
         entry = data["per_agent"][0]
-        expected_keys = {"agent_id", "name", "role", "time_seconds", "tokens"}
+        # DWB-306: per_agent now exposes `overhead_tokens` breakdown alongside
+        # the total `tokens` field.
+        expected_keys = {"agent_id", "name", "role", "time_seconds", "tokens", "overhead_tokens"}
         assert set(entry.keys()) == expected_keys
 
     def test_summary_tokens_summed(self, client, make_ticket, make_agent):

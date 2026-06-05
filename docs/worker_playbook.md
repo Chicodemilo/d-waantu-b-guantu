@@ -11,6 +11,8 @@ D'Waantu B'Guantu is the human user's private project management system. **Never
 
 ## Canonical Tools
 
+> **If your project does not have Jira enabled (`project.jira_base_url` is null), skip this section** — use the DWB API directly for ticket transitions (`PATCH /api/tickets/{id}` with `{"status": "..."}` + `X-Agent-ID` header). The D2J CLI is only relevant for Jira-linked projects.
+
 All ticket operations go through the D2J (DWB_2_JIRA) CLI — it keeps Jira and DWB in lockstep.
 
 - **Transition your ticket:** `dwb2jira ticket transition POR-KEY --to "In Progress"` — atomic dual-write (Jira + DWB)
@@ -18,12 +20,23 @@ All ticket operations go through the D2J (DWB_2_JIRA) CLI — it keeps Jira and 
 - **Never** PATCH `/api/tickets/{id}` directly for status changes — it updates DWB only and leaves Jira drift. `dwb2jira ticket transition` is the canonical move.
 - **Never** use `dwb2jira ticket update --status` for status changes either — it updates Jira only and leaves DWB drift. `ticket transition` is dual-write aware; `ticket update` is not.
 - **If a teammate already did one of the above by mistake:** treat it like a bail-forward drift — tell the TL, PM does a one-sided DWB PATCH to realign. Don't try to un-do it yourself.
+- **D2J defaults to the project_id set in your D2J config; verify with `dwb2jira config show`.** If you need to operate on a different project than your shell's default (e.g. transitioning a D2J self-management ticket from a non-D2J working dir), prefix with `DWB_PROJECT_ID=N dwb2jira ticket transition ...` so the twin lookup hits the right project. Otherwise the dual-write falls back to Jira-only with a "no twin" warning.
 
 Full reference: `~/Dev/DWB_2_JIRA/README.md`. Status vocabulary (terminal vs non-terminal, Jira↔DWB mapping): `~/Dev/DWB_2_JIRA/README.md §Terminal vs non-terminal status vocabulary`.
 
+## On Spawn — Identity (REQUIRED)
+
+Before doing ANY work, establish who you are on this project:
+
+1. **Identify yourself.** `POST /api/agents/identify` with `{role, name, project_prefix}` (use the name from your spawn brief; for fixed-role agents this may be a `_<PROJECT_PREFIX>` suffixed form like `Archie_DWB`, but the endpoint accepts the short name too). Response: `{agent_id, memory_dir, scratchpad_excerpt, instructions[]}`.
+   - On `409 ambiguous` or `404 not found`: **HALT** and tell the TL. Never invent an agent_id.
+2. **Cache your `agent_id`.** Include `X-Agent-ID: {agent_id}` on **every** `POST`/`PATCH`/`PUT`/`DELETE` to `/api/`. Without it, your actions log as "system" and your tokens don't attribute.
+3. **Session marker — TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file** — subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop. If you think your marker is missing, tell the TL — they write it.
+4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. Read `identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md` in that order. If missing, **HALT** and tell the TL.
+
 ## On Spawn — Read These First
 
-Before doing anything, read: (1) `.claude/agents/{role}.md`, (2) `.claude/project_rules_worker.md`, (3) `HANDOFF.md`, (4) `ARCHITECTURE.md`, (5) `README.md`. If any are missing, proceed with what you have and flag it.
+After identity, read: (1) `.claude/agents/{role}.md`, (2) `.claude/project_rules_worker.md`, (3) `HANDOFF.md`, (4) `ARCHITECTURE.md`, (5) `README.md`. If any are missing, proceed with what you have and flag it.
 
 ## API
 
@@ -91,6 +104,43 @@ curl -X PATCH http://localhost:8000/api/tickets/{dwb_id} \
 (PM owns that recovery — it's in their playbook § 4 Exception (a). Shown here so you can sanity-check the fix.)
 
 If you get blocked on the work itself, message the TL immediately — don't sit on it.
+
+## Sprint Close — Consolidation (REQUIRED)
+
+DWB enforces a `force_consolidation` gate at sprint close. Every sprint participant must call `consolidate-complete` before the TL can close the sprint. The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 if your owned files are over ceiling, unless you provide per-file overrides with non-empty reasons.
+
+**When to ack:** as soon as your last ticket hits `in_review` (or `done`). Don't wait for the TL — the ack is yours to file.
+
+**How:**
+
+```bash
+curl -X POST http://localhost:8000/api/agents/{your_agent_id}/consolidate-complete \
+  -H "X-Agent-ID: {your_agent_id}" \
+  -H "Content-Type: application/json" \
+  -d '{"sprint_id": <active_sprint_id>}'
+```
+
+201 on success. 409 if already acked. 400 if over-ceiling files exist (see below).
+
+**Check your owned files BEFORE acking:**
+
+```
+GET /api/projects/{project_id}/consolidation-status?sprint_id=<active_sprint_id>
+```
+
+Your block lists `owned_over_ceiling_files`. If non-empty: trim before acking.
+
+### REFUSAL is the signal to TRIM, not idle (DWB-328 autonomy)
+
+When the gate refuses your ack with violations:
+
+1. **Default path: TRIM the listed files.** That's the work. Re-ack with no overrides. Should pass clean. Don't wait for TL guidance — refusal means go fix.
+2. **Override path (rare): per-file reason.** Use only when the file is genuinely load-bearing and trim would lose meaning. Body: `{"sprint_id": N, "overrides": {"file_path": "non-empty reason text", ...}}`. Every file in the violation list must have a key. Empty/whitespace reasons rejected.
+3. **Cap-raise path (when override would repeat across sprints):** ping TL with proposed `_TOKEN_CEILINGS` change. Don't override the same file every sprint.
+
+**Subagents can't write to `.claude/` paths.** If your over-ceiling files live under `.claude/agents/memory/<name>/` or `.claude/agents/<role>.md` etc, send the TL the trim payload via SendMessage and they'll write it on your behalf. Then retry.
+
+**Idling on refusal is the anti-pattern.** The TL doesn't want to nag every agent every sprint to trim their files. The system tells you what's over; you trim; you retry. That's the contract.
 
 ## Reporting Status
 

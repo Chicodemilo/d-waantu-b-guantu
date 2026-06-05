@@ -1,6 +1,9 @@
 # Environment
 .env
 
+# Personal seed (Miles's local DWB rows — not shipped)
+seed_personal_dwb.sql
+
 # Python
 __pycache__/
 *.pyc
@@ -30,6 +33,11 @@ mysql_data/
 
 # Claude Code
 .claude/settings.local.json
+.claude/agents/active/
+.claude/agents/memory/
+.claude/scheduled_tasks.lock
+ALERTS_PENDING.md
+.claude/ALERTS_PENDING.md
 
 # IDE
 .vscode/

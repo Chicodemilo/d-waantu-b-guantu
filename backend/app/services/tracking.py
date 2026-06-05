@@ -6,7 +6,7 @@
 # Callees: app/models/tracking_log.py, app/models/ticket.py
 # Data In: db: Session, ticket_id, agent_id, tokens, source
 # Data Out: TrackingLog, computed summaries
-# Last Modified: 2026-03-30
+# Last Modified: 2026-06-05
 
 """Service layer for the tracking_log table — time and token event logging."""
 
@@ -14,6 +14,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
+from app.models.project import Project
 from app.models.sprint import Sprint
 from app.models.ticket import Ticket
 from app.models.tracking_log import TrackingLog
@@ -108,7 +109,19 @@ def log_overhead_stop(db: Session, project_id: int, agent_id: int) -> TrackingLo
 def log_overhead_tokens(
     db: Session, project_id: int, agent_id: int, tokens: int, source: str = "hook"
 ) -> TrackingLog:
-    """Insert an 'overhead_token_report' event (no ticket)."""
+    """Insert an 'overhead_token_report' event AND atomically update the
+    matching per-role bucket on the project row.
+
+    Invariant (DWB-305): for every project,
+        project.tl_overhead_tokens + project.pm_overhead_tokens
+            == sum(tracking_log.tokens WHERE event_type='overhead_token_report')
+
+    The row insert and the bucket increment commit together so future
+    callers cannot drift the two apart. Classification: agents with
+    role=='pm' land in pm_overhead_tokens; every other role (including the
+    unusual case of a worker session that ended without ticket attribution)
+    lands in tl_overhead_tokens so the invariant holds.
+    """
     entry = TrackingLog(
         ticket_id=None,
         agent_id=agent_id,
@@ -119,6 +132,16 @@ def log_overhead_tokens(
         source=source,
     )
     db.add(entry)
+
+    # Atomic bucket update — drift-proof by construction.
+    project = db.get(Project, project_id)
+    agent = db.get(Agent, agent_id) if agent_id else None
+    if project is not None and tokens:
+        if agent is not None and agent.role == "pm":
+            project.pm_overhead_tokens += tokens
+        else:
+            project.tl_overhead_tokens += tokens
+
     db.commit()
     db.refresh(entry)
     return entry
@@ -248,18 +271,33 @@ def get_project_summary(db: Session, project_id: int) -> dict:
             .group_by(TrackingLog.ticket_id)
         ).all())
         agent_time = sum(compute_ticket_time(db, tid) for tid in agent_ticket_ids)
-        agent_tokens = db.scalar(
+        # DWB-306: per_agent must aggregate BOTH ticket-attributed token_report
+        # events AND overhead_token_report events. Previously this filter only
+        # included 'token_report', so any agent in an overhead role (PM, TL)
+        # rolled up as 0 tokens even when their overhead attribution was
+        # correct at project_total.overhead_tokens.
+        agent_ticket_tokens = db.scalar(
             select(func.coalesce(func.sum(TrackingLog.tokens), 0))
             .where(TrackingLog.project_id == project_id)
             .where(TrackingLog.agent_id == row.agent_id)
             .where(TrackingLog.event_type == "token_report")
+        ) or 0
+        agent_overhead_tokens = db.scalar(
+            select(func.coalesce(func.sum(TrackingLog.tokens), 0))
+            .where(TrackingLog.project_id == project_id)
+            .where(TrackingLog.agent_id == row.agent_id)
+            .where(TrackingLog.event_type == "overhead_token_report")
         ) or 0
         per_agent.append({
             "agent_id": row.agent_id,
             "name": row.name,
             "role": row.role,
             "time_seconds": agent_time,
-            "tokens": agent_tokens,
+            # `tokens` is the total across ticket + overhead attribution so
+            # dashboards see a correct headline number for every agent.
+            # `overhead_tokens` is the breakdown of the overhead portion.
+            "tokens": agent_ticket_tokens + agent_overhead_tokens,
+            "overhead_tokens": agent_overhead_tokens,
         })
 
     # Per-sprint summary

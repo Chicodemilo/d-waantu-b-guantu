@@ -7,7 +7,7 @@
 # Callees: pytest, curl → POST /api/test-results
 # Data In: CLI args (--post, --project-id, --triggered-by, --context, --url)
 # Data Out: Pytest output + JSON report; optional HTTP POST to API
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-05
 #
 # run_tests.sh — Run the backend pytest suite and optionally POST results to the API.
 #
@@ -35,6 +35,7 @@ PROJECT_DIR="$(dirname "$BACKEND_DIR")"
 #   LAT_PYTEST_REPORT   — path for JSON test report (default: /tmp/lat_pytest_report.json)
 #   LAT_PYTEST_OUTPUT   — path for raw pytest output (default: $PYTEST_OUTPUT)
 #   LAT_POST_RESPONSE   — path for POST response body (default: $POST_RESPONSE)
+#   AGENT_ID            — agent id used for X-Agent-ID on the POST (default: 6, Sage/tester)
 
 # Defaults
 POST_RESULTS=false
@@ -192,6 +193,7 @@ print(json.dumps(payload))
     HTTP_CODE=$(curl -s -o $POST_RESPONSE -w "%{http_code}" \
         -X POST "$API_BASE/api/test-results" \
         -H "Content-Type: application/json" \
+        -H "X-Agent-ID: ${AGENT_ID:-6}" \
         -d "$PAYLOAD")
 
     if [[ "$HTTP_CODE" -ge 200 && "$HTTP_CODE" -lt 300 ]]; then

@@ -20,6 +20,7 @@ def project_with_pm(client, make_project, make_agent):
     """Create a project with a PM agent assigned."""
     project = make_project()
     pm = client.post("/api/agents", json={
+        "project_id": project["id"],
         "name": "PM Agent",
         "role": "pm",
         "api_key": f"pm-key-{project['id']}",

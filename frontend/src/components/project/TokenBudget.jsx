@@ -1,16 +1,82 @@
 // Path: src/components/project/TokenBudget.jsx
 // File: TokenBudget.jsx
 // Created: 2026-04-17
-// Purpose: Collapsible token budget panel showing per-file token counts vs ceilings with status indicators
+// Purpose: Collapsible token budget panel showing per-file token counts grouped by category, with Memory subgrouped by agent
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect), config (API_BASE_URL), styles/dashboard.css
+// Callees: react (useState, useEffect, useMemo), config (API_BASE_URL), styles/dashboard.css
 // Data In: projectId prop
 // Data Out: default export TokenBudget component
-// Last Modified: 2026-04-17
+// Last Modified: 2026-06-04
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { API_BASE_URL } from '../../config';
 import '../../styles/dashboard.css';
+
+// Section ordering + which categories roll up into each section.
+const SECTIONS = [
+  {
+    key: 'root_docs',
+    label: 'Root Docs',
+    categories: ['claude_md', 'handoff', 'team', 'architecture', 'readme', 'initial'],
+  },
+  {
+    key: 'agent_defs',
+    label: 'Agent Defs',
+    categories: ['agent_def'],
+  },
+  {
+    key: 'playbooks',
+    label: 'Playbooks',
+    categories: ['playbook'],
+  },
+  {
+    key: 'project_rules',
+    label: 'Project Rules',
+    categories: ['project_rules'],
+  },
+  {
+    key: 'memory',
+    label: 'Memory',
+    categories: ['memory_identity', 'memory_scratchpad', 'memory_lessons', 'memory_recent'],
+    subgroupBy: 'agent_name',
+  },
+];
+
+const formatTokens = (n) => {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+};
+
+function FileRow({ f }) {
+  const pct = f.ceiling > 0 ? Math.round((f.tokens / f.ceiling) * 100) : 0;
+  const barWidth = Math.min(pct, 100);
+  const barClass =
+    f.status === 'over'
+      ? 'token-budget__bar--over'
+      : f.status === 'warning'
+        ? 'token-budget__bar--warning'
+        : 'token-budget__bar--ok';
+  const indicator = f.status === 'over' ? '✗' : f.status === 'warning' ? '●' : '✓';
+  return (
+    <div className="token-budget__file">
+      <div className="token-budget__file-row">
+        <span className={`token-budget__indicator token-budget__indicator--${f.status}`}>
+          {indicator}
+        </span>
+        <span className="token-budget__name">{f.name}</span>
+        <span className="token-budget__count">
+          {formatTokens(f.tokens)}/{formatTokens(f.ceiling)}
+        </span>
+      </div>
+      <div className="token-budget__bar-track">
+        <div
+          className={`token-budget__bar-fill ${barClass}`}
+          style={{ width: `${barWidth}%` }}
+        />
+      </div>
+    </div>
+  );
+}
 
 function TokenBudget({ projectId }) {
   const [data, setData] = useState(null);
@@ -20,33 +86,62 @@ function TokenBudget({ projectId }) {
   useEffect(() => {
     let cancelled = false;
     fetch(`${API_BASE_URL}/projects/${projectId}/token-budget`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => { if (!cancelled) setData(d); })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
       .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
+
+  // Group files by section. Memo so we don't redo on every collapse toggle.
+  const sections = useMemo(() => {
+    if (!data) return [];
+    return SECTIONS.map((section) => {
+      const files = data.files.filter((f) => section.categories.includes(f.category));
+      if (files.length === 0) return { ...section, files: [], subgroups: null };
+      if (!section.subgroupBy) return { ...section, files, subgroups: null };
+      // Build subgroup map preserving first-seen order.
+      const order = [];
+      const map = new Map();
+      for (const f of files) {
+        const k = f[section.subgroupBy] || 'unknown';
+        if (!map.has(k)) {
+          map.set(k, []);
+          order.push(k);
+        }
+        map.get(k).push(f);
+      }
+      return {
+        ...section,
+        files,
+        subgroups: order.map((name) => ({ name, files: map.get(name) })),
+      };
+    }).filter((s) => s.files.length > 0);
+  }, [data]);
 
   if (loading || !data) return null;
 
   const overCount = data.files.filter((f) => f.status === 'over').length;
   const warnCount = data.files.filter((f) => f.status === 'warning').length;
 
-  const statusLabel = overCount > 0
-    ? `${overCount} over`
-    : warnCount > 0
-      ? `${warnCount} warning`
-      : '\u2713 all ok';
-  const statusClass = overCount > 0
-    ? 'token-budget__status--over'
-    : warnCount > 0
-      ? 'token-budget__status--warning'
-      : 'token-budget__status--ok';
-
-  const formatTokens = (n) => {
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-    return String(n);
-  };
+  const statusLabel =
+    overCount > 0
+      ? `${overCount} over`
+      : warnCount > 0
+        ? `${warnCount} warning`
+        : '✓ all ok';
+  const statusClass =
+    overCount > 0
+      ? 'token-budget__status--over'
+      : warnCount > 0
+        ? 'token-budget__status--warning'
+        : 'token-budget__status--ok';
 
   return (
     <div className="token-budget">
@@ -68,33 +163,48 @@ function TokenBudget({ projectId }) {
               team startup: ~{formatTokens(data.team_startup_cost)} tokens (5-agent team)
             </span>
           </div>
-          <div className="token-budget__list">
-            {data.files.map((f) => {
-              const pct = f.ceiling > 0 ? Math.round((f.tokens / f.ceiling) * 100) : 0;
-              const barWidth = Math.min(pct, 100);
-              const barClass = f.status === 'over'
-                ? 'token-budget__bar--over'
-                : f.status === 'warning'
-                  ? 'token-budget__bar--warning'
-                  : 'token-budget__bar--ok';
+          <div className="token-budget__sections">
+            {sections.map((section) => {
+              const sectionTotal = section.files.reduce((acc, f) => acc + f.tokens, 0);
               return (
-                <div key={f.path} className="token-budget__file">
-                  <div className="token-budget__file-row">
-                    <span className={`token-budget__indicator token-budget__indicator--${f.status}`}>
-                      {f.status === 'over' ? '\u2717' : f.status === 'warning' ? '\u25CF' : '\u2713'}
+                <section key={section.key} className="token-budget__section">
+                  <header className="token-budget__section-header">
+                    <span className="token-budget__section-label">{section.label}</span>
+                    <span className="token-budget__section-meta">
+                      {section.files.length} {section.files.length === 1 ? 'file' : 'files'}
+                      {' · '}
+                      {formatTokens(sectionTotal)} tokens
                     </span>
-                    <span className="token-budget__name">{f.name}</span>
-                    <span className="token-budget__count">
-                      {formatTokens(f.tokens)}/{formatTokens(f.ceiling)}
-                    </span>
-                  </div>
-                  <div className="token-budget__bar-track">
-                    <div
-                      className={`token-budget__bar-fill ${barClass}`}
-                      style={{ width: `${barWidth}%` }}
-                    />
-                  </div>
-                </div>
+                  </header>
+                  {section.subgroups ? (
+                    <div className="token-budget__subgroups">
+                      {section.subgroups.map((sg) => {
+                        const sgTotal = sg.files.reduce((acc, f) => acc + f.tokens, 0);
+                        return (
+                          <div key={sg.name} className="token-budget__subgroup">
+                            <header className="token-budget__subgroup-header">
+                              <span className="token-budget__subgroup-label">{sg.name}</span>
+                              <span className="token-budget__subgroup-meta">
+                                {formatTokens(sgTotal)} tokens
+                              </span>
+                            </header>
+                            <div className="token-budget__list">
+                              {sg.files.map((f) => (
+                                <FileRow key={f.path} f={f} />
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="token-budget__list">
+                      {section.files.map((f) => (
+                        <FileRow key={f.path} f={f} />
+                      ))}
+                    </div>
+                  )}
+                </section>
               );
             })}
           </div>

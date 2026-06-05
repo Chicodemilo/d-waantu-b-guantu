@@ -57,7 +57,7 @@ class TestGetAgent:
         agent = make_agent()
         data = client.get(f"/api/agents/{agent['id']}").json()
         expected_keys = {
-            "id", "name", "description", "role", "api_key",
+            "id", "project_id", "name", "description", "role", "api_key",
             "is_active", "created_at", "updated_at",
         }
         assert set(data.keys()) == expected_keys
@@ -68,8 +68,10 @@ class TestGetAgent:
 
 
 class TestCreateAgent:
-    def test_create_returns_201(self, client):
+    def test_create_returns_201(self, client, make_project):
+        project = make_project()
         r = client.post("/api/agents", json={
+            "project_id": project["id"],
             "name": "New Agent",
             "role": "developer",
             "api_key": "new-key-unique",
@@ -79,8 +81,10 @@ class TestCreateAgent:
         assert r.json()["role"] == "developer"
         assert r.json()["is_active"] is True  # default
 
-    def test_create_with_all_fields(self, client):
+    def test_create_with_all_fields(self, client, make_project):
+        project = make_project()
         r = client.post("/api/agents", json={
+            "project_id": project["id"],
             "name": "Full Agent",
             "description": "A described agent",
             "role": "pm",

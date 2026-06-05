@@ -1,12 +1,12 @@
 # Path: app/routers/projects.py
 # File: projects.py
 # Created: 2026-03-29
-# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, docs, activity-feed, token-budget
+# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, docs, activity-feed, token-budget, team
 # Caller: app/main.py
-# Callees: app/services/project.py, models (Agent, Alert, ProjectAgent)
+# Callees: app/services/project.py, app/services/project_agent.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
-# Data Out: JSON responses (ProjectRead, gate status, token budget)
-# Last Modified: 2026-04-17
+# Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
+# Last Modified: 2026-06-05
 
 import json
 import re
@@ -26,8 +26,10 @@ from app.models.project import ProjectStatus
 from app.models.project_agent import ProjectAgent
 from app.models.ticket import Ticket
 from app.schemas.project import ProjectCreate, ProjectOverheadIncrement, ProjectRead, ProjectUpdate
+from app.schemas.project_agent import ProjectTeamRead
 from app.schemas.test_result import TestResultRead
 from app.services import project as svc
+from app.services import project_agent as pa_svc
 from app.services import test_result as test_svc
 from app.services.seed_demo import seed_demo_project
 
@@ -159,6 +161,30 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
     return project
 
 
+@router.get("/{project_id}/team", response_model=ProjectTeamRead)
+def get_project_team(
+    project_id: int,
+    include_inactive: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """DWB-313: single-roundtrip team listing for a project.
+
+    Default returns only active agents. Pass ?include_inactive=true to get the
+    full historical roster.
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    agents = pa_svc.list_project_team(
+        db, project_id=project_id, include_inactive=include_inactive
+    )
+    return {
+        "project_id": project.id,
+        "project_prefix": project.prefix,
+        "agents": agents,
+    }
+
+
 @router.post("", response_model=ProjectRead, status_code=201)
 def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
     return svc.create_project(db, data)
@@ -222,7 +248,6 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
 _DOC_GATES = [
     ("force_initial_md", "INITIAL.md"),
     ("force_architecture_md", "ARCHITECTURE.md"),
-    ("force_team_md", "TEAM.md"),
     ("force_handoff_md", "HANDOFF.md"),
 ]
 
@@ -314,7 +339,7 @@ def list_project_tests(
     )
 
 
-_DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md", "INITIAL.md", "TEAM.md", "HANDOFF.md"]
+_DOC_FILES = ["README.md", "QUICKSTART.md", "ARCHITECTURE.md", "INITIAL.md", "HANDOFF.md"]
 
 
 @router.get("/{project_id}/docs")
@@ -443,13 +468,39 @@ def get_project_activity_feed(
 
 # --- Token budget ---
 
+# DWB-327 ceiling rebalance (2026-06-05): agent_def 800→1500, project_rules
+# 500→1000, architecture 4000→6000, readme 2000→2500.
+# Worker agent defs (worker.md, backend-worker.md, frontend-worker.md,
+# tester.md, system-ops.md) carry per-role workflow text that pushed the
+# old 800-token cap into "over" on every sprint close — that content is
+# load-bearing, not bloat. project_rules_* per-project conventions accreted
+# past 500 and trimming them was lossy. ARCHITECTURE.md is genuinely large
+# (data model + hook attribution + API + frontend + scripts + testing +
+# deployment + business logic) — see ARCHITECTURE.md size justification at
+# the top of the file. README.md fits just under 2500 with the bump.
+# CLAUDE.md, HANDOFF.md, INITIAL.md stay at 1500 — trims this cycle land
+# them under without raising caps.
 _TOKEN_CEILINGS = {
-    "agent_def": 800,
+    "agent_def": 1500,
     "playbook": 2500,
     "claude_md": 1500,
-    "project_rules": 500,
+    "project_rules": 1000,
     "handoff": 1500,
-    "team": 500,
+    "architecture": 6000,
+    "readme": 2500,
+    "initial": 1500,
+    "memory_identity": 600,
+    "memory_scratchpad": 2000,
+    "memory_lessons": 1500,
+    "memory_recent": 1000,
+}
+
+# Memory files scanned per active agent (filename -> category)
+_MEMORY_FILES = {
+    "identity.md": "memory_identity",
+    "scratchpad.md": "memory_scratchpad",
+    "lessons.md": "memory_lessons",
+    "recent_sessions.md": "memory_recent",
 }
 
 # Which files each role reads at startup
@@ -468,8 +519,12 @@ def _classify_file(name: str) -> str:
         return "claude_md"
     if lower == "handoff.md":
         return "handoff"
-    if lower == "team.md":
-        return "team"
+    if lower == "architecture.md":
+        return "architecture"
+    if lower == "readme.md":
+        return "readme"
+    if lower == "initial.md":
+        return "initial"
     if "project_rules" in lower:
         return "project_rules"
     if lower.endswith("_playbook.md"):
@@ -482,20 +537,26 @@ def _estimate_tokens(text: str) -> int:
     return int(len(text.split()) * 1.3)
 
 
-@router.get("/{project_id}/token-budget")
-def get_token_budget(project_id: int, db: Session = Depends(get_db)):
-    project = svc.get_project(db, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-    if not project.repo_path:
-        raise HTTPException(400, "Project has no repo_path configured")
+def compute_token_budget(db: Session, project) -> dict:
+    """Build the token-budget payload for a project. Shared by the public
+    endpoint and the consolidation-status endpoint. Caller is responsible for
+    asserting project exists and has repo_path; raises ValueError otherwise.
+    """
+    if not project or not project.repo_path:
+        raise ValueError("project has no repo_path")
 
     repo = Path(project.repo_path)
     files = []
     file_token_map: dict[str, int] = {}  # name -> tokens for startup calc
 
-    # Root-level context files
-    for name in ["CLAUDE.md", "HANDOFF.md", "TEAM.md"]:
+    # Root-level context files (CLAUDE/HANDOFF + per-project docs agents load at spawn)
+    for name in [
+        "CLAUDE.md",
+        "HANDOFF.md",
+        "ARCHITECTURE.md",
+        "README.md",
+        "INITIAL.md",
+    ]:
         filepath = repo / name
         if filepath.is_file():
             try:
@@ -510,6 +571,8 @@ def get_token_budget(project_id: int, db: Session = Depends(get_db)):
             files.append({
                 "path": str(filepath),
                 "name": name,
+                "category": category,
+                "agent_name": None,
                 "tokens": tokens,
                 "ceiling": ceiling,
                 "status": status,
@@ -534,6 +597,8 @@ def get_token_budget(project_id: int, db: Session = Depends(get_db)):
             files.append({
                 "path": str(filepath),
                 "name": f".claude/agents/{filepath.name}",
+                "category": category,
+                "agent_name": None,
                 "tokens": tokens,
                 "ceiling": ceiling,
                 "status": status,
@@ -559,11 +624,51 @@ def get_token_budget(project_id: int, db: Session = Depends(get_db)):
                 files.append({
                     "path": str(filepath),
                     "name": f".claude/{filepath.name}",
+                    "category": category,
+                    "agent_name": None,
                     "tokens": tokens,
                     "ceiling": ceiling,
                     "status": status,
                 })
                 file_token_map[filepath.name] = tokens
+
+    # Per-agent memory: .claude/agents/memory/{prefix}/{agent_name}/{file}
+    # Counts every file each active agent on this project loads at spawn.
+    if project.prefix:
+        memory_root = repo / ".claude" / "agents" / "memory" / project.prefix
+        active_agents = (
+            db.query(Agent)
+            .filter(Agent.project_id == project.id, Agent.is_active.is_(True))
+            .order_by(Agent.name)
+            .all()
+        )
+        for agent in active_agents:
+            agent_mem_dir = memory_root / agent.name
+            if not agent_mem_dir.is_dir():
+                continue
+            for fname, category in _MEMORY_FILES.items():
+                filepath = agent_mem_dir / fname
+                if not filepath.is_file():
+                    continue
+                try:
+                    text = filepath.read_text(encoding="utf-8")
+                except Exception:
+                    text = ""
+                tokens = _estimate_tokens(text)
+                ceiling = _TOKEN_CEILINGS.get(category, 1000)
+                ratio = tokens / ceiling if ceiling > 0 else 0
+                status = (
+                    "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
+                )
+                files.append({
+                    "path": str(filepath),
+                    "name": f"memory/{agent.name}/{fname}",
+                    "category": category,
+                    "agent_name": agent.name,
+                    "tokens": tokens,
+                    "ceiling": ceiling,
+                    "status": status,
+                })
 
     total_tokens = sum(f["tokens"] for f in files)
 
@@ -578,3 +683,37 @@ def get_token_budget(project_id: int, db: Session = Depends(get_db)):
         "total_tokens": total_tokens,
         "team_startup_cost": team_startup,
     }
+
+
+@router.get("/{project_id}/token-budget")
+def get_token_budget(project_id: int, db: Session = Depends(get_db)):
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not project.repo_path:
+        raise HTTPException(400, "Project has no repo_path configured")
+    return compute_token_budget(db, project)
+
+
+@router.get("/{project_id}/consolidation-status")
+def get_consolidation_status(
+    project_id: int,
+    sprint_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Per-agent consolidation gate status for a given sprint.
+
+    Each active agent on the project gets a block with their ack state and the
+    over-ceiling files they own (memory files + role-mapped repo files). The
+    gate is satisfied when force_consolidation is off or every agent has acked.
+    """
+    from app.models.sprint import Sprint
+    from app.services import agent_consolidation as consolidation_svc
+
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    sprint = db.get(Sprint, sprint_id)
+    if not sprint or sprint.project_id != project_id:
+        raise HTTPException(404, "Sprint not found for this project")
+    return consolidation_svc.get_consolidation_status(db, project, sprint_id)

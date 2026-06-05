@@ -83,16 +83,16 @@ Agent (standalone)
 
 ### Tables
 
-16 model files in `app/models/`. See individual model files for full column definitions.
+18 model files in `app/models/`. See individual model files for full column definitions.
 
 | Table | Key Columns | Notes |
 |-------|-------------|-------|
-| **projects** | prefix, name, status, repo_path, jira_base_url, jira_project_key, tl/pm_overhead_tokens, tl/pm_overhead_time_seconds, force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_team_md, force_handoff_md, playbooks_deployed_at | 8 sprint gate flags. Status: active/paused/completed/archived |
+| **projects** | prefix, name, status, repo_path, jira_base_url, jira_project_key, tl/pm_overhead_tokens, tl/pm_overhead_time_seconds, force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_handoff_md, force_consolidation, playbooks_deployed_at | 7 sprint gate flags. Status: active/paused/completed/archived |
 | **epics** | project_id, name, description, status | Status: open/in_progress/completed |
 | **sprints** | project_id, epic_id, name, goal, sprint_number, status, start/end_date | Name auto-generated from goal. Completion triggers gate validation + alerts |
 | **tickets** | project_id, epic_id, sprint_id, assigned_agent_id, ticket_number, ticket_key, jira_issue_key, title, description, ticket_type, status, tokens_used, time_spent_seconds, token_source, completed_at | Auto-assigns sprint/epic on create. Status change triggers history + tracking events |
-| **agents** | name, description, role, api_key, is_active | role maps to Claude teammate name |
-| **project_agents** | project_id, agent_id, assigned_at | Unique constraint: (project_id, agent_id) |
+| **agents** | project_id, name, description, role, api_key, is_active | role maps to Claude teammate name. **Per-project rows** (DWB-287, 2026-06-03): every agent belongs to exactly one project; same Claude teammate name on two projects = two agent rows. **Globally unique name** (DWB-315, 2026-06-05): `UNIQUE(name)` system-wide. Fixed-role agents that recur on every project are suffixed with `_<PROJECT_PREFIX>` (e.g., `Archie_DWB`, `Pam_DWB`); the identify endpoint accepts either form. Workers without cross-project collisions keep their plain name. |
+| **project_agents** | project_id, agent_id, assigned_at | Unique constraint: (project_id, agent_id). Agents are 1:1 with a single project (see agents table); this table additionally tracks assigned-at timestamps for active-roster queries. |
 | **tracking_log** | ticket_id, agent_id, project_id, sprint_id, event_type, tokens, timestamp, source | event_type: start/stop/token_report/overhead_start/overhead_stop |
 | **status_history** | ticket_id, old_status, new_status, changed_at, changed_by_agent_id | Used for time computation + rework detection |
 | **failure_records** | project_id, ticket_id, sprint_id, agent_id, logged_by_agent_id, failure_type, severity, attempt_number, notes, root_cause, resolution, resolved | Two FK to agents. Unreviewed stubs block sprint close |
@@ -103,6 +103,7 @@ Agent (standalone)
 | **test_results** | project_id, sprint_id, ticket_id, run_at, suite, total_tests, passed, failed, skipped, duration_seconds, status, details, triggered_by, triggered_context | Failed results auto-create failure_records |
 | **hook_sessions** | session_id, transcript_path, agent_id, project_id, ticket_id, sprint_id, start_time, end_time, total_tokens, token_breakdown, status, session_type, agent_name, hook_event, created_at | Status: active/completed/error. Type: main/teammate/subagent |
 | **error_logs** | project_id, agent_id, source, endpoint, error_type, message, stack_trace, file_path, function_name, line_number, status_code, created_at | Source: backend/frontend/hook |
+| **failed_hooks** | session_id, hook_event, reason, cwd, agent_type, agent_name, agent_id_from_marker, project_id, hook_data, created_at | DWB-288 audit table for marker-resolution failures. Every `resolve_agent_from_marker` miss writes a row with the failure reason (`marker_missing`, `marker_unparseable`, `marker_agent_not_found`, etc.) and the raw hook payload, so the diagnostic isn't silent. |
 
 ---
 
@@ -120,9 +121,9 @@ Request -> ActivityLoggerMiddleware -> Router -> Service -> Model -> DB
          (auto-populated)
 ```
 
-- **Routers** (`app/routers/`): Define endpoints, validate input via Pydantic, inject DB session via `Depends(get_db)`. 18 router files.
-- **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution, tracking events, demo seeding). 16 service files.
-- **Models** (`app/models/`): SQLAlchemy 2.0 ORM classes with Mapped types and relationships. 16 model files.
+- **Routers** (`app/routers/`): Define endpoints, validate input via Pydantic, inject DB session via `Depends(get_db)`. 19 router files.
+- **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution, tracking events, demo seeding). 20 service files.
+- **Models** (`app/models/`): SQLAlchemy 2.0 ORM classes with Mapped types and relationships. 18 model files.
 - **Schemas** (`app/schemas/`): Pydantic v2 models with ConfigDict(from_attributes=True) for Create, Update, Read per entity. List endpoints use slim schemas that strip heavy fields (e.g., `TestResultListRead` omits `details`, `AgentListRead` omits `api_key`). Tickets, alerts, and sprints support `?fields=slim` for minimal payloads.
 - **Middleware** (`app/middleware/`): ActivityLoggerMiddleware auto-logs all mutations.
 
@@ -159,6 +160,7 @@ Disabled during testing (`TESTING=1` env var).
 | GET    | /api/projects/{id}/playbook-files     |                      | List playbook files in .claude/ |
 | GET    | /api/projects/{id}/token-budget       |                      | Context file token counts + ceilings |
 | GET    | /api/projects/{id}/activity-feed      | limit                | Activity log with agents   |
+| GET    | /api/projects/{id}/team               | include_inactive     | Single-roundtrip team roster (DWB-313) — `{project_id, project_prefix, agents: [{agent_id, name, role, is_active, assigned_at}]}`. Active-only by default. |
 
 #### /api/sprints
 | Method | Path                | Query Params       | Purpose        |
@@ -179,13 +181,17 @@ Disabled during testing (`TESTING=1` env var).
 | DELETE | /api/epics/{id}  |                    | Delete epic  |
 
 #### /api/agents
-| Method | Path              | Query Params     | Purpose       |
-|--------|-------------------|------------------|---------------|
-| GET    | /api/agents       | role, is_active  | List agents   |
-| GET    | /api/agents/{id}  |                  | Get agent     |
-| POST   | /api/agents       |                  | Create agent  |
-| PATCH  | /api/agents/{id}  |                  | Update agent  |
-| DELETE | /api/agents/{id}  |                  | Delete agent  |
+| Method | Path                                | Query Params     | Purpose       |
+|--------|-------------------------------------|------------------|---------------|
+| GET    | /api/agents                         | role, is_active  | List agents   |
+| GET    | /api/agents/{id}                    |                  | Get agent     |
+| POST   | /api/agents                         |                  | Create agent  |
+| PATCH  | /api/agents/{id}                    |                  | Update agent  |
+| DELETE | /api/agents/{id}                    |                  | Delete agent  |
+| POST   | /api/agents/identify                |                  | Resolve identity from (role, name, project_prefix); returns agent_id + memory_dir + visible instructions. Accepts short name OR `<name>_<PROJECT_PREFIX>` (DWB-289, 315). |
+| POST   | /api/agents/spawn-prepare           |                  | Identify + return ready-to-paste markdown sections (Identity, Recent Scratchpad, Boundary Rules) for the spawn brief. |
+| POST   | /api/agents/{id}/session-complete   |                  | Append a session entry to scratchpad.md / lessons.md / recent_sessions.md for the agent (run from agent at session end). |
+| POST   | /api/agents/{id}/scaffold-memory    |                  | Idempotently scaffold the agent's memory directory (`.claude/agents/memory/<PREFIX>/<Name>/`) — used as a lazy heal for pre-DWB-293 agents. |
 
 #### /api/project-agents
 | Method | Path                    | Query Params          | Purpose          |
@@ -194,6 +200,8 @@ Disabled during testing (`TESTING=1` env var).
 | GET    | /api/project-agents/{id}|                       | Get assignment   |
 | POST   | /api/project-agents     |                       | Create           |
 | DELETE | /api/project-agents/{id}|                       | Delete           |
+
+Note: `GET /api/projects/{id}/team` (DWB-313) is the single-roundtrip alternative for spawn-time roster lookup — returns `{project_id, project_prefix, agents: [{agent_id, name, role, is_active, assigned_at}, ...]}` filtered to active by default, `?include_inactive=true` for the full historical roster.
 
 #### /api/tickets
 | Method | Path                               | Query Params                                                          | Purpose             |
@@ -216,7 +224,7 @@ Disabled during testing (`TESTING=1` env var).
 | POST   | /api/tracking/tokens      | Log token report (ticket_id, agent_id, tokens, source) |
 | POST   | /api/tracking/overhead/start | Log overhead start (project_id, agent_id) |
 | POST   | /api/tracking/overhead/stop  | Log overhead stop (project_id, agent_id)  |
-| GET    | /api/tracking/summary     | Full rollup (per_ticket with title/agent, per_agent, per_sprint, project_total) |
+| GET    | /api/tracking/summary     | Full rollup (per_ticket with title/agent, per_agent, per_sprint, project_total). DWB-306 (2026-06-05): `per_agent` now aggregates both `token_report` and `overhead_token_report` events — each row carries a `tokens` total (ticket + overhead combined) plus a separate `overhead_tokens` breakdown so dashboards see correct headline numbers for PM/TL agents while keeping the overhead portion visible. `project_total.overhead_tokens` remains the project-wide overhead figure. |
 
 #### /api/comments
 | Method | Path                 | Query Params               | Purpose        |
@@ -261,7 +269,8 @@ Disabled during testing (`TESTING=1` env var).
 | GET    | /api/test-results            | project_id, suite, status, limit | List results         |
 | GET    | /api/test-results/performance| project_id, limit                | Lightweight history  |
 | GET    | /api/test-results/{id}       |                                  | Get result           |
-| POST   | /api/test-results            |                                  | Create result        |
+| POST   | /api/test-results            |                                  | Create result. `details` column is MEDIUMTEXT (DWB-308) so gate-sized payloads (~600 per-test entries + 4000-char tail, ~85KB) fit. |
+| DELETE | /api/test-results/{id}       |                                  | Operator-driven orphan-row cleanup (DWB-310). 204 on success, 404 on missing. Does NOT cascade to `failure_records` (those are independent diagnostic rows). |
 
 #### /api/failure-records
 | Method | Path                         | Query Params                                            | Purpose            |
@@ -284,7 +293,7 @@ Disabled during testing (`TESTING=1` env var).
 |--------|----------------------------|----------------------|--------------------------------|
 | POST   | /api/hooks/session-start   |                      | Receive SessionStart hook data |
 | POST   | /api/hooks/session-end     |                      | Receive SessionEnd/SubagentStop hook data |
-| GET    | /api/hooks/sessions        | project_id, status   | List hook sessions             |
+| GET    | /api/hooks/sessions        | project_id, status, cutoff_minutes | List hook sessions. `status=orphan` returns active sessions older than `cutoff_minutes` (default 60) for cleanup workflows. |
 | GET    | /api/hooks/sessions/{id}   |                      | Get session by ID              |
 
 #### /api/tokens
@@ -343,7 +352,6 @@ Disabled during testing (`TESTING=1` env var).
 - **Status history timeline** on ticket detail pages
 - **Failure record review form** with type, notes, root_cause, resolution
 - **Test performance tab** with duration charts and sparklines
-- **TEAM.md panel** on the Team page (collapsible, read-only)
 - **Tracking summary** with time/token rollups from hooks
 - **Adaptive polling** 2s active, 10s idle
 
@@ -450,10 +458,27 @@ Token and time attribution is handled passively by hooks configured in `.claude/
 
 SubagentStop creates a separate HookSession keyed on `agent_id` (not the parent `session_id`). Unmatched agent types (e.g. "Explore" subagent) fall back to TL as overhead.
 
-Workers get tokens attributed to their active ticket (in_progress, in_review, or recently done). TL/PM get project overhead. Key files:
-- `app/services/hook_tracking.py` — all business logic
-- `app/routers/hooks.py` — 4 endpoints (never return 5xx)
+**SubagentStop transcript fallback (DWB-311, 2026-06-05).** In production Claude Code's SubagentStop hook sends `agent_transcript_path` pointing at a synthetic path inside a `subagents/agent-<sid>.jsonl` subdirectory that doesn't exist on disk — the real subagent transcript content is interleaved in the parent session's top-level `.jsonl`, each line tagged with an `agentName` field. When `parse_transcript()` returns 0 because the synthetic file is absent, `_handle_subagent_stop()` falls back to `_parse_subagent_from_projects_dir(synthetic_path, agent.name)`: derive the CC projects directory as `Path(synthetic_path).parent.parent.parent`, walk every `*.jsonl` sibling, and accumulate usage from lines where `agentName == agent.name`. The fallback runs only when the primary parse misses AND the synthetic file is absent AND the marker has already resolved a named agent; on any failure it returns a zero result (same observable as pre-fix), so it can never make attribution worse.
+
+**Marker-based attribution (DWB-294 + DWB-304).** SubagentStop session_ids are generated by Claude Code internally and can't be pre-computed by the TL. The marker scheme bridges that gap:
+
+- TL writes a **pending marker** at spawn time: `.claude/agents/active/pending-<agent_id>-<unix_ms>-<rand4hex>` (file content = JSON dict, see below).
+- When `_handle_subagent_stop` fires, `resolve_agent_from_marker` first tries a strict literal lookup at `.claude/agents/active/<session_id>`. If that's missing, it scans for the oldest unconsumed `pending-*` marker belonging to the same project and **atomically renames** it to `<session_id>` — at which point it's consumed and won't be re-used.
+- Failures (missing marker, unparseable JSON, agent_id doesn't resolve) write a row to `failed_hooks` with a specific `reason` so the diagnostic isn't silent — see the failed_hooks table.
+
+**Marker file format** (all marker files, both literal and pending, are JSON dicts):
+
+```json
+{"agent_id": 21, "agent_name": "Barry_DWB", "role": "backend-worker", "project_prefix": "DWB"}
+```
+
+`agent_id` is the only authoritative field for attribution; the others are convenience/diagnostic.
+
+Workers get tokens attributed to their active ticket (in_progress, in_review, or recently done within ~5min). TL/PM get project overhead split across `tl_overhead_tokens` / `pm_overhead_tokens` buckets (DWB-305). Key files:
+- `app/services/hook_tracking.py` — all business logic, including marker resolution + `_parse_subagent_from_projects_dir` fallback
+- `app/routers/hooks.py` — 4 endpoints (never return 5xx; failures land in `failed_hooks` + `error_logs`)
 - `app/models/hook_session.py` — session state model
+- `app/models/failed_hook.py` — marker-resolution failure audit table
 
 ---
 
@@ -533,7 +558,7 @@ alembic downgrade -1       # rollback one
 ## 8. Key Business Logic
 
 ### Sprint Completion Gates
-Projects enforce up to 8 gates via `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_team_md`, `force_handoff_md`, `force_headers` flags, plus unreviewed failure records check. Sprint service validates these before allowing status -> completed.
+Projects enforce up to 7 gates via `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_headers`, `force_consolidation` flags, plus unreviewed failure records check. Sprint service validates these before allowing status -> completed.
 
 ### Auto-Assignment
 - Ticket `sprint_id` auto-assigned to the project's active sprint on creation

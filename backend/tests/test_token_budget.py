@@ -1,0 +1,234 @@
+# Path:          tests/test_token_budget.py
+# File:          test_token_budget.py
+# Created:       2026-06-04
+# Purpose:       Tests for GET /api/projects/:id/token-budget — root docs, agent defs, memory files
+# Caller:        pytest
+# Callees:       GET /api/projects/:id/token-budget
+# Data In:       Temp repo dir with .claude/ + memory layout, factory-created project + agents
+# Data Out:      Assertions on category/agent_name fields and inclusion of new docs/memory files
+# Last Modified: 2026-06-05
+
+"""Tests for the /api/projects/:id/token-budget endpoint.
+
+Covers the round-2 extension that adds:
+  - ARCHITECTURE.md / README.md / INITIAL.md to the root-docs scan
+  - per-agent memory file scan under .claude/agents/memory/{prefix}/{name}/
+  - `category` field on every entry
+  - `agent_name` field (string for memory entries, null otherwise)
+"""
+
+from pathlib import Path
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _setup_repo(tmp_path: Path, prefix: str, agent_names: list[str]) -> Path:
+    """Build a minimal repo layout that exercises every scan path."""
+    repo = tmp_path / "repo"
+    # Root-level docs
+    _write(repo / "CLAUDE.md", "# Claude context\n" + "word " * 50)
+    _write(repo / "ARCHITECTURE.md", "# Architecture\n" + "word " * 200)
+    _write(repo / "README.md", "# Readme\n" + "word " * 100)
+    _write(repo / "INITIAL.md", "# Initial\n" + "word " * 80)
+    # Agent definition
+    _write(repo / ".claude" / "agents" / "backend-worker.md", "# backend\n" + "word " * 60)
+    # Playbook + project rules
+    _write(repo / ".claude" / "worker_playbook.md", "# playbook\n" + "word " * 80)
+    _write(repo / ".claude" / "project_rules_worker.md", "# rules\n" + "word " * 20)
+    # Memory dirs for each agent
+    for name in agent_names:
+        mem = repo / ".claude" / "agents" / "memory" / prefix / name
+        _write(mem / "identity.md", f"# identity {name}\n" + "word " * 40)
+        _write(mem / "scratchpad.md", f"# scratch {name}\n" + "word " * 30)
+        _write(mem / "lessons.md", f"# lessons {name}\n")  # near-empty
+        _write(mem / "recent_sessions.md", f"# recent {name}\n")
+    return repo
+
+
+class TestTokenBudgetExtended:
+    def test_endpoint_returns_200(self, client, make_project):
+        # Brand-new project with repo_path set still needs a repo to scan
+        proj = make_project(repo_path=str(Path(__file__).parent))
+        r = client.get(f"/api/projects/{proj['id']}/token-budget")
+        assert r.status_code == 200
+
+    def test_root_docs_include_new_files(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "TST", agent_names=[])
+        proj = make_project(prefix="TBX1", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+
+        names = {f["name"] for f in data["files"]}
+        assert "CLAUDE.md" in names
+        assert "ARCHITECTURE.md" in names
+        assert "README.md" in names
+        assert "INITIAL.md" in names
+
+    def test_every_entry_has_category(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "TST", agent_names=[])
+        proj = make_project(prefix="TBX2", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+
+        assert data["files"], "expected at least one file in scan"
+        for entry in data["files"]:
+            assert "category" in entry, f"missing category: {entry['name']}"
+            assert isinstance(entry["category"], str)
+            assert entry["category"]
+
+    def test_new_doc_categories_are_set(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "TST", agent_names=[])
+        proj = make_project(prefix="TBX3", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        by_name = {f["name"]: f for f in data["files"]}
+
+        assert by_name["ARCHITECTURE.md"]["category"] == "architecture"
+        assert by_name["README.md"]["category"] == "readme"
+        assert by_name["INITIAL.md"]["category"] == "initial"
+
+    def test_non_memory_entries_have_null_agent_name(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "TST", agent_names=[])
+        proj = make_project(prefix="TBX4", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+
+        for entry in data["files"]:
+            assert entry["agent_name"] is None, (
+                f"expected null agent_name on non-memory entry: {entry['name']}"
+            )
+
+    def test_memory_files_counted_for_active_agents(
+        self, client, make_project, make_agent, tmp_path
+    ):
+        prefix = "TBX5"
+        repo = _setup_repo(tmp_path, prefix, agent_names=["Barry", "Mona"])
+        proj = make_project(prefix=prefix, repo_path=str(repo))
+        make_agent(project_id=proj["id"], name="Barry", role="backend-worker")
+        make_agent(project_id=proj["id"], name="Mona", role="pm")
+
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        names = {f["name"] for f in data["files"]}
+
+        # Each agent contributes 4 memory files
+        for agent in ("Barry", "Mona"):
+            assert f"memory/{agent}/identity.md" in names
+            assert f"memory/{agent}/scratchpad.md" in names
+            assert f"memory/{agent}/lessons.md" in names
+            assert f"memory/{agent}/recent_sessions.md" in names
+
+    def test_memory_entries_carry_agent_name_and_category(
+        self, client, make_project, make_agent, tmp_path
+    ):
+        prefix = "TBX6"
+        repo = _setup_repo(tmp_path, prefix, agent_names=["Barry"])
+        proj = make_project(prefix=prefix, repo_path=str(repo))
+        make_agent(project_id=proj["id"], name="Barry", role="backend-worker")
+
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        memory_entries = [f for f in data["files"] if f["name"].startswith("memory/")]
+        assert memory_entries, "expected memory entries for active agent Barry"
+
+        category_by_file = {
+            "memory/Barry/identity.md": "memory_identity",
+            "memory/Barry/scratchpad.md": "memory_scratchpad",
+            "memory/Barry/lessons.md": "memory_lessons",
+            "memory/Barry/recent_sessions.md": "memory_recent",
+        }
+        by_name = {e["name"]: e for e in memory_entries}
+        for name, expected_category in category_by_file.items():
+            assert name in by_name, f"missing {name}"
+            assert by_name[name]["agent_name"] == "Barry"
+            assert by_name[name]["category"] == expected_category
+
+    def test_inactive_agents_excluded(
+        self, client, make_project, make_agent, tmp_path
+    ):
+        prefix = "TBX7"
+        repo = _setup_repo(tmp_path, prefix, agent_names=["Ghost"])
+        proj = make_project(prefix=prefix, repo_path=str(repo))
+        ghost = make_agent(project_id=proj["id"], name="Ghost", role="backend-worker")
+        # Deactivate
+        r = client.patch(f"/api/agents/{ghost['id']}", json={"is_active": False})
+        assert r.status_code == 200
+
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        names = {f["name"] for f in data["files"]}
+        assert not any(n.startswith("memory/Ghost/") for n in names), (
+            "memory files for inactive agent must not be counted"
+        )
+
+    def test_agents_on_other_projects_excluded(
+        self, client, make_project, make_agent, tmp_path
+    ):
+        prefix_a = "TBX8A"
+        prefix_b = "TBX8B"
+        # Repo A has memory dirs for both Alice and Mallory
+        repo_a = _setup_repo(tmp_path / "a", prefix_a, agent_names=["Alice", "Mallory"])
+        proj_a = make_project(prefix=prefix_a, repo_path=str(repo_a))
+        proj_b = make_project(prefix=prefix_b)
+
+        # Alice is on project A, Mallory is on project B
+        make_agent(project_id=proj_a["id"], name="Alice", role="backend-worker")
+        make_agent(project_id=proj_b["id"], name="Mallory", role="backend-worker")
+
+        data = client.get(f"/api/projects/{proj_a['id']}/token-budget").json()
+        names = {f["name"] for f in data["files"]}
+        # Alice's memory shows; Mallory's does not (she's on a different project)
+        assert any(n.startswith("memory/Alice/") for n in names)
+        assert not any(n.startswith("memory/Mallory/") for n in names)
+
+
+class TestDWB327CeilingRebalance:
+    """DWB-327: agent_def 800→1500, project_rules 500→1000.
+
+    Asserts the new caps surface on the budget endpoint. If a future ticket
+    tunes them again, the source of truth (_TOKEN_CEILINGS in routers/projects.py)
+    must update along with these tests.
+    """
+
+    def test_agent_def_ceiling_is_1500(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "DR1", agent_names=[])
+        proj = make_project(prefix="DR1", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        agent_def = next(
+            f for f in data["files"] if f["category"] == "agent_def"
+        )
+        assert agent_def["ceiling"] == 1500
+
+    def test_project_rules_ceiling_is_1000(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "DR2", agent_names=[])
+        proj = make_project(prefix="DR2", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        rules = next(
+            f for f in data["files"] if f["category"] == "project_rules"
+        )
+        assert rules["ceiling"] == 1000
+
+    def test_architecture_ceiling_is_6000(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "DR3", agent_names=[])
+        proj = make_project(prefix="DR3", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        arch = next(
+            f for f in data["files"] if f["category"] == "architecture"
+        )
+        assert arch["ceiling"] == 6000
+
+    def test_readme_ceiling_is_2500(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "DR4", agent_names=[])
+        proj = make_project(prefix="DR4", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        readme = next(
+            f for f in data["files"] if f["category"] == "readme"
+        )
+        assert readme["ceiling"] == 2500
+
+    def test_other_ceilings_unchanged_by_rebalance(self, client, make_project, tmp_path):
+        """Spot-check categories that DWB-327 did NOT touch."""
+        repo = _setup_repo(tmp_path, "DR5", agent_names=[])
+        proj = make_project(prefix="DR5", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        by_category = {f["category"]: f["ceiling"] for f in data["files"]}
+        # These were not raised — assert they stayed put.
+        assert by_category["claude_md"] == 1500
+        assert by_category["initial"] == 1500
+        assert by_category["playbook"] == 2500

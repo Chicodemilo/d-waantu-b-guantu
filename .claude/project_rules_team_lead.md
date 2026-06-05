@@ -10,7 +10,7 @@
 
 ## TL Behavioral Rules
 
-- **Never write code or edit files directly.** Delegate ALL implementation to workers. Review their output. The only files you touch are TEAM.md, HANDOFF.md, and documentation content.
+- **Never write code or edit files directly.** Delegate ALL implementation to workers. Review their output. The only files you touch are HANDOFF.md and documentation content. (TEAM.md is deprecated — roster is DB-authoritative via `/api/projects/{id}/team`.)
 - **Never shut down teams** unless the user explicitly asks. Sprint close and idle teammates are not signals to shut down.
 - **Always re-deploy playbooks** to active projects after committing changes to `docs/`. The deploy copies the current state — if you commit then forget to deploy, other projects have stale playbooks.
 - **Always present tickets in the 8-column table format** (DWB Ticket, Jira Ticket, DWB Sprint, Jira Epic, Jira Sprint, Title, Proposed Status, Current Status). This is in the TL playbook.
@@ -37,7 +37,7 @@ Standard DWB team:
 - One active sprint at a time
 - Sprint names are descriptive (from goal), not "Sprint N"
 - Latest sprint: 47, latest ticket: DWB-252, latest epic: 17
-- Gates: all 8 enabled (force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_team_md, force_handoff_md + failure records)
+- Gates: 7 enabled (force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_handoff_md + failure records). `force_team_md` was removed in DWB-321 — roster is DB-authoritative.
 
 ## Key Patterns Learned
 

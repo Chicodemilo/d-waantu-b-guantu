@@ -22,44 +22,13 @@ These requirements came from running real multi-agent builds where the team lead
 
 ## Project Phases
 
-### Phase 0 — Architecture & Data Model (Day 1)
+**Phase 0 — Architecture & Data Model.** Hierarchy (Project → Epic → Sprint → Ticket), agent model, instruction scoping (global/project/agent), alert system. Read-heavy dashboard, PM is primary writer, no ticket priority levels, terminal UI.
 
-Defined the core hierarchy (Project → Epic → Sprint → Ticket), agent model, instruction scoping, and alert system. Key decisions made here:
+**Phase 1 — Multi-Agent Build.** Built via Claude Code subagents in waves, then switched to Claude Code Teams (persistent teammates, TL orchestrates via instructions).
 
-- Dashboard is **read-heavy, write-light** for the human. The PM agent is the primary writer.
-- Token tracking at ticket level, with separate overhead tracking for TL/PM.
-- No priority levels on tickets — a ticket exists or it doesn't.
-- Terminal aesthetic UI — black background, monospace, ASCII charts.
+**Phase 2 — Iteration & Automation.** Token tracking hooks, sprint gates, auto-assignment defaults, sprint lifecycle alerts, instruction sync, playbook deployment, token audit.
 
-### Phase 1 — Multi-Agent Build (Days 1-2)
-
-Built the initial system using Claude Code subagents in waves:
-
-- **Wave 1** (parallel): DBA Bot (Docker, MySQL, Alembic, 10 SQLAlchemy models) + React Bot (Vite, Zustand, 27 components, 8 pages, 7 CSS files)
-- **Wave 2**: API Bot (FastAPI routers, schemas, services for all 10 models)
-- **Wave 3**: Data Bot (frontend API client, hooks, real data wiring)
-
-After Wave 1 completed, switched from manual subagent waves to **Claude Code Teams** — six persistent teammates communicating directly, with the team lead orchestrating dependencies through instructions rather than manual sequencing.
-
-### Phase 2 — Iteration & Automation (Days 2-4)
-
-Rapid iteration with the full team running:
-
-- Token tracking stop hook (`report_tokens.py`) — auto-reports tokens on agent idle/stop
-- Sprint gates — projects can enforce test runs, test coverage, and documentation before sprint completion
-- Auto-assignment defaults — tickets auto-assign to active sprints, sprints auto-assign to open epics
-- Sprint lifecycle automation — alerts on completion, auto-created test tickets
-- Instruction sync — bidirectional sync between Claude memory files and database
-- Playbook deployment — operational guides pushed to project repos
-- Token audit — cross-cutting token accounting with discrepancy detection
-
-### Phase 3 — Product Maturity (Planned)
-
-- Failure analysis system (tracking agent rework patterns, not test failures)
-- Test performance tracking
-- Forced project documentation (INITIAL.md, ARCHITECTURE.md toggles)
-- README and comprehensive usage docs
-- Rules moved from Claude memory into repo files
+**Phase 3 — Product Maturity.** Failure analysis, test performance tracking, forced project docs, comprehensive usage docs, rules moved into repo files (in progress).
 
 ---
 

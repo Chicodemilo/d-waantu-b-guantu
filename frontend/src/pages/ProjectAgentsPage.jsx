@@ -1,19 +1,18 @@
 // Path: src/pages/ProjectAgentsPage.jsx
 // File: ProjectAgentsPage.jsx
 // Created: 2026-03-29
-// Purpose: Team page — TEAM.md panel, deploy playbooks button, agent roster table, and playbook inspector
+// Purpose: Team page — deploy playbooks button, agent roster table, and playbook inspector
 // Caller: App.jsx (route: /projects/:id/agents)
-// Callees: react, react-router-dom, ../store/useStore, ../api/projects (deployPlaybooks), ../components/common/StatusBadge, ../components/project/TeamMdPanel, ../components/project/PlaybookInspector, ../styles/docs.css
+// Callees: react, react-router-dom, ../store/useStore, ../api/projects (deployPlaybooks), ../components/common/StatusBadge, ../components/project/PlaybookInspector, ../styles/docs.css
 // Data In: Route param (id), project and agents from Zustand store
 // Data Out: Default export ProjectAgentsPage component
-// Last Modified: 2026-04-17
+// Last Modified: 2026-06-05
 
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { deployPlaybooks } from '../api/projects';
 import StatusBadge from '../components/common/StatusBadge';
-import TeamMdPanel from '../components/project/TeamMdPanel';
 import PlaybookInspector from '../components/project/PlaybookInspector';
 import '../styles/docs.css';
 
@@ -43,11 +42,6 @@ function ProjectAgentsPage() {
         <Link to={`/projects/${id}`}>&larr; Back to project</Link>
         <span>{project ? `${project.prefix} Team` : 'Team'}</span>
       </div>
-      {project?.force_team_md && (
-        <div className="team-md-panel__wrapper">
-          <TeamMdPanel projectId={id} />
-        </div>
-      )}
       {project?.repo_path && (
         <div className="team-deploy">
           <button

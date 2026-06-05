@@ -9,19 +9,29 @@
 - **Status change on a linked ticket:** `dwb2jira ticket transition {JIRA-KEY} --to "{target}" [--comment "..."]` — atomic dual-write.
 - **Never call Jira/DWB ticket-CRUD endpoints directly; use the tools.** Raw `curl` is reserved for debugging and two documented exceptions (see § 4).
 
-**Before first use of `create`, read the `dwb2jira create` section in `~/Dev/DWB_2_JIRA/README.md` in full** — YAML schema, validation rules, agent-assisted 2-stage flow (`--dry-run` → human approves → `echo Y | ...`), and drift-gate semantics.
-
-**Piping `Y` does NOT bypass approval.** `echo Y | dwb2jira create proposal.yaml` still trips the hash-sidecar gate — you must have run `--dry-run` first for that exact YAML content. If the user edits the YAML between preview and submit, the drift gate fires with exit 7.
-
-**Who drafts the YAML?** When the human (or TL) asks PM to propose tickets, PM drafts the YAML file locally, runs `--dry-run`, and shows the preview in chat for approval. TL may edit or reject before PM runs the submit step.
+**`dwb2jira create` flow** (read the full section in `~/Dev/DWB_2_JIRA/README.md` before first use): PM drafts YAML locally → `--dry-run` for preview → show human/TL for approval → `echo Y | dwb2jira create proposal.yaml` to submit. Piping `Y` does NOT bypass approval — the hash-sidecar gate requires that `--dry-run` ran first against the exact same YAML content. Edits between preview and submit trip the drift gate (exit 7). TL may edit or reject before PM submits.
 
 ## DWB Is an Internal Tool
 
 D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself.
 
+## Safety — Hard Limits on Jira Manipulation
+
+PM agents have authority over:
+- DWB sprints (create, edit, close, delete) — internal to this dashboard, no cross-user impact.
+- Tickets the user (Miles, or the human you're working with) is the Jira assignee of (status transitions, comments, edits).
+
+PM agents have NO AUTHORITY over:
+- Jira sprints. Pull/read only. NEVER run `dwb2jira sprint close/create/edit/delete`. Jira sprints span many users; closing one creates a cluster-fuck for every assignee on that sprint who isn't you.
+- Tickets the user is not assigned to. Pull/read only.
+
+If a TL asks you to close a Jira sprint, REFUSE and escalate to the human. This is non-negotiable. The CLI itself enforces this via DWB-324 — your call will be blocked at the tool layer too. The playbook rule is the first defense; the code guard is the second.
+
+**Violation example:** the prior Pam ran `dwb2jira sprint close <JIRA-SPRINT-ID>`. Took out an active sprint that the user had no permission to close. Other assignees lost their sprint context. Never again.
+
 ## On Startup
 
-Read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`, `TEAM.md`.
+Read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`. Fetch live roster from `GET /api/projects/{project_id}/team` (DB-authoritative).
 
 Load instructions: `GET /api/instructions?scope=global`, `scope=project&project_id={pid}`, `scope=agent&agent_id={pm_id}`.
 
@@ -77,17 +87,13 @@ dwb2jira ticket transition {JIRA-KEY} --to "{target}" [--comment "..."]
 
 ### Resolving a DWB numeric id from a Jira key
 
-The PATCH endpoint needs DWB's numeric `id`, NOT the `CI-###` `ticket_key`. Look it up:
+PATCH endpoints need DWB's numeric `id`, not the `ticket_key` (e.g. `CI-217`):
 
 ```bash
-# dwb2jira report shows the CI key:
-dwb2jira report --jira POR-5600      # DWB # column = CI-217
-
-# Resolve CI-217 → numeric id via DWB API:
 curl -s "http://localhost:8000/api/tickets?project_id={pid}&jira_issue_key=POR-5600" | jq '.[0].id'
 ```
 
-Then `PATCH /api/tickets/{id}` uses that numeric id. `PATCH /api/tickets/CI-217` will 404.
+`PATCH /api/tickets/CI-217` will 404 — always resolve to the numeric id first.
 
 ### Exceptions where raw PATCH IS sanctioned
 
@@ -186,6 +192,12 @@ Time/token tracking is passive via lifecycle hooks — PM consumes the data.
 - `GET /api/tracking/summary?project_id={pid}` — per-ticket, per-agent, per-sprint rollups
 - `GET /api/hooks/sessions?project_id={pid}` — active/completed sessions
 
+**Overhead breakdown (DWB-306):** the `per_agent` rollup splits totals into two fields per agent:
+- `tokens` — combined total (ticket work + overhead like spawn/handoff/orchestration)
+- `overhead_tokens` — the overhead-only portion (`overhead_token_report` events)
+
+For sprint-close diagnostics, subtract `overhead_tokens` from `tokens` to see ticket-attributable work. The project rollup carries the invariant `project.tl_overhead + project.pm_overhead == project_total.overhead_tokens` — if it ever fails, that's a tracking bug, raise critical.
+
 Flag outliers (one ticket 10x+ tokens of peers) to TL.
 
 ---
@@ -207,6 +219,30 @@ Alert on: consecutive failures, increasing skip count, duration creep. Name the 
 5. Send findings to TL and human
 
 ---
+
+## 12a. Sprint Close — Consolidation Gate (REQUIRED)
+
+DWB's `force_consolidation` gate blocks sprint close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): naked ack with over-ceiling files returns HTTP 400 with violations. The PM's role at sprint close:
+
+1. **Verify gate state** — `GET /api/projects/{pid}/consolidation-status?sprint_id={sid}` returns `agents[]` with `acked: true/false` + `owned_over_ceiling_files` per agent, and `gate_satisfied` overall.
+2. **Surface refusals proactively** — if any participant has over-ceiling files and hasn't acked yet, ping them BY NAME with their file list and the autonomy expectation: "refusal is the signal to trim, not idle." Don't let agents sit on a refused ack waiting for instructions.
+3. **Self-ack with the same discipline** — PM trims own over-ceiling files BEFORE acking. If you get 400, trim and retry; don't override unless the file is genuinely load-bearing.
+
+```bash
+# PM's self-ack (clean files → naked ack passes 201; over-ceiling → 400 with violations)
+curl -X POST http://localhost:8000/api/agents/{pm_agent_id}/consolidate-complete \
+  -H "X-Agent-ID: {pm_agent_id}" \
+  -H "Content-Type: application/json" \
+  -d '{"sprint_id": <id>}'
+
+# Override form (use sparingly — repeated overrides = cap is wrong, raise it)
+curl -X POST ... \
+  -d '{"sprint_id": <id>, "overrides": {"path/to/file.md": "load-bearing reason text"}}'
+```
+
+4. **TL owns the final PATCH** — PM only verifies and reports gate-clean.
+
+If an agent has gone dark, escalate to TL — TL decides between (a) mark inactive (excludes from gate), (b) wait, (c) admin-ack on their behalf for an edge case like DWB-329. Never silently ack on someone else's behalf.
 
 ## 13. HANDOFF.md Responsibility
 

@@ -1,12 +1,12 @@
 # Path: app/schemas/project.py
 # File: project.py
 # Created: 2026-03-29
-# Purpose: Pydantic schemas for project CRUD with gate flags (incl. force_team_md)
+# Purpose: Pydantic schemas for project CRUD with gate flags
 # Caller: app/routers/projects.py
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: ProjectCreate, ProjectUpdate, ProjectRead, ProjectOverheadIncrement
-# Last Modified: 2026-04-16
+# Last Modified: 2026-06-05
 
 from datetime import datetime
 
@@ -28,8 +28,8 @@ class ProjectCreate(BaseModel):
     force_test_run: bool = False
     force_initial_md: bool = False
     force_architecture_md: bool = False
-    force_team_md: bool = True
     force_handoff_md: bool = True
+    force_consolidation: bool = False
 
 
 class ProjectUpdate(BaseModel):
@@ -48,8 +48,8 @@ class ProjectUpdate(BaseModel):
     force_test_run: bool | None = None
     force_initial_md: bool | None = None
     force_architecture_md: bool | None = None
-    force_team_md: bool | None = None
     force_handoff_md: bool | None = None
+    force_consolidation: bool | None = None
 
 
 class ProjectOverheadIncrement(BaseModel):
@@ -78,8 +78,8 @@ class ProjectRead(BaseModel):
     force_test_run: bool
     force_initial_md: bool
     force_architecture_md: bool
-    force_team_md: bool
     force_handoff_md: bool
+    force_consolidation: bool
     playbooks_deployed_at: datetime | None
     created_at: datetime
     updated_at: datetime

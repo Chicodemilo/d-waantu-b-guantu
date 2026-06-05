@@ -6,7 +6,7 @@
 # Callees: app/models/alert.py, app/models/project.py
 # Data In: db: Session, AlertCreate/Update
 # Data Out: list[Alert], Alert, send-to-team dict
-# Last Modified: 2026-04-17
+# Last Modified: 2026-06-04
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,9 +61,11 @@ def dismiss_all(db: Session, project_id: int | None = None) -> int:
     result = db.execute(stmt)
     db.commit()
 
-    # Auto-unlink: remove ALERTS_PENDING.md if no open alerts remain
-    if project_id is not None:
-        _auto_unlink_alerts_file(db, project_id)
+    # Auto-unlink: remove ALERTS_PENDING.md for the project(s) we just drained.
+    # DWB-303: when project_id is None (frontend's "Dismiss All" call sends an
+    # empty body), loop over every project so the on-disk file is cleaned up
+    # everywhere. Without this, ALERTS_PENDING.md is orphaned on the filesystem.
+    _auto_unlink_alerts_file(db, project_id)
 
     return result.rowcount
 
@@ -109,21 +111,37 @@ def send_to_team(db: Session, project: Project) -> dict:
     return {"file_written": str(target), "alerts_count": len(alerts)}
 
 
-def _auto_unlink_alerts_file(db: Session, project_id: int) -> None:
-    """Delete ALERTS_PENDING.md if no open alerts remain for the project."""
-    remaining = db.scalar(
-        select(Alert.id)
-        .where(Alert.project_id == project_id)
-        .where(Alert.status == AlertStatus.open)
-        .limit(1)
-    )
-    if remaining is not None:
-        return
+def _auto_unlink_alerts_file(db: Session, project_id: int | None) -> None:
+    """Delete ALERTS_PENDING.md for the project(s) that have no open alerts.
 
-    project = db.get(Project, project_id)
-    if not project or not project.repo_path:
-        return
+    When project_id is given, only that project is considered. When None
+    (DWB-303 — frontend's global Dismiss All sends an empty body), iterate
+    over every project so the on-disk file is cleaned up everywhere.
+    Each project is evaluated independently: a project with remaining open
+    alerts keeps its file.
+    """
+    project_ids: list[int]
+    if project_id is None:
+        project_ids = list(
+            db.scalars(select(Project.id).where(Project.repo_path.is_not(None))).all()
+        )
+    else:
+        project_ids = [project_id]
 
-    target = Path(project.repo_path) / ".claude" / "ALERTS_PENDING.md"
-    if target.exists():
-        target.unlink()
+    for pid in project_ids:
+        remaining = db.scalar(
+            select(Alert.id)
+            .where(Alert.project_id == pid)
+            .where(Alert.status == AlertStatus.open)
+            .limit(1)
+        )
+        if remaining is not None:
+            continue
+
+        project = db.get(Project, pid)
+        if not project or not project.repo_path:
+            continue
+
+        target = Path(project.repo_path) / ".claude" / "ALERTS_PENDING.md"
+        if target.exists():
+            target.unlink()

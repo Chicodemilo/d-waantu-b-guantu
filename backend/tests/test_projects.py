@@ -1,12 +1,13 @@
 # Path:          tests/test_projects.py
 # File:          test_projects.py
 # Created:       2026-03-28
-# Purpose:       Full CRUD + filtering tests for /api/projects, including overhead
+# Purpose:       Full CRUD + filtering tests for /api/projects, including overhead + team
 # Caller:        pytest
-# Callees:       GET/POST/PATCH/DELETE /api/projects, POST /api/projects/:id/overhead
+# Callees:       GET/POST/PATCH/DELETE /api/projects, POST /api/projects/:id/overhead,
+#                GET /api/projects/:id/team (DWB-313)
 # Data In:       Factory-created projects, tickets, test results via conftest fixtures
 # Data Out:      Assertions on HTTP status codes, JSON shapes, and cascade deletes
-# Last Modified: 2026-04-16
+# Last Modified: 2026-06-05
 
 """Tests for /api/projects CRUD and filtering."""
 
@@ -52,8 +53,8 @@ class TestGetProject:
             "tl_overhead_tokens", "pm_overhead_tokens",
             "tl_overhead_time_seconds", "pm_overhead_time_seconds",
             "force_headers", "force_test_coverage", "force_test_run",
-            "force_initial_md", "force_architecture_md", "force_team_md",
-            "force_handoff_md",
+            "force_initial_md", "force_architecture_md",
+            "force_handoff_md", "force_consolidation",
             "playbooks_deployed_at",
             "created_at", "updated_at",
         }
@@ -230,3 +231,133 @@ class TestDeleteProject:
         client.delete(f"/api/projects/{pid}")
         r = client.get(f"/api/alerts/{alert_id}")
         assert r.status_code == 404
+
+
+class TestProjectTeam:
+    """DWB-313 — GET /api/projects/{id}/team single-roundtrip team listing."""
+
+    def _assign(self, client, project_id, agent_id):
+        r = client.post("/api/project-agents", json={
+            "project_id": project_id, "agent_id": agent_id,
+        })
+        assert r.status_code == 201
+
+    def test_team_missing_project_returns_404(self, client):
+        r = client.get("/api/projects/999999/team")
+        assert r.status_code == 404
+
+    def test_team_empty_project_returns_zero_agents(self, client, make_project):
+        project = make_project()
+        r = client.get(f"/api/projects/{project['id']}/team")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["project_id"] == project["id"]
+        assert body["project_prefix"] == project["prefix"]
+        assert body["agents"] == []
+
+    def test_team_returns_member_shape(self, client, make_project, make_agent):
+        project = make_project()
+        agent = make_agent(
+            project_id=project["id"], name="Archie", role="team-lead",
+            api_key="team-archie-1",
+        )
+        self._assign(client, project["id"], agent["id"])
+
+        r = client.get(f"/api/projects/{project['id']}/team")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["agents"]) == 1
+        member = body["agents"][0]
+        # Shape contract: exactly these keys, no more
+        assert set(member.keys()) == {
+            "agent_id", "name", "role", "is_active", "assigned_at",
+        }
+        assert member["agent_id"] == agent["id"]
+        assert member["name"] == "Archie"
+        assert member["role"] == "team-lead"
+        assert member["is_active"] is True
+
+    def test_team_default_excludes_inactive_agents(
+        self, client, make_project, make_agent,
+    ):
+        """Default filter is is_active=true. Inactive agents must NOT appear."""
+        project = make_project()
+        pid = project["id"]
+
+        # 3 active + 1 inactive
+        active_names = ["Archie", "Devin", "Pixel"]
+        active_agents = []
+        for i, name in enumerate(active_names):
+            a = make_agent(
+                project_id=pid, name=name, role="developer",
+                api_key=f"team-active-{i}",
+            )
+            active_agents.append(a)
+            self._assign(client, pid, a["id"])
+
+        inactive = make_agent(
+            project_id=pid, name="Retired", role="developer",
+            api_key="team-inactive", is_active=False,
+        )
+        self._assign(client, pid, inactive["id"])
+
+        r = client.get(f"/api/projects/{pid}/team")
+        assert r.status_code == 200
+        body = r.json()
+        names = {a["name"] for a in body["agents"]}
+        assert names == set(active_names), (
+            f"default team listing should only return active agents; got {names}"
+        )
+        assert all(a["is_active"] for a in body["agents"])
+
+    def test_team_include_inactive_returns_all(
+        self, client, make_project, make_agent,
+    ):
+        """?include_inactive=true returns the full historical roster."""
+        project = make_project()
+        pid = project["id"]
+
+        active = make_agent(
+            project_id=pid, name="Working", role="developer",
+            api_key="team-incl-active",
+        )
+        inactive = make_agent(
+            project_id=pid, name="Retired", role="developer",
+            api_key="team-incl-inactive", is_active=False,
+        )
+        self._assign(client, pid, active["id"])
+        self._assign(client, pid, inactive["id"])
+
+        r = client.get(
+            f"/api/projects/{pid}/team", params={"include_inactive": "true"}
+        )
+        assert r.status_code == 200
+        body = r.json()
+        names = {a["name"] for a in body["agents"]}
+        assert names == {"Working", "Retired"}
+        # Confirm the inactive row carries is_active=False so callers can render it
+        retired = next(a for a in body["agents"] if a["name"] == "Retired")
+        assert retired["is_active"] is False
+
+    def test_team_does_not_include_agents_from_other_projects(
+        self, client, make_project, make_agent,
+    ):
+        """Sanity: project_id filter must isolate per-project rosters."""
+        proj_a = make_project()
+        proj_b = make_project()
+
+        agent_a = make_agent(
+            project_id=proj_a["id"], name="A-only", role="developer",
+            api_key="iso-a",
+        )
+        agent_b = make_agent(
+            project_id=proj_b["id"], name="B-only", role="developer",
+            api_key="iso-b",
+        )
+        self._assign(client, proj_a["id"], agent_a["id"])
+        self._assign(client, proj_b["id"], agent_b["id"])
+
+        body_a = client.get(f"/api/projects/{proj_a['id']}/team").json()
+        names_a = {m["name"] for m in body_a["agents"]}
+        assert names_a == {"A-only"}
+        assert "B-only" not in names_a

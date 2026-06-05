@@ -63,6 +63,20 @@ function Sidebar({ open, onNavClick }) {
                 docs
               </NavLink>
             </li>
+            {p.jira_project_key && (
+              <>
+                <li>
+                  <NavLink to={`/projects/${p.id}/jira`} className={linkClass} onClick={onNavClick}>
+                    jira
+                  </NavLink>
+                </li>
+                <li>
+                  <NavLink to={`/projects/${p.id}/jira-rollup`} className={linkClass} onClick={onNavClick}>
+                    jira_rollup
+                  </NavLink>
+                </li>
+              </>
+            )}
           </ul>
         )}
       </li>

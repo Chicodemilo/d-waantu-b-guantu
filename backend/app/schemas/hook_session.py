@@ -55,3 +55,5 @@ class HookSessionRead(BaseModel):
     agent_name: str | None
     hook_event: str | None
     created_at: datetime
+    # Populated only when the row was returned via the `status=orphan` filter.
+    elapsed_seconds: int | None = None

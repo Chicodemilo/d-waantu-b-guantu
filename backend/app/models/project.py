@@ -1,12 +1,12 @@
 # Path: app/models/project.py
 # File: project.py
 # Created: 2026-03-29
-# Purpose: Project ORM model with status enum, sprint gate flags (incl. force_team_md), and Jira fields
+# Purpose: Project ORM model with status enum, sprint gate flags, and Jira fields
 # Caller: app/services/project.py, sprint.py
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Project, ProjectStatus
-# Last Modified: 2026-04-16
+# Last Modified: 2026-06-05
 
 import enum
 from datetime import datetime
@@ -46,8 +46,8 @@ class Project(Base):
     force_test_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_initial_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_architecture_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    force_team_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     force_handoff_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    force_consolidation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

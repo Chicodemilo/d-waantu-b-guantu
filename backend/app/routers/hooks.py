@@ -3,10 +3,10 @@
 # Created: 2026-04-09
 # Purpose: HTTP endpoints for Claude Code lifecycle hooks
 # Caller: app/main.py
-# Callees: app/services/hook_tracking.py, app/models/hook_session.py
+# Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/models/hook_session.py
 # Data In: HTTP POST from curl hook commands
 # Data Out: JSON responses (HookSession data)
-# Last Modified: 2026-04-16
+# Last Modified: 2026-06-03
 
 """Hook endpoints for passive tracking.
 
@@ -26,6 +26,7 @@ from app.schemas.hook_session import (
     HookSessionRead,
 )
 from app.services import hook_tracking as svc
+from app.services.failed_hook import log_failed_hook
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,12 @@ def hook_session_start(data: HookEventInput, db: Session = Depends(get_db)):
         }
     except Exception as e:
         logger.exception("hook_session_start error")
+        log_failed_hook(
+            hook_event=data.hook_event_name or "SessionStart",
+            status_code=200,
+            raw_payload=data.model_dump(),
+            error=f"{type(e).__name__}: {e}",
+        )
         return {
             "status": "error",
             "detail": str(e),
@@ -63,6 +70,12 @@ def hook_session_end(data: HookEventInput, db: Session = Depends(get_db)):
         }
     except Exception as e:
         logger.exception("hook_session_end error")
+        log_failed_hook(
+            hook_event=data.hook_event_name or "SessionEnd",
+            status_code=200,
+            raw_payload=data.model_dump(),
+            error=f"{type(e).__name__}: {e}",
+        )
         return {
             "status": "error",
             "detail": str(e),
@@ -72,11 +85,36 @@ def hook_session_end(data: HookEventInput, db: Session = Depends(get_db)):
 @router.get("/sessions", response_model=list[HookSessionRead])
 def list_hook_sessions(
     project_id: int | None = Query(None),
-    status: HookSessionStatus | None = Query(None),
+    status: str | None = Query(None, description="active|completed|error|orphan"),
+    cutoff_minutes: int = Query(30, ge=1, le=10080, description="Used only when status=orphan"),
     db: Session = Depends(get_db),
 ):
-    """List hook sessions with optional filters."""
-    return svc.list_sessions(db, project_id=project_id, status=status)
+    """List hook sessions with optional filters.
+
+    `status=orphan` is a synthetic value: returns active sessions whose
+    `start_time` is older than `cutoff_minutes` (default 30). The
+    `elapsed_seconds` field on each row is populated only for orphan rows.
+    """
+    if status == "orphan":
+        paired = svc.list_orphan_sessions(
+            db, project_id=project_id, cutoff_minutes=cutoff_minutes
+        )
+        out: list[HookSessionRead] = []
+        for session, elapsed in paired:
+            row = HookSessionRead.model_validate(session)
+            row.elapsed_seconds = elapsed
+            out.append(row)
+        return out
+
+    real_status: HookSessionStatus | None = None
+    if status is not None:
+        try:
+            real_status = HookSessionStatus(status)
+        except ValueError:
+            raise HTTPException(
+                400, f"invalid status '{status}'; expected one of active|completed|error|orphan"
+            )
+    return svc.list_sessions(db, project_id=project_id, status=real_status)
 
 
 @router.get("/sessions/{session_id}", response_model=HookSessionRead)

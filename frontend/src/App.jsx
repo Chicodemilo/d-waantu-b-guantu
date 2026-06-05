@@ -25,6 +25,8 @@ import ProjectTestsPage from './pages/ProjectTestsPage';
 import DocsPage from './pages/DocsPage';
 import SystemDocsPage from './pages/SystemDocsPage';
 import ErrorLogPage from './pages/ErrorLogPage';
+import JiraIssuesPage from './pages/JiraIssuesPage';
+import JiraRollupPage from './pages/JiraRollupPage';
 
 function App() {
   useAppData();
@@ -42,6 +44,8 @@ function App() {
         <Route path="/projects/:id/tests" element={<ProjectTestsPage />} />
         <Route path="/projects/:id/docs" element={<DocsPage />} />
         <Route path="/projects/:id/agents/:agentId" element={<AgentPage />} />
+        <Route path="/projects/:id/jira" element={<JiraIssuesPage />} />
+        <Route path="/projects/:id/jira-rollup" element={<JiraRollupPage />} />
         <Route path="/docs" element={<SystemDocsPage />} />
         <Route path="/instructions" element={<InstructionsPage />} />
         <Route path="/tests" element={<TestResultsPage />} />

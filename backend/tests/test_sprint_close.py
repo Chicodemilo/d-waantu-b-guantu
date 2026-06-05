@@ -27,6 +27,7 @@ def sprint_close_project(client, make_project, make_epic):
     agents = {}
     for role in ("team-lead", "pm", "tester"):
         agent = client.post("/api/agents", json={
+            "project_id": project["id"],
             "name": f"{role.title()} Agent",
             "role": role,
             "api_key": f"sc-{role}-{project['id']}",
@@ -204,6 +205,7 @@ class TestSprintCloseAutoTicket:
 
         # Only assign a team-lead, no tester
         agent = client.post("/api/agents", json={
+            "project_id": project["id"],
             "name": "TL Only", "role": "team-lead",
             "api_key": f"tl-only-{project['id']}",
         }).json()

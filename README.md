@@ -37,7 +37,7 @@ Archie reads the repo, runs the setup, creates your first project, and reports b
 React UI (Vite/5173) ──▶ FastAPI (:8000) ──▶ MySQL 8 (:23847)
 ```
 
-- **Backend** — FastAPI, SQLAlchemy 2.0, Pydantic v2. Three-layer: routers → services → models. 18 router files, 93 endpoints, 15 tables. Alembic migrations.
+- **Backend** — FastAPI, SQLAlchemy 2.0, Pydantic v2. Three-layer: routers → services → models. 19 router files, 112 endpoints, 18 tables. Alembic migrations.
 - **Frontend** — React 18, Vite, Zustand, React Router. Plain CSS with dark terminal aesthetic (JetBrains Mono). Adaptive polling: 2s active, 10s idle.
 - **Database** — MySQL 8.0 via Docker. PyMySQL driver.
 
@@ -60,6 +60,10 @@ Enforced at the API level — every ticket needs a sprint, every sprint an epic,
 Agent definitions in `.claude/agents/` auto-load when spawning teammates. Minimum team: `@team-lead` + `@pm`. Add `@frontend-worker`, `@backend-worker`, `@system-ops`, `@tester` as needed.
 
 Agents are assigned to projects via `project_agents`. The `X-Agent-ID` header on mutating requests attributes actions in the activity feed.
+
+**Per-project rows + system-wide unique names** (DWB-287, 2026-06-03; DWB-315, 2026-06-05). Every agent row carries `project_id` (a single project, no shared roster) and `agents.name` is `UNIQUE` across the whole system. Fixed-role agents that naturally recur on every project — TL, PM, occasionally tester — are stored with a `_<PROJECT_PREFIX>` suffix so they don't collide: `Archie_DWB`, `Pam_DWB`, `Archie_D2J`. Worker names (Devin, Pixel, Barry, Sylvie) stay plain until a real cross-project collision forces a rename. The identify endpoint accepts either the short name or the suffixed form, so spawn briefs continue to call `{name: "Archie", project_prefix: "DWB"}` and resolve correctly.
+
+**Spawn-time identity flow.** When a teammate starts a session it calls `POST /api/agents/identify` to get its `agent_id` and memory dir. Before spawning, the TL writes a **pending marker** at `.claude/agents/active/pending-<agent_id>-<unix_ms>-<rand4hex>` with JSON content `{"agent_id": N, "agent_name": "...", "role": "...", "project_prefix": "DWB"}`. When the first SubagentStop hook fires, the resolver scans for the oldest unconsumed pending marker on this project and atomically renames it to the CC `session_id`. From that point on tokens land correctly on the named agent. See DWB-294 (marker authority) and DWB-304 (pending scheme + atomic rename).
 
 ### Team Status
 
@@ -94,9 +98,15 @@ The `tracking_log` table is the source of truth. It records discrete events: `st
 
 Hook config lives in `.claude/settings.json`. Zero manual intervention needed.
 
-**Overhead** — TL/PM coordination time tracked at the project level via `overhead_start`/`overhead_stop` events.
+**Overhead** — TL/PM coordination time tracked at the project level via `overhead_start`/`overhead_stop` events. Tokens land in per-role buckets: `projects.tl_overhead_tokens` for the team-lead and `projects.pm_overhead_tokens` for the PM (DWB-305, 2026-06-05). Both buckets are computed from `tracking_log.event_type='overhead_token_report'` rows and must equal the project-wide overhead total; the invariant is enforced by the bucket-backfill migration (`dwb305c7f1e2a`) and a regression test (`test_overhead_bucket_invariant.py`).
 
-**Manual fallback** — `scripts/attribute_tokens.py` scans transcripts for backfilling or recovery.
+**Per-agent rollup includes overhead** (DWB-306, 2026-06-05). `GET /api/tracking/summary` `per_agent` rows now carry a `tokens` total that aggregates both `token_report` (ticket-attributed) and `overhead_token_report` events, plus a separate `overhead_tokens` field that exposes just the overhead portion. Dashboards see a correct headline number for PM/TL agents while keeping the breakdown visible.
+
+**SubagentStop fallback** (DWB-311, 2026-06-05). Claude Code's SubagentStop hook reports a synthetic `agent_transcript_path` (a `subagents/agent-<sid>.jsonl` file that doesn't exist on disk); the real subagent transcript lives inline in the parent session's `.jsonl` tagged with `agentName`. When the primary parse hits the missing file, `_handle_subagent_stop` walks the CC projects directory and accumulates usage from lines matching the resolved agent's name.
+
+**Large test-result payloads** (DWB-308, 2026-06-05). `test_results.details` is `MEDIUMTEXT` (up to 16MB) so gate-sized payloads — ~600 per-test entries plus a 4000-char output tail, ~85KB — round-trip cleanly. Earlier `TEXT` column capped at 64KB and produced HTTP 500.
+
+**Manual fallback** — Claude Code lifecycle hooks handle backfill and recovery automatically; no separate scan script is needed.
 
 ---
 
@@ -110,7 +120,6 @@ Boolean toggles that gate sprint completion:
 | `force_test_coverage` | Every router has a test file |
 | `force_initial_md` | `INITIAL.md` exists at repo root |
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
-| `force_team_md` | `TEAM.md` exists at repo root |
 | `force_handoff_md` | `HANDOFF.md` exists at repo root |
 | Failure records | Unreviewed stubs always block close |
 
@@ -161,7 +170,7 @@ The frontend reports errors to the backend via `POST /api/errors`. The API clien
 
 ```bash
 cd backend && pytest tests/                                              # local
-./scripts/run_tests.sh --post --project-id 1 --triggered-by "manual"    # with API reporting
+./backend/scripts/run_tests.sh --post --project-id 1 --triggered-by "manual"    # with API reporting
 ```
 
 Or trigger via API: `POST /api/system/run-tests`
@@ -183,7 +192,7 @@ Run history: `GET /api/test-results/performance`
 
 ## API Reference
 
-93 endpoints across 18 routers. Full interactive docs at http://localhost:8000/docs.
+112 endpoints across 19 routers. Full interactive docs at http://localhost:8000/docs.
 
 **Slim responses:** List endpoints strip heavy fields by default — test-results omit `details` (can be 65k+), agents omit `api_key`. Tickets, alerts, and sprints support `?fields=slim` for minimal payloads (id, key fields, status only).
 
@@ -209,7 +218,13 @@ Standard CRUD exists for all resources (projects, epics, sprints, tickets, agent
 | GET | `/api/tracking/summary` | Project tracking summary |
 | POST | `/api/hooks/session-start` | Receive SessionStart hook |
 | POST | `/api/hooks/session-end` | Receive SessionEnd/SubagentStop hook |
-| GET | `/api/hooks/sessions` | List hook sessions |
+| GET | `/api/hooks/sessions` | List hook sessions (filter by `status=orphan` for cleanup) |
+| POST | `/api/agents/identify` | Resolve identity from `(role, name, project_prefix)` — accepts short or `<name>_<PREFIX>` form (DWB-289, 315) |
+| POST | `/api/agents/spawn-prepare` | Identify + return ready-to-paste markdown for the spawn brief |
+| POST | `/api/agents/{id}/session-complete` | Append session entry to scratchpad / lessons / recent_sessions (DWB-293) |
+| POST | `/api/agents/{id}/scaffold-memory` | Idempotently scaffold the agent's memory dir |
+| GET | `/api/projects/{id}/team` | Single-roundtrip team roster (DWB-313) |
+| DELETE | `/api/test-results/{id}` | Operator orphan-row cleanup, 204/404 (DWB-310) |
 | POST | `/api/alerts/dismiss-all` | Bulk dismiss open alerts |
 | POST | `/api/alerts/send-to-team` | Write alerts to ALERTS_PENDING.md |
 | POST | `/api/alerts/run-tests` | Request a test run |

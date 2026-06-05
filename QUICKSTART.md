@@ -25,9 +25,16 @@ You're an agent and you landed here? Here's what to read:
 
 1. **CLAUDE.md** — project rules, API reference, hierarchy (auto-loaded)
 2. **Your agent def** — `.claude/agents/{your-role}.md` (auto-loaded)
-3. **Your playbook** — `.claude/{role}_playbook.md` or `docs/{role}_playbook.md`
+3. **Your playbook** — `docs/{role}_playbook.md` is the **canonical source**; `.claude/{role}_playbook.md` is the **deployed copy** that `POST /api/projects/{id}/deploy-playbooks` writes into each target repo. Edits should land in `docs/` and be re-deployed; never edit the deployed `.claude/` copy directly.
 4. **HANDOFF.md** — what happened last session, what needs doing next
-5. **TEAM.md** — who's on the team right now
+5. **Team roster** — `GET /api/projects/{id}/team` is the **DB-authoritative roster**. The old checked-in `TEAM.md` file was removed in DWB-312 (2026-06-05); the LiveSessions panel and any agent that needs the roster reads from the API. Don't grep for or write to TEAM.md — it isn't there.
+
+### Agent identity flow at spawn
+
+1. The TL pre-writes a pending marker at `.claude/agents/active/pending-<agent_id>-<unix_ms>-<rand4hex>` with JSON content `{"agent_id": N, "agent_name": "...", "role": "...", "project_prefix": "DWB"}`.
+2. When the spawned teammate's session starts, it calls `POST /api/agents/identify` with `{role, name, project_prefix}` and receives its `agent_id` + `memory_dir`. Names accept the short form (`Archie`) or the system-unique `_<PREFIX>` form (`Archie_DWB`) — see DWB-315.
+3. The teammate writes its session-id marker locally (or relies on the resolver to rename the pending marker on first SubagentStop) and reads its memory dir at `.claude/agents/memory/<PROJECT_PREFIX>/<Name>/`.
+4. Hooks fire on session boundaries; tokens are attributed to the resolved `agent_id` without further work from the teammate.
 
 ---
 
@@ -86,10 +93,12 @@ npm run dev
 From the repo root:
 
 ```bash
-mysql -h 127.0.0.1 -P 23847 -u lat_user -plat_dev_password local_agent_tracker < seed.sql
+mysql -h 127.0.0.1 -P 23847 -u lat_user -plat_dev_password local_agent_tracker < seed_demo.sql
 ```
 
 **What you'll see:** No output means success. If you get `ERROR 2003 (HY000): Can't connect`, MySQL is still starting — wait a few seconds and retry.
+
+`seed_demo.sql` is a minimal touring dataset — one project, three agents, one sprint, four tickets — enough to see the dashboard populated. Delete or replace it once you start tracking real work.
 
 ## 6. Open the dashboard
 
@@ -118,15 +127,9 @@ pytest tests/ -v
 
 ## Token tracking
 
-Token and time tracking is **automatic** via Claude Code lifecycle hooks — no manual steps needed. When agents work, hooks fire and attribute tokens to tickets.
+Token and time tracking is **automatic** via Claude Code lifecycle hooks — no manual steps needed. When agents work, hooks fire (`SessionStart`, `SessionEnd`, `SubagentStop`) and attribute tokens to the correct ticket (workers) or the project's `tl_overhead_tokens` / `pm_overhead_tokens` buckets (TL/PM). Hook config lives in `.claude/settings.json`.
 
-To manually backfill or recover tokens from transcripts:
-
-```bash
-curl -X POST http://localhost:8000/api/projects/1/scan-tokens
-```
-
-**What you'll see:** JSON with `sessions_found`, `sessions_attributed`, and `total_tokens`.
+There is no manual backfill endpoint — the hook pipeline + the `_parse_subagent_from_projects_dir` fallback (DWB-311, scans the CC projects dir when the synthetic transcript path is missing) cover all real attribution paths. If you have stale or unattributed sessions, inspect them via `GET /api/hooks/sessions?status=orphan&cutoff_minutes=60` and clean up with `DELETE /api/test-results/{id}` or the activity-log audit.
 
 ## Troubleshooting
 

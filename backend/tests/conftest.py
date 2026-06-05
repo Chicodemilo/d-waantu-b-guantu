@@ -6,16 +6,25 @@
 # Callees:       app.main (FastAPI TestClient), app.database (engine, session)
 # Data In:       MySQL lat_test database connection
 # Data Out:      Rolled-back test transactions; factory-created API objects
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-05
 
 """Shared fixtures for backend API tests.
 
 Uses a separate 'lat_test' MySQL database. Tables are created fresh per session
 and dropped after. Each test function gets a rolled-back transaction so tests
 stay isolated without needing to reseed.
+
+DWB-314: A session-scoped fcntl.flock serializes concurrent pytest invocations
+against the shared `lat_test` schema. Without it, two pytest processes hitting
+the same MySQL DB race on DDL (`create_all`/`drop_all`, producing mass setup
+errors) and on DML (InnoDB lock-wait / deadlock on contended rows like
+`projects.tl_overhead_tokens`). The lock is held for the full session — the
+second runner waits for the first to finish.
 """
 
+import fcntl
 import os
+import pathlib
 
 # Must set BEFORE any app module is imported so Settings picks it up
 os.environ["MYSQL_DATABASE"] = "lat_test"
@@ -39,13 +48,45 @@ _TEST_DB_URL = (
 engine = create_engine(_TEST_DB_URL, pool_pre_ping=True)
 TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Redirect app.database.SessionLocal at the test engine. Services that build a
+# fresh session via SessionLocal() (e.g., failed_hook logger) would otherwise
+# write to the prod DB during tests.
+import app.database as _app_database  # noqa: E402
+_app_database.SessionLocal = TestingSession
+
+# DWB-314: cross-process lock path. Lives in pytest's cache dir so it's a
+# stable per-checkout location and doesn't collide with parallel checkouts.
+_LAT_TEST_LOCK_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent / ".pytest_cache" / "lat_test.lock"
+)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def create_tables():
-    """Create all tables once per test session, drop after."""
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
+    """Create all tables once per test session, drop after.
+
+    DWB-314: Acquires an exclusive fcntl lock on `.pytest_cache/lat_test.lock`
+    before any DDL runs and holds it for the entire session. A second pytest
+    process invoked while this one is running will block at `LOCK_EX` until
+    we release on session teardown — zero schema/DML contention possible.
+
+    The Unix fcntl.flock advisory lock auto-releases when the file descriptor
+    closes (including on abnormal process exit), so we don't leak the lock
+    if pytest is killed.
+    """
+    _LAT_TEST_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Keep the fd alive on the fixture for the session lifetime.
+    lock_fh = open(_LAT_TEST_LOCK_PATH, "w")
+    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+    try:
+        Base.metadata.create_all(bind=engine)
+        yield
+        Base.metadata.drop_all(bind=engine)
+    finally:
+        # Releasing the lock is automatic on close, but be explicit for
+        # readers — the contract is "lock held until session teardown finishes".
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+        lock_fh.close()
 
 
 @pytest.fixture(autouse=True)
@@ -99,12 +140,19 @@ def make_project(client):
 
 
 @pytest.fixture
-def make_agent(client):
-    """Factory that POST-creates an agent and returns the response dict."""
+def make_agent(client, make_project):
+    """Factory that POST-creates an agent and returns the response dict.
+
+    project_id is required (DWB-287). Auto-creates a project if not provided,
+    mirroring the make_epic/make_sprint/make_ticket pattern.
+    """
     _counter = [0]
 
     def _make(**overrides):
         _counter[0] += 1
+        if "project_id" not in overrides:
+            project = make_project()
+            overrides["project_id"] = project["id"]
         data = {
             "name": f"Test Agent {_counter[0]}",
             "role": "developer",

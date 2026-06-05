@@ -2,6 +2,10 @@
 
 > Project-specific rules for all workers. This file is NOT overwritten by deploy.
 
+## Identity at Spawn
+
+Read the **Identity (REQUIRED — do not skip)** section in `.claude/agents/worker.md` first. Five steps: identify via `POST /api/agents/identify`, cache your `agent_id`, the TL writes your session marker (subagents can't touch `.claude/`), read your memory dir, follow the spawn-time read order. Without identity setup your work doesn't attribute correctly and may not appear in the dashboard at all.
+
 ## Alembic Migrations
 
 - Autogenerate always detects spurious `drop_index` ops on the `error_logs` table (`ix_error_logs_created_at`, `ix_error_logs_source`). **Remove these** from every generated migration before running.
@@ -44,12 +48,12 @@ All factory fixtures accept `**overrides` to customize fields. Use them instead 
 Use direct `client.post()` when you need to assert on creation behavior itself or control gate flags.
 
 ### Sprint close tests — disable ALL default-True gates
-Multiple gates default to True (`force_team_md`, `force_handoff_md`). When testing sprint close behavior for a specific gate, explicitly disable all others or the test will fail for the wrong reason:
+`force_handoff_md` defaults to True. When testing sprint close behavior for a specific gate, explicitly disable all others or the test will fail for the wrong reason:
 ```python
 project = client.post("/api/projects", json={
     "prefix": "X", "name": "Test", "repo_path": str(tmp_path),
     "force_initial_md": False, "force_architecture_md": False,
-    "force_team_md": False, "force_handoff_md": False,
+    "force_handoff_md": False,
     "force_test_run": False, "force_test_coverage": False,
 }).json()
 ```
@@ -59,14 +63,15 @@ If a new gate is added with `default=True`, sprint close tests that don't disabl
 `test_projects.py::test_get_response_shape` asserts an exact set of keys. When you add a column to the Project model, update this set or the test breaks.
 
 ### File-existence gates — use tmp_path
-For gates that check file presence (`force_team_md` → `TEAM.md`, etc.), use pytest's `tmp_path` fixture as the project's `repo_path`:
+For gates that check file presence (`force_handoff_md` → `HANDOFF.md`, `force_initial_md` → `INITIAL.md`, etc.), use pytest's `tmp_path` fixture as the project's `repo_path`:
 ```python
 def test_gate_passes(self, client, tmp_path):
-    (tmp_path / "TEAM.md").write_text("# Team\n")
+    (tmp_path / "HANDOFF.md").write_text("# Handoff\n")
     project = client.post("/api/projects", json={
         "prefix": "X", "name": "Test", "repo_path": str(tmp_path),
     }).json()
 ```
+Note: `force_team_md` was fully removed in DWB-321 (2026-06-05) — roster is DB-authoritative via `/api/projects/{id}/team`. The gate column is dropped; do not reference it.
 
 ### Deploy response format
 The deploy-playbooks endpoint returns entries like `"pm_playbook.md"` for overwritten playbooks and `"project_rules_pm.md (created)"` for newly created project rules. Strip the suffix when checking file existence: `filename = entry.split(" (")[0]`.

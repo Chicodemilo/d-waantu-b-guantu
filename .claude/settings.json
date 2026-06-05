@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -sf -X POST http://localhost:8000/api/hooks/session-start -H 'Content-Type: application/json' -d \"$(cat)\" 2>/dev/null || true",
+            "command": "curl -sf -X POST http://localhost:8000/api/hooks/session-start -H 'Content-Type: application/json' -d \"$(cat)\"",
             "timeout": 5
           }
         ]
@@ -16,7 +16,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -sf -X POST http://localhost:8000/api/hooks/session-end -H 'Content-Type: application/json' -d \"$(cat)\" 2>/dev/null || true",
+            "command": "curl -sf -X POST http://localhost:8000/api/hooks/session-end -H 'Content-Type: application/json' -d \"$(cat)\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -X POST http://localhost:8000/api/hooks/session-end -H 'Content-Type: application/json' -d \"$(cat)\"",
             "timeout": 30
           }
         ]
@@ -27,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -sf -X POST http://localhost:8000/api/hooks/session-end -H 'Content-Type: application/json' -d \"$(cat)\" 2>/dev/null || true",
+            "command": "curl -sf -X POST http://localhost:8000/api/hooks/session-end -H 'Content-Type: application/json' -d \"$(cat)\"",
             "timeout": 30
           }
         ]
