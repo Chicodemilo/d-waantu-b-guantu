@@ -4,16 +4,11 @@
 
 ## Canonical Tools
 
-- **Query tickets:** `dwb2jira report` — defaults to your tickets. **No-flag default includes EVERY status** (Done too) — add `--status "To Do,In Progress,Ready for Testing/Review"` to filter to open work. See `~/Dev/DWB_2_JIRA/README.md`.
-- **Create tickets:** `dwb2jira create` — YAML input, preview + approval gate, auto-sprint, auto-DWB twin.
-- **Status change on a linked ticket:** `dwb2jira ticket transition {JIRA-KEY} --to "{target}" [--comment "..."]` — atomic dual-write.
-- **Never call Jira/DWB ticket-CRUD endpoints directly; use the tools.** Raw `curl` is reserved for debugging and two documented exceptions (see § 4).
+`report` and `transition` rules are in `docs/worker_playbook.md § Canonical Tools`. PM-unique tool:
 
-**`dwb2jira create` flow** (read the full section in `~/Dev/DWB_2_JIRA/README.md` before first use): PM drafts YAML locally → `--dry-run` for preview → show human/TL for approval → `echo Y | dwb2jira create proposal.yaml` to submit. Piping `Y` does NOT bypass approval — the hash-sidecar gate requires that `--dry-run` ran first against the exact same YAML content. Edits between preview and submit trip the drift gate (exit 7). TL may edit or reject before PM submits.
+- **`dwb2jira create`** — YAML input, preview + approval gate, auto-sprint, auto-DWB twin. Flow: PM drafts YAML → `--dry-run` for preview → show human/TL for approval → `echo Y | dwb2jira create proposal.yaml` to submit. Piping `Y` does NOT bypass approval — the hash-sidecar gate requires that `--dry-run` ran first against the exact same YAML content. Edits between preview and submit trip the drift gate (exit 7). TL may edit or reject before PM submits. **Never `POST /api/tickets` directly** — the drift gate exists for a reason.
 
-## DWB Is an Internal Tool
-
-D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself.
+**DWB is internal — never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content.** Full context: `docs/worker_playbook.md § DWB Is an Internal Tool`.
 
 ## Safety — Hard Limits on Jira Manipulation
 
@@ -31,9 +26,17 @@ If a TL asks you to close a Jira sprint, REFUSE and escalate to the human. This 
 
 ## On Startup
 
-Read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`. Fetch live roster from `GET /api/projects/{project_id}/team` (DB-authoritative).
+**First, complete the identity flow** in `docs/worker_playbook.md` § On Spawn — Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker, read your memory dir (`identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). HALT if anything is missing.
+
+Then read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`. Fetch live roster from `GET /api/projects/{project_id}/team` (DB-authoritative).
 
 Load instructions: `GET /api/instructions?scope=global`, `scope=project&project_id={pid}`, `scope=agent&agent_id={pm_id}`.
+
+### Your Personal Memory Dir
+
+Lives at `.claude/agents/memory/<project_prefix>/Pam_<PREFIX>/`. File purposes + write rules in `docs/worker_playbook.md § Memory Writes`. PM-flavored use: `scratchpad.md` for status observations, blocker flags, sprint notes; `lessons.md` for PM-specific patterns (escalations that worked, tool quirks).
+
+Session marker is TL-written (you can't create your own); see worker_playbook § On Spawn — Identity step 3.
 
 ---
 
@@ -67,6 +70,18 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 - `dwb2jira epic list --project {JIRA_PROJECT}` — discover epic keys (useful for `--epic` filter)
 
 **Red flags:** pileup in `todo` (blocked agents?), stuck `in_progress` (check activity logs), empty `in_review` (agents not finishing or TL not reviewing?), skewed token usage (one ticket 10x+ others). Bucket by status, report to TL if burndown is off.
+
+---
+
+## 3a. Ticket Status Drives the Dashboard
+
+The Team Status panel on the project page is **driven by ticket status**. An agent shows as "working" if they have an `in_progress` ticket. This means:
+
+- **Moving tickets to `in_progress` promptly is critical** — if a worker starts but the ticket isn't moved, the dashboard won't reflect their activity.
+- **Moving tickets OUT of `in_progress` when done is equally critical** — stale in_progress tickets make the dashboard show phantom workers.
+- **Only one `in_progress` ticket per agent matters** — the most recently updated one is displayed.
+
+Deterministic — no manual registration or hooks needed. Keep ticket statuses accurate and the dashboard stays accurate.
 
 ---
 
@@ -207,6 +222,28 @@ Flag outliers (one ticket 10x+ tokens of peers) to TL.
 `GET /api/test-results?project_id={pid}&limit=5`
 
 Alert on: consecutive failures, increasing skip count, duration creep. Name the suite (`backend`, `frontend`) and the failure count.
+
+---
+
+## 11a. Failure Logging
+
+When a ticket moves back to `in_progress` after being `done` (rework), the system auto-creates a failure record stub with type `TBD`. The PM MUST:
+
+1. `GET /api/failure-records?project_id={pid}&resolved=false` — find unresolved stubs
+2. Fill in the type, severity, notes:
+
+```bash
+PATCH /api/failure-records/{id}
+{
+  "failure_type": "context_degradation",
+  "severity": "medium",
+  "notes": "Agent lost context of the schema change from sprint 2"
+}
+```
+
+Failure types: `context_degradation`, `spec_drift`, `sycophantic_confirmation`, `tool_selection_error`, `cascading_failure`, `silent_failure`, `integration_failure`, `rework`, `test_failure`.
+
+**Sprint close is blocked until all failure records in the sprint are reviewed (resolved or have a non-TBD type).**
 
 ---
 

@@ -2,28 +2,28 @@
 
 > Base URL: `http://localhost:8000`
 
-## DWB Is an Internal Tool
-
-D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself. **The human user approves all ticket proposals before anything is created.**
-
 ## Canonical Tools
 
-All ticket operations go through the D2J (DWB_2_JIRA) CLI. Don't hand-roll curl for ticket CRUD.
+All ticket ops go through D2J. `report` and `transition` rules in `docs/worker_playbook.md § Canonical Tools`. `create` flow (TL drafts, PM previews + submits) in `docs/pm_playbook.md § Canonical Tools`. Full CLI reference: `~/Dev/DWB_2_JIRA/README.md`.
 
-- **Query:** `dwb2jira report` — filterable Jira+DWB merged view. Defaults to assignee=you.
-- **Create:** `dwb2jira create proposal.yaml` — YAML input, preview + approval gate, auto-sprint, auto-DWB twin.
-- **Status change:** `dwb2jira ticket transition POR-KEY --to "Done" [--comment "..."]` — atomic dual-write (Jira + DWB).
-- **Full reference:** `~/Dev/DWB_2_JIRA/README.md`.
+**DWB is internal — never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content. The human approves all ticket proposals before anything is created.** Full context: `docs/worker_playbook.md § DWB Is an Internal Tool`.
 
 ---
 
 ## On Startup
 
-1. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`
-2. Fetch the live team roster: `GET /api/projects/{project_id}/team` — the DB is authoritative, not a checked-in file
-3. Read `ARCHITECTURE.md` / `README.md` only for cross-cutting work
-4. Check open alerts (API + `ALERTS_PENDING.md`)
-5. Jump to § 5 for the typical session flow
+1. **Complete the identity flow** in `docs/worker_playbook.md` § On Spawn — Identity (identify, cache `agent_id`, read your memory dir: `identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). Same flow for every agent — TL included.
+2. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`
+3. Fetch the live team roster: `GET /api/projects/{project_id}/team` — the DB is authoritative, not a checked-in file
+4. Read `ARCHITECTURE.md` / `README.md` only for cross-cutting work
+5. Check open alerts (API + `ALERTS_PENDING.md`)
+6. Jump to § 5 for the typical session flow
+
+### Your Personal Memory Dir
+
+Lives at `.claude/agents/memory/<project_prefix>/Archie_<PREFIX>/`. File purposes + write rules in `docs/worker_playbook.md § Memory Writes`. TL-flavored use: `scratchpad.md` for orchestration notes (who's spawned, what you're tracking); `lessons.md` for TL-specific patterns (spawn quirks, gate edge cases).
+
+TL is unique in writing **other agents' session markers** too — see § 4a Spawning Teams.
 
 ### Playbook locations
 
@@ -53,41 +53,18 @@ The team roster lives in the DB. `HANDOFF.md` = session continuity — read on s
 
 ## 2. API Reference
 
+Full endpoint reference: `README.md § API Reference`. TL-critical endpoints not covered by `dwb2jira`:
+
 | Action | Endpoint | Notes |
 |--------|----------|-------|
-| **Sprints** | | |
-| Create sprint | `POST /api/sprints` | Required: `project_id`, `name`, `goal`, `sprint_number`, dates |
-| Update sprint | `PATCH /api/sprints/{id}` | `planned` → `active` → `completed`. One active at a time |
-| List sprints | `GET /api/sprints?project_id={pid}` | Filter `status=active` for hygiene checks |
-| **Epics** | | |
+| Create sprint | `POST /api/sprints` | Required: `project_id`, `goal`, `sprint_number`, dates. Auto-names from goal. |
+| Close sprint | `PATCH /api/sprints/{id}` `{"status":"completed"}` | Triggers consolidation gate (§ 5a). One active at a time. |
 | Create epic | `POST /api/epics` | Required: `project_id`, `name` |
-| **Agents** | | |
-| Register agent | `POST /api/agents` | Body REQUIRES `project_id` (since DWB-287). Roles: `team_lead`, `pm`, `developer`, `reviewer`, `specialist`. UNIQUE(project_id, name) enforced. |
-| Assign to project | `POST /api/project-agents` | Body: `{ project_id, agent_id }` |
-| List project agents | `GET /api/project-agents?project_id={pid}` | |
-| **Tickets (non-creation ops)** | | |
-| Query | `dwb2jira report` or `GET /api/tickets` | Use `dwb2jira report` for cross-system view. Legacy `ticket list` strips assignee — don't use. |
-| Transition status | `dwb2jira ticket transition POR-KEY --to "..."` | Dual-write. Never PATCH `/api/tickets/{id}` status directly on linked tickets. |
-| Assign | `PATCH /api/tickets/{id}` with `assigned_agent_id` | DWB-side only; Jira assignment is separate |
-| **Creation** | | |
-| New ticket(s) | `dwb2jira create proposal.yaml` | YAML input + approval gate. Never `POST /api/tickets` directly for new tickets. |
-| **Comments** | | |
-| Add | `POST /api/comments` | Body: `{ ticket_id, author_agent_id, body }` |
-| List | `GET /api/comments?ticket_id={id}` | |
-| **Alerts** | | |
-| Raise | `POST /api/alerts` | Severities: `info`, `warning`, `critical` |
-| Update | `PATCH /api/alerts/{id}` | `open` → `acknowledged` → `resolved` |
-| List open | `GET /api/alerts?project_id={pid}&status=open` | |
-| Dismiss all | `POST /api/alerts/dismiss-all` | Use after sprint close if queue is stale |
-| **Activity Log** | | |
-| Log event | `POST /api/activity-logs` | Body: `{ project_id, agent_id, entity_type, entity_id, action, details }` |
-| Query | `GET /api/activity-logs?project_id={pid}` | Filters: `entity_type`, `limit` |
-| **Test Results** | | |
-| Log | `POST /api/test-results` | Body: `{ project_id, suite, total_tests, passed, failed, status, ... }` |
-| Query | `GET /api/test-results?project_id={pid}` | Filters: `suite`, `status` |
-| **Tracking** | | |
-| Usage summary | `GET /api/tracking/summary?project_id={pid}` | Per-ticket/agent/sprint rollups (automatic via hooks) |
-| Hook sessions | `GET /api/hooks/sessions?project_id={pid}` | |
+| Register agent | `POST /api/agents` + `POST /api/project-agents` | Roster setup. Names unique system-wide. |
+| Assign ticket | `PATCH /api/tickets/{id}` with `assigned_agent_id` | DWB-side only; Jira assignment is separate. |
+| Gate status | `GET /api/projects/{id}/gate-status` | Doc gates + consolidation. |
+| Dismiss alerts | `POST /api/alerts/dismiss-all` | Use after sprint close if queue is stale. |
+| Tracking summary | `GET /api/tracking/summary?project_id={pid}` | Token + time rollups (automatic via hooks). |
 
 ---
 
@@ -147,6 +124,54 @@ Don't let open alerts accumulate — an ignored queue trains everyone to ignore 
 
 ---
 
+## 4a. Spawning Teams
+
+**No PM for small teams (1-2 workers).** TL drives directly. PM only earns a slot at 3+ parallel workers. Keep teams alive across sprints — only shut down when the user explicitly says.
+
+### Spawn-Prepare (REQUIRED before every spawn)
+
+```
+POST /api/agents/spawn-prepare
+{ "role": "frontend-worker", "name": "Pixel", "project_prefix": "DWB" }
+```
+
+Response is the identity bundle to inject into the spawn prompt. Confirms the agent exists, is unambiguous, returns `agent_id` + memory dir + scratchpad excerpt + agent-scoped instructions. **Never spawn without this handshake.** 409/404 → HALT and escalate.
+
+### Session Marker (TL writes before spawning a worker)
+
+Subagents can't write to `.claude/` paths (writes crash Claude Code). The TL pre-writes a pending marker so the hook resolver can attribute the new session's tokens to the right agent:
+
+```bash
+# Marker filename pattern: pending-<agent_id>-<unix_ms>-<rand4hex>
+# Marker contents (JSON dict, NOT a single int):
+echo '{"agent_id": <id>, "agent_name": "<name>", "role": "<role>", "project_prefix": "<prefix>"}' \
+  > .claude/agents/active/pending-<id>-$(date +%s000)-$(openssl rand -hex 2)
+```
+
+The hook resolver atomically renames the pending marker to the CC-assigned `session_id` on first SubagentStop. If a worker reports their marker is missing, the TL writes it on their behalf.
+
+### Naming rules
+
+- Names unique system-wide. Fixed roles on multiple projects use `_<PROJECT_PREFIX>` suffix (`Archie_DWB`, `Pam_DWB`).
+- Workers without cross-project collision keep their plain name.
+- Hyphenated disambiguation (`Bolt-Ops`) BANNED.
+- Need a second worker in the same role? Use the convention default (Barry for second backend, etc.) — see § 6 Naming Convention.
+
+### Worker roles you can spawn
+
+`@frontend-worker`, `@backend-worker`, `@system-ops`, `@tester`, `@docs-writer`, or `@pm` when scale justifies.
+
+## 4b. Code Review Gate
+
+Before marking any implementation task done:
+
+1. Read changed files — don't trust the agent summary.
+2. Verify code matches the spec (field names, routes, CSS).
+3. Run tests locally if they exist.
+4. Verify dashboard renders what the API returns (for UI work).
+
+Skipping review because you're moving fast is exactly when bugs slip through.
+
 ## 5. TL Workflow — Typical Session
 
 1. Check open alerts (`GET /api/alerts?status=open` + `ALERTS_PENDING.md`)
@@ -203,30 +228,7 @@ Agent names are **unique system-wide** (single `UNIQUE(name)` constraint on `age
 | backend-worker | **Barry** or **Devin** |
 | system-ops | **Sylvie** (or Bolt, deprecated on DWB) |
 
-**Custom roles** — same leading-letter pattern:
-
-| Role | Example names |
-|------|--------------|
-| designer | **Des**mond, **Des**iree |
-| researcher | **Res**a, **Re**my |
-| devops | **Dev**on, **Dev**in |
-| analyst | **Ana**stasia, **An**dre |
-| reviewer | **Rev**a, **Re**ggie |
-| security | **Sec**ily, **Seb**astian |
-| database | **Da**rcy, **Dan**te |
-| architect | **Arc**hie, **Ari**adne |
-| mobile | **Mo**ira, **Mor**ris |
-| docs-writer | **Dol**ores, **Dom**inic |
-| data-engineer | **Da**phne, **Dan**iel |
-| infra | **Ing**rid, **Irv**ing |
-| qa | **Qu**inn |
-| ux | **Ur**sula |
-| api-worker | **Apr**il |
-| migrator | **Mi**tch, **Min**a |
-| performance | **Per**cy, **Pet**ra |
-| scheduler | **Sca**rlett |
-
-If you spawn a role not listed here, follow the pattern: 3-letter prefix > 2-letter. If the name already exists on another project, suffix with `_<PROJECT_PREFIX>`.
+**Custom roles** — follow the same leading-letter pattern (3-letter prefix > 2-letter > 1-letter). If the name already exists on another project, suffix with `_<PROJECT_PREFIX>`.
 
 The `role` field in the DB maps to the Claude teammate name (e.g., `role="pm"` → `@pm`). The `name` field is the unique display identity.
 

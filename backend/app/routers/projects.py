@@ -503,13 +503,14 @@ _MEMORY_FILES = {
     "recent_sessions.md": "memory_recent",
 }
 
-# Which files each role reads at startup
+# Which files each role reads at startup (post-stub: playbooks are the real load)
 _ROLE_FILES = {
-    "team-lead": ["CLAUDE.md", "team-lead.md"],
-    "pm": ["CLAUDE.md", "pm.md"],
-    "frontend-worker": ["CLAUDE.md", "worker.md", "frontend-worker.md"],
-    "backend-worker": ["CLAUDE.md", "worker.md", "backend-worker.md"],
-    "tester": ["CLAUDE.md", "worker.md", "tester.md"],
+    "team-lead": ["CLAUDE.md", "team_lead_playbook.md"],
+    "pm": ["CLAUDE.md", "pm_playbook.md"],
+    "frontend-worker": ["CLAUDE.md", "worker_playbook.md"],
+    "backend-worker": ["CLAUDE.md", "worker_playbook.md"],
+    "tester": ["CLAUDE.md", "worker_playbook.md"],
+    "system-ops": ["CLAUDE.md", "worker_playbook.md"],
 }
 
 

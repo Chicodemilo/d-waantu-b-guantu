@@ -125,12 +125,33 @@ def scaffold_agent_dir(db: Session, agent_id: int) -> ScaffoldResult:
     return result
 
 
+_ROLE_PLAYBOOK = {
+    "team-lead": ".claude/team_lead_playbook.md",
+    "team_lead": ".claude/team_lead_playbook.md",
+    "pm": ".claude/pm_playbook.md",
+}
+
+
+def _playbook_for_role(role: str) -> str:
+    return _ROLE_PLAYBOOK.get(role, ".claude/worker_playbook.md")
+
+
+def _project_rules_for_role(role: str) -> str:
+    if role in ("team-lead", "team_lead"):
+        return ".claude/project_rules_team_lead.md"
+    if role == "pm":
+        return ".claude/project_rules_pm.md"
+    return ".claude/project_rules_worker.md"
+
+
 def _build_identity_md(agent: Agent, project: Project) -> str:
     """System-generated identity.md. Carries the on-spawn checklist + ISO rule."""
     created = (
         agent.created_at.date().isoformat() if agent.created_at else "unknown"
     )
     refreshed = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    playbook = _playbook_for_role(agent.role)
+    project_rules = _project_rules_for_role(agent.role)
     return f"""# Identity — {agent.name}
 
 > System-generated. Do not edit by hand — `scaffold_agent_dir(agent_id={agent.id})` regenerates this file each time.
@@ -148,8 +169,8 @@ def _build_identity_md(agent: Agent, project: Project) -> str:
 
 Before doing anything else, read these files in order:
 
-1. **Your role-specific playbook** — `.claude/agents/{{role}}.md` (if it exists)
-2. **Your project rules** — `.claude/project_rules_worker.md`
+1. **Your playbook** — `{playbook}`
+2. **Your project rules** — `{project_rules}`
 3. **HANDOFF.md** — session continuity notes (current state, decisions, gotchas)
 4. **ARCHITECTURE.md** — system design and data model
 5. **README.md** — project overview, setup, API reference

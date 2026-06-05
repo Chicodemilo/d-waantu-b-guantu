@@ -49,22 +49,14 @@ _OWNER_MAP: dict[str, list[str]] = {
     "ARCHITECTURE.md": ["team-lead"],
     "README.md": ["team-lead"],
     "INITIAL.md": ["team-lead"],
-    # Per-role agent defs + playbooks
-    ".claude/agents/team-lead.md": ["team-lead"],
+    # Per-role playbooks + project rules (agent defs are 8-line stubs — not owned)
     ".claude/team_lead_playbook.md": ["team-lead"],
     ".claude/project_rules_team_lead.md": ["team-lead"],
-    ".claude/agents/pm.md": ["pm"],
     ".claude/pm_playbook.md": ["pm"],
     ".claude/project_rules_pm.md": ["pm"],
     # Worker-shared files — every worker role is responsible
-    ".claude/agents/worker.md": ["frontend-worker", "backend-worker", "system-ops", "tester"],
     ".claude/worker_playbook.md": ["frontend-worker", "backend-worker", "system-ops", "tester"],
     ".claude/project_rules_worker.md": ["frontend-worker", "backend-worker", "system-ops", "tester"],
-    # Worker role-specific files
-    ".claude/agents/frontend-worker.md": ["frontend-worker"],
-    ".claude/agents/backend-worker.md": ["backend-worker"],
-    ".claude/agents/system-ops.md": ["system-ops"],
-    ".claude/agents/tester.md": ["tester"],
 }
 
 

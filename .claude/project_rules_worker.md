@@ -4,7 +4,7 @@
 
 ## Identity at Spawn
 
-Read the **Identity (REQUIRED — do not skip)** section in `.claude/agents/worker.md` first. Five steps: identify via `POST /api/agents/identify`, cache your `agent_id`, the TL writes your session marker (subagents can't touch `.claude/`), read your memory dir, follow the spawn-time read order. Without identity setup your work doesn't attribute correctly and may not appear in the dashboard at all.
+Read the **On Spawn — Identity (REQUIRED)** section in `docs/worker_playbook.md` (deployed to `.claude/worker_playbook.md`) first. Five steps: identify via `POST /api/agents/identify`, cache your `agent_id`, the TL writes your session marker (subagents can't touch `.claude/`), read your memory dir, follow the spawn-time read order. Without identity setup your work doesn't attribute correctly and may not appear in the dashboard at all.
 
 ## Alembic Migrations
 
@@ -76,3 +76,189 @@ Note: `force_team_md` was fully removed in DWB-321 (2026-06-05) — roster is DB
 ### Deploy response format
 The deploy-playbooks endpoint returns entries like `"pm_playbook.md"` for overwritten playbooks and `"project_rules_pm.md (created)"` for newly created project rules. Strip the suffix when checking file existence: `filename = entry.split(" (")[0]`.
 
+---
+
+## Backend Stack (for backend-worker, plus anyone touching the API)
+
+- **FastAPI** with Pydantic v2 schemas
+- **SQLAlchemy 2.0** ORM (DeclarativeBase, `mapped_column`, `Mapped[]` type hints)
+- **Alembic** for migrations
+- **MySQL 8.0** via pymysql driver — **port 23847** (mapped from 3306)
+- **pytest** for testing — test DB `lat_test` (separate from dev, auto-created)
+
+### Architecture pattern: Router → Service → Model
+
+```
+Request → Router (validation, HTTP) → Service (business logic) → Model (ORM) → DB
+```
+
+- **Routers** (`app/routers/`): endpoints, inject DB via `Depends(get_db)`, validate with Pydantic
+- **Services** (`app/services/`): all business logic. Never put logic in routers.
+- **Models** (`app/models/`): SQLAlchemy ORM classes — relationships, enums, constraints
+- **Schemas** (`app/schemas/`): Pydantic models — Create, Update, Read per entity
+
+### Adding a feature
+1. Model in `app/models/`
+2. Schema in `app/schemas/` (Create, Update, Read)
+3. Service in `app/services/` (CRUD + business logic)
+4. Router in `app/routers/`
+5. Register router in `app/main.py`
+6. Migration: `cd backend && alembic revision --autogenerate -m "..."` then `alembic upgrade head` (review the diff)
+7. Tests in `backend/tests/`
+
+### Service layer rules
+- Services take `db: Session` as first param
+- Services return model instances, not dicts
+- Cross-entity logic (auto-assign, auto-alert) belongs in services
+- Never commit in a service — the caller (router via `get_db`) handles session lifecycle
+
+---
+
+## Frontend Stack (for frontend-worker)
+
+- **React 18** with React Router 6
+- **Vite** dev server + bundler — **port 5173**
+- **Zustand** for state management (single store at `src/store/useStore.js`)
+- **Plain CSS** with custom properties — theme in `src/styles/theme.css`. **No Tailwind, no CSS-in-JS.**
+- **Vitest** + React Testing Library + jsdom for tests
+- **Font:** JetBrains Mono / Fira Code monospace. Terminal aesthetic throughout (green-on-dark theme).
+
+### Component patterns
+- Pages are thin wrappers in `src/pages/` — they compose components
+- Components do the heavy lifting in `src/components/{domain}/`
+- API calls go through `src/api/client.js` wrappers in `src/api/`
+- Hooks in `src/hooks/` — `useAppData.js` is the master data loader
+- State selectors: `useStore(state => state.getTicketsByProject(id))`
+
+### Polling
+`useAppData` fetches all data on mount, then polls `/api/status` to adapt interval (2s when active, 10s when idle). Don't add separate polling — the master hook handles all data refresh.
+
+---
+
+## Infrastructure (for system-ops)
+
+### Docker Compose
+```
+docker compose up -d       # MySQL + phpMyAdmin
+docker compose down
+docker compose logs mysql
+```
+
+Services:
+- **mysql** (`lat_mysql`): MySQL 8.0, port 23847 (mapped from 3306), volume: `mysql_data`
+- **phpmyadmin** (`lat_phpmyadmin`): port 8080
+
+### Ports
+| Service | Port |
+|---------|------|
+| MySQL | 23847 |
+| phpMyAdmin | 8080 |
+| FastAPI | 8000 |
+| Vite (frontend) | 5173 |
+
+### Environment variables
+All in `.env` at project root. Key vars: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `API_HOST`, `API_PORT`, `API_RELOAD`, `VITE_API_BASE_URL`, `ADMIN_API_KEY`.
+
+Script-specific env vars use the `LAT_` prefix. All optional with sensible defaults.
+
+### Scripts (`backend/scripts/`)
+
+**`run_tests.sh`** — runs pytest, optionally POSTs results to API:
+```bash
+./backend/scripts/run_tests.sh                                              # run only
+./backend/scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"
+```
+Env: `LAT_API_URL`, `LAT_PYTEST_REPORT`, `LAT_PYTEST_OUTPUT`, `LAT_POST_RESPONSE`. The POST sends `X-Agent-ID: ${AGENT_ID:-6}` (DWB-309).
+
+**`sync_instructions.py`** — bidirectional sync of DB instructions ↔ `docs/rules/`:
+```bash
+python scripts/sync_instructions.py              # report status
+python scripts/sync_instructions.py --export     # DB → files
+python scripts/sync_instructions.py --import     # files → DB
+```
+
+### Scripts always exit 0
+Hook scripts and token scanners must never block the caller. Catch exceptions, post an alert if possible, exit 0.
+
+### Hook-based token tracking
+Token/time attribution is passive via Claude Code hooks in `.claude/settings.json`. Hooks POST to `/api/hooks/session-start` and `/api/hooks/session-end`. The resolver reads `.claude/agents/active/<session_id>` to attribute work.
+
+**Marker format = JSON dict, NOT a single int:**
+```json
+{"agent_id": N, "agent_name": "Name", "role": "role-string", "project_prefix": "DWB"}
+```
+TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning; the resolver atomically renames it to the CC-assigned session_id on first SubagentStop. See `hook_tracking.py::resolve_agent_from_marker` (DWB-294, DWB-304).
+
+### Agent identity endpoints
+- `POST /api/agents/identify` — resolve `(role, name, project_prefix)` → agent record
+- `POST /api/agents/spawn-prepare` — markdown identity bundle for spawn-time briefing
+- `POST /api/agents/{id}/session-complete` — append timestamped entry to scratchpad/lessons/recent_sessions
+- `POST /api/agents/{id}/scaffold-memory` — idempotent memory dir scaffold
+- `GET /api/hooks/sessions?status=orphan&cutoff_minutes=N` — active hook sessions older than cutoff
+
+---
+
+## Tester Stack
+
+- **Backend:** pytest with pytest-json-report. Tests in `backend/tests/`. Config in `backend/pyproject.toml`. Test DB `lat_test`, transaction rollback per test.
+- **Frontend:** Vitest + React Testing Library + jsdom. Tests in `frontend/src/__tests__/`. Config in `frontend/vitest.config.js`.
+
+### Running tests
+```bash
+cd backend && source .venv/bin/activate
+python -m pytest tests/ -v                    # all
+python -m pytest tests/test_tickets.py -v     # one file
+python -m pytest tests/ -k "test_create" -v   # by pattern
+```
+
+```bash
+cd frontend
+npm test          # single run
+npm run test:watch
+```
+
+### Fixture system (`backend/tests/conftest.py`)
+Session-level `create_tables` + per-test `db_session` with rollback. Factory fixtures (already documented above under Testing Patterns) auto-create dependencies.
+
+### Test naming
+Descriptive: `test_create_ticket_auto_assigns_sprint`, `test_sprint_close_blocked_by_unresolved_failures`. Not `test_1`.
+
+### Coverage gates
+- `force_test_run` — sprint can't close without a recorded test run
+- `force_test_coverage` — all API routers must have corresponding test files
+
+Check: `GET /api/status/test-coverage`, `GET /api/projects/{id}/gate-status`.
+
+### Filing bugs
+Tickets created via `dwb2jira create proposal.yaml` (see PM/TL playbook). Don't `POST /api/tickets` directly — drift gate exists for a reason.
+
+### No mocking the database
+Tests hit the real test database. The fixture system handles isolation via transaction rollback. Don't mock SQLAlchemy sessions.
+
+---
+
+## Project Structure
+
+```
+backend/
+├── app/
+│   ├── main.py        # FastAPI app, CORS, router registration
+│   ├── config.py      # Settings via pydantic-settings
+│   ├── database.py    # Engine, SessionLocal, get_db
+│   ├── models/        # SQLAlchemy ORM
+│   ├── schemas/       # Pydantic request/response
+│   ├── routers/       # API endpoints
+│   └── services/      # Business logic
+├── alembic/           # Migrations
+├── tests/             # pytest
+└── scripts/           # CLI scripts
+
+frontend/src/
+├── api/          # API client modules
+├── components/   # Organized by domain
+├── hooks/        # useAppData, usePolling
+├── pages/        # Route-level pages
+├── store/        # Zustand store
+├── styles/       # All CSS
+└── __tests__/    # Vitest
+```

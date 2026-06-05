@@ -796,6 +796,73 @@
   font-variant-numeric: tabular-nums;
 }
 
+.token-budget__info-wrap {
+  position: relative;
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.token-budget__info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--gray);
+  background: transparent;
+  color: var(--gray-light);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: bold;
+  cursor: help;
+  padding: 0;
+  line-height: 1;
+}
+
+.token-budget__info-icon:hover,
+.token-budget__info-icon:focus {
+  border-color: var(--green);
+  color: var(--green);
+  outline: none;
+}
+
+.token-budget__info-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  display: none;
+  min-width: 280px;
+  max-width: 420px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-alt);
+  color: var(--green);
+  font-size: 11px;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: 0;
+  z-index: 20;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+}
+
+.token-budget__info-tooltip ul {
+  margin: 0;
+  padding-left: 14px;
+  list-style: square;
+}
+
+.token-budget__info-tooltip li {
+  margin: 4px 0;
+}
+
+.token-budget__info-wrap:hover .token-budget__info-tooltip,
+.token-budget__info-icon:focus + .token-budget__info-tooltip {
+  display: block;
+}
+
 .token-budget__subgroups {
   display: flex;
   flex-direction: column;

@@ -1,7 +1,6 @@
 # Worker Playbook (All Agents)
 
-> Common rules and workflow for all agents. Loaded automatically alongside TL/PM playbooks.
-> Your role-specific playbook (`.claude/agents/{role}.md`) supplements this.
+> Common rules and workflow for all worker-class agents. Your agent definition at `.claude/agents/{role}.md` is a stub that points here — this is the source of truth.
 
 ---
 
@@ -32,15 +31,55 @@ Before doing ANY work, establish who you are on this project:
    - On `409 ambiguous` or `404 not found`: **HALT** and tell the TL. Never invent an agent_id.
 2. **Cache your `agent_id`.** Include `X-Agent-ID: {agent_id}` on **every** `POST`/`PATCH`/`PUT`/`DELETE` to `/api/`. Without it, your actions log as "system" and your tokens don't attribute.
 3. **Session marker — TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file** — subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop. If you think your marker is missing, tell the TL — they write it.
-4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. Read `identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md` in that order. If missing, **HALT** and tell the TL.
+4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. Read these in order — if any are missing, **HALT** and tell the TL:
+   - **`identity.md`** — system-generated profile (who you are, file purposes, ISO 8601 rule, read order). **Do not edit by hand** — `scaffold-memory` regenerates this file each time.
+   - **`scratchpad.md`** — your in-flight working notes. Append-only, one block per session. Use this as your running memory during a ticket.
+   - **`lessons.md`** — durable lessons across sessions. Append a block when something is worth remembering for next time (a gotcha, a pattern, a workaround). Future-you and other agents read this.
+   - **`recent_sessions.md`** — one-line index of past sessions. Append-only. Skim it to see what you (or your prior incarnation) did recently.
 
 ## On Spawn — Read These First
 
-After identity, read: (1) `.claude/agents/{role}.md`, (2) `.claude/project_rules_worker.md`, (3) `HANDOFF.md`, (4) `ARCHITECTURE.md`, (5) `README.md`. If any are missing, proceed with what you have and flag it.
+After identity, read: (1) `.claude/project_rules_worker.md`, (2) `HANDOFF.md`, (3) `ARCHITECTURE.md`, (4) `README.md`. If any are missing, proceed with what you have and flag it.
+
+## Memory Writes — When and How
+
+You write to your memory dir during and after work. Two paths:
+
+**Easy path — `POST /api/agents/{your_agent_id}/session-complete`.** Send a summary payload at session end; the endpoint writes timestamped entries to `scratchpad.md`, `recent_sessions.md`, and (if `lessons` provided) `lessons.md` for you. Formats the ISO 8601 heading automatically. Use this when wrapping a session.
+
+**Direct path — append the file yourself.** For in-flight notes during a ticket, append to `scratchpad.md` directly. Required format — every entry starts with an ISO 8601 UTC timestamp heading:
+
+```
+## 2026-06-03T13:48:15Z
+<entry body>
+```
+
+Sortable, greppable, unambiguous across timezones. Other agents traversing your memory split on `## 20` to iterate entries.
+
+**What goes where:**
+- `scratchpad.md` — "I'm trying X, hit Y, working around with Z." In-flight thinking.
+- `lessons.md` — "Next time you migrate enums in MySQL, autogenerate misses them. Always hand-write." Durable.
+- `recent_sessions.md` — "2026-06-05 — closed S64, gate-test passed clean." One-liner per session.
+
+**Never edit `identity.md`** — system-generated, regenerated on scaffold.
 
 ## API
 
 **Base URL:** `http://localhost:8000/api` — used by `dwb2jira` and for GET queries. Mutating ticket calls go through `dwb2jira` (see Canonical Tools above).
+
+## Ticket IDs — Read Carefully
+
+The DWB API uses two different identifiers for tickets; they are **NOT** interchangeable:
+
+- **`ticket_key`** (e.g., `DWB-285`) — human-readable label shown in the dashboard and comments
+- **`ticket_id`** / **`id`** (e.g., `762`) — database primary key, used in all API paths
+
+API endpoints take the **database id**, not the number suffix of the ticket_key:
+
+- `PATCH /api/tickets/762` — correct (DWB-285 has id=762)
+- `PATCH /api/tickets/285` — wrong — hits a different ticket (likely in a different project) and can cause cross-project corruption
+
+When you receive a ticket assignment, the TL or PM gives you both forms: `DWB-285 (id=762)`. Use the `id` in API paths. If you only have the key, look it up: `GET /api/tickets?project_id={pid}` and filter by `ticket_key`.
 
 ## Code Headers — Mandatory
 

@@ -227,18 +227,19 @@ class TestConsolidationStatus:
         assert "ARCHITECTURE.md" in names
         assert "HANDOFF.md" in names
 
-    def test_owner_mapping_pm_owns_pm_def(self, client, gate_ctx):
+    def test_owner_mapping_pm_owns_pm_playbook(self, client, gate_ctx):
         body = client.get(
             f"/api/projects/{gate_ctx['project']['id']}/consolidation-status",
             params={"sprint_id": gate_ctx["sprint"]["id"]},
         ).json()
         mona = next(a for a in body["agents"] if a["name"] == "Mona")
         names = {f["name"] for f in mona["owned_over_ceiling_files"]}
-        assert ".claude/agents/pm.md" in names
-        # PM should NOT own the backend-worker file
-        assert ".claude/agents/backend-worker.md" not in names
+        assert ".claude/pm_playbook.md" in names
+        assert ".claude/project_rules_pm.md" in names
+        # PM should NOT own worker-shared files
+        assert ".claude/worker_playbook.md" not in names
 
-    def test_owner_mapping_backend_worker_owns_own_def_and_worker_shared(
+    def test_owner_mapping_backend_worker_owns_worker_shared(
         self, client, gate_ctx
     ):
         body = client.get(
@@ -247,10 +248,9 @@ class TestConsolidationStatus:
         ).json()
         barry = next(a for a in body["agents"] if a["name"] == "Barry")
         names = {f["name"] for f in barry["owned_over_ceiling_files"]}
-        assert ".claude/agents/backend-worker.md" in names
-        # worker.md + worker_playbook.md are shared across all worker roles
-        assert ".claude/agents/worker.md" in names
+        # worker_playbook + project_rules_worker are shared across all worker roles
         assert ".claude/worker_playbook.md" in names
+        assert ".claude/project_rules_worker.md" in names
 
     def test_owner_mapping_memory_files_belong_to_agent(self, client, gate_ctx):
         body = client.get(
@@ -411,13 +411,12 @@ class TestOverCeilingEnforcement:
         assert r.status_code == 400, r.text
         detail = r.json()["detail"]
         assert detail["error"] == "over_ceiling_files_must_be_trimmed_or_overridden"
-        # Barry owns backend-worker.md, worker.md, worker_playbook.md, and his
-        # own memory/scratchpad — all 'over' in the fixture. Every entry has
-        # the expected shape.
+        # Barry owns worker_playbook.md, project_rules_worker.md, and his own
+        # memory/scratchpad — all 'over' in the fixture. Every entry has the
+        # expected shape.
         names = {v["file"] for v in detail["violations"]}
-        assert ".claude/agents/backend-worker.md" in names
-        assert ".claude/agents/worker.md" in names
         assert ".claude/worker_playbook.md" in names
+        assert ".claude/project_rules_worker.md" in names
         assert any(n.startswith("memory/Barry/") for n in names)
         for v in detail["violations"]:
             assert isinstance(v["tokens"], int) and v["tokens"] > v["ceiling"]
@@ -429,17 +428,16 @@ class TestOverCeilingEnforcement:
         # Justify only one file
         r = client.post(f"/api/agents/{agent['id']}/consolidate-complete", json={
             "sprint_id": gate_ctx["sprint"]["id"],
-            "overrides": {".claude/agents/backend-worker.md": "load-bearing API ref"},
+            "overrides": {".claude/worker_playbook.md": "load-bearing role guide"},
         })
         assert r.status_code == 400, r.text
         detail = r.json()["detail"]
         assert detail["error"] == "over_ceiling_files_must_be_trimmed_or_overridden"
         missing = {v["file"] for v in detail["violations"]}
         # Justified file is NOT in the violations list anymore
-        assert ".claude/agents/backend-worker.md" not in missing
+        assert ".claude/worker_playbook.md" not in missing
         # Others still demand justification
-        assert ".claude/agents/worker.md" in missing
-        assert ".claude/worker_playbook.md" in missing
+        assert ".claude/project_rules_worker.md" in missing
 
     def test_ack_with_empty_reason_refused(self, client, gate_ctx):
         """A whitespace-only reason is not a real override → still refused for that file."""
