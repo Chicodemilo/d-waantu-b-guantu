@@ -159,11 +159,16 @@ class TestSprintCloseAutoTicket:
             "status": "active",
             "name": "Feature Sprint",
         }).json()
+        # DWB-331: only one sprint per project can be active. The next-up
+        # sprint stays "planned" until the prior one closes. The auto-ticket
+        # service logic finds the next planned (or active) sprint by
+        # sprint_number, so the test still asserts the same downstream
+        # behavior.
         s2 = client.post("/api/sprints", json={
             "project_id": ctx["project"]["id"],
             "epic_id": ctx["epic"]["id"],
             "sprint_number": 2,
-            "status": "active",
+            "status": "planned",
         }).json()
 
         client.patch(f"/api/sprints/{s1['id']}", json={"status": "completed"})
@@ -217,9 +222,10 @@ class TestSprintCloseAutoTicket:
             "project_id": project["id"], "epic_id": epic["id"],
             "sprint_number": 1, "status": "active",
         }).json()
+        # DWB-331: s2 stays planned until s1 closes.
         s2 = client.post("/api/sprints", json={
             "project_id": project["id"], "epic_id": epic["id"],
-            "sprint_number": 2, "status": "active",
+            "sprint_number": 2, "status": "planned",
         }).json()
 
         client.patch(f"/api/sprints/{s1['id']}", json={"status": "completed"})
@@ -240,11 +246,16 @@ class TestSprintCloseAutoTicket:
             "sprint_number": 1,
             "status": "active",
         }).json()
+        # DWB-331: only one sprint per project can be active. The next-up
+        # sprint stays "planned" until the prior one closes. The auto-ticket
+        # service logic finds the next planned (or active) sprint by
+        # sprint_number, so the test still asserts the same downstream
+        # behavior.
         s2 = client.post("/api/sprints", json={
             "project_id": ctx["project"]["id"],
             "epic_id": ctx["epic"]["id"],
             "sprint_number": 2,
-            "status": "active",
+            "status": "planned",
         }).json()
 
         client.patch(f"/api/sprints/{s1['id']}", json={"status": "completed"})
@@ -266,11 +277,16 @@ class TestSprintCloseAutoTicket:
             "sprint_number": 1,
             "status": "active",
         }).json()
+        # DWB-331: only one sprint per project can be active. The next-up
+        # sprint stays "planned" until the prior one closes. The auto-ticket
+        # service logic finds the next planned (or active) sprint by
+        # sprint_number, so the test still asserts the same downstream
+        # behavior.
         s2 = client.post("/api/sprints", json={
             "project_id": ctx["project"]["id"],
             "epic_id": ctx["epic"]["id"],
             "sprint_number": 2,
-            "status": "active",
+            "status": "planned",
         }).json()
 
         # Close once

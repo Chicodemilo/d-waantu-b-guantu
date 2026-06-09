@@ -6,7 +6,7 @@
 # Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc
 # Data In: db: Session, SprintCreate/Update
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-06-04
+# Last Modified: 2026-06-09
 
 import logging
 import re
@@ -61,6 +61,48 @@ def get_sprint(db: Session, sprint_id: int) -> Sprint | None:
     return db.get(Sprint, sprint_id)
 
 
+def _find_active_sprint(
+    db: Session, project_id: int, exclude_id: int | None = None
+) -> Sprint | None:
+    """Return the existing active sprint for a project, or None."""
+    stmt = (
+        select(Sprint)
+        .where(Sprint.project_id == project_id)
+        .where(Sprint.status == SprintStatus.active)
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Sprint.id != exclude_id)
+    return db.scalars(stmt).first()
+
+
+def _raise_conflict_if_active_exists(
+    db: Session, project_id: int, exclude_id: int | None = None
+) -> None:
+    """409 if another sprint on the same project is already active (DWB-331).
+
+    The DB-level (project_id, is_active) UNIQUE index enforces this too,
+    but the service-layer pre-check produces a friendly 409 body with
+    the offending sprint's id + name instead of an opaque IntegrityError.
+    """
+    existing = _find_active_sprint(db, project_id, exclude_id=exclude_id)
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "another_active_sprint",
+                "message": (
+                    f"Project {project_id} already has an active sprint "
+                    f"(id={existing.id}, name={existing.name!r}, "
+                    f"number={existing.sprint_number}). Close it before "
+                    f"starting another."
+                ),
+                "active_sprint_id": existing.id,
+                "active_sprint_name": existing.name,
+                "active_sprint_number": existing.sprint_number,
+            },
+        )
+
+
 def create_sprint(db: Session, data: SprintCreate) -> Sprint:
     values = data.model_dump()
 
@@ -94,6 +136,13 @@ def create_sprint(db: Session, data: SprintCreate) -> Sprint:
         values["name"] = _generate_name_from_goal(goal)
     elif not name.strip():
         values["name"] = f"Sprint {values.get('sprint_number', '?')}"
+
+    # DWB-331: refuse a second active sprint per project at the service
+    # layer so callers see a friendly 409 (not an IntegrityError from
+    # the DB-level UNIQUE index).
+    if values.get("status") == SprintStatus.active:
+        _raise_conflict_if_active_exists(db, values["project_id"])
+
     sprint = Sprint(**values)
     db.add(sprint)
     db.commit()
@@ -109,10 +158,20 @@ def update_sprint(db: Session, sprint: Sprint, data: SprintUpdate) -> Sprint:
         updates.get("status") == SprintStatus.completed
         and old_status != SprintStatus.completed
     )
+    transitioning_to_active = (
+        updates.get("status") == SprintStatus.active
+        and old_status != SprintStatus.active
+    )
 
     # Validate completion gates before applying changes
     if transitioning_to_completed:
         _check_completion_gates(db, sprint)
+    # DWB-331: refuse a second active sprint per project on PATCH transitions
+    # too (e.g. flipping planned -> active when another active sprint exists).
+    if transitioning_to_active:
+        _raise_conflict_if_active_exists(
+            db, sprint.project_id, exclude_id=sprint.id
+        )
 
     for key, value in updates.items():
         setattr(sprint, key, value)
@@ -275,12 +334,19 @@ def _on_sprint_completed(db: Session, sprint: Sprint) -> None:
             status=AlertStatus.open,
         ))
 
-    # Find the next active sprint for the same project
+    # Find the next sprint for the same project. Post-DWB-331 only one
+    # sprint can be active per project, so the auto-ticket target is the
+    # next planned (queued) sprint. We also accept active as a fallback
+    # for any legacy data ordering oddities; the OR keeps the lookup
+    # robust without depending on the order pre-completion ran.
     next_sprint = db.scalars(
         select(Sprint)
         .where(Sprint.project_id == sprint.project_id)
-        .where(Sprint.status == SprintStatus.active)
-        .order_by(Sprint.created_at.asc())
+        .where(Sprint.id != sprint.id)
+        .where(
+            Sprint.status.in_([SprintStatus.planned, SprintStatus.active])
+        )
+        .order_by(Sprint.sprint_number.asc(), Sprint.created_at.asc())
         .limit(1)
     ).first()
 

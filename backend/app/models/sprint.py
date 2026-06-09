@@ -1,17 +1,30 @@
 # Path: app/models/sprint.py
 # File: sprint.py
 # Created: 2026-03-29
-# Purpose: Sprint ORM model with status enum
+# Purpose: Sprint ORM model with status enum + single-active-per-project invariant
 # Caller: app/services/sprint.py
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Sprint, SprintStatus
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-09
 
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Computed,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -24,7 +37,23 @@ class SprintStatus(str, enum.Enum):
 
 
 class Sprint(Base):
+    """A sprint groups tickets within an epic. Single active invariant
+    (DWB-331): at most one row per project_id with status=active.
+
+    Enforced by a STORED generated column (`is_active` = 1 when status =
+    active else NULL) plus a UNIQUE(project_id, is_active) index. Same
+    pattern as Epic.is_in_progress and DwbSession.is_open (DWB-335).
+    """
+
     __tablename__ = "sprints"
+    __table_args__ = (
+        Index(
+            "uq_sprints_one_active_per_project",
+            "project_id",
+            "is_active",
+            unique=True,
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(
@@ -41,6 +70,19 @@ class Sprint(Base):
     )
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # Single-active marker — 1 when status is active, NULL else. The
+    # (project_id, is_active) UNIQUE index uses this to enforce
+    # one-active-sprint-per-project.
+    is_active: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        Computed(
+            "(CASE WHEN status = 'active' THEN 1 ELSE NULL END)",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

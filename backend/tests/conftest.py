@@ -189,8 +189,17 @@ def make_epic(client, make_project):
 
 @pytest.fixture
 def make_sprint(client, make_project, make_epic):
-    """Factory that POST-creates a sprint (auto-creates project + epic if needed)."""
+    """Factory that POST-creates a sprint (auto-creates project + epic if needed).
+
+    DWB-331: only one sprint per project can be `active` at a time. Tests that
+    make multiple sprints in the same project would now collide on the new
+    UNIQUE constraint; the factory transparently falls back to `planned` for
+    every sprint after the first one in a given project so existing test
+    bodies don't need rewriting. Callers that need a specific status pass it
+    explicitly via `status=` override (no auto-fallback in that case).
+    """
     _counter = [0]
+    _projects_with_active: set[int] = set()
 
     def _make(**overrides):
         _counter[0] += 1
@@ -200,14 +209,25 @@ def make_sprint(client, make_project, make_epic):
         if "epic_id" not in overrides:
             epic = make_epic(project_id=overrides["project_id"])
             overrides["epic_id"] = epic["id"]
+
+        explicit_status = "status" in overrides
+        pid = overrides["project_id"]
+        if not explicit_status and pid in _projects_with_active:
+            default_status = "planned"
+        else:
+            default_status = "active"
+
         data = {
             "sprint_number": _counter[0],
-            "status": "active",
+            "status": default_status,
             **overrides,
         }
         r = client.post("/api/sprints", json=data)
-        assert r.status_code == 201
-        return r.json()
+        assert r.status_code == 201, r.text
+        result = r.json()
+        if result["status"] == "active":
+            _projects_with_active.add(pid)
+        return result
 
     return _make
 
