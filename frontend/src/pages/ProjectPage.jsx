@@ -332,14 +332,11 @@ function ProjectPage() {
           </div>
       </div>
 
-      <TokenBudget projectId={id} />
-
-      <ConsolidationStatus projectId={id} />
-
-      <div>
-        <div className="dashboard__section-title">Team Status</div>
-        <LiveSessions projectId={id} />
-      </div>
+      {/* 2026-06-08: Consolidation gate panel hidden pending rethink.
+          User feedback: unclear what info to glean from it during a sprint;
+          gate mainly matters at sprint-close. Revisit whether the panel
+          should be sprint-close-scoped, redesigned, or removed entirely. */}
+      {/* <ConsolidationStatus projectId={id} /> */}
 
       {alerts.length > 0 && (
         <div>
@@ -389,6 +386,8 @@ function ProjectPage() {
         <TimeTokens projectId={id} />
       </div>
 
+      <TokenBudget projectId={id} />
+
       <div>
         <div className="dashboard__section-title">Velocity</div>
         <SprintVelocity projectId={id} />
@@ -399,6 +398,11 @@ function ProjectPage() {
         <div className="epic-list-scroll">
           <EpicList projectId={id} />
         </div>
+      </div>
+
+      <div>
+        <div className="dashboard__section-title">Team Status</div>
+        <LiveSessions projectId={id} />
       </div>
 
       <div>

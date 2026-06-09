@@ -35,12 +35,18 @@ function AlertBanner({ alert }) {
   return (
     <div className={`alert-banner alert-banner--${alert.severity}`}>
       <div className="alert-banner__content">
-        <div className="alert-banner__agent">
-          {source && <span>{source}</span>}
-          {alert.created_at && <span className="alert-banner__time">{relativeTime(alert.created_at)}</span>}
+        <div className="alert-banner__meta">
+          {alert.created_at && (
+            <span className="alert-banner__time">{relativeTime(alert.created_at)}</span>
+          )}
+          {alert.created_at && source && <span className="alert-banner__sep">::</span>}
+          {source && <span className="alert-banner__source">{source}</span>}
+          {(alert.created_at || source) && alert.body && (
+            <span className="alert-banner__sep">::</span>
+          )}
+          {alert.body && <span className="alert-banner__body-inline">{alert.body}</span>}
         </div>
         <div className="alert-banner__title">{alert.title}</div>
-        <div className="alert-banner__body">{alert.body}</div>
       </div>
       <button
         className="alert-banner__dismiss"

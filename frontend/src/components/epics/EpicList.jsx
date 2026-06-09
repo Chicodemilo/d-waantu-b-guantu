@@ -15,14 +15,30 @@ import { getTrackingSummary } from '../../services/tracking';
 import { formatTime, formatTokens } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import AsciiProgressBar from '../common/AsciiProgressBar';
+import { updateEpic, getEpics } from '../../api/epics';
 import '../../styles/common.css';
 
 function EpicList({ projectId }) {
   const epics = useStore((s) => s.getEpicsByProject(projectId));
   const sprints = useStore((s) => s.sprints);
   const tickets = useStore((s) => s.tickets);
+  const setEpics = useStore((s) => s.setEpics);
   const [expanded, setExpanded] = useState({});
   const [summary, setSummary] = useState(null);
+  const [confirmingCloseId, setConfirmingCloseId] = useState(null);
+  const [closing, setClosing] = useState(false);
+
+  const handleMarkClosed = async (epicId) => {
+    setClosing(true);
+    try {
+      await updateEpic(epicId, { status: 'completed' });
+      const fresh = await getEpics();
+      setEpics(fresh);
+      setConfirmingCloseId(null);
+    } finally {
+      setClosing(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +89,46 @@ function EpicList({ projectId }) {
             >
               <div className="epic-card__header">
                 <span className="epic-card__name">{epic.name}</span>
-                <StatusBadge status={epic.status} />
+                <div className="epic-card__header-right">
+                  <StatusBadge status={epic.status} />
+                  {epic.status === 'open' && (
+                    <div
+                      className="epic-card__close-row"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    >
+                      {confirmingCloseId === epic.id ? (
+                        <span className="epic-card__close-confirm">
+                          confirm?{' '}
+                          <button
+                            type="button"
+                            className="epic-card__close-action"
+                            onClick={() => handleMarkClosed(epic.id)}
+                            disabled={closing}
+                          >
+                            {closing ? 'closing...' : 'yes'}
+                          </button>
+                          {' / '}
+                          <button
+                            type="button"
+                            className="epic-card__close-action epic-card__close-action--cancel"
+                            onClick={() => setConfirmingCloseId(null)}
+                            disabled={closing}
+                          >
+                            cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="epic-card__close-link"
+                          onClick={() => setConfirmingCloseId(epic.id)}
+                        >
+                          mark as closed
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
               {epic.description && (
                 <div className="epic-card__desc">{epic.description}</div>

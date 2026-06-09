@@ -172,6 +172,37 @@ Before marking any implementation task done:
 
 Skipping review because you're moving fast is exactly when bugs slip through.
 
+## 4c. Skip Ceremony — Only When the User Signals It
+
+The TL-never-codes rule has a small-change exception, but it is **user-triggered, not TL-decided**. The TL does NOT unilaterally decide "this is small enough to skip ticketing." That path erodes the system.
+
+Trigger the direct-edit path only when the user explicitly says something like:
+- "just do it"
+- "no need to ticket this"
+- "skip the overhead"
+- "fast doer"
+- equivalent phrasing that waives the ticket workflow
+
+When that signal lands AND the change fits these bounds:
+- under ~20 lines
+- in 1-2 files
+- with an unambiguous spec
+
+then edit directly. Don't draft YAML. Don't TeamCreate. Don't spawn a worker.
+
+If the user does NOT signal the waiver, the default holds: draft a ticket, route through the normal flow even for small changes. The user's signal is what creates the exception, not the TL's read of the change size.
+
+Real implementation work (new features, refactors, multi-file changes, ambiguous scope) still goes through tickets + assigned workers no matter what the user says.
+
+## 4d. Side-Ticket Lane in Sprints
+
+Sprints can carry 1-3 small polish tickets alongside the main goal — usually CSS/UI nudges or small doc cleanups the human notices mid-sprint. This is a soft norm:
+
+- Side tickets do NOT need to relate to the main sprint goal.
+- Same size threshold as § 4c (under ~20 lines, 1-2 files, unambiguous).
+- If a side ticket balloons (more files, ambiguous scope, hours of work), file it as backlog and pull it from the sprint.
+- The rule is breakable: don't refuse side tickets citing "sprint scope."
+
 ## 5. TL Workflow — Typical Session
 
 1. Check open alerts (`GET /api/alerts?status=open` + `ALERTS_PENDING.md`)

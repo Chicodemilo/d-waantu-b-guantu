@@ -6,7 +6,7 @@
 // Callees: react (useState, useEffect), useStore, api/client (get), styles/dashboard.css
 // Data In: projectId prop
 // Data Out: default export ConsolidationStatus component
-// Last Modified: 2026-06-04
+// Last Modified: 2026-06-08
 
 import { useEffect, useState } from 'react';
 import useStore from '../../store/useStore';
@@ -39,7 +39,7 @@ function AgentRow({ agent }) {
   const ackClass = agent.acked
     ? 'consolidation-status__ack--done'
     : 'consolidation-status__ack--pending';
-  const ackLabel = agent.acked ? '✓ acked' : '⏳ pending';
+  const ackLabel = agent.acked ? 'acked' : 'pending';
   const files = agent.owned_over_ceiling_files || [];
   return (
     <div className="consolidation-status__agent">
@@ -106,7 +106,7 @@ function ConsolidationStatus({ projectId }) {
   if (loading && !data) {
     return (
       <div className="consolidation-status">
-        <div className="consolidation-status__header">consolidation gate — loading...</div>
+        <div className="consolidation-status__header">consolidation gate: loading...</div>
       </div>
     );
   }
@@ -114,7 +114,7 @@ function ConsolidationStatus({ projectId }) {
     return (
       <div className="consolidation-status">
         <div className="consolidation-status__header consolidation-status__header--pending">
-          consolidation gate — error: {error}
+          consolidation gate error: {error}
         </div>
       </div>
     );
@@ -129,8 +129,8 @@ function ConsolidationStatus({ projectId }) {
     ? 'consolidation-status__header--ready'
     : 'consolidation-status__header--pending';
   const headerLabel = ready
-    ? '✓ ready to close'
-    : `⏳ ${pendingCount} of ${total} agent${total === 1 ? '' : 's'} pending`;
+    ? 'ready to close'
+    : `${pendingCount} of ${total} agent${total === 1 ? '' : 's'} pending`;
 
   return (
     <div className="consolidation-status">

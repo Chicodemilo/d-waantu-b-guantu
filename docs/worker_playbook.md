@@ -187,7 +187,13 @@ When done, message the TL: what you did, files changed, anything unexpected, whe
 
 ## Style Rules
 
-Project-specific style rules (CSS conventions, UI aesthetic, framework bans) live in `.claude/project_rules_worker.md`. Read them at session start.
+**Universal (apply everywhere):**
+
+- **No icons.** No emoji, lucide/heroicon glyphs, or decorative unicode in UI labels, docs, commit messages, ticket prose, or any user-facing output. Use plain text. If an existing component renders an icon next to a label, drop the icon when you touch the component.
+- **No em dashes.** Use a hyphen, colon, comma, or new sentence instead. Em dashes in code, docs, and prose read as AI-generated and the user wants them out.
+- **Inline text confirmations over modals.** For light confirm flows (mark closed, archive, dismiss, disable), the trigger swaps in-place to `confirm? yes / cancel` styled the same size as the trigger. Do not build modal components. Reference pattern: ProjectPage delete/disable flows, EpicList mark-as-closed.
+
+Project-specific style rules (CSS palette, framework bans, file structure) live in `.claude/project_rules_worker.md`. Read them at session start.
 
 ## STOP Means Stop
 

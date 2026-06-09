@@ -72,7 +72,7 @@ function TokenOverview() {
 
   return (
     <div className="token-overview">
-      <AsciiChart title="Tokens by Project" tooltip="Total tokens for all agents on the project — includes team lead, PM, and worker agents." data={projectData} colorClass="orange" />
+      <AsciiChart title="Tokens by Project" tooltip="Total tokens for all agents on the project, includes team lead, PM, and worker agents." data={projectData} colorClass="gradient" />
       <AsciiChart title="Tokens by Agent" tooltip="Tokens consumed by each agent across their assigned tickets." data={agentData} colorClass="blue" />
       <AsciiChart title="Overhead Tokens" tooltip="Tokens spent by the Team Lead (TL) and Project Manager (PM) on coordination — not tied to specific tickets. Tracked separately per project." data={overheadData} />
     </div>

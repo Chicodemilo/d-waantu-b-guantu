@@ -51,6 +51,8 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 - Significant ticket count changes (5+): report new sprint status
 - DM the human via alerts when something needs their attention
 
+**Side-ticket lane awareness:** sprints can carry 1-3 small polish tickets (CSS/UI nudges, copy fixes) alongside the main goal. These are pass-throughs for the PM — do not gate them, do not flag them as scope drift. If a side ticket balloons (multiple files, hours of work, ambiguous spec), THEN flag it and ask the TL whether to pull it from the sprint. See `docs/team_lead_playbook.md` § 4d.
+
 ---
 
 ## 2. First-Run Checks (New Projects)

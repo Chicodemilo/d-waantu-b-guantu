@@ -57,6 +57,15 @@
   color: var(--blue);
 }
 
+.ascii-chart__bar--gradient {
+  background-image: linear-gradient(to right, #3a4a7c, #a8b5d1);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  letter-spacing: -1px;
+}
+
 .ascii-chart__bar-empty {
   color: var(--gray);
   letter-spacing: -1px;
@@ -80,7 +89,11 @@
 }
 
 .progress-bar__filled {
-  color: var(--green-dim);
+  background-image: linear-gradient(to right, #3a4a7c, #a8b5d1);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .progress-bar__empty {
@@ -110,7 +123,7 @@
 .vbar-chart {
   display: flex;
   align-items: flex-end;
-  gap: 1px;
+  gap: 4px;
   overflow-x: auto;
   padding-bottom: 4px;
 }
@@ -139,8 +152,15 @@
   font-size: 13px;
 }
 
-.vbar-chart__filled {
-  color: var(--green-dim);
+.vbar-chart__filled-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background-image: linear-gradient(to top, #3a4a7c, #a8b5d1);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .vbar-chart__empty {
@@ -152,42 +172,19 @@
   cursor: pointer;
 }
 
-.vbar-chart__col--link:hover .vbar-chart__filled:not(.vu--orange):not(.vu--brick) {
-  color: var(--green-bright);
-}
-
 .vbar-chart__col--link:hover .vbar-chart__label {
   color: var(--green-bright);
 }
 
-/* VU meter color bands — row position from bottom */
-.vu--green {
-  color: var(--green-dim);
-}
-
-.vu--orange {
-  color: var(--orange);
-}
-
-.vu--brick {
-  color: var(--brick-red);
-}
-
-.vbar-chart__col--link:hover .vu--green {
+/* Alternate label shade: every other column's S-label uses the lighter green so the labels don't smear together */
+.vbar-chart__col--alt .vbar-chart__label {
   color: var(--green-bright);
 }
 
-.vbar-chart__col--link:hover .vu--orange {
-  color: var(--orange-bright);
-}
-
-.vbar-chart__col--link:hover .vu--brick {
-  color: #c4503f;
-}
-
 .vbar-chart__label {
-  font-size: 9px;
-  color: var(--green);
+  font-size: 10.35px;
+  color: #3bc870;
+  font-weight: bold;
   margin-top: 2px;
   text-transform: uppercase;
   letter-spacing: 0.5px;

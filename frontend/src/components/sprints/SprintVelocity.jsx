@@ -6,7 +6,7 @@
 // Callees: react-router-dom (Link), useStore, charts.css
 // Data In: projectId prop
 // Data Out: default export SprintVelocity component
-// Last Modified: 2026-03-30
+// Last Modified: 2026-06-08
 
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
@@ -14,19 +14,13 @@ import '../../styles/charts.css';
 
 const MAX_BAR_HEIGHT = 10;
 
-function vuColor(row) {
-  if (row >= 9) return 'vu--brick';
-  if (row >= 7) return 'vu--orange';
-  return 'vu--green';
-}
-
 function SprintVelocity({ projectId }) {
   const sprints = useStore((s) => s.getSprintsByProject(projectId));
   const tickets = useStore((s) => s.tickets);
 
   const data = [...sprints]
     .sort((a, b) => b.sprint_number - a.sprint_number)
-    .map((sprint) => {
+    .map((sprint, idx) => {
       const sprintTickets = tickets.filter((t) => t.sprint_id === sprint.id);
       const done = sprintTickets.filter((t) => t.status === 'done').length;
       return {
@@ -34,6 +28,7 @@ function SprintVelocity({ projectId }) {
         label: `S${sprint.sprint_number}`,
         value: done,
         total: sprintTickets.length,
+        alt: idx % 2 === 1,
       };
     });
 
@@ -48,20 +43,25 @@ function SprintVelocity({ projectId }) {
         {data.map((item, i) => {
           let filled = Math.round((item.value / maxValue) * MAX_BAR_HEIGHT);
           if (item.value > 0 && filled === 0) filled = 1;
-          const empty = MAX_BAR_HEIGHT - filled;
-          const blocks = [];
-          for (let row = MAX_BAR_HEIGHT; row >= 1; row--) {
-            if (row > filled) {
-              blocks.push(<span key={row} className="vbar-chart__empty">{'░\n'}</span>);
-            } else {
-              blocks.push(<span key={row} className={`vbar-chart__filled ${vuColor(row)}`}>{'█\n'}</span>);
-            }
+          const emptyBlocks = [];
+          const filledBlocks = [];
+          for (let row = MAX_BAR_HEIGHT; row > filled; row--) {
+            emptyBlocks.push(<span key={`e${row}`} className="vbar-chart__empty">{'░\n'}</span>);
           }
+          for (let row = filled; row >= 1; row--) {
+            filledBlocks.push(<span key={`f${row}`}>{'█\n'}</span>);
+          }
+          const colClass = item.alt
+            ? 'vbar-chart__col vbar-chart__col--link vbar-chart__col--alt'
+            : 'vbar-chart__col vbar-chart__col--link';
           return (
-            <Link key={i} to={`/projects/${projectId}/sprints/${item.id}`} className="vbar-chart__col vbar-chart__col--link">
+            <Link key={i} to={`/projects/${projectId}/sprints/${item.id}`} className={colClass}>
               <span className="vbar-chart__value">{item.value}</span>
               <div className="vbar-chart__bar">
-                {blocks}
+                {emptyBlocks}
+                {filledBlocks.length > 0 && (
+                  <div className="vbar-chart__filled-stack">{filledBlocks}</div>
+                )}
               </div>
               <span className="vbar-chart__label">{item.label}</span>
             </Link>
