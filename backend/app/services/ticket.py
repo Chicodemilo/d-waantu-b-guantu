@@ -6,7 +6,7 @@
 # Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking
 # Data In: db: Session, TicketCreate/Update
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-03-30
+# Last Modified: 2026-06-09
 
 import logging
 
@@ -97,6 +97,27 @@ def create_ticket(db: Session, data: TicketCreate) -> Ticket:
 def update_ticket(db: Session, ticket: Ticket, data: TicketUpdate) -> Ticket:
     updates = data.model_dump(exclude_unset=True)
     old_status = ticket.status
+
+    # DWB-333: sprint_id is NOT NULL in the model — every ticket must belong
+    # to a sprint per the hierarchy rule. The TicketUpdate schema declares
+    # the field as int | None, so an explicit `{"sprint_id": null}` body
+    # passes Pydantic validation but hits MySQL's NOT NULL and produces an
+    # opaque 500. Reject it here with a clean 400 telling the caller to
+    # reassign instead of detach. epic_id and assigned_agent_id ARE nullable
+    # in the model, so null on those is fine and falls through.
+    if "sprint_id" in updates and updates["sprint_id"] is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "sprint_id_required",
+                "message": (
+                    "sprint_id cannot be null. Every ticket must belong to a "
+                    "sprint. To detach from the current sprint, reassign to a "
+                    "different sprint via {\"sprint_id\": <int>}."
+                ),
+                "field": "sprint_id",
+            },
+        )
 
     for key, value in updates.items():
         setattr(ticket, key, value)
