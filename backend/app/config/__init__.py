@@ -1,12 +1,21 @@
-# Path: app/config.py
-# File: config.py
-# Created: 2026-03-29
-# Purpose: Application configuration via Pydantic Settings
-# Caller: app/database.py
-# Callees: pydantic_settings
-# Data In: .env file
-# Data Out: Settings instance
-# Last Modified: 2026-03-29
+# Path: app/config/__init__.py
+# File: __init__.py
+# Created: 2026-06-09
+# Purpose: app.config package — Settings (this file) + versioned data submodules (session_phrases, etc.)
+# Caller: app/database.py, app/services/*
+# Callees: pydantic_settings, app.config.session_phrases
+# Data In: .env file (settings)
+# Data Out: Settings instance, re-exported submodules
+# Last Modified: 2026-06-09
+
+"""DWB-336 introduced `app/config/` as a versioned-data package
+(session_phrases.py lives here). To keep `from app.config import settings`
+working for every existing caller, the Settings class moved into this
+package's __init__ when the standalone `app/config.py` was retired.
+
+Anything that was previously imported from `app.config` is still imported
+from `app.config` — only the on-disk layout changed.
+"""
 
 from pydantic_settings import BaseSettings
 
@@ -25,6 +34,11 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     API_RELOAD: bool = True
     ADMIN_API_KEY: str = "lat-admin-CHANGE-ME-TO-RANDOM-64-CHAR-HEX"
+
+    # DWB session idle sweeper (DWB-337). Disabled (interval=0) in tests so
+    # the asyncio task doesn't fight with rolled-back transactions.
+    IDLE_TIMEOUT_MINUTES: int = 60
+    IDLE_SWEEP_INTERVAL_SECONDS: int = 300
 
     # Jira (optional — empty disables the /api/jira/* endpoints)
     JIRA_BASE_URL: str = ""

@@ -96,7 +96,7 @@
   color: transparent;
   font-size: 10px;
   line-height: 1;
-  vertical-align: middle;
+  vertical-align: 3px;
   margin-left: 3px;
 }
 
@@ -104,7 +104,7 @@
   color: var(--gray);
   font-size: 10px;
   line-height: 1;
-  vertical-align: middle;
+  vertical-align: 3px;
   margin-right: 3px;
 }
 

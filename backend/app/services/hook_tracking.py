@@ -1,12 +1,12 @@
 # Path: app/services/hook_tracking.py
 # File: hook_tracking.py
 # Created: 2026-04-09
-# Purpose: Hook-based tracking service — handles Claude Code lifecycle hook events
+# Purpose: Hook-based tracking service — handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336)
 # Caller: app/routers/hooks.py
-# Callees: app/models/hook_session.py, app/services/tracking.py, app/models/alert.py
+# Callees: app/models/hook_session.py, app/services/tracking.py, app/services/dwb_session.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
-# Data Out: HookSession records, tracking_log events via tracking.py
-# Last Modified: 2026-06-05
+# Data Out: HookSession records, tracking_log events via tracking.py, opened/closed DwbSession rows
+# Last Modified: 2026-06-09
 
 """Service layer for passive hook-based time and token tracking.
 
@@ -26,13 +26,16 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config.session_phrases import match_close, match_open
 from app.models.agent import Agent
 from app.models.alert import Alert, AlertSeverity
+from app.models.dwb_session import DwbCloseMethod, DwbCloseReason, DwbOpenMethod
 from app.models.hook_session import HookSession, HookSessionStatus, HookSessionType
 from app.models.project import Project
 from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
 from app.models.ticket import Ticket, TicketStatus
+from app.services import dwb_session as dwb_svc
 from app.services import tracking
 from app.services.failed_hook import log_failed_hook
 
@@ -152,6 +155,11 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
             tracking.log_start(db, ticket.id, agent.id)
         elif session_type == HookSessionType.main or agent.role in OVERHEAD_ROLES:
             tracking.log_overhead_start(db, project.id, agent.id)
+
+    # DWB-336: Layer-1 regex fast path for session-open detection. Run after
+    # the hook_session is persisted so attribution stays correct even when
+    # phrase detection no-ops. Errors are swallowed inside the helper.
+    try_open_dwb_session_from_transcript(db, project, transcript_path)
 
     return session
 
@@ -325,6 +333,13 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
     elif token_total > 0:
         # No TL agent on project — truly unattributed
         _create_unattributed_alert(db, session)
+
+    # DWB-336: Layer-1 regex fast path for session-close detection. Same
+    # post-commit timing as the open path so token attribution lands first.
+    if session.project_id:
+        project = db.get(Project, session.project_id)
+        if project is not None:
+            try_close_dwb_session_from_transcript(db, project, transcript_path)
 
     return session
 
@@ -1077,6 +1092,198 @@ def _resolve_ticket(db: Session, agent: Agent, project_id: int) -> Ticket | None
         .limit(1)
     )
     return ticket
+
+
+# ---------------------------------------------------------------------------
+# DWB session phrase detection (DWB-336)
+#
+# Layer 1 of session lifecycle: when a hook fires, we peek the user-side
+# messages in the transcript and try to match the regex catalogue in
+# app.config.session_phrases. If we hit an open phrase and the project has
+# no active DWB session, we open one. If we hit a close phrase and an active
+# session exists, we close it. Both paths swallow all exceptions — hooks
+# are fire-and-forget; phrase detection must never block ticket attribution.
+# ---------------------------------------------------------------------------
+
+
+# Cap on how many user messages we scan from a transcript. Open phrases live
+# in the first user turn; close phrases live in the last few user turns.
+# 50 entries is generous and bounds the worst-case JSONL read.
+_PHRASE_SCAN_LIMIT = 50
+
+
+def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
+    """Return user-side message texts from a Claude Code JSONL transcript.
+
+    Claude Code stores each turn as a JSON line. User turns look like:
+
+        {"type": "user", "message": {"role": "user", "content": "..."},
+         "timestamp": "..."}
+
+    or with structured content:
+
+        {"type": "user", "message": {"role": "user",
+         "content": [{"type": "text", "text": "..."}]}, ...}
+
+    ``head=True`` returns the first ``_PHRASE_SCAN_LIMIT`` lines that decode
+    as user messages (used for open-phrase detection on SessionStart).
+    ``head=False`` returns the last ``_PHRASE_SCAN_LIMIT`` (used for close
+    detection on SessionEnd). Both bound I/O.
+
+    Returns an empty list on any read/parse error.
+    """
+    transcript = Path(path)
+    if not transcript.exists():
+        return []
+
+    try:
+        with transcript.open("r") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return []
+
+    iter_lines = lines if head else list(reversed(lines))
+
+    out: list[str] = []
+    for raw in iter_lines:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            entry = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        # Identify user turns. CC's format puts role on the inner message,
+        # but historical/test fixtures sometimes flatten role/type to top
+        # level. Accept both.
+        msg = entry.get("message") or {}
+        is_user = (
+            entry.get("type") == "user"
+            or msg.get("role") == "user"
+            or entry.get("role") == "user"
+        )
+        if not is_user:
+            continue
+
+        content = msg.get("content") or entry.get("content")
+        text: str | None = None
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            # Structured content: concatenate every text block.
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    val = block.get("text")
+                    if isinstance(val, str):
+                        parts.append(val)
+            if parts:
+                text = "\n".join(parts)
+
+        if text:
+            out.append(text)
+        if len(out) >= _PHRASE_SCAN_LIMIT:
+            break
+
+    return out
+
+
+def try_open_dwb_session_from_transcript(
+    db: Session, project: Project, transcript_path: str | None
+) -> None:
+    """Layer-1 regex fast path: scan early user turns for an open phrase and,
+    on match, open a DWB session for the project via the service layer.
+
+    No-op if:
+      - transcript_path is missing or unreadable
+      - no user message matches an OPEN_PATTERNS regex
+      - the project already has an open DWB session
+
+    All exceptions are swallowed + logged as failed_hook rows. Hook flows
+    must never raise out of this function — they're called in fire-and-
+    forget paths and an exception here would break token attribution.
+    """
+    if not transcript_path:
+        return
+    try:
+        texts = _extract_user_message_texts(transcript_path, head=True)
+        for text in texts:
+            phrase = match_open(text)
+            if not phrase:
+                continue
+            # Found a match — try to open. The service returns (None,
+            # existing) when a session is already open; that's a silent
+            # no-op for the hook path (Layer 2 / explicit endpoint will
+            # surface conflicts to the user).
+            new_session, _existing = dwb_svc.open_session(
+                db,
+                project_id=project.id,
+                opened_at=datetime.now(UTC),
+                open_method=DwbOpenMethod.regex,
+                open_phrase=phrase,
+            )
+            if new_session is not None:
+                db.commit()
+            return
+    except Exception as e:
+        logger.exception(
+            "try_open_dwb_session_from_transcript failed for project_id=%s",
+            project.id,
+        )
+        log_failed_hook(
+            hook_event="dwb_session_open_regex",
+            status_code=None,
+            raw_payload={"project_id": project.id, "transcript_path": transcript_path},
+            error=f"{type(e).__name__}: {e}",
+        )
+
+
+def try_close_dwb_session_from_transcript(
+    db: Session, project: Project, transcript_path: str | None
+) -> None:
+    """Layer-1 regex fast path: scan late user turns for a close phrase and,
+    on match, close the project's active DWB session via the service layer.
+
+    No-op if:
+      - transcript_path is missing or unreadable
+      - no user message matches a CLOSE_PATTERNS regex
+      - the project has no active DWB session
+
+    Same exception-swallowing contract as
+    ``try_open_dwb_session_from_transcript``: hooks never raise.
+    """
+    if not transcript_path:
+        return
+    try:
+        texts = _extract_user_message_texts(transcript_path, head=False)
+        for text in texts:
+            phrase = match_close(text)
+            if not phrase:
+                continue
+            active = dwb_svc.get_active_session(db, project.id)
+            if active is None:
+                return
+            dwb_svc.close_session(
+                db,
+                active,
+                close_method=DwbCloseMethod.regex,
+                close_reason=DwbCloseReason.explicit,
+                close_phrase=phrase,
+            )
+            db.commit()
+            return
+    except Exception as e:
+        logger.exception(
+            "try_close_dwb_session_from_transcript failed for project_id=%s",
+            project.id,
+        )
+        log_failed_hook(
+            hook_event="dwb_session_close_regex",
+            status_code=None,
+            raw_payload={"project_id": project.id, "transcript_path": transcript_path},
+            error=f"{type(e).__name__}: {e}",
+        )
 
 
 def _create_unattributed_alert(db: Session, session: HookSession) -> None:

@@ -6,7 +6,7 @@
 # Callees: All routers, app/database.py
 # Data In: None
 # Data Out: FastAPI app instance
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-09
 
 import os
 from contextlib import asynccontextmanager
@@ -24,6 +24,7 @@ from app.routers import (
     agents,
     alerts,
     comments,
+    dwb_sessions,
     epics,
     errors,
     failure_records,
@@ -40,13 +41,18 @@ from app.routers import (
     tokens,
     tracking,
 )
+from app.services import idle_sweeper
 from app.services.failed_hook import log_failed_hook
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    yield
+    await idle_sweeper.start(app)
+    try:
+        yield
+    finally:
+        await idle_sweeper.stop(app)
 
 
 app = FastAPI(title="Local Agent Tracker", lifespan=lifespan)
@@ -104,3 +110,5 @@ app.include_router(hooks.router)
 app.include_router(errors.router)
 app.include_router(status.router)
 app.include_router(jira.router)
+app.include_router(dwb_sessions.router)
+app.include_router(dwb_sessions.project_sessions_router)
