@@ -1,14 +1,15 @@
 # Path: app/routers/playbooks.py
 # File: playbooks.py
 # Created: 2026-03-29
-# Purpose: Playbook listing and deployment (TL, PM, worker) to project repos
+# Purpose: Playbook listing and deployment (TL, PM, worker) to project repos, with Jira-awareness (DWB-332)
 # Caller: app/main.py
-# Callees: app/services/project.py, app/services/agent_memory.py, pathlib, shutil
+# Callees: app/services/project.py, app/services/agent_memory.py, pathlib, shutil, re
 # Data In: HTTP requests
 # Data Out: JSON responses (playbook list, deploy status incl. scaffolded memory dirs)
-# Last Modified: 2026-06-04
+# Last Modified: 2026-06-09
 
 import logging
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +51,70 @@ AGENT_DEF_FILES = [
     "system-ops.md",
     "tester.md",
 ]
+
+
+# DWB-332: scrub markers for variant-aware deploy. Playbook source carries
+# both Jira-flavored and non-Jira blocks side-by-side; on deploy we keep one
+# and drop the other based on the target project's jira_base_url.
+#
+#   <!-- jira-only:start --> ... <!-- jira-only:end -->
+#       Kept on Jira-enabled projects, stripped on non-Jira projects.
+#
+#   <!-- non-jira-only:start --> ... <!-- non-jira-only:end -->
+#       Inverse — stripped on Jira, kept on non-Jira.
+#
+# Picked scrub-on-write over variant-templates (separate Jira / non-Jira
+# files) because the alternative would double the maintenance surface: every
+# edit to the playbook would have to land in both copies, and drift between
+# them is invisible until an agent reads the wrong one. Markers keep one
+# canonical source with the variant decisions explicit and grep-able.
+_JIRA_ONLY_BLOCK_RE = re.compile(
+    r"<!--\s*jira-only:start\s*-->.*?<!--\s*jira-only:end\s*-->\s*\n?",
+    re.DOTALL,
+)
+_NON_JIRA_ONLY_BLOCK_RE = re.compile(
+    r"<!--\s*non-jira-only:start\s*-->.*?<!--\s*non-jira-only:end\s*-->\s*\n?",
+    re.DOTALL,
+)
+
+
+def _scrub_for_jira_target(text: str, *, jira_enabled: bool) -> str:
+    """Apply the variant rule: drop the inverse block, keep the matching one.
+
+    Jira-enabled deploy: keep jira-only blocks, strip non-jira-only blocks.
+    Non-Jira deploy: strip jira-only blocks, keep non-jira-only blocks.
+
+    Marker-tags themselves are left in place on the kept side (HTML comments
+    don't render in markdown viewers and are useful when an agent grep's the
+    deployed file for context). Tests assert presence/absence by content
+    inside the blocks, not by marker presence.
+    """
+    if jira_enabled:
+        return _NON_JIRA_ONLY_BLOCK_RE.sub("", text)
+    return _JIRA_ONLY_BLOCK_RE.sub("", text)
+
+
+_NON_JIRA_BANNER = (
+    "> THIS PROJECT IS NOT LINKED TO JIRA.\n"
+    "> Do not invoke `dwb2jira` tools or reference Jira issue keys.\n"
+    "> All ticket transitions go through the DWB API directly: "
+    "`PATCH /api/tickets/{id}` with `{\"status\": \"...\"}` and the "
+    "`X-Agent-ID` header.\n\n"
+)
+
+
+def _prepend_banner_if_needed(content: str, *, jira_enabled: bool) -> str:
+    """Prepend the non-Jira banner so the agent sees it at the top of the
+    file. No-op on Jira-enabled projects.
+
+    Idempotent — if the banner is already present (e.g. file was generated
+    with one before), don't double-stack it.
+    """
+    if jira_enabled:
+        return content
+    if "THIS PROJECT IS NOT LINKED TO JIRA" in content:
+        return content
+    return _NON_JIRA_BANNER + content
 
 
 class PlaybookRead(BaseModel):
@@ -111,19 +176,30 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
     target_dir = repo / ".claude"
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    # DWB-332: variant deploy. Strip the wrong-side variant blocks and
+    # prepend a banner for non-Jira targets. shutil.copy2 is bypassed for
+    # playbooks because the content needs transformation; copy2's mtime
+    # preservation isn't useful when we're rewriting bytes anyway.
+    jira_enabled = bool(project.jira_base_url)
+
     deployed = []
     for key, filename in PLAYBOOK_FILES.items():
         src = DOCS_DIR / filename
         if not src.is_file():
             continue
+        src_text = src.read_text(encoding="utf-8")
+        out_text = _scrub_for_jira_target(src_text, jira_enabled=jira_enabled)
+        out_text = _prepend_banner_if_needed(out_text, jira_enabled=jira_enabled)
         dst = target_dir / filename
-        shutil.copy2(src, dst)
+        dst.write_text(out_text, encoding="utf-8")
         deployed.append(filename)
 
     if not deployed:
         raise HTTPException(500, "No playbook files found in docs/")
 
-    # Create blank project rules files (never overwrite existing)
+    # Create blank project rules files (never overwrite existing).
+    # DWB-332: non-Jira projects get the banner inserted at file creation
+    # time. Existing files are still preserved untouched.
     PROJECT_RULES_FILES = {
         "project_rules_team_lead.md": "# Project Rules — Team Lead\n\n> Project-specific rules for the TL. This file is NOT overwritten by deploy.\n\n",
         "project_rules_pm.md": "# Project Rules — PM\n\n> Project-specific rules for the PM. This file is NOT overwritten by deploy.\n\n",
@@ -133,8 +209,37 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
     for filename, default_content in PROJECT_RULES_FILES.items():
         dst = target_dir / filename
         if not dst.exists():
-            dst.write_text(default_content, encoding="utf-8")
+            content = _prepend_banner_if_needed(
+                default_content, jira_enabled=jira_enabled
+            )
+            dst.write_text(content, encoding="utf-8")
             deployed.append(f"{filename} (created)")
+
+    # DWB-332: HANDOFF.md banner for non-Jira projects. Only scaffolds when
+    # the file does NOT exist at the repo root — never mutates an existing
+    # HANDOFF.md, because that's user-authored content. If the file is
+    # missing on a non-Jira project, drop a stub with the banner so the
+    # agent's first read of HANDOFF.md gets the visibility signal.
+    #
+    # The created path lives at <repo>/HANDOFF.md (matching force_handoff_md
+    # gate's expectation), NOT under .claude/. Surface it via a separate
+    # entry so the existing deployed[] consumers (which assume every entry
+    # resolves under .claude/) don't trip.
+    if not jira_enabled:
+        handoff_path = repo / "HANDOFF.md"
+        if not handoff_path.exists():
+            handoff_stub = (
+                _NON_JIRA_BANNER
+                + "# Handoff\n\n"
+                + "> Session-to-session continuity. Read at session start, "
+                + "update at end.\n\n"
+                + "## Current State\n\n_(Update each session.)_\n"
+            )
+            handoff_path.write_text(handoff_stub, encoding="utf-8")
+            logger.info(
+                "deploy-playbooks: scaffolded HANDOFF.md at %s "
+                "(non-Jira target)", handoff_path
+            )
 
     # Deploy canonical role agent definitions to the target project's
     # `.claude/agents/`. Overwritten on each deploy. Project-specific defs

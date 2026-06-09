@@ -26,6 +26,11 @@ class TicketCreate(BaseModel):
     description: str | None = None
     ticket_type: TicketType = TicketType.task
     status: TicketStatus = TicketStatus.backlog
+    # DWB-332: surfaced on create so the Jira-disabled gate (project-level
+    # project.jira_base_url null) can refuse linking attempts at the POST
+    # path too. Service-layer rejects with a clean 400 when the project is
+    # not Jira-linked.
+    jira_issue_key: str | None = None
 
 
 class TicketUpdate(BaseModel):

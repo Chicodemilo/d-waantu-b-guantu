@@ -34,8 +34,27 @@ def _reset_cache():
     svc.clear_cache()
 
 
+def _ensure_project_jira_linked(client, project_id: int) -> None:
+    """DWB-332: the ticket router refuses jira_issue_key writes when the
+    project's jira_base_url is null. The make_project factory leaves it null
+    by default; link the project to a stub Jira URL here so the existing
+    test bodies (which assume linking works) continue to pass without
+    rewriting every test."""
+    project = client.get(f"/api/projects/{project_id}").json()
+    if not project.get("jira_base_url"):
+        client.patch(
+            f"/api/projects/{project_id}",
+            json={
+                "jira_base_url": "https://test.atlassian.net",
+                "jira_project_key": "POR",
+            },
+        )
+
+
 def _link_ticket(client, ticket_id: int, jira_key: str, status: str | None = None) -> dict:
     """Helper: PATCH a ticket to set jira_issue_key (+ optional status)."""
+    ticket = client.get(f"/api/tickets/{ticket_id}").json()
+    _ensure_project_jira_linked(client, ticket["project_id"])
     body: dict = {"jira_issue_key": jira_key}
     if status is not None:
         body["status"] = status

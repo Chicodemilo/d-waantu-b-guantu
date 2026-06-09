@@ -81,6 +81,10 @@ class AgentIdentifyResponse(BaseModel):
     role: str
     project_id: int
     project_prefix: str
+    # DWB-332: signal to the agent at startup whether this project is wired
+    # to Jira. True when project.jira_base_url is set. Agents key Jira-side
+    # decisions (dwb2jira invocations, jira_issue_key reads) on this.
+    jira_enabled: bool
     memory_dir: str
     scratchpad_excerpt: str
     instructions: list[InstructionPayload]

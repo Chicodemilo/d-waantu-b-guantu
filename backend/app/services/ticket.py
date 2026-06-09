@@ -58,6 +58,30 @@ def get_ticket(db: Session, ticket_id: int) -> Ticket | None:
     return db.get(Ticket, ticket_id)
 
 
+def _raise_if_jira_disabled(project: Project, jira_issue_key) -> None:
+    """DWB-332: refuse jira_issue_key writes when the project is not
+    Jira-linked. Idempotent on falsy values (None / "") so callers that
+    submit jira_issue_key=null on a non-Jira project still pass through.
+    """
+    if jira_issue_key and not project.jira_base_url:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "jira_disabled_for_project",
+                "message": (
+                    f"Project {project.id} ({project.prefix!r}) is not "
+                    f"linked to Jira (jira_base_url is null). "
+                    f"jira_issue_key cannot be set. Enable Jira on the "
+                    f"project via PATCH /api/projects/{project.id} "
+                    f"{{\"jira_base_url\": \"...\", "
+                    f"\"jira_project_key\": \"...\"}} first."
+                ),
+                "field": "jira_issue_key",
+                "project_id": project.id,
+            },
+        )
+
+
 def create_ticket(db: Session, data: TicketCreate) -> Ticket:
     values = data.model_dump()
 
@@ -65,6 +89,9 @@ def create_ticket(db: Session, data: TicketCreate) -> Ticket:
     project = db.get(Project, values["project_id"])
     if not project:
         raise HTTPException(404, "Project not found")
+
+    # DWB-332: Jira-disabled hard gate at create time.
+    _raise_if_jira_disabled(project, values.get("jira_issue_key"))
 
     # Auto-assign sprint_id if not provided
     if values.get("sprint_id") is None:
@@ -118,6 +145,14 @@ def update_ticket(db: Session, ticket: Ticket, data: TicketUpdate) -> Ticket:
                 "field": "sprint_id",
             },
         )
+
+    # DWB-332: Jira-disabled hard gate on PATCH. Refuses jira_issue_key
+    # writes when the project is not linked. Loading the project on every
+    # update is a small extra query; acceptable for the safety it adds.
+    if "jira_issue_key" in updates and updates["jira_issue_key"]:
+        project = db.get(Project, ticket.project_id)
+        if project is not None:
+            _raise_if_jira_disabled(project, updates["jira_issue_key"])
 
     for key, value in updates.items():
         setattr(ticket, key, value)

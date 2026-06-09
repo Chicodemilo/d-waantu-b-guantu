@@ -75,6 +75,7 @@ class TestIdentifyHappyPath:
         data = r.json()
         assert set(data.keys()) == {
             "agent_id", "name", "role", "project_id", "project_prefix",
+            "jira_enabled",  # DWB-332
             "memory_dir", "scratchpad_excerpt", "instructions",
         }
         assert data["agent_id"] == agent["id"]

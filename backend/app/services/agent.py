@@ -150,6 +150,9 @@ def identify_agent(
         "role": agent.role,
         "project_id": project.id,
         "project_prefix": project.prefix,
+        # DWB-332: explicit jira_enabled flag so agents don't have to peek
+        # at project.jira_base_url themselves.
+        "jira_enabled": bool(project.jira_base_url),
         "memory_dir": memory_dir,
         "scratchpad_excerpt": scratchpad_excerpt,
         "instructions": instructions,

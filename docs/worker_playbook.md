@@ -8,6 +8,7 @@
 
 D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself.
 
+<!-- jira-only:start -->
 ## Canonical Tools
 
 > **If your project does not have Jira enabled (`project.jira_base_url` is null), skip this section** — use the DWB API directly for ticket transitions (`PATCH /api/tickets/{id}` with `{"status": "..."}` + `X-Agent-ID` header). The D2J CLI is only relevant for Jira-linked projects.
@@ -22,6 +23,18 @@ All ticket operations go through the D2J (DWB_2_JIRA) CLI — it keeps Jira and 
 - **D2J defaults to the project_id set in your D2J config; verify with `dwb2jira config show`.** If you need to operate on a different project than your shell's default (e.g. transitioning a D2J self-management ticket from a non-D2J working dir), prefix with `DWB_PROJECT_ID=N dwb2jira ticket transition ...` so the twin lookup hits the right project. Otherwise the dual-write falls back to Jira-only with a "no twin" warning.
 
 Full reference: `~/Dev/DWB_2_JIRA/README.md`. Status vocabulary (terminal vs non-terminal, Jira↔DWB mapping): `~/Dev/DWB_2_JIRA/README.md §Terminal vs non-terminal status vocabulary`.
+<!-- jira-only:end -->
+
+<!-- non-jira-only:start -->
+## Canonical Tools (no Jira)
+
+This project is not linked to Jira. All ticket operations go directly through the DWB API. Do not invoke `dwb2jira` tools; do not reference Jira issue keys.
+
+- **Transition your ticket:** `PATCH /api/tickets/{id}` with `{"status": "..."}` + `X-Agent-ID: {your_agent_id}` header.
+- **Pull tickets:** `GET /api/tickets?project_id={pid}&assigned_agent_id={your_id}`.
+
+Full workflow under § Ticket Workflow below.
+<!-- non-jira-only:end -->
 
 ## On Spawn — Identity (REQUIRED)
 
@@ -93,6 +106,7 @@ Every new file MUST have a code header. See `docs/rules/global/code-header-forma
 
 ## Ticket Workflow
 
+<!-- jira-only:start -->
 ### Discover first (if unsure)
 
 If you don't know what transitions are valid on your assigned ticket — or if this project uses non-standard status labels — run this before anything:
@@ -143,6 +157,28 @@ curl -X PATCH http://localhost:8000/api/tickets/{dwb_id} \
 (PM owns that recovery — it's in their playbook § 4 Exception (a). Shown here so you can sanity-check the fix.)
 
 If you get blocked on the work itself, message the TL immediately — don't sit on it.
+<!-- jira-only:end -->
+
+<!-- non-jira-only:start -->
+### Pick up -> work -> hand off (no Jira)
+
+This project is not linked to Jira (`project.jira_base_url` is null). All ticket transitions go directly through the DWB API. Do not invoke `dwb2jira` tools; do not write to `jira_issue_key`.
+
+1. **Pick up:**
+   ```
+   PATCH /api/tickets/{ticket_id} -H "X-Agent-ID: {agent_id}" -d '{"status": "in_progress"}'
+   ```
+2. **Do the work.**
+3. **Hand off:**
+   ```
+   PATCH /api/tickets/{ticket_id} -H "X-Agent-ID: {agent_id}" -d '{"status": "in_review"}'
+   ```
+4. **Message the TL** that work is ready for review. Include what you did, files changed, staged/committed status, anything unexpected.
+
+Status vocabulary: `todo` -> `in_progress` -> `in_review` -> `done`. Use the ticket's database `id` in the URL path; the `ticket_key` (e.g. `PROJ-001`) is for human display, not API paths.
+
+If you get blocked on the work, message the TL — don't sit on it.
+<!-- non-jira-only:end -->
 
 ## Sprint Close — Consolidation (REQUIRED)
 
