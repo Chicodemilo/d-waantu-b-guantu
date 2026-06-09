@@ -36,9 +36,29 @@ Deployed to each project's `.claude/` via the Deploy Playbooks button. Playbooks
 | Action | Endpoint | Notes |
 |--------|----------|-------|
 | Create from repo | `POST /api/projects/from-repo` | Body: `{ "repo_path": "..." }` — auto-populates from repo metadata |
-| Create manually | `POST /api/projects` | Required: `prefix`, `name`, `description`. Optional: `repo_path`, `status` |
-| Update project | `PATCH /api/projects/{id}` | |
+| Create manually | `POST /api/projects` | Required: `prefix`, `name`, `description`. Optional: `repo_path`, `status`, `jira_base_url`, `jira_project_key` |
+| Update project | `PATCH /api/projects/{id}` | Used to enable/disable Jira on an existing project (set/clear `jira_base_url` + `jira_project_key`) |
 | Check gates | `GET /api/projects/{id}/gate-status` | Shows which doc gates pass/fail |
+
+### Jira fields: `prefix` vs `jira_project_key`
+
+These are **two different keys** and can legitimately differ. Don't conflate them at setup time.
+
+- `prefix` — DWB-internal display key (e.g. `DWB`, `CI`, `RVP`). Stamped on every DWB ticket (`DWB-123`). Never leaves DWB. Required.
+- `jira_project_key` — the actual Jira project key on the Atlassian side (e.g. `POR`). Used by `dwb2jira` to find the Jira project. Required only when linking to Jira.
+- `jira_base_url` — the Atlassian instance URL (e.g. `https://yourorg.atlassian.net`). Presence of this field is what flips `jira_enabled=true` for agents (DWB-332).
+
+**Canonical mismatch example:** FRAUDI's DWB prefix is `CI` (display) but its Jira project key is `POR`. Both point at the same Jira project; one is for DWB display, the other is for the Jira API.
+
+**Enabling Jira on an existing project:**
+```
+PATCH /api/projects/{id}
+{
+  "jira_base_url": "https://yourorg.atlassian.net",
+  "jira_project_key": "POR"
+}
+```
+Until both fields are set, `POST/PATCH /api/tickets` will refuse `jira_issue_key` writes with `400 jira_disabled_for_project` — the gate exists to prevent the silent broken state of half-linked tickets. If a worker reports that error, check project config first; don't relax the gate.
 
 ### First-Run Checklist (New Projects)
 

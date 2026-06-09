@@ -157,6 +157,8 @@ curl -X PATCH http://localhost:8000/api/tickets/{dwb_id} \
 (PM owns that recovery — it's in their playbook § 4 Exception (a). Shown here so you can sanity-check the fix.)
 
 If you get blocked on the work itself, message the TL immediately — don't sit on it.
+
+**`jira_disabled_for_project` 400 on POST/PATCH:** the DWB ticket router refuses `jira_issue_key` writes when the project's `jira_base_url` is null. This is intentional (DWB-332). If you see it on a project you expected to be Jira-linked, the project config is wrong, not your call. Stop, surface to the TL with the error body, do NOT try to bypass. Example fix path lives in TL playbook § 1 Project Setup.
 <!-- jira-only:end -->
 
 <!-- non-jira-only:start -->
