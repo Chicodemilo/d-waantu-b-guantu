@@ -6,7 +6,7 @@
 # Callees: All model modules
 # Data In: None
 # Data Out: All model classes
-# Last Modified: 2026-06-04
+# Last Modified: 2026-06-09
 
 from app.models.project import Project, ProjectStatus
 from app.models.sprint import Sprint, SprintStatus
@@ -26,6 +26,12 @@ from app.models.hook_session import HookSession, HookSessionStatus, HookSessionT
 from app.models.error_log import ErrorLog, ErrorSource
 from app.models.failed_hook import FailedHook
 from app.models.agent_consolidation_ack import AgentConsolidationAck
+from app.models.dwb_session import (
+    DwbSession,
+    DwbOpenMethod,
+    DwbCloseMethod,
+    DwbCloseReason,
+)
 
 __all__ = [
     "Project", "ProjectStatus",
@@ -46,4 +52,5 @@ __all__ = [
     "ErrorLog", "ErrorSource",
     "FailedHook",
     "AgentConsolidationAck",
+    "DwbSession", "DwbOpenMethod", "DwbCloseMethod", "DwbCloseReason",
 ]

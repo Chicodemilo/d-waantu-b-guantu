@@ -6,7 +6,7 @@
 # Callees: app.config.settings, app.database.Base, app.models
 # Data In: alembic.ini config, app settings (DB URL)
 # Data Out: Migration execution against target database
-# Last Modified: 2026-04-09
+# Last Modified: 2026-06-09
 
 import sys
 from logging.config import fileConfig
@@ -24,6 +24,7 @@ from app.models import (  # noqa: E402, F401
     Project, Sprint, Epic, Agent, ProjectAgent,
     Ticket, Comment, Alert, Instruction, ActivityLog,
     TestResult, HookSession, AgentConsolidationAck,
+    DwbSession,
 )
 
 config = context.config

@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: HookSession, HookSessionStatus, HookSessionType
-# Last Modified: 2026-04-09
+# Last Modified: 2026-06-09
 
 import enum
 from datetime import datetime
@@ -46,6 +46,13 @@ class HookSession(Base):
     )
     sprint_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("sprints.id"), nullable=True, index=True
+    )
+    # DWB-335: link a hook session to its enclosing DWB session for rollup.
+    # NULL allowed — historical rows predate the DWB session model and must
+    # remain valid; future ingestion sets this when an open DWB session is
+    # found for the project at hook receipt time.
+    dwb_session_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("dwb_sessions.id"), nullable=True, index=True
     )
     start_time: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()

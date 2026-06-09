@@ -1,0 +1,115 @@
+# Path: app/models/dwb_session.py
+# File: dwb_session.py
+# Created: 2026-06-09
+# Purpose: DwbSession ORM model — passive user-bounded session for time + token rollup (DWB-335)
+# Caller: app/services/dwb_session.py (DWB-337), app/routers/dwb_sessions.py (DWB-338)
+# Callees: app/database.Base
+# Data In: DB rows
+# Data Out: DwbSession, DwbOpenMethod, DwbCloseMethod, DwbCloseReason
+# Last Modified: 2026-06-09
+
+import enum
+from datetime import datetime
+
+from sqlalchemy import (
+    BigInteger,
+    Computed,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    SmallInteger,
+    Text,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
+
+
+class DwbOpenMethod(str, enum.Enum):
+    regex = "regex"
+    ai_confident = "ai_confident"
+    ai_asked = "ai_asked"
+
+
+class DwbCloseMethod(str, enum.Enum):
+    regex = "regex"
+    ai_confident = "ai_confident"
+    ai_asked = "ai_asked"
+    idle_timeout = "idle_timeout"
+
+
+class DwbCloseReason(str, enum.Enum):
+    explicit = "explicit"
+    idle = "idle"
+    manual = "manual"
+
+
+class DwbSession(Base):
+    """A DWB session — a user-bounded span (open phrase -> close phrase / idle)
+    that aggregates one or more Claude Code hook_sessions for passive time +
+    token rollup.
+
+    Single-active invariant: at most one row per project_id with closed_at IS
+    NULL. Enforced by a STORED generated column (`is_open` = 1 when closed_at
+    IS NULL else NULL) plus a composite UNIQUE index on (project_id, is_open).
+    MySQL treats NULL as distinct in UNIQUE, so closed rows never collide.
+    """
+
+    __tablename__ = "dwb_sessions"
+    __table_args__ = (
+        Index(
+            "uq_dwb_sessions_one_open_per_project",
+            "project_id",
+            "is_open",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("projects.id"), nullable=False, index=True
+    )
+
+    opened_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    open_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
+    close_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    open_method: Mapped[DwbOpenMethod] = mapped_column(
+        Enum(DwbOpenMethod), nullable=False
+    )
+    close_method: Mapped[DwbCloseMethod | None] = mapped_column(
+        Enum(DwbCloseMethod), nullable=True
+    )
+    close_reason: Mapped[DwbCloseReason | None] = mapped_column(
+        Enum(DwbCloseReason), nullable=True
+    )
+
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_time_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+
+    # Generated single-active marker: 1 when closed_at IS NULL, NULL when
+    # closed_at IS NOT NULL. The (project_id, is_open) UNIQUE index above
+    # uses this to enforce one-open-per-project. Generated STORED so the
+    # UNIQUE index has a concrete value to compare against on MySQL.
+    is_open: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        Computed(
+            "(CASE WHEN closed_at IS NULL THEN 1 ELSE NULL END)",
+            persisted=True,
+        ),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
