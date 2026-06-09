@@ -2,7 +2,7 @@
 /* File: charts.css */
 /* Created: 2026-03-29 */
 /* Purpose: Styles for ASCII horizontal bar charts, progress bars, sparklines, and vertical bar (VU meter) charts */
-/* Last Modified: 2026-04-09 */
+/* Last Modified: 2026-06-09 */
 
 .ascii-chart {
   padding: 16px;
@@ -94,10 +94,18 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: middle;
+  margin-left: 3px;
 }
 
 .progress-bar__empty {
   color: var(--gray);
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: middle;
+  margin-right: 3px;
 }
 
 .progress-bar__pct {

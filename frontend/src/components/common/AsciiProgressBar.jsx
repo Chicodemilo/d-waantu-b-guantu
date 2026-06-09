@@ -6,7 +6,7 @@
 // Callees: charts.css
 // Data In: props { value, max, width }
 // Data Out: default export AsciiProgressBar component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-09
 
 import '../../styles/charts.css';
 
