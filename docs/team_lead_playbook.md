@@ -203,6 +203,26 @@ Sprints can carry 1-3 small polish tickets alongside the main goal — usually C
 - If a side ticket balloons (more files, ambiguous scope, hours of work), file it as backlog and pull it from the sprint.
 - The rule is breakable: don't refuse side tickets citing "sprint scope."
 
+## 4e. DWB Session Awareness (TL-only)
+
+A DWB session bounds passive time + token tracking by user intent, not by Claude Code session boundaries. Single-active per project: at most one session open at any time. Workers never participate in lifecycle; only the TL evaluates intent and acts.
+
+**On every user turn, evaluate the message against three outcomes:**
+
+1. **Confident open or close** — the user clearly says open ("you are archie, read the playbook") or close ("have the team write docs and exit", "shut it down for the night"). Act, then announce in one line.
+   - Open: `POST /api/sessions/open` with `open_method="ai_confident"` (or `"regex"` if the SessionStart hook already caught it, check `GET /api/projects/{id}/sessions?status=open` first). On 201, announce "Opened DWB session N."
+   - Close: `POST /api/sessions/{id}/close` with `close_method="ai_confident"`, `close_reason="explicit"`. On 200, announce "Closing DWB session N (X tokens, Y seconds)."
+
+2. **Ambiguous** — wording suggests intent but isn't certain (e.g. "let's wrap up" without "for the night"; "you are archie" with no playbook clause). Ask one short clarifying question before acting. If the user confirms, post with `open_method="ai_asked"` / `close_method="ai_asked"` so the rollup records which layer caught it.
+
+3. **Irrelevant** — most messages. Do nothing. The regex fast path (Layer 1) catches obvious cases automatically via the SessionStart/SessionEnd hooks; the AI reasoning (Layer 2) is a backstop, not a per-turn ritual.
+
+**Method enum:** `regex` = caught by the hook fast path, `ai_confident` = TL acted without asking, `ai_asked` = TL confirmed first. Stored on the DwbSession row so the dashboard can show which layer is doing the work.
+
+**Race with the regex layer:** if the regex hook opens first, your AI-side attempt returns 409 with the active session's id, silently noop and read that id for any follow-up announcements. Same for close: the regex hook may beat you to it, in which case `close` returns 200 (idempotent), not an error.
+
+**Idle timeout:** after 60min of zero activity (no hook_session updates, no tracking_log writes), the background sweeper auto-closes with `close_method="idle_timeout"`. If you forget to close, the system catches it.
+
 ## 5. TL Workflow — Typical Session
 
 1. Check open alerts (`GET /api/alerts?status=open` + `ALERTS_PENDING.md`)
