@@ -5,8 +5,8 @@
 # Caller: app/routers/hooks.py
 # Callees: pydantic
 # Data In: JSON request body from Claude Code hooks
-# Data Out: HookEventInput (incl. SubagentStop fields), HookSessionRead
-# Last Modified: 2026-04-16
+# Data Out: HookEventInput (incl. SubagentStop + UserPromptSubmit fields), HookSessionRead
+# Last Modified: 2026-06-09
 
 from datetime import datetime
 
@@ -23,6 +23,7 @@ class HookEventInput(BaseModel):
 
     SessionStart/SessionEnd send: session_id, transcript_path, cwd, hook_event_name
     SubagentStop additionally sends: agent_type, agent_id, agent_transcript_path
+    UserPromptSubmit additionally sends: prompt (the raw user prompt text)
     """
     session_id: str | None = None
     transcript_path: str | None = None
@@ -34,6 +35,9 @@ class HookEventInput(BaseModel):
     agent_type: str | None = None
     agent_id: str | None = None
     agent_transcript_path: str | None = None
+    # UserPromptSubmit-specific field (DWB-344): the raw text the user typed.
+    # Optional - tolerant handler noops when missing/empty.
+    prompt: str | None = None
 
 
 class HookSessionRead(BaseModel):

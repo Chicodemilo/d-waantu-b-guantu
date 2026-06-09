@@ -1,7 +1,7 @@
 # Path: app/services/hook_tracking.py
 # File: hook_tracking.py
 # Created: 2026-04-09
-# Purpose: Hook-based tracking service — handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336)
+# Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path)
 # Caller: app/routers/hooks.py
 # Callees: app/models/hook_session.py, app/services/tracking.py, app/services/dwb_session.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
@@ -336,10 +336,20 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
 
     # DWB-336: Layer-1 regex fast path for session-close detection. Same
     # post-commit timing as the open path so token attribution lands first.
+    #
+    # DWB-343: also run the OPEN regex retry here. Claude Code's SessionStart
+    # hook fires ~2s before the user's first message hits the transcript JSONL,
+    # so the Layer-1 open scan in handle_session_start frequently misses on the
+    # very first hook of a session. By the time any Stop/SessionEnd/SubagentStop
+    # fires (i.e., after the first assistant turn), the user's first message is
+    # in the transcript and OPEN_PATTERNS can match. open_session no-ops
+    # silently when a session is already open, so calling unconditionally is
+    # safe and never disturbs a Layer-2 (ai_confident) open.
     if session.project_id:
         project = db.get(Project, session.project_id)
         if project is not None:
             try_close_dwb_session_from_transcript(db, project, transcript_path)
+            try_open_dwb_session_from_transcript(db, project, transcript_path)
 
     return session
 
@@ -1284,6 +1294,75 @@ def try_close_dwb_session_from_transcript(
             raw_payload={"project_id": project.id, "transcript_path": transcript_path},
             error=f"{type(e).__name__}: {e}",
         )
+
+
+def handle_user_prompt(db: Session, hook_data: dict) -> dict:
+    """Handle a UserPromptSubmit hook event (DWB-344).
+
+    The fastest available path for open-phrase detection: Claude Code fires
+    UserPromptSubmit synchronously as the user submits a message and includes
+    the raw prompt text in the payload, so we match against
+    ``match_open(prompt)`` directly without scanning the transcript.
+
+    Why this exists: the SessionStart hook fires before the user's first
+    message lands in the transcript, so the Layer-1 transcript-scan path
+    (DWB-336) misses the initial open phrase. DWB-343 retries on
+    SessionEnd; DWB-344 is the instant-detection sibling.
+
+    Contract:
+
+      - Tolerant: if ``prompt`` is missing/empty, the project can't be
+        resolved from cwd, or no open phrase matches, this is a silent noop.
+      - Single-active: if the project already has an open DWB session, noop.
+      - Fire-and-forget: every exception is swallowed and logged to
+        failed_hooks. Returns a small status dict either way; the router
+        always returns HTTP 200.
+    """
+    try:
+        prompt = hook_data.get("prompt")
+        if not prompt:
+            return {"status": "noop", "reason": "no_prompt"}
+
+        cwd = hook_data.get("cwd", "")
+        project = _resolve_project(db, cwd)
+        if not project:
+            return {"status": "noop", "reason": "no_project_for_cwd"}
+
+        phrase = match_open(prompt)
+        if not phrase:
+            return {"status": "noop", "reason": "no_phrase_match"}
+
+        # Single-active guard: defer to open_session for the actual race-safe
+        # check, but short-circuit here so the common case doesn't churn the
+        # transaction.
+        if dwb_svc.get_active_session(db, project.id) is not None:
+            return {"status": "noop", "reason": "already_open"}
+
+        new_session, _existing = dwb_svc.open_session(
+            db,
+            project_id=project.id,
+            opened_at=datetime.now(UTC),
+            open_method=DwbOpenMethod.regex,
+            open_phrase=phrase,
+        )
+        if new_session is None:
+            # Lost the race; another caller opened concurrently. Treat as noop.
+            return {"status": "noop", "reason": "already_open"}
+        db.commit()
+        return {
+            "status": "opened",
+            "dwb_session_id": new_session.id,
+            "open_phrase": phrase,
+        }
+    except Exception as e:
+        logger.exception("handle_user_prompt failed")
+        log_failed_hook(
+            hook_event=hook_data.get("hook_event_name") or "UserPromptSubmit",
+            status_code=None,
+            raw_payload=hook_data,
+            error=f"{type(e).__name__}: {e}",
+        )
+        return {"status": "error", "detail": f"{type(e).__name__}: {e}"}
 
 
 def _create_unattributed_alert(db: Session, session: HookSession) -> None:

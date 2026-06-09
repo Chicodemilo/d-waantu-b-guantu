@@ -1,12 +1,12 @@
 # Path: app/routers/hooks.py
 # File: hooks.py
 # Created: 2026-04-09
-# Purpose: HTTP endpoints for Claude Code lifecycle hooks
+# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit)
 # Caller: app/main.py
 # Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/models/hook_session.py
 # Data In: HTTP POST from curl hook commands
 # Data Out: JSON responses (HookSession data)
-# Last Modified: 2026-06-03
+# Last Modified: 2026-06-09
 
 """Hook endpoints for passive tracking.
 
@@ -72,6 +72,38 @@ def hook_session_end(data: HookEventInput, db: Session = Depends(get_db)):
         logger.exception("hook_session_end error")
         log_failed_hook(
             hook_event=data.hook_event_name or "SessionEnd",
+            status_code=200,
+            raw_payload=data.model_dump(),
+            error=f"{type(e).__name__}: {e}",
+        )
+        return {
+            "status": "error",
+            "detail": str(e),
+        }
+
+
+@router.post("/user-prompt", status_code=200)
+def hook_user_prompt(data: HookEventInput, db: Session = Depends(get_db)):
+    """Receive a UserPromptSubmit hook event from Claude Code (DWB-344).
+
+    Fast-path open-phrase detection: CC fires this hook the instant the user
+    submits a message and includes the raw prompt text in the payload, so we
+    can open the DWB session synchronously without waiting for the next
+    SessionEnd retry.
+
+    Like the other hook endpoints, this MUST NEVER return 5xx. Every failure
+    swallows, logs to failed_hooks, and returns HTTP 200.
+    """
+    try:
+        result = svc.handle_user_prompt(db, data.model_dump())
+        return result
+    except Exception as e:
+        # Belt-and-suspenders: the service already swallows, but if anything
+        # leaks (e.g. pydantic edge case before the service is entered)
+        # we still 200 the caller.
+        logger.exception("hook_user_prompt error")
+        log_failed_hook(
+            hook_event=data.hook_event_name or "UserPromptSubmit",
             status_code=200,
             raw_payload=data.model_dump(),
             error=f"{type(e).__name__}: {e}",
