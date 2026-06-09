@@ -532,3 +532,77 @@ class TestSessionDetailOverhead:
         body = r.json()
         assert body["tl_overhead_tokens"] == 1500 + 300
         assert body["pm_overhead_tokens"] == 800
+
+
+class TestSessionDetailEdgeCases:
+    """Edge cases that lock in correct NULL handling + window clamping."""
+
+    def test_open_session_with_no_hook_sessions_returns_zeros(
+        self, client, make_project, insert_dwb_session
+    ):
+        """A freshly-opened session with zero linked hook_sessions must
+        return total_tokens=0 cleanly (no NULL bleed from the COALESCE
+        in compute_live_totals) and total_time_seconds >= 0 (wall clock
+        is monotonic). Empty by_role and by_ticket arrays, zero overhead.
+        """
+        project = make_project()
+        sess = insert_dwb_session(project["id"], opened_offset_minutes=5)
+
+        r = client.get(f"/api/sessions/{sess.id}")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "open"
+        assert body["live"] is True
+        assert body["total_tokens"] == 0
+        assert body["total_time_seconds"] >= 0
+        assert body["by_role"] == []
+        assert body["by_ticket"] == []
+        assert body["tl_overhead_tokens"] == 0
+        assert body["pm_overhead_tokens"] == 0
+
+    def test_hook_session_starting_before_open_is_clamped(
+        self,
+        client,
+        make_project,
+        make_agent,
+        insert_dwb_session,
+        insert_hook_session,
+    ):
+        """A hook_session whose start_time is BEFORE the DWB session's
+        opened_at should have its time clamped to the window — credit only
+        the wall-clock overlap, not the full hook duration. Tokens stay
+        whole (hook_session.total_tokens is a scalar, not time-windowed).
+
+        Scenario: hook ran from 90min ago to 30min ago (60min duration).
+        DWB session opened 60min ago and closed 10min ago.
+        Overlap window = 60min ago .. 30min ago = 30min.
+        time_seconds for the agent must be exactly 30*60, NOT 60*60.
+        """
+        project = make_project()
+        agent = make_agent(project_id=project["id"], role="backend-worker")
+        sess = insert_dwb_session(
+            project["id"],
+            opened_offset_minutes=60,
+            closed_offset_minutes=10,
+        )
+        insert_hook_session(
+            project["id"],
+            session_id="straddles-open",
+            agent_id=agent["id"],
+            start_offset_minutes=90,  # 90 min ago — BEFORE opened_at
+            end_offset_minutes=30,    # 30 min ago — inside window
+            total_tokens=5000,
+            dwb_session_id=sess.id,
+        )
+
+        r = client.get(f"/api/sessions/{sess.id}")
+        body = r.json()
+        by_role = body["by_role"]
+        assert len(by_role) == 1
+        entry = by_role[0]
+        assert entry["agent_id"] == agent["id"]
+        # Tokens not clamped — full hook total counts.
+        assert entry["tokens"] == 5000
+        # Time clamped to overlap (window_start -> hook end) = 30 minutes.
+        # Allow 5s slack for test wall-time jitter on the now-anchored fixture.
+        assert 30 * 60 - 5 <= entry["time_seconds"] <= 30 * 60 + 5
