@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AgentCreate, AgentUpdate, AgentRead
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-10
 
 from datetime import datetime
 
@@ -88,6 +88,11 @@ class AgentIdentifyResponse(BaseModel):
     memory_dir: str
     scratchpad_excerpt: str
     instructions: list[InstructionPayload]
+    # DWB-352: condensed inline memory-usage rules from
+    # app.config.memory_rules.MEMORY_USAGE_RULES (single source of truth,
+    # <=600 chars). Surfaced so every spawn delivers the rules regardless
+    # of whether the worker opens the full playbook.
+    memory_usage_rules: str
 
 
 # --- /spawn-prepare endpoint -----------------------------------------------
@@ -103,6 +108,14 @@ class SpawnPrepareResponse(BaseModel):
     identity_prompt: str
     scratchpad_excerpt: str
     boundary_rules: str
+    # DWB-341: absolute memory_dir path. The endpoint guarantees this dir +
+    # its core files (identity.md, scratchpad.md, lessons.md,
+    # recent_sessions.md) exist on return; agents reading the spawn payload
+    # can rely on the path being live without a separate scaffold call.
+    memory_dir: str
+    # DWB-352: same constant the identify endpoint surfaces, so a TL building
+    # a spawn prompt can drop the rules inline.
+    memory_usage_rules: str
 
 
 # --- /{id}/session-complete endpoint ---------------------------------------
@@ -135,4 +148,40 @@ class MarkerResponse(BaseModel):
     agent_id: int
     session_id: str
     marker_path: str
+    bytes_written: int
+
+
+# --- /{id}/memory/append (DWB-358) ------------------------------------------
+
+
+# Literal type pins the file enum at the schema layer; FastAPI returns 422
+# automatically on a value outside the whitelist. The service layer also
+# defends against this (defense in depth) and returns 400 if the schema is
+# bypassed (e.g. direct service call from another module).
+from typing import Literal
+
+
+class MemoryAppendRequest(BaseModel):
+    """POST /api/agents/{agent_id}/memory/append body (DWB-358).
+
+    file: which of the three agent-owned memory files to append to.
+          identity.md is system-generated and not accepted.
+    content: the body of the appended block. The server prepends an ISO
+             8601 UTC heading; the caller does NOT include the heading.
+             Empty / whitespace-only content is refused at 400.
+    session_id: optional; appears in the heading as "## <ts> - session <id>"
+                so a human reading the file can tie the entry to a CC
+                session. Omit when the append isn't session-scoped.
+    """
+
+    file: Literal["scratchpad", "lessons", "recent_sessions"]
+    content: str
+    session_id: str | None = None
+
+
+class MemoryAppendResponse(BaseModel):
+    agent_id: int
+    file: str
+    path: str
+    timestamp: str
     bytes_written: int

@@ -1,12 +1,12 @@
 // Path: src/components/dashboard/TimeTokens.jsx
 // File: TimeTokens.jsx
 // Created: 2026-03-30
-// Purpose: Tabbed "Time & Tokens" section with data tables (by project, by agent, overhead) and expandable per-ticket breakdowns
+// Purpose: Tabbed "Time & Tokens" section with data tables (by project, by agent, overhead) and expandable per-ticket breakdowns. Overhead section includes Team Lead + PM rows (per agent) plus an Ad Hoc row sourced from project_total.ad_hoc_overhead_tokens / ad_hoc_overhead_seconds (DWB-353/354). Ad Hoc fields are null-guarded to 0 so the row renders even before the backend ships them.
 // Caller: DashboardPage.jsx, ProjectPage.jsx
 // Callees: react (useState, useEffect), useStore, services/tracking, utils/format, dashboard.css
 // Data In: Optional projectId prop (single project mode); projects from store; tracking summaries from API
 // Data Out: default export TimeTokens component
-// Last Modified: 2026-03-30
+// Last Modified: 2026-06-10
 
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
@@ -45,7 +45,7 @@ function TTSection({ title, tooltip, columns, rows, tickets }) {
                     className={`tt-table__row ${hasTickets ? 'tt-table__row--expandable' : ''}`}
                     onClick={() => { if (hasTickets) setExpanded(isOpen ? null : i); }}
                   >
-                    {hasTickets && (
+                    {(hasTickets || row.forceCaret) && (
                       <span className={`tt-caret ${isOpen ? 'tt-caret--open' : ''}`}>&#9654;</span>
                     )}
                     <span className="tt-table__name">{row.label}</span>
@@ -161,6 +161,32 @@ function TimeTokens({ projectId }) {
     ticketFilter: (t) => t.assigned_agent_id === a.agent_id,
   }));
 
+  // Ad Hoc row: worker overhead not tied to a ticket. Pulled from each project's
+  // tracking summary (sums across multiple projects on the dashboard view).
+  // Null-guarded to 0 so the row exists in the UI before DWB-353 lands the
+  // ad_hoc_overhead_tokens / ad_hoc_overhead_seconds fields on the API.
+  const adHocTotals = projects.reduce(
+    (acc, p) => {
+      const summary = summaries[p.id];
+      const pt = (summary && summary.project_total) || {};
+      acc.tokens += pt.ad_hoc_overhead_tokens || 0;
+      acc.time += pt.ad_hoc_overhead_seconds || 0;
+      return acc;
+    },
+    { tokens: 0, time: 0 }
+  );
+  overheadRows.push({
+    label: 'Ad Hoc',
+    tokensDisplay: formatTokens(adHocTotals.tokens),
+    timeDisplay: formatTime(adHocTotals.time),
+    // Ad Hoc work has no ticket-level breakdown; the caret is a static visual
+    // placeholder for row-shape parity with the TL/PM rows and the click is a
+    // noop. If/when a per-worker breakdown lands, swap ticketFilter for the
+    // actual filter and drop forceCaret.
+    ticketFilter: () => false,
+    forceCaret: true,
+  });
+
   return (
     <div className="time-tokens">
       <div className="time-tokens__body">
@@ -182,7 +208,7 @@ function TimeTokens({ projectId }) {
         />
         <TTSection
           title="Overhead"
-          tooltip="Team Lead and PM coordination — not tied to specific tickets."
+          tooltip="Team Lead, PM coordination, and worker ad-hoc work. None of these are tied to specific tickets - ad-hoc covers small fixes a worker did without a ticket being filed."
           columns={columns}
           rows={overheadRows}
           tickets={allTickets}

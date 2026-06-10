@@ -69,19 +69,25 @@ class TestOpenEndpoint:
         assert body["total_time_seconds"] == 0
 
     def test_201_with_open_phrase(self, client, make_project):
+        """DWB-351: AI-method opens null out the phrase regardless of
+        what the caller sends (privacy: user-typed text never persisted).
+        This test now uses open_method=regex to exercise the with-phrase
+        success path; the AI-method null-out is covered in
+        test_dwb_session_phrase_privacy.py.
+        """
         project = make_project()
         r = client.post(
             "/api/sessions/open",
             json={
                 "project_id": project["id"],
                 "opened_at": _opened_at_iso(),
-                "open_method": "ai_confident",
+                "open_method": "regex",
                 "open_phrase": "you are archie, read the playbook",
             },
         )
         assert r.status_code == 201
         body = r.json()
-        assert body["open_method"] == "ai_confident"
+        assert body["open_method"] == "regex"
         assert body["open_phrase"] == "you are archie, read the playbook"
 
     def test_409_when_active_session_exists(self, client, make_project):

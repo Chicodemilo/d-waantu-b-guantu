@@ -110,6 +110,12 @@ Hook config lives in `.claude/settings.json`. Zero manual intervention needed.
 
 ---
 
+## DWB Sessions
+
+A DWB session is a user-bounded span of work on a project: it opens when you signal the team to start ("you are archie, read the playbook"), closes when you signal them to stop ("write docs and exit", "shut it down for the night"), and rolls up the total tokens and wall-clock time across every Claude Code session that ran in between (TL, workers, subagents). One DWB session typically spans many CC sessions. Single-active per project, DB-enforced. A 60-minute idle sweeper closes sessions you forget about. Two detection layers - regex fast path on hooks (instant) and TL reasoning (backstop for the long tail) - both tag the row with which layer caught the open/close so the dashboard can show the breakdown. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
+
+---
+
 ## Sprint Gates
 
 Boolean toggles that gate sprint completion:

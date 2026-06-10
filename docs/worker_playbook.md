@@ -42,11 +42,11 @@ Full workflow under § Ticket Workflow below.
 
 Before doing ANY work, establish who you are on this project:
 
-1. **Identify yourself.** `POST /api/agents/identify` with `{role, name, project_prefix}` (use the name from your spawn brief; for fixed-role agents this may be a `_<PROJECT_PREFIX>` suffixed form like `Archie_DWB`, but the endpoint accepts the short name too). Response includes `agent_id`, `memory_dir`, `scratchpad_excerpt`, `instructions[]`, and `jira_enabled` (DWB-332). Canonical shape lives in `app/schemas/agent.py::AgentIdentifyResponse`; the playbook listing here may lag.
+1. **Identify yourself.** `POST /api/agents/identify` with `{role, name, project_prefix}` (use the name from your spawn brief; for fixed-role agents this may be a `_<PROJECT_PREFIX>` suffixed form like `Archie_DWB`, but the endpoint accepts the short name too). Response includes `agent_id`, `memory_dir`, `scratchpad_excerpt`, `instructions[]`, `jira_enabled` (DWB-332), and `memory_usage_rules` (DWB-352): a condensed inline summary of the memory dir layout + append-only rule + ISO 8601 timestamp format. Treat that string as the authoritative quick-reference; the longer Memory Writes section below expands on it. Canonical shape lives in `app/schemas/agent.py::AgentIdentifyResponse`.
    - On `409 ambiguous` or `404 not found`: **HALT** and tell the TL. Never invent an agent_id.
 2. **Cache your `agent_id`.** Include `X-Agent-ID: {agent_id}` on **every** `POST`/`PATCH`/`PUT`/`DELETE` to `/api/`. Without it, your actions log as "system" and your tokens don't attribute.
 3. **Session marker: TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file**: subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop. If you think your marker is missing, tell the TL, they write it.
-4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. Read these in order; if any are missing, **HALT** and tell the TL:
+4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. As of DWB-341, the dir + all four files are guaranteed to exist on spawn: `spawn-prepare` auto-scaffolds idempotently (identity.md refreshed, the other three preserved byte-for-byte when present, created empty when missing). You no longer need to create them yourself; read in this order, and if any are still missing after scaffold, **HALT** and tell the TL:
    - **`identity.md`**: system-generated profile (who you are, file purposes, ISO 8601 rule, read order). **Do not edit by hand**: `scaffold-memory` regenerates this file each time.
    - **`scratchpad.md`**: your in-flight working notes. Append-only, one block per session. Use this as your running memory during a ticket.
    - **`lessons.md`**: durable lessons across sessions. Append a block when something is worth remembering for next time (a gotcha, a pattern, a workaround). Future-you and other agents read this.
@@ -56,27 +56,48 @@ Before doing ANY work, establish who you are on this project:
 
 After identity, read: (1) `.claude/project_rules_worker.md`, (2) `HANDOFF.md`, (3) `ARCHITECTURE.md`, (4) `README.md`. If any are missing, proceed with what you have and flag it.
 
+For context on the DWB session model (open/close phrases, single-active rule, what gets tracked), see `.claude/session_lifecycle.md`. You are NOT responsible for opening or closing sessions: that is TL-only. The reference is there so you understand where your tokens land.
+
+## Protected Files: Never Write These
+
+The Claude Code permission dialog for editing files under `.claude/` crashes subagents in the ink renderer. Four sibling agents died across S66 from this exact pattern, including some that followed prior playbook guidance to "append yourself" inside the memory dir. The current ground truth is stricter:
+
+- **NEVER** use `Edit`, `Write`, or `NotebookEdit` on ANY path under `.claude/`. This includes `.claude/settings.json`, `.claude/settings.local.json`, every playbook, every project_rules file, AND your own memory dir under `.claude/agents/memory/<prefix>/<name>/`. The dialog fires the same way; subagents die the same way.
+- Anywhere outside `.claude/` is safe to write directly (project code, `docs/`, `README.md`, `HANDOFF.md`, etc.).
+- Memory updates go through the API only: see Memory Writes below.
+- If your work requires a `.claude/settings.json` (or other harness-config) change, flag it to the TL; they'll handle the edit directly from the main CC window where a user is attached for the permission dialog.
+
 ## Memory Writes: When and How
 
-You write to your memory dir during and after work. Two paths:
+All writes to your memory dir go through the API. The FastAPI process runs outside the CC ink renderer, so server-side writes never trigger the permission dialog that kills subagents. Two endpoints, one for in-flight notes and one for wrap-up.
 
-**Easy path: `POST /api/agents/{your_agent_id}/session-complete`.** Send a summary payload at session end; the endpoint writes timestamped entries to `scratchpad.md`, `recent_sessions.md`, and (if `lessons` provided) `lessons.md` for you. Formats the ISO 8601 heading automatically. Use this when wrapping a session.
+**Canonical in-flight path: `POST /api/agents/{your_agent_id}/memory/append`** (DWB-358). Use this whenever you want to drop a thought into `scratchpad.md` or capture a lesson mid-ticket. Body:
 
-**Direct path: append the file yourself.** For in-flight notes during a ticket, append to `scratchpad.md` directly. Required format; every entry starts with an ISO 8601 UTC timestamp heading:
-
+```json
+{
+  "file": "scratchpad",
+  "content": "Trying X, hit Y, working around with Z.",
+  "session_id": "optional-cc-session-id"
+}
 ```
-## 2026-06-03T13:48:15Z
-<entry body>
-```
 
-Sortable, greppable, unambiguous across timezones. Other agents traversing your memory split on `## 20` to iterate entries.
+- `file` enum: `scratchpad` | `lessons` | `recent_sessions`. `identity.md` is system-managed; the Pydantic `Literal` rejects an `"identity"` value at 422, and the service layer also refuses it as a defense-in-depth check.
+- `content`: required, non-empty. Empty or whitespace-only bodies return 400.
+- Server prepends an ISO 8601 UTC heading (`## 2026-06-10T13:48:15+00:00`, or `## 2026-06-10T13:48:15+00:00 - session <id>` when you pass `session_id`) so headings stay consistent with the session-complete writer. You don't format the timestamp; the endpoint does.
+- Append-only. Existing content is never overwritten. Creates the file if scaffold somehow missed it (idempotent with DWB-341 auto-scaffold).
+- Returns 201 with `{agent_id, file, path, timestamp, bytes_written}` on success.
+- Errors: 422 (file value outside the Literal enum); 400 (empty content; agent has no project_id; project has no repo_path); 404 (agent not found, project row missing); 500 (memory dir or file unwritable).
+
+**Wrap-up path: `POST /api/agents/{your_agent_id}/session-complete`.** The natural close at session end. Send a summary payload and the endpoint writes timestamped entries to `scratchpad.md`, `recent_sessions.md`, and (if `lessons` provided) `lessons.md` in one call. Same ISO 8601 heading format. Use this to land the wrap; use the in-flight endpoint for everything before.
 
 **What goes where:**
 - `scratchpad.md`: "I'm trying X, hit Y, working around with Z." In-flight thinking.
 - `lessons.md`: "Next time you migrate enums in MySQL, autogenerate misses them. Always hand-write." Durable.
 - `recent_sessions.md`: "2026-06-05, closed S64, gate-test passed clean." One-liner per session.
 
-**Never edit `identity.md`.** It is system-generated and regenerated on scaffold.
+**Never edit `identity.md`.** It is system-generated and regenerated on scaffold. The append endpoint will refuse writes to it.
+
+**Do not Edit/Write the memory files directly even though you can see them.** The dir lives under `.claude/`; the permission dialog fires on subagent writes there and crashes you. Go through the API.
 
 ## API
 
@@ -98,7 +119,7 @@ When you receive a ticket assignment, the TL or PM gives you both forms: `DWB-28
 
 ## Code Headers: Mandatory
 
-Every new file MUST have a code header. See `docs/rules/global/code-header-format.md` for the format. When editing a file that already has a header, update the `Last Modified` date.
+Every new file MUST have a code header. See `.claude/rules/global/code-header-format.md` for the format. When editing a file that already has a header, update the `Last Modified` date.
 
 ## Git Commit Rules
 
@@ -224,6 +245,10 @@ When the gate refuses your ack with violations:
 ## Reporting Status
 
 When done, message the TL: what you did, files changed, anything unexpected, whether changes are staged/committed or unstaged. Keep it concise, the TL reads the diff.
+
+## Ad Hoc Work (No Filed Ticket)
+
+When the user signals the small-change waiver (see TL playbook § 4c) and the TL delegates a fix without filing a ticket, your tokens and time route to the project's **ad_hoc** bucket (DWB-353) instead of failing an unattributed-tokens alert. The bucket is computed automatically from `tracking_log` rows tagged `ad_hoc_token_report`; no special headers from you required. You don't need to think about it; just do the work. Real implementation work still goes through tickets as usual.
 
 ## Style Rules
 

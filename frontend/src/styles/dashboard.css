@@ -2,7 +2,7 @@
 /* File: dashboard.css */
 /* Created: 2026-03-29 */
 /* Purpose: Styles for dashboard page — project cards, cross-project summary, tooltips, add-project form, sync buttons, token overview, time-tokens tables, token audit, sprint+activity row, responsive breakpoints */
-/* Last Modified: 2026-04-09 */
+/* Last Modified: 2026-06-10 */
 
 .dashboard {
   display: flex;
@@ -305,14 +305,31 @@
   font-size: 12px;
 }
 
-.tt-table thead th {
-  text-align: left;
+/* Header row mirrors the flex layout of .tt-table__row so column widths line
+   up exactly with the data values below. Name takes the flex remainder; the
+   right-aligned columns share the same min-width / right-edge as the data
+   .tt-table__tokens / .tt-table__time cells. */
+.tt-table thead tr {
+  display: flex;
+  align-items: center;
   padding: 4px 8px;
+}
+
+.tt-table thead th {
+  padding: 0;
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--gray);
   font-weight: 400;
+  text-align: left;
+  flex: 1;
+}
+
+.tt-table thead th.tt-table__col-right {
+  flex: none;
+  min-width: 72px;
+  text-align: right;
 }
 
 .tt-table__col-right {

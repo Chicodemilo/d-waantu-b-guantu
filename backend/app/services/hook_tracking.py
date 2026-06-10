@@ -1,7 +1,7 @@
 # Path: app/services/hook_tracking.py
 # File: hook_tracking.py
 # Created: 2026-04-09
-# Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path)
+# Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path, DWB-353 ad_hoc routing + alert removal)
 # Caller: app/routers/hooks.py
 # Callees: app/models/hook_session.py, app/services/tracking.py, app/services/dwb_session.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
@@ -28,7 +28,8 @@ from sqlalchemy.orm import Session
 
 from app.config.session_phrases import match_close, match_open
 from app.models.agent import Agent
-from app.models.alert import Alert, AlertSeverity
+# DWB-353: app.models.alert imports removed - the only consumer in this
+# module was _create_unattributed_alert, which is gone.
 from app.models.dwb_session import DwbCloseMethod, DwbCloseReason, DwbOpenMethod
 from app.models.hook_session import HookSession, HookSessionStatus, HookSessionType
 from app.models.project import Project
@@ -307,10 +308,27 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
     db.commit()
     db.refresh(session)
 
-    # Log stop + tokens through tracking.py
+    # Log stop + tokens through tracking.py.
+    #
+    # DWB-353 routing:
+    #   agent in OVERHEAD_ROLES (tl/pm)      -> overhead bucket (always, even with ticket)
+    #   worker with ticket                   -> ticket attribution
+    #   worker without ticket                -> ad_hoc bucket (was: silent tl overhead +
+    #                                           unattributed alert; both removed)
+    #   no agent at all                      -> nothing (silently dropped; the
+    #                                           unattributed alert that used to fire
+    #                                           here is dead per DWB-353)
     agent = db.get(Agent, session.agent_id) if session.agent_id else None
     if agent:
-        if session.ticket_id and agent.role not in OVERHEAD_ROLES:
+        if agent.role in OVERHEAD_ROLES:
+            tracking.log_overhead_stop(db, session.project_id, agent.id)
+            if token_total > 0:
+                # log_overhead_tokens atomically updates the per-role bucket
+                # on the project row - see DWB-305 / tracking.py.
+                tracking.log_overhead_tokens(
+                    db, session.project_id, agent.id, token_total, source="hook"
+                )
+        elif session.ticket_id:
             tracking.log_stop(db, session.ticket_id, agent.id)
             if token_total > 0:
                 tracking.log_tokens(
@@ -323,16 +341,14 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
                     ticket.token_source = "hook"
                     db.commit()
         else:
-            tracking.log_overhead_stop(db, session.project_id, agent.id)
+            # DWB-353: worker without ticket -> ad_hoc bucket. Previously this
+            # silently inflated tl_overhead_tokens; the skip-ticket-overhead
+            # lane is by design and shouldn't masquerade as TL work.
+            tracking.log_ad_hoc_stop(db, session.project_id, agent.id)
             if token_total > 0:
-                # log_overhead_tokens atomically updates the per-role bucket
-                # on the project row — see DWB-305 / tracking.py.
-                tracking.log_overhead_tokens(
+                tracking.log_ad_hoc_tokens(
                     db, session.project_id, agent.id, token_total, source="hook"
                 )
-    elif token_total > 0:
-        # No TL agent on project — truly unattributed
-        _create_unattributed_alert(db, session)
 
     # DWB-336: Layer-1 regex fast path for session-close detection. Same
     # post-commit timing as the open path so token attribution lands first.
@@ -936,9 +952,16 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
     db.commit()
     db.refresh(session)
 
-    # Log stop + tokens through tracking.py
+    # Log stop + tokens through tracking.py.
+    # DWB-353 routing: same as handle_session_end (see comments there).
     if agent:
-        if session.ticket_id and agent.role not in OVERHEAD_ROLES:
+        if agent.role in OVERHEAD_ROLES:
+            tracking.log_overhead_stop(db, session.project_id, agent.id)
+            if token_total > 0:
+                tracking.log_overhead_tokens(
+                    db, session.project_id, agent.id, token_total, source="hook"
+                )
+        elif session.ticket_id:
             tracking.log_stop(db, session.ticket_id, agent.id)
             if token_total > 0:
                 tracking.log_tokens(
@@ -951,15 +974,11 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
                     ticket.token_source = "hook"
                     db.commit()
         else:
-            tracking.log_overhead_stop(db, session.project_id, agent.id)
+            tracking.log_ad_hoc_stop(db, session.project_id, agent.id)
             if token_total > 0:
-                # log_overhead_tokens atomically updates the per-role bucket
-                # on the project row — see DWB-305 / tracking.py.
-                tracking.log_overhead_tokens(
+                tracking.log_ad_hoc_tokens(
                     db, session.project_id, agent.id, token_total, source="hook"
                 )
-    elif token_total > 0:
-        _create_unattributed_alert(db, session)
 
     return session
 
@@ -1355,35 +1374,27 @@ def handle_user_prompt(db: Session, hook_data: dict) -> dict:
             "open_phrase": phrase,
         }
     except Exception as e:
+        # DWB-351 privacy: the user's prompt is matched in-memory and must
+        # NOT be persisted under any circumstance. Strip it from the raw
+        # payload before forwarding to log_failed_hook (failed_hooks.raw_payload
+        # would otherwise capture it on every UserPromptSubmit exception).
+        # The logger.exception line below intentionally does NOT interpolate
+        # the prompt; the stack trace alone is enough to debug a hook crash.
+        scrubbed = {k: v for k, v in hook_data.items() if k != "prompt"}
+        if "prompt" in hook_data:
+            scrubbed["prompt"] = "<redacted>"
         logger.exception("handle_user_prompt failed")
         log_failed_hook(
             hook_event=hook_data.get("hook_event_name") or "UserPromptSubmit",
             status_code=None,
-            raw_payload=hook_data,
+            raw_payload=scrubbed,
             error=f"{type(e).__name__}: {e}",
         )
         return {"status": "error", "detail": f"{type(e).__name__}: {e}"}
 
 
-def _create_unattributed_alert(db: Session, session: HookSession) -> None:
-    """Create an alert for unattributed tokens."""
-    # Find any agent assigned to the project to use as raised_by
-    pa = db.scalar(
-        select(ProjectAgent).where(ProjectAgent.project_id == session.project_id)
-    )
-    if not pa:
-        return
-
-    alert = Alert(
-        project_id=session.project_id,
-        raised_by_agent_id=pa.agent_id,
-        title=f"Unattributed hook session: {session.session_id}",
-        body=(
-            f"Session {session.session_id} completed with {session.total_tokens} tokens "
-            f"but could not be attributed to an agent. "
-            f"Agent name from transcript: {session.agent_name}"
-        ),
-        severity=AlertSeverity.warning,
-    )
-    db.add(alert)
-    db.commit()
+# DWB-353: _create_unattributed_alert was deleted along with its two call
+# sites in handle_session_end and handle_subagent_stop. The "unattributed"
+# alert class is gone - worker-without-ticket tokens now flow into the
+# ad_hoc bucket (see DWB-353 in tracking.py); no-agent-at-all sessions
+# silently drop their tokens (rare; not worth paging on).

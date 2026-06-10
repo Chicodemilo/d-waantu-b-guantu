@@ -1,12 +1,12 @@
 # Path: app/routers/projects.py
 # File: projects.py
 # Created: 2026-03-29
-# Purpose: Project HTTP endpoints — CRUD, from-repo, gates, overhead, docs, activity-feed, token-budget, team
+# Purpose: Project HTTP endpoints - CRUD, from-repo, gates, overhead, docs, activity-feed, token-budget, team, scaffold-agents (DWB-341), Jira table + sync (DWB-342)
 # Caller: app/main.py
 # Callees: app/services/project.py, app/services/project_agent.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-10
 
 import json
 import re
@@ -182,6 +182,281 @@ def get_project_team(
         "project_id": project.id,
         "project_prefix": project.prefix,
         "agents": agents,
+    }
+
+
+@router.get("/{project_id}/jira-tickets")
+def list_project_jira_tickets(
+    project_id: int,
+    q: str | None = Query(None, description="Fuzzy substring search across all 10 columns"),
+    sort: str = Query("dwb_key", description="Column to sort by"),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """DWB-342: unified Jira table for a project.
+
+    Returns the 10-column row shape (DWB id/sprint/status + Jira
+    id/sprint/status/assignee + created/updated + title) joined from the
+    canonical tickets table and the jira_ticket_snapshots cache. Only
+    tickets with a non-null jira_issue_key are returned (the table is
+    for linked tickets only).
+
+    Search is case-insensitive substring across every text column.
+    Token-order-agnostic: splitting the query on whitespace requires
+    EVERY token to appear somewhere in the row (matches the spec's
+    "substring + token-order-agnostic" intent).
+
+    404 when the project does not exist. Non-Jira projects (jira_base_url
+    null) return 200 with an empty row list and a banner-friendly total=0
+    so the UI can render the empty state without a separate API call.
+    """
+    from app.models.jira_ticket_snapshot import JiraTicketSnapshot
+    from app.models.sprint import Sprint
+
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    # Whitelist of sortable column keys -> SQL expression. Keeping the
+    # mapping inline so an attacker can't pass a hostile ORDER BY string.
+    sort_columns: dict[str, object] = {
+        "dwb_key":          Ticket.ticket_key,
+        "dwb_sprint":       Sprint.name,
+        "dwb_status":       Ticket.status,
+        "jira_key":         Ticket.jira_issue_key,
+        "jira_sprint":      JiraTicketSnapshot.jira_sprint_name,
+        "jira_status":      JiraTicketSnapshot.jira_status,
+        "jira_assignee":    JiraTicketSnapshot.jira_assignee,
+        # DWB-362: 11th column. Sortable like the others.
+        "jira_issue_type":  JiraTicketSnapshot.jira_issue_type,
+        # DWB-363: 12th column. Sort by epic key only - epic names are
+        # free-form summaries and sorting by them is rarely useful.
+        "jira_epic_key":    JiraTicketSnapshot.jira_epic_key,
+        # DWB-364: 13th column. Subtask-only field; sort gathers
+        # subtasks together on this column.
+        "jira_parent_key":  JiraTicketSnapshot.jira_parent_key,
+        "created_at":       Ticket.created_at,
+        "updated_at":       Ticket.updated_at,
+        "title":            Ticket.title,
+    }
+    sort_col = sort_columns.get(sort)
+    if sort_col is None:
+        raise HTTPException(400, f"unknown sort column '{sort}'")
+
+    base = (
+        select(Ticket, JiraTicketSnapshot, Sprint)
+        .join(
+            JiraTicketSnapshot,
+            JiraTicketSnapshot.ticket_id == Ticket.id,
+            isouter=True,
+        )
+        .join(Sprint, Sprint.id == Ticket.sprint_id, isouter=True)
+        .where(Ticket.project_id == project_id)
+        .where(Ticket.jira_issue_key.isnot(None))
+    )
+
+    # Fuzzy search: AND across whitespace-split tokens; each token must
+    # match somewhere in any text field. Substring + case-insensitive.
+    if q and q.strip():
+        from sqlalchemy import or_
+        searchable: list = [
+            Ticket.ticket_key, Sprint.name, Ticket.title,
+            Ticket.jira_issue_key,
+            JiraTicketSnapshot.jira_sprint_name,
+            JiraTicketSnapshot.jira_status,
+            JiraTicketSnapshot.jira_assignee,
+            JiraTicketSnapshot.jira_reporter,
+            JiraTicketSnapshot.jira_title,
+            # DWB-362: search hits issue_type too (e.g. typing "Bug"
+            # filters to bug-type rows).
+            JiraTicketSnapshot.jira_issue_type,
+            # DWB-363: search hits both the epic key (e.g. "POR-5152")
+            # and the resolved epic name ("Gemini AI Claims/Fraud").
+            JiraTicketSnapshot.jira_epic_key,
+            JiraTicketSnapshot.jira_epic_name,
+            # DWB-364: search hits the subtask's parent key.
+            JiraTicketSnapshot.jira_parent_key,
+        ]
+        for token in q.strip().split():
+            like = f"%{token}%"
+            base = base.where(or_(*(func.lower(col).like(like.lower()) for col in searchable)))
+
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+
+    if order == "asc":
+        base = base.order_by(sort_col.asc(), Ticket.id.asc())
+    else:
+        base = base.order_by(sort_col.desc(), Ticket.id.desc())
+    base = base.limit(limit).offset(offset)
+
+    rows = []
+    for ticket, snapshot, sprint in db.execute(base).all():
+        rows.append({
+            "ticket_id": ticket.id,
+            "dwb_key": ticket.ticket_key,
+            "dwb_sprint": sprint.name if sprint else None,
+            "dwb_status": ticket.status.value if hasattr(ticket.status, "value") else ticket.status,
+            "title": ticket.title,
+            "created_at": ticket.created_at,
+            "updated_at": ticket.updated_at,
+            "jira_key": ticket.jira_issue_key,
+            "jira_sprint": snapshot.jira_sprint_name if snapshot else None,
+            "jira_status": snapshot.jira_status if snapshot else None,
+            "jira_assignee": snapshot.jira_assignee if snapshot else None,
+            "jira_reporter": snapshot.jira_reporter if snapshot else None,
+            "jira_title": snapshot.jira_title if snapshot else None,
+            "jira_created_at": snapshot.jira_created_at if snapshot else None,
+            "jira_updated_at": snapshot.jira_updated_at if snapshot else None,
+            "last_synced_at": snapshot.last_synced_at if snapshot else None,
+            # DWB-362: 11th column on every row. None on pre-DWB-362
+            # snapshots; the UI null-guards with '-'.
+            "jira_issue_type": snapshot.jira_issue_type if snapshot else None,
+            # DWB-363: 12th column. UI renders KEY prominently + name as
+            # tooltip; null-guards with '-' when both are None.
+            "jira_epic_key":   snapshot.jira_epic_key   if snapshot else None,
+            "jira_epic_name":  snapshot.jira_epic_name  if snapshot else None,
+            # DWB-364: 13th column. Populated for subtasks only; non-
+            # subtask rows serve None and the UI shows '-'.
+            "jira_parent_key": snapshot.jira_parent_key if snapshot else None,
+        })
+
+    return {
+        "project_id": project_id,
+        "project_prefix": project.prefix,
+        "total": int(total),
+        "limit": limit,
+        "offset": offset,
+        "rows": rows,
+    }
+
+
+@router.post("/{project_id}/jira-sync", status_code=202)
+def trigger_jira_sync(project_id: int, db: Session = Depends(get_db)):
+    """DWB-342: manual Jira -> DWB sync (READ-ONLY ingestion).
+
+    Synchronous in v1 - returns when the sync completes. The endpoint
+    enforces single-sync concurrency via Project.last_jira_sync_status:
+    a second concurrent caller gets 409.
+
+    202 Accepted on success (the sync ran and the cache is fresh).
+    400 when the project has no jira_base_url configured.
+    404 when the project does not exist.
+    409 when a sync is already in flight for this project.
+    """
+    from app.services import jira_sync as sync_svc
+
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not project.jira_base_url:
+        raise HTTPException(
+            400,
+            f"project '{project.prefix}' has no jira_base_url - configure Jira first",
+        )
+
+    try:
+        sync_svc.run_sync(db, project_id)
+    except sync_svc.SyncAlreadyRunning:
+        raise HTTPException(409, f"a Jira sync is already running on project '{project.prefix}'")
+    except sync_svc.SyncNotConfigured as exc:
+        raise HTTPException(400, str(exc))
+
+    # Re-read so the response carries the freshly-stamped sync row.
+    db.refresh(project)
+    return {
+        "project_id": project_id,
+        "status": project.last_jira_sync_status.value
+            if hasattr(project.last_jira_sync_status, "value")
+            else project.last_jira_sync_status,
+        "started_at": project.last_jira_sync_at,
+    }
+
+
+@router.get("/{project_id}/jira-sync/status")
+def get_jira_sync_status(project_id: int, db: Session = Depends(get_db)):
+    """DWB-342: poll endpoint for the UI to detect sync completion.
+
+    Returns the project-level sync flags. 404 when project missing.
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return {
+        "project_id": project_id,
+        "status": project.last_jira_sync_status.value
+            if hasattr(project.last_jira_sync_status, "value")
+            else project.last_jira_sync_status,
+        "last_synced_at": project.last_jira_sync_at,
+        "counts": project.last_jira_sync_counts,
+    }
+
+
+@router.post("/{project_id}/scaffold-agents")
+def scaffold_project_agents(project_id: int, db: Session = Depends(get_db)):
+    """Walk every agent whose project_id matches and scaffold any missing
+    memory dirs/files (DWB-341).
+
+    Use case: project repo got cloned to a new machine or recreated from
+    scratch; the agent rows still exist in DB but the on-disk dirs are
+    gone. One call rehydrates the lot. Idempotent per agent - identity.md
+    refreshes; scratchpad/lessons/recent_sessions are preserved when
+    present, created empty when missing.
+
+    Returns a per-agent disposition list (created/preserved/refreshed/
+    skipped) so callers can see exactly what changed. Per-agent failures
+    are recorded in the response rather than aborting the walk; one bad
+    agent shouldn't block the rest of the team.
+
+    404 if project missing. 400 if project.repo_path is null (no point
+    walking - every per-agent call would skip).
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not project.repo_path:
+        raise HTTPException(
+            400,
+            f"project '{project.prefix}' has no repo_path - cannot scaffold "
+            f"agent memory dirs (set project.repo_path first)",
+        )
+
+    from app.services import agent_memory  # local import avoids router-level cycle
+    agents = list(
+        db.scalars(
+            select(Agent)
+            .where(Agent.project_id == project_id)
+            .order_by(Agent.name.asc())
+        )
+    )
+
+    results = []
+    for a in agents:
+        try:
+            res = agent_memory.scaffold_agent_dir(db, a.id)
+            results.append({
+                "agent_id": res.agent_id,
+                "agent_name": a.name,
+                "memory_dir": res.memory_dir,
+                "created": res.created,
+                "preserved": res.preserved,
+                "refreshed": res.refreshed,
+                "skipped": res.skipped,
+                "skip_reason": res.skip_reason,
+            })
+        except agent_memory.ScaffoldError as e:
+            results.append({
+                "agent_id": a.id,
+                "agent_name": a.name,
+                "error": e.code,
+                "detail": e.detail,
+            })
+    return {
+        "project_id": project_id,
+        "project_prefix": project.prefix,
+        "agent_count": len(agents),
+        "scaffolded": results,
     }
 
 

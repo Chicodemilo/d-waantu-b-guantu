@@ -138,6 +138,10 @@ def test_normalize_issue_flattens_nested_fields():
         },
     }
     out = svc._normalize_issue(raw)
+    # DWB-356 added reporter + sprint_name; DWB-363 added epic_key;
+    # DWB-364 added issue_type_is_subtask. The parent here is an Epic so
+    # epic_key resolves to "POR-100"; the issuetype dict omits the
+    # `subtask` field so issue_type_is_subtask defaults to False.
     assert out == {
         "key": "POR-1",
         "id": "10000",
@@ -145,12 +149,16 @@ def test_normalize_issue_flattens_nested_fields():
         "status": "In Progress",
         "status_category": "In Progress",
         "assignee": "Jane Doe",
+        "reporter": None,
         "issue_type": "Task",
+        "issue_type_is_subtask": False,
         "parent_key": "POR-100",
         "parent_type": "Epic",
         "priority": "Medium",
         "created": "2026-05-01T10:00:00.000+0000",
         "updated": "2026-05-26T15:00:00.000+0000",
+        "sprint_name": None,
+        "epic_key": "POR-100",
     }
 
 

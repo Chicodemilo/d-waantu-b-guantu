@@ -1,12 +1,12 @@
 # Path: app/routers/hooks.py
 # File: hooks.py
 # Created: 2026-04-09
-# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit)
+# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit) - DWB-351 privacy scrub on UserPromptSubmit failure path
 # Caller: app/main.py
 # Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/models/hook_session.py
 # Data In: HTTP POST from curl hook commands
 # Data Out: JSON responses (HookSession data)
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 """Hook endpoints for passive tracking.
 
@@ -93,6 +93,11 @@ def hook_user_prompt(data: HookEventInput, db: Session = Depends(get_db)):
 
     Like the other hook endpoints, this MUST NEVER return 5xx. Every failure
     swallows, logs to failed_hooks, and returns HTTP 200.
+
+    DWB-351 privacy: the inbound ``prompt`` is matched in-memory by the
+    service and never persisted. The exception-path log_failed_hook call
+    below scrubs ``prompt`` from the payload before writing the
+    failed_hooks row, mirroring the service-layer scrub.
     """
     try:
         result = svc.handle_user_prompt(db, data.model_dump())
@@ -101,11 +106,15 @@ def hook_user_prompt(data: HookEventInput, db: Session = Depends(get_db)):
         # Belt-and-suspenders: the service already swallows, but if anything
         # leaks (e.g. pydantic edge case before the service is entered)
         # we still 200 the caller.
+        # DWB-351: scrub the user-typed prompt from the raw payload.
+        payload = data.model_dump()
+        if "prompt" in payload and payload["prompt"] is not None:
+            payload["prompt"] = "<redacted>"
         logger.exception("hook_user_prompt error")
         log_failed_hook(
             hook_event=data.hook_event_name or "UserPromptSubmit",
             status_code=200,
-            raw_payload=data.model_dump(),
+            raw_payload=payload,
             error=f"{type(e).__name__}: {e}",
         )
         return {

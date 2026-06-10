@@ -736,10 +736,20 @@ class TestTLFallback:
         assert summary["project_total"]["overhead_tokens"] == 800
         assert summary["per_ticket"] == []
 
-    def test_no_tl_agent_fires_unattributed_alert(
+    def test_no_tl_agent_does_not_fire_unattributed_alert(
         self, client, hook_project, make_transcript, make_agent,
     ):
-        """If no TL is assigned to the project, tokens are unattributed → alert."""
+        """DWB-353: the unattributed alert class is removed.
+
+        Pre-DWB-353 a session that ended with tokens but no agent
+        attribution fired a warning alert. The whole alert path is gone:
+        worker-without-ticket tokens flow into the ad_hoc bucket via the
+        DWB-353 routing in hook_tracking.py, and no-agent-at-all
+        sessions silently drop their tokens (rare; not worth paging).
+
+        This test pins the negative so a future change that resurrects
+        the alert fails loud.
+        """
         pid = hook_project["id"]
         # Assign a worker (not TL) so project has agents but no TL
         worker = make_agent(name="Worker", role="frontend-worker")
@@ -761,7 +771,9 @@ class TestTLFallback:
             "hook_event": "SessionEnd",
         })
 
-        # Should have an unattributed alert
+        # DWB-353: must NOT have an unattributed alert.
         alerts = client.get("/api/alerts").json()
         unattributed = [a for a in alerts if "Unattributed" in a.get("title", "")]
-        assert len(unattributed) >= 1
+        assert unattributed == [], (
+            f"DWB-353 removed the unattributed alert; saw: {unattributed}"
+        )

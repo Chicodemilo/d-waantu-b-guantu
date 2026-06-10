@@ -1,10 +1,10 @@
 /* Path: src/styles/jira.css
  * File: jira.css
  * Created: 2026-05-27
- * Purpose: Styling for the /projects/:id/jira page — list, sprint board, detail panel
+ * Purpose: Styling for the /projects/:id/jira unified table page (DWB-342) + legacy list/sprint-board/detail-panel styles still used by components/jira/*
  * Caller: pages/JiraIssuesPage.jsx, components/jira/*
  * Callees: theme tokens from theme.css
- * Last Modified: 2026-05-27
+ * Last Modified: 2026-06-10
  */
 
 .jira-page {
@@ -374,85 +374,148 @@
   font-size: 13px;
 }
 
-.jira-rollup {
+/* Legacy .jira-rollup* rules removed in DWB-342 — JiraRollupPage was deleted
+   as part of the unification. New table styles live below under .jira-table*. */
+
+/* ---- DWB-342 unified Jira table ---- */
+
+.jira-page__title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.jira-page__sync {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--gray-light);
+}
+
+.jira-page__sync-summary {
+  font-variant-numeric: tabular-nums;
+}
+
+.jira-page__search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.jira-page__search {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--green);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.jira-page__search:focus {
+  outline: none;
+  border-color: var(--green-dim);
+}
+
+.jira-page__count {
+  color: var(--gray-light);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.jira-table {
   border: 1px solid var(--border);
   background: var(--bg-alt);
+  font-size: 12px;
+  overflow-x: auto;
 }
 
-.jira-rollup__row {
+.jira-table__row {
   display: grid;
-  grid-template-columns: 100px minmax(180px, 1fr) 70px 70px 70px 90px 70px 200px;
-  gap: 12px;
-  padding: 8px 12px;
+  grid-template-columns: 55px 110px 70px 70px 110px 70px 60px 100px 100px 95px 100px 100px 2fr;
+  gap: 8px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   align-items: center;
-  font-size: 13px;
 }
 
-.jira-rollup__row:last-child {
+.jira-table__row:last-child {
   border-bottom: none;
 }
 
-.jira-rollup__row--header {
-  background: var(--bg);
-  color: var(--gray-light);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 11px;
-}
-
-.jira-rollup__epic a {
+.jira-table__cell--assignee {
   color: var(--blue);
-  text-decoration: none;
 }
 
-.jira-rollup__epic a:hover {
-  text-decoration: underline;
+.jira-table__cell--date {
+  color: var(--gray);
 }
 
-.jira-rollup__no-epic {
-  color: var(--gray-light);
-  font-style: italic;
+.jira-table__row--header {
+  background-color: var(--bg);
 }
 
-.jira-rollup__summary {
+.jira-table__row--data {
+  color: var(--green);
+  cursor: pointer;
+  transition: background-color 0.1s linear;
+}
+
+.jira-table__row--data:hover {
+  background-color: var(--bg-hover);
+}
+
+.jira-table__cell {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--green);
 }
 
-.jira-rollup__counts {
-  text-align: right;
+.jira-table__cell--header {
+  background: none;
+  border: none;
   color: var(--gray-light);
-  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-mono);
+  padding: 0;
 }
 
-.jira-rollup__bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.jira-table__cell--header:hover {
+  color: var(--green-bright);
 }
 
-.jira-rollup__bar-track {
-  flex: 1;
-  height: 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  position: relative;
+.jira-table__cell--sorted {
+  color: var(--orange);
 }
 
-.jira-rollup__bar-fill {
-  display: block;
-  height: 100%;
-  background: var(--green-dim);
-  transition: width 0.3s ease;
-}
-
-.jira-rollup__bar-pct {
-  font-variant-numeric: tabular-nums;
-  color: var(--green);
-  min-width: 48px;
+.jira-table__cell--right {
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
+
+.jira-table__cell--key {
+  color: var(--blue);
+}
+
+.jira-table__cell--status {
+  color: var(--gray-light);
+  text-transform: lowercase;
+}
+
+.jira-table__cell--title {
+  color: var(--green-bright);
+}
+
+/* DWB-342 sync info affordance now uses the canonical .tooltip-trigger /
+   .tooltip-content pattern (defined in dashboard.css). No page-local rules
+   needed; the custom .jira-page__sync-info* block was removed. */

@@ -40,11 +40,30 @@ class Settings(BaseSettings):
     IDLE_TIMEOUT_MINUTES: int = 60
     IDLE_SWEEP_INTERVAL_SECONDS: int = 300
 
+    # DWB-369: marker-file sweeper. Periodically cleans pending-* markers
+    # whose worker died pre-SubagentStop AND finalized markers whose
+    # hook_session has completed. Mirrors the idle_sweeper interval
+    # convention - interval=0 disables, default 600s (10 min) is much
+    # less aggressive than idle (5 min) because marker churn is slow.
+    MARKER_STALE_MINUTES: int = 30
+    MARKER_SWEEP_INTERVAL_SECONDS: int = 600
+
     # Jira (optional — empty disables the /api/jira/* endpoints)
     JIRA_BASE_URL: str = ""
     JIRA_EMAIL: str = ""
     JIRA_API_TOKEN: str = ""
     JIRA_CACHE_TTL_SECONDS: int = 60
+    # DWB-356: Jira stores sprint membership in an instance-specific custom
+    # field. Cloud defaults to customfield_10020; on-prem installs vary, so
+    # this is overridable via .env. The normalizer reads this field name
+    # off the issue payload to derive the active sprint name.
+    JIRA_SPRINT_CUSTOMFIELD: str = "customfield_10020"
+    # DWB-363: legacy Jira "Epic Link" customfield (pre next-gen projects).
+    # Modern Jira surfaces the epic via parent.key / parent.fields.issuetype
+    # (Roadvantage shape), so this is a fallback for older instances. The
+    # extractor tries parent-as-Epic first and only consults this field if
+    # the parent path didn't yield an epic.
+    JIRA_EPIC_LINK_CUSTOMFIELD: str = "customfield_10014"
 
     @property
     def jira_configured(self) -> bool:

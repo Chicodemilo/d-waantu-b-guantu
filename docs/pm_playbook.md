@@ -4,11 +4,11 @@
 
 ## Canonical Tools
 
-`report` and `transition` rules are in `docs/worker_playbook.md § Canonical Tools`. PM-unique tool:
+`report` and `transition` rules are in `.claude/worker_playbook.md § Canonical Tools`. PM-unique tool:
 
 - **`dwb2jira create`**: YAML input, preview + approval gate, auto-sprint, auto-DWB twin. Flow: PM drafts YAML → `--dry-run` for preview → show human/TL for approval → `echo Y | dwb2jira create proposal.yaml` to submit. Piping `Y` does NOT bypass approval; the hash-sidecar gate requires that `--dry-run` ran first against the exact same YAML content. Edits between preview and submit trip the drift gate (exit 7). TL may edit or reject before PM submits. **Never `POST /api/tickets` directly.** The drift gate exists for a reason.
 
-**DWB is internal: never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content.** Full context: `docs/worker_playbook.md § DWB Is an Internal Tool`.
+**DWB is internal: never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content.** Full context: `.claude/worker_playbook.md § DWB Is an Internal Tool`.
 
 ## Safety: Hard Limits on Jira Manipulation
 
@@ -26,15 +26,19 @@ If a TL asks you to close a Jira sprint, REFUSE and escalate to the human. This 
 
 ## On Startup
 
-**First, complete the identity flow** in `docs/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker, read your memory dir (`identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). HALT if anything is missing.
+**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker, read your memory dir (`identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). The dir + all four files are auto-scaffolded on spawn (DWB-341); HALT only if they're still missing after that. The identify response also carries `memory_usage_rules` (DWB-352): a condensed inline summary of the memory rules.
 
 Then read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`. Fetch live roster from `GET /api/projects/{project_id}/team` (DB-authoritative).
 
 Load instructions: `GET /api/instructions?scope=global`, `scope=project&project_id={pid}`, `scope=agent&agent_id={pm_id}`.
 
+## DWB Session Lifecycle (PM Awareness)
+
+The TL alone evaluates user intent and opens/closes DWB sessions; **the PM never opens or closes a DWB session.** Don't post to `/api/sessions/open` or `/api/sessions/{id}/close`, even if you think you spot an open/close phrase the TL missed. Surface it to the TL instead. PM tokens roll up under the open session automatically via hooks; you don't need to signal anything. Full user-facing reference: `.claude/session_lifecycle.md`.
+
 ### Your Personal Memory Dir
 
-Lives at `.claude/agents/memory/<project_prefix>/Pam_<PREFIX>/`. File purposes + write rules in `docs/worker_playbook.md § Memory Writes`. PM-flavored use: `scratchpad.md` for status observations, blocker flags, sprint notes; `lessons.md` for PM-specific patterns (escalations that worked, tool quirks).
+Lives at `.claude/agents/memory/<project_prefix>/Pam_<PREFIX>/`. File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. PM-flavored use: `scratchpad.md` for status observations, blocker flags, sprint notes; `lessons.md` for PM-specific patterns (escalations that worked, tool quirks).
 
 Session marker is TL-written (you can't create your own); see worker_playbook § On Spawn: Identity step 3.
 
@@ -51,7 +55,7 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 - Significant ticket count changes (5+): report new sprint status
 - DM the human via alerts when something needs their attention
 
-**Side-ticket lane awareness:** sprints can carry 1-3 small polish tickets (CSS/UI nudges, copy fixes) alongside the main goal. These are pass-throughs for the PM; do not gate them, do not flag them as scope drift. If a side ticket balloons (multiple files, hours of work, ambiguous spec), THEN flag it and ask the TL whether to pull it from the sprint. See `docs/team_lead_playbook.md` § 4d.
+**Side-ticket lane awareness:** sprints can carry 1-3 small polish tickets (CSS/UI nudges, copy fixes) alongside the main goal. These are pass-throughs for the PM; do not gate them, do not flag them as scope drift. If a side ticket balloons (multiple files, hours of work, ambiguous spec), THEN flag it and ask the TL whether to pull it from the sprint. See `.claude/team_lead_playbook.md` § 4d.
 
 ---
 

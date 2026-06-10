@@ -8,7 +8,7 @@
 # Data Out: All model classes
 # Last Modified: 2026-06-09
 
-from app.models.project import Project, ProjectStatus
+from app.models.project import JiraSyncStatus, Project, ProjectStatus
 from app.models.sprint import Sprint, SprintStatus
 from app.models.epic import Epic, EpicStatus
 from app.models.agent import Agent
@@ -32,9 +32,10 @@ from app.models.dwb_session import (
     DwbCloseMethod,
     DwbCloseReason,
 )
+from app.models.jira_ticket_snapshot import JiraTicketSnapshot
 
 __all__ = [
-    "Project", "ProjectStatus",
+    "Project", "ProjectStatus", "JiraSyncStatus",
     "Sprint", "SprintStatus",
     "Epic", "EpicStatus",
     "Agent",
@@ -53,4 +54,5 @@ __all__ = [
     "FailedHook",
     "AgentConsolidationAck",
     "DwbSession", "DwbOpenMethod", "DwbCloseMethod", "DwbCloseReason",
+    "JiraTicketSnapshot",
 ]

@@ -1,17 +1,17 @@
 # Path: app/models/project.py
 # File: project.py
 # Created: 2026-03-29
-# Purpose: Project ORM model with status enum, sprint gate flags, and Jira fields
+# Purpose: Project ORM model with status enum, sprint gate flags, Jira fields, and Jira sync state (DWB-342)
 # Caller: app/services/project.py, sprint.py
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Project, ProjectStatus
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-10
 
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, String, Text, func
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,6 +22,24 @@ class ProjectStatus(str, enum.Enum):
     paused = "paused"
     completed = "completed"
     archived = "archived"
+
+
+class JiraSyncStatus(str, enum.Enum):
+    """DWB-342: project-level Jira sync state.
+
+    - idle:    no sync in flight, no record of a previous run on this project
+    - running: a sync is in progress (POST /api/projects/{id}/jira-sync
+               sets this; subsequent POSTs return 409 until done/error)
+    - done:    most recent sync finished cleanly
+    - error:   most recent sync raised; counts may be partial. The
+               concurrency lock is released on error so the operator can
+               retry without manual intervention.
+    """
+
+    idle = "idle"
+    running = "running"
+    done = "done"
+    error = "error"
 
 
 class Project(Base):
@@ -52,6 +70,14 @@ class Project(Base):
         DateTime, nullable=False, server_default=func.now()
     )
     playbooks_deployed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # DWB-342: project-level Jira sync state. Used by the manual sync
+    # endpoint to enforce single-sync concurrency, render the
+    # last-synced-at header, and show the last run's per-bucket counts.
+    last_jira_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_jira_sync_status: Mapped[JiraSyncStatus] = mapped_column(
+        Enum(JiraSyncStatus), nullable=False, default=JiraSyncStatus.idle
+    )
+    last_jira_sync_counts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )

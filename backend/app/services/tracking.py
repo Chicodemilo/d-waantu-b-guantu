@@ -1,12 +1,12 @@
 # Path: app/services/tracking.py
 # File: tracking.py
 # Created: 2026-03-30
-# Purpose: Tracking service — start/stop events, token reports, overhead, time/token computation
+# Purpose: Tracking service - start/stop events, token reports, overhead, ad_hoc bucket (DWB-353), time/token computation
 # Caller: app/routers/tracking.py, app/services/ticket.py
 # Callees: app/models/tracking_log.py, app/models/ticket.py
 # Data In: db: Session, ticket_id, agent_id, tokens, source
 # Data Out: TrackingLog, computed summaries
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-10
 
 """Service layer for the tracking_log table — time and token event logging."""
 
@@ -142,6 +142,60 @@ def log_overhead_tokens(
         else:
             project.tl_overhead_tokens += tokens
 
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+# ---------------------------------------------------------------------------
+# DWB-353: ad_hoc bucket for worker-without-ticket tokens
+# ---------------------------------------------------------------------------
+
+
+def log_ad_hoc_stop(db: Session, project_id: int, agent_id: int) -> TrackingLog:
+    """Insert an 'ad_hoc_stop' event (worker session without a ticket).
+
+    Companion to log_overhead_stop, kept distinct so the rollup can compute
+    ad_hoc time/tokens without untangling worker-without-ticket from TL/PM
+    overhead at query time.
+    """
+    entry = TrackingLog(
+        ticket_id=None,
+        agent_id=agent_id,
+        project_id=project_id,
+        sprint_id=None,
+        event_type="ad_hoc_stop",
+        source="auto",
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+def log_ad_hoc_tokens(
+    db: Session, project_id: int, agent_id: int, tokens: int, source: str = "hook"
+) -> TrackingLog:
+    """Insert an 'ad_hoc_token_report' event for worker-without-ticket tokens.
+
+    Unlike log_overhead_tokens this does NOT touch the project row's tl/pm
+    overhead buckets. The DWB-305 invariant
+        project.tl_overhead_tokens + project.pm_overhead_tokens
+            == sum(tracking_log.tokens WHERE event_type='overhead_token_report')
+    is preserved: ad_hoc lives in its own event_type, so it never inflates
+    either of the overhead columns. Session-level rollups compute the
+    per-window ad_hoc bucket on demand from these events.
+    """
+    entry = TrackingLog(
+        ticket_id=None,
+        agent_id=agent_id,
+        project_id=project_id,
+        sprint_id=None,
+        event_type="ad_hoc_token_report",
+        tokens=tokens,
+        source=source,
+    )
+    db.add(entry)
     db.commit()
     db.refresh(entry)
     return entry

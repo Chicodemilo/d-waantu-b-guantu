@@ -6,7 +6,7 @@
 # Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking
 # Data In: db: Session, TicketCreate/Update
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 import logging
 
@@ -197,24 +197,12 @@ def update_ticket(db: Session, ticket: Ticket, data: TicketUpdate) -> Ticket:
         # DWB-144: Recompute time_spent_seconds from status_history
         _recompute_time_in_progress(db, ticket)
 
-    # Auto-create alert when ticket closed with no tokens reported
-    if (
-        updates.get("status") == TicketStatus.done
-        and ticket.tokens_used == 0
-        and ticket.assigned_agent_id is not None
-    ):
-        alert = Alert(
-            project_id=ticket.project_id,
-            raised_by_agent_id=ticket.assigned_agent_id,
-            ticket_id=ticket.id,
-            title=f"Tokens not reported for {ticket.ticket_key}",
-            body="Agent should POST to /api/tickets/:id/tokens before closing.",
-            severity=AlertSeverity.info,
-            status=AlertStatus.open,
-        )
-        db.add(alert)
-        db.commit()
-
+    # DWB-353: tokens-not-reported alert removed. It was a relic of the
+    # pre-hook workflow that checked ticket.tokens_used == 0 on close; the
+    # hook attribution layer (SessionStart/SubagentStop -> hook_sessions
+    # -> tracking_log -> by_ticket rollup) made ticket.tokens_used dead
+    # for hook-attributed work. The alert fired on every close and was
+    # pure noise.
     return ticket
 
 

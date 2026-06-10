@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Root application component that initializes data polling and defines all routes
 // Caller: main.jsx
-// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/DocsPage, pages/SystemDocsPage
+// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/DocsPage, pages/SystemDocsPage, pages/SessionsPage, pages/SessionDetailPage
 // Data In: None
 // Data Out: Exports App component (renders route tree inside AppShell)
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-10
 
 import { Routes, Route } from 'react-router-dom';
 import useAppData from './hooks/useAppData';
@@ -26,7 +26,9 @@ import DocsPage from './pages/DocsPage';
 import SystemDocsPage from './pages/SystemDocsPage';
 import ErrorLogPage from './pages/ErrorLogPage';
 import JiraIssuesPage from './pages/JiraIssuesPage';
-import JiraRollupPage from './pages/JiraRollupPage';
+import SessionsPage from './pages/SessionsPage';
+import SessionCurrentPage from './pages/SessionCurrentPage';
+import SessionDetailPage from './pages/SessionDetailPage';
 
 function App() {
   useAppData();
@@ -45,7 +47,9 @@ function App() {
         <Route path="/projects/:id/docs" element={<DocsPage />} />
         <Route path="/projects/:id/agents/:agentId" element={<AgentPage />} />
         <Route path="/projects/:id/jira" element={<JiraIssuesPage />} />
-        <Route path="/projects/:id/jira-rollup" element={<JiraRollupPage />} />
+        <Route path="/projects/:id/sessions" element={<SessionsPage />} />
+        <Route path="/projects/:id/sessions/current" element={<SessionCurrentPage />} />
+        <Route path="/projects/:id/sessions/:sid" element={<SessionDetailPage />} />
         <Route path="/docs" element={<SystemDocsPage />} />
         <Route path="/instructions" element={<InstructionsPage />} />
         <Route path="/tests" element={<TestResultsPage />} />

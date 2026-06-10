@@ -1,7 +1,7 @@
 # Path: tests/test_dwb_session_migration.py
 # File: test_dwb_session_migration.py
 # Created: 2026-06-09
-# Purpose: Verify the DWB-335 migration applies cleanly (downgrade + re-upgrade against lat_test)
+# Purpose: Verify the DWB-335 migration applies cleanly (downgrade + re-upgrade against lat_test); DWB-346 patch keeps schema at head after round-trip
 # Caller: pytest
 # Callees: alembic.command, sqlalchemy.inspect
 # Data In: lat_test (already at head via conftest create_all)
@@ -149,6 +149,22 @@ def test_migration_round_trip(alembic_cfg):
         assert dwb_fk is not None
         assert dwb_fk["constrained_columns"] == ["dwb_session_id"]
     finally:
+        # DWB-346: the round-trip rebuilt dwb_sessions per the DWB-335 spec,
+        # which predates later columns the test-session create_all baseline
+        # carries. Forward-roll the alembic chain doesn't work past
+        # dwb335a7b3c91 here because subsequent migrations
+        # (dwb331a7c8f4d epics.is_in_progress) collide with columns the
+        # ORM model already created. So we re-apply post-DWB-335
+        # dwb_sessions DDL inline. Future migrations that add columns to
+        # dwb_sessions need a sibling line here.
+        with engine.begin() as conn:
+            # DWB-346: dwb_sessions.headline (VARCHAR(80) NULL).
+            conn.execute(
+                text(
+                    "ALTER TABLE dwb_sessions "
+                    "ADD COLUMN headline VARCHAR(80) NULL"
+                )
+            )
         # Leave alembic_version table behind but cleared so subsequent
         # test runs don't trip on a stale revision pointer.
         with engine.begin() as conn:

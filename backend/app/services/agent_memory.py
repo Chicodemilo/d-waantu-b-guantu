@@ -185,19 +185,21 @@ Three companion files live in this directory:
 - `lessons.md` — durable lessons learned across sessions; append a block when something is worth remembering
 - `recent_sessions.md` — one-line index of past sessions; append-only
 
-The DWB endpoint `POST /api/agents/{agent.id}/session-complete` writes all three for you at session end. You can also append directly when iterating.
+## How to write to them
+
+All memory writes go through the API; never Edit/Write these files directly (subagent writes to `.claude/` paths crash the CC ink renderer):
+
+- **In-flight notes:** `POST /api/agents/{agent.id}/memory/append` with body `{{"file": "scratchpad" | "lessons" | "recent_sessions", "content": "..."}}`. Server prepends the ISO 8601 UTC heading. `identity.md` is not in the file enum and is refused at the validation layer.
+- **Session wrap-up:** `POST /api/agents/{agent.id}/session-complete` writes all three for you at session end with one payload.
 
 ## ISO 8601 entry rule
 
-Every appended entry MUST start with an ISO 8601 UTC timestamp. The session-complete endpoint formats this for you. If you write directly, use:
+Both endpoints prepend the heading server-side, so you do not format the timestamp. Reference shape for what lands on disk:
 
 ```
-## 2026-06-03T20:48:42+00:00 — session <session_id>
-- summary: <one-line summary>
-- tokens_used: <int>           (optional)
-- lessons:                     (optional)
-  - <lesson 1>
+## 2026-06-03T20:48:42+00:00 - session <session_id>
+<entry body>
 ```
 
-Never clobber prior entries. Always append.
+Both endpoints are append-only and never clobber prior entries.
 """

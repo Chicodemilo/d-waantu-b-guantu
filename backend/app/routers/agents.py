@@ -6,7 +6,7 @@
 # Callees: app/services/agent.py, app/services/agent_consolidation.py
 # Data In: HTTP requests
 # Data Out: JSON responses (AgentRead, AgentIdentifyResponse, AgentConsolidationAckRead)
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-10
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -22,6 +22,8 @@ from app.schemas.agent import (
     AgentUpdate,
     MarkerRequest,
     MarkerResponse,
+    MemoryAppendRequest,
+    MemoryAppendResponse,
     SessionCompleteRequest,
     SessionCompleteResponse,
     SpawnPrepareRequest,
@@ -71,8 +73,12 @@ def spawn_prepare(data: SpawnPrepareRequest, db: Session = Depends(get_db)):
 
     Wraps identify and adds an Identity / Recent Scratchpad / Boundary Rules
     block. boundary_rules pulls instructions scoped 'global' or scoped 'agent'
-    for this agent (project-scope is excluded — those are environmental, not
+    for this agent (project-scope is excluded - those are environmental, not
     personal boundaries).
+
+    DWB-341: auto-scaffolds the agent's memory dir (idempotent; preserves
+    agent-owned files; never suffixes the dir name). 400 when the project
+    has no repo_path set.
     """
     try:
         return svc.spawn_prepare_payload(
@@ -82,7 +88,12 @@ def spawn_prepare(data: SpawnPrepareRequest, db: Session = Depends(get_db)):
             project_prefix=data.project_prefix,
         )
     except svc.IdentifyError as e:
-        status = 409 if e.code == "ambiguous" else 404
+        if e.code == "repo_path_missing":
+            status = 400
+        elif e.code == "ambiguous":
+            status = 409
+        else:
+            status = 404
         raise HTTPException(status, e.detail)
 
 
@@ -243,6 +254,62 @@ def write_marker(
             status = 500
         else:
             status = 404
+        raise HTTPException(status, e.detail)
+
+
+@router.post(
+    "/{agent_id}/memory/append",
+    response_model=MemoryAppendResponse,
+    status_code=201,
+)
+def append_agent_memory(
+    agent_id: int,
+    data: MemoryAppendRequest,
+    db: Session = Depends(get_db),
+):
+    """Server-side append to one of the agent's three memory files (DWB-358).
+
+    Workaround for the Claude Code ink-renderer crash on permission
+    prompts under .claude/: subagents can't Edit/Write their own memory
+    files mid-session, but the FastAPI process has no permission dialog
+    and can write on the agent's behalf.
+
+    Body: { file: scratchpad|lessons|recent_sessions, content: str,
+            session_id?: str }
+
+    The server prepends an ISO 8601 UTC heading (matching the
+    session-complete endpoint's heading format) and appends the result
+    to the target file. Append-only; prior content is never overwritten.
+
+    Returns 201 on successful append. Errors:
+      - 400: invalid file enum, identity.md attempt, empty content,
+             unscoped agent, project missing repo_path.
+      - 404: agent or project not found.
+      - 500: disk write failure (memory dir or file unwritable).
+    """
+    try:
+        return svc.append_memory(
+            db,
+            agent_id=agent_id,
+            file=data.file,
+            content=data.content,
+            session_id=data.session_id,
+        )
+    except svc.MemoryAppendError as e:
+        if e.code in ("agent_not_found", "project_not_found"):
+            status = 404
+        elif e.code in (
+            "file_protected",
+            "invalid_file",
+            "empty_content",
+            "agent_unscoped",
+            "repo_path_missing",
+        ):
+            status = 400
+        elif e.code in ("memory_dir_unwritable", "memory_file_unwritable"):
+            status = 500
+        else:
+            status = 500
         raise HTTPException(status, e.detail)
 
 

@@ -1,12 +1,12 @@
 # Path: app/services/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: Service-layer business logic for DWB session open/close + idle sweep (DWB-336, DWB-337)
+# Purpose: Service-layer business logic for DWB session open/close + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases)
 # Caller: app/services/idle_sweeper.py (sweep loop), app/routers/dwb_sessions.py (open + close endpoints)
 # Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 """DWB session business logic.
 
@@ -118,10 +118,24 @@ def open_session(
     The DB also enforces single-active via the (project_id, is_open) UNIQUE
     index, so racing opens still fail safely with IntegrityError — this
     pre-check is for the friendly conflict body, not correctness.
+
+    DWB-351 privacy guard: when ``open_method`` is ``ai_confident`` or
+    ``ai_asked``, the user's literal text is never persisted - the
+    ``open_phrase`` field is silently nulled out regardless of what the
+    caller passed. Regex opens may continue to store the matched
+    catalogue substring (deterministic, bounded by the hardcoded
+    phrase list in ``app.config.session_phrases``). Silent rather than
+    400 by design (TL playbook recommends omitting the field for AI
+    opens, but a stale caller that still sends it gets quiet
+    null-out instead of a hard failure).
     """
     existing = get_active_session(db, project_id)
     if existing is not None:
         return None, existing
+
+    # DWB-351: privacy null-out on AI-layer opens.
+    if open_method in (DwbOpenMethod.ai_confident, DwbOpenMethod.ai_asked):
+        open_phrase = None
 
     row = DwbSession(
         project_id=project_id,
@@ -211,6 +225,7 @@ def close_session(
     close_reason: DwbCloseReason,
     close_phrase: str | None = None,
     now: datetime | None = None,
+    headline: str | None = None,
 ) -> DwbSession:
     """Close an open DwbSession. Idempotent: if the session is already closed,
     returns it unchanged (no double-close, no overwrite of close fields).
@@ -221,15 +236,30 @@ def close_session(
       - closed_at = now (default utcnow)
       - total_tokens = sum of linked hook_sessions.total_tokens
       - total_time_seconds = (closed_at - opened_at).total_seconds()
+      - headline (DWB-346) = passthrough; persisted when non-None. The idle
+        sweeper never supplies one (machine-driven close has nothing to
+        say); only the explicit close endpoint does.
+
+    DWB-351 privacy guard: when ``close_method`` is ``ai_confident`` or
+    ``ai_asked`` the ``close_phrase`` is silently nulled out before
+    persisting. Regex closes may continue to store the matched catalogue
+    substring; idle_timeout closes never receive a phrase to begin with.
+    See ``open_session`` for the matching open-side guard.
     """
     if session.closed_at is not None:
         return session
+
+    # DWB-351: privacy null-out on AI-layer closes.
+    if close_method in (DwbCloseMethod.ai_confident, DwbCloseMethod.ai_asked):
+        close_phrase = None
 
     closed_at = _strip_tz(now) if now is not None else _utcnow()
     session.closed_at = closed_at
     session.close_method = close_method
     session.close_reason = close_reason
     session.close_phrase = close_phrase
+    if headline is not None:
+        session.headline = headline
     session.total_tokens = _rollup_tokens(db, session)
     session.total_time_seconds = max(
         0, int((closed_at - session.opened_at).total_seconds())

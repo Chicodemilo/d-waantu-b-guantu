@@ -1,12 +1,12 @@
 # Path: app/schemas/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: Pydantic schemas for DWB session CRUD + lifecycle + rollup endpoints (DWB-335, DWB-336, DWB-338)
+# Purpose: Pydantic schemas for DWB session CRUD + lifecycle + rollup endpoints (DWB-335, DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket)
 # Caller: app/routers/dwb_sessions.py
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: DwbSessionCreate, DwbSessionUpdate, DwbSessionRead, DwbSessionOpenRequest, DwbSessionCloseRequest, DwbSessionOpenConflict, DwbSessionListItem, DwbSessionByRoleEntry, DwbSessionByTicketEntry, DwbSessionDetail
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 from datetime import datetime
 
@@ -55,6 +55,8 @@ class DwbSessionRead(BaseModel):
     close_reason: DwbCloseReason | None
     total_tokens: int
     total_time_seconds: int
+    # DWB-346: user-supplied summary set on close. None when never set.
+    headline: str | None = None
     is_open: int | None
     created_at: datetime
     updated_at: datetime
@@ -75,18 +77,24 @@ class DwbSessionOpenRequest(BaseModel):
 
 
 class DwbSessionCloseRequest(BaseModel):
-    """POST /api/sessions/{id}/close body (DWB-336).
+    """POST /api/sessions/{id}/close body (DWB-336, DWB-346).
 
     close_method + close_reason are required so the rollup row records which
     layer (regex / ai_confident / ai_asked / idle_timeout) caught the close
-    and why (explicit / idle / manual). close_phrase is optional — the idle
+    and why (explicit / idle / manual). close_phrase is optional - the idle
     sweeper (DWB-337) has no phrase to attribute. closed_at is optional;
-    omitted means 'now' (server-side default)."""
+    omitted means 'now' (server-side default).
+
+    headline (DWB-346): optional short summary (<=80 chars) of what the
+    session was about. Persisted on dwb_sessions.headline; surfaced by the
+    list endpoint. None means 'use the auto-derived ticket_summary instead'.
+    """
 
     close_method: DwbCloseMethod
     close_reason: DwbCloseReason
     close_phrase: str | None = None
     closed_at: datetime | None = None
+    headline: str | None = None
 
 
 class DwbSessionOpenConflict(BaseModel):
@@ -107,7 +115,21 @@ class DwbSessionOpenConflict(BaseModel):
 
 class DwbSessionListItem(BaseModel):
     """One row in GET /api/projects/{id}/sessions. Status is "open" when
-    closed_at IS NULL, else "closed"."""
+    closed_at IS NULL, else "closed".
+
+    DWB-346 added per-row aggregates so the dashboard can render a useful
+    sessions list without a fan-out N+1 to the detail endpoint:
+
+      - tickets_made:      tickets whose created_at falls in the session window
+      - tickets_completed: tickets whose completed_at falls in the session window
+      - agents_active:     distinct agent count from linked hook_sessions
+      - open_method:       same enum that lives on the row
+      - close_method:      same enum (None for still-open sessions)
+      - headline:          the user-supplied summary set on close (DWB-346)
+      - ticket_summary:    auto-derived "Epic Name (N)" string built from
+                            the completed tickets in the window; None when no
+                            ticket completed in this session
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -117,6 +139,18 @@ class DwbSessionListItem(BaseModel):
     total_tokens: int
     total_time_seconds: int
     status: str
+    # DWB-346 fields below. All optional/defaulted so older callers that
+    # only consume the first six keys are unaffected.
+    headline: str | None = None
+    tickets_made: int = 0
+    tickets_completed: int = 0
+    agents_active: int = 0
+    open_method: DwbOpenMethod | None = None
+    close_method: DwbCloseMethod | None = None
+    ticket_summary: str | None = None
+    # DWB-353: ad_hoc overhead bucket (worker tokens without ticket).
+    ad_hoc_overhead_tokens: int = 0
+    ad_hoc_overhead_seconds: int = 0
 
 
 class DwbSessionByRoleEntry(BaseModel):
@@ -158,6 +192,8 @@ class DwbSessionDetail(BaseModel):
     open_method: DwbOpenMethod
     close_method: DwbCloseMethod | None
     close_reason: DwbCloseReason | None
+    # DWB-346: user-supplied headline mirrored from the row.
+    headline: str | None = None
     # status / live partials flag
     status: str
     live: bool
@@ -170,3 +206,6 @@ class DwbSessionDetail(BaseModel):
     # overhead deltas during window
     tl_overhead_tokens: int
     pm_overhead_tokens: int
+    # DWB-353: ad_hoc bucket (worker tokens without ticket attribution in window).
+    ad_hoc_overhead_tokens: int = 0
+    ad_hoc_overhead_seconds: int = 0

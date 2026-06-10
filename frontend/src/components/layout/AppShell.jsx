@@ -1,17 +1,17 @@
 // Path: src/components/layout/AppShell.jsx
 // File: AppShell.jsx
 // Created: 2026-03-29
-// Purpose: Top-level layout shell that composes Sidebar, Header, main content area, and Footer with mobile sidebar toggle
+// Purpose: Top-level layout shell that composes Sidebar, Header, main content area, and SessionFooter (single persistent footer row: session state on the left, polling status on the right). The old standalone Footer was merged into SessionFooter as of DWB-349.
 // Caller: App.jsx
-// Callees: react (useState, useCallback), Sidebar, Header, Footer, layout.css
+// Callees: react (useState, useCallback), Sidebar, Header, SessionFooter, layout.css
 // Data In: children (React children rendered in main content area)
 // Data Out: default export AppShell component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-10
 
 import { useState, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
-import Footer from './Footer';
+import SessionFooter from './SessionFooter';
 import '../../styles/layout.css';
 
 function AppShell({ children }) {
@@ -26,7 +26,7 @@ function AppShell({ children }) {
       <Sidebar open={sidebarOpen} onNavClick={closeSidebar} />
       <Header onMenuClick={toggleSidebar} />
       <main className="main-content">{children}</main>
-      <Footer />
+      <SessionFooter />
     </div>
   );
 }

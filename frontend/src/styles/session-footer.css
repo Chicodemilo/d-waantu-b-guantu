@@ -1,0 +1,136 @@
+/* Path: src/styles/session-footer.css */
+/* File: session-footer.css */
+/* Created: 2026-06-10 */
+/* Purpose: Persistent SessionFooter styles — single-line bar above the polling Footer; 5 dot color states (active green pulse, closed slate, error red, idle-warning amber, none gray hollow); hover treatment since the whole bar is a Link */
+/* Last Modified: 2026-06-10 */
+
+.session-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 24px;
+  font-size: 11px;
+  color: var(--gray-light);
+  border-top: 1px solid var(--border);
+  background-color: var(--bg-alt);
+  text-decoration: none;
+  transition: background-color 0.1s linear;
+  min-height: 28px;
+}
+
+.session-footer:hover {
+  background-color: var(--bg-hover);
+  text-decoration: none;
+}
+
+.session-footer--inert {
+  cursor: default;
+  pointer-events: none;
+  color: var(--gray);
+}
+
+.session-footer__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.session-footer__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.session-footer__title {
+  color: var(--orange);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-footer__time {
+  color: var(--gray-light);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-footer__poll {
+  color: var(--gray-light);
+}
+
+.session-footer__error {
+  color: var(--red);
+}
+
+/* ---- Dot states ---- */
+
+.session-footer__dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.session-footer__dot--active {
+  background-color: var(--green);
+  animation: session-footer-pulse 2s ease-in-out infinite;
+}
+
+.session-footer__dot--closed {
+  background-color: var(--blue);
+}
+
+.session-footer__dot--error {
+  background-color: var(--red);
+  animation: session-footer-pulse 1s ease-in-out infinite;
+}
+
+.session-footer__dot--idle-warning {
+  background-color: var(--yellow);
+  animation: session-footer-pulse 1.5s ease-in-out infinite;
+}
+
+.session-footer__dot--none {
+  background-color: transparent;
+  border: 1px solid var(--gray);
+}
+
+@keyframes session-footer-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Color-tinted variants on the bar's left edge for at-a-glance state */
+
+.session-footer--active .session-footer__title {
+  color: var(--green-bright);
+}
+
+.session-footer--error .session-footer__title {
+  color: var(--red);
+}
+
+.session-footer--idle-warning .session-footer__title {
+  color: var(--yellow);
+}
+
+.session-footer--closed .session-footer__title {
+  color: var(--blue);
+}
+
+.session-footer--none .session-footer__title {
+  color: var(--gray-light);
+}
+
+@media (max-width: 768px) {
+  .session-footer {
+    padding: 6px 12px;
+    font-size: 10px;
+  }
+}

@@ -41,7 +41,7 @@ from app.routers import (
     tokens,
     tracking,
 )
-from app.services import idle_sweeper
+from app.services import idle_sweeper, marker_sweep_task
 from app.services.failed_hook import log_failed_hook
 
 
@@ -49,9 +49,14 @@ from app.services.failed_hook import log_failed_hook
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     await idle_sweeper.start(app)
+    # DWB-369: marker sweeper - cleans pending-* files whose worker died
+    # pre-SubagentStop, plus finalized markers tied to completed
+    # hook_sessions. Independent lifecycle from the idle sweeper.
+    await marker_sweep_task.start(app)
     try:
         yield
     finally:
+        await marker_sweep_task.stop(app)
         await idle_sweeper.stop(app)
 
 

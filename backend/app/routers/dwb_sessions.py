@@ -1,12 +1,12 @@
 # Path: app/routers/dwb_sessions.py
 # File: dwb_sessions.py
 # Created: 2026-06-09
-# Purpose: REST endpoints for DWB session open/close + read rollups (DWB-336, DWB-338)
+# Purpose: REST endpoints for DWB session open/close + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket)
 # Caller: app/main.py
 # Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/schemas/dwb_session.py
 # Data In: HTTP POST JSON bodies, GET query/path params
 # Data Out: DwbSessionRead, DwbSessionListItem[], DwbSessionDetail (or 404/409)
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 """HTTP layer for DWB session lifecycle.
 
@@ -138,6 +138,7 @@ def close_dwb_session(
         close_reason=body.close_reason,
         close_phrase=body.close_phrase,
         now=body.closed_at,
+        headline=body.headline,
     )
 
     if not was_already_closed:
@@ -163,13 +164,18 @@ def list_project_sessions(
 ):
     """List DWB sessions for a project, most recent first.
 
-    Returns a slim row per session (no rollup slices). For full detail
-    including by_role / by_ticket / overhead, follow up with
-    GET /api/sessions/{id}.
+    Returns a slim row per session plus DWB-346 per-row aggregates:
+    tickets_made / tickets_completed / agents_active / open_method /
+    close_method / headline / ticket_summary. For full detail including
+    by_role / by_ticket / overhead, follow up with GET /api/sessions/{id}.
 
     404 when the project does not exist (separating "no project" from
     "project exists with zero sessions" so callers can distinguish a
     typo from a fresh project).
+
+    Backwards-compatibility: the original six fields (id, opened_at,
+    closed_at, total_tokens, total_time_seconds, status) keep their old
+    shape and values. DWB-346 aggregates are additive only.
     """
     if db.get(Project, project_id) is None:
         raise HTTPException(404, f"Project {project_id} not found")
@@ -184,17 +190,30 @@ def list_project_sessions(
         ).scalars()
     )
 
-    return [
-        DwbSessionListItem(
-            id=r.id,
-            opened_at=r.opened_at,
-            closed_at=r.closed_at,
-            total_tokens=r.total_tokens,
-            total_time_seconds=r.total_time_seconds,
-            status="open" if r.closed_at is None else "closed",
+    items: list[DwbSessionListItem] = []
+    for r in rows:
+        agg = rollup.compute_list_aggregates(db, r)
+        ad_hoc_tokens, ad_hoc_seconds = rollup.compute_ad_hoc_bucket(db, r)
+        items.append(
+            DwbSessionListItem(
+                id=r.id,
+                opened_at=r.opened_at,
+                closed_at=r.closed_at,
+                total_tokens=r.total_tokens,
+                total_time_seconds=r.total_time_seconds,
+                status="open" if r.closed_at is None else "closed",
+                headline=r.headline,
+                tickets_made=agg["tickets_made"],
+                tickets_completed=agg["tickets_completed"],
+                agents_active=agg["agents_active"],
+                open_method=r.open_method,
+                close_method=r.close_method,
+                ticket_summary=agg["ticket_summary"],
+                ad_hoc_overhead_tokens=ad_hoc_tokens,
+                ad_hoc_overhead_seconds=ad_hoc_seconds,
+            )
         )
-        for r in rows
-    ]
+    return items
 
 
 @router.get(
@@ -223,6 +242,7 @@ def get_dwb_session_detail(
     by_role = rollup.compute_by_role(db, row)
     by_ticket = rollup.compute_by_ticket(db, row)
     tl_overhead, pm_overhead = rollup.compute_overhead_deltas(db, row)
+    ad_hoc_tokens, ad_hoc_seconds = rollup.compute_ad_hoc_bucket(db, row)
 
     if is_open:
         live_tokens, live_time = rollup.compute_live_totals(db, row)
@@ -242,6 +262,7 @@ def get_dwb_session_detail(
         open_method=row.open_method,
         close_method=row.close_method,
         close_reason=row.close_reason,
+        headline=row.headline,
         status="open" if is_open else "closed",
         live=is_open,
         total_tokens=total_tokens,
@@ -250,4 +271,6 @@ def get_dwb_session_detail(
         by_ticket=by_ticket,
         tl_overhead_tokens=tl_overhead,
         pm_overhead_tokens=pm_overhead,
+        ad_hoc_overhead_tokens=ad_hoc_tokens,
+        ad_hoc_overhead_seconds=ad_hoc_seconds,
     )

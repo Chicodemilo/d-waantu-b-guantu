@@ -1,12 +1,12 @@
 # Path: app/services/jira.py
 # File: jira.py
 # Created: 2026-05-27
-# Purpose: Read-only Jira REST client with in-process TTL cache for slow-changing data
+# Purpose: Read-only Jira REST client with in-process TTL cache for slow-changing data (DWB-356 adds reporter + active-sprint extraction)
 # Caller: app/routers/jira.py
 # Callees: requests, app.config
 # Data In: Jira REST API responses
 # Data Out: Normalized dicts for FastAPI routers
-# Last Modified: 2026-05-27
+# Last Modified: 2026-06-10
 
 """Minimal Jira REST wrapper used by the `/api/jira/*` proxy endpoints.
 
@@ -140,12 +140,62 @@ def list_projects() -> list[dict]:
     ]
 
 
+def _issue_fields_param() -> str:
+    """DWB-356: canonical `fields` query param for Jira issue/search calls.
+
+    Centralized so a future field addition lands in one place. `reporter`
+    is requested for displayName flattening alongside assignee.
+
+    Sprint customfield IDs vary per Jira instance. We explicitly request
+    a small bag of known IDs (cloud default 10020 + Roadvantage 10021 +
+    the env-configured override) so the auto-detector in
+    ``_extract_active_sprint_name`` has data to work with regardless of
+    which instance the project is on. Adding a third instance with a
+    new customfield ID = add the ID to the SPRINT_FIELD_HINT_IDS tuple
+    below; the extractor's shape-based auto-detection will still find it
+    on the issue payload either way.
+    """
+    sprint_hints = ",".join(SPRINT_FIELD_HINT_IDS | {settings.JIRA_SPRINT_CUSTOMFIELD})
+    # DWB-363: legacy Epic Link customfield (modern Jira uses `parent` which
+    # is already requested above). Configured ID + the historical Cloud
+    # default 10014 in case the override isn't set.
+    epic_link_hints = ",".join(
+        EPIC_LINK_HINT_IDS | {settings.JIRA_EPIC_LINK_CUSTOMFIELD}
+    )
+    return (
+        "summary,status,assignee,reporter,issuetype,parent,priority,"
+        f"updated,created,{sprint_hints},{epic_link_hints}"
+    )
+
+
+# DWB-356: known Jira sprint customfield IDs across user instances. The
+# `fields=` query string includes all of these so the issue payload
+# carries the sprint data regardless of which ID the instance uses; the
+# auto-detector in `_extract_active_sprint_name` then picks the
+# sprint-shaped value off the payload. New instances with novel IDs:
+# add the ID here; no other code path needs to change.
+SPRINT_FIELD_HINT_IDS: set[str] = {
+    "customfield_10020",  # Jira Cloud "Software" projects (historical default)
+    "customfield_10021",  # Roadvantage / FRAUDI (probed 2026-06-10)
+}
+
+
+# DWB-363: known Jira Epic Link customfield IDs. Modern Jira uses `parent`
+# (already requested via the explicit field list) so this is purely a
+# legacy fallback. Roadvantage didn't have epics via customfield in the
+# 2026-06-10 probe (all via parent), so the hint set is just the
+# historical Cloud default for now.
+EPIC_LINK_HINT_IDS: set[str] = {
+    "customfield_10014",  # Jira Cloud historical "Epic Link" default
+}
+
+
 def get_issue(issue_key: str) -> dict:
     """Return a normalized issue dict for the given Jira key."""
     raw = _request(
         "GET",
         f"/rest/api/3/issue/{issue_key}",
-        params={"fields": "summary,status,assignee,issuetype,parent,priority,updated,created"},
+        params={"fields": _issue_fields_param()},
         cache_ttl=settings.JIRA_CACHE_TTL_SECONDS,
     )
     return _normalize_issue(raw)
@@ -159,7 +209,7 @@ def search_issues(jql: str, limit: int = 50) -> list[dict]:
         params={
             "jql": jql,
             "maxResults": min(max(1, limit), 100),
-            "fields": "summary,status,assignee,issuetype,parent,priority,updated,created",
+            "fields": _issue_fields_param(),
         },
         cache_ttl=settings.JIRA_CACHE_TTL_SECONDS,
     )
@@ -201,7 +251,7 @@ def get_sprint_issues(sprint_id: int) -> list[dict]:
     data = _request(
         "GET",
         f"/rest/agile/1.0/sprint/{sprint_id}/issue",
-        params={"fields": "summary,status,assignee,issuetype,parent,priority,updated"},
+        params={"fields": _issue_fields_param()},
         cache_ttl=settings.JIRA_CACHE_TTL_SECONDS,
     )
     return [_normalize_issue(i) for i in data.get("issues", [])]
@@ -226,7 +276,7 @@ def batch_get_issues(issue_keys: list[str]) -> list[dict]:
             params={
                 "jql": jql,
                 "maxResults": 100,
-                "fields": "summary,status,assignee,issuetype,parent,priority,updated,created",
+                "fields": _issue_fields_param(),
             },
             cache_ttl=0,
         )
@@ -447,15 +497,181 @@ def rollup_by_epic(db, project_id: int) -> dict:
 # ── Normalization ─────────────────────────────────────────────────
 
 
+def _extract_active_sprint_name(fields: dict, sprint_field_id: str) -> str | None:
+    """DWB-356: pull the sprint name from the issue's sprint customfield.
+
+    Jira customfield ID for sprint varies per instance:
+      - Jira Cloud "Software" projects:   customfield_10020 (the historical default)
+      - Roadvantage / FRAUDI (lat env):   customfield_10021 (probed live 2026-06-10)
+      - On-prem installs:                 anything; check the issue payload
+
+    Strategy: try the configured field first (settings.JIRA_SPRINT_CUSTOMFIELD,
+    env-overridable), then auto-scan every customfield_* key for the
+    sprint-shape fingerprint (list of dicts each carrying both `name` and
+    `state` keys). The fingerprint is distinctive enough that no other
+    Jira customfield value collides with it in practice. Auto-detection
+    means a new Jira instance with a third ID needs no code change.
+
+    Selection rule (DWB-356, REVISED 2026-06-10): the original "active
+    only -> None on closed" rule blanked 322/322 rows on FRAUDI because
+    every ticket there was in closed-only sprints. Real-world Jira
+    admins close sprints right after work ships, so on a mature project
+    almost no ticket is in an active sprint. The user wants to see WHICH
+    sprint the work was/is in, so we now surface the most-recent sprint
+    membership with this priority:
+
+      1. active   (work happening now)        - highest id wins on ties
+      2. future   (work scheduled)            - highest id wins
+      3. closed   (work shipped, historical)  - highest id wins
+      4. None     (no sprint membership at all)
+
+    Higher Jira sprint id = newer sprint (ids increment globally per
+    board), so the highest-id pick is the most-recent within each tier.
+
+    Tolerant of legacy string-encoded shapes (older Jira returned the
+    sprint customfield as a list of '[Sprint@123,name=Foo,state=ACTIVE,...]'
+    strings instead of dicts); the parser falls back to a regex scan in
+    that case. Anything we can't parse becomes None - the rest of the
+    snapshot still lands.
+    """
+    raw = fields.get(sprint_field_id)
+    if not raw:
+        # Configured field missing - auto-scan for a sprint-shaped value
+        # under any customfield_* key.
+        raw = _autodetect_sprint_field(fields)
+    if not raw:
+        return None
+    if not isinstance(raw, list):
+        return None
+
+    import re
+    # Legacy parser: search for ``name=`` and ``state=`` independently
+    # because their order varies in the old string encoding. Stop the
+    # `name=...` capture at the next comma OR closing bracket so a name
+    # without trailing commas at the end of the string still parses.
+    legacy_name_re = re.compile(r"name=([^,\]]+)")
+    legacy_state_re = re.compile(r"state=([A-Za-z]+)")
+    legacy_id_re = re.compile(r"id=(\d+)")
+
+    # Tuple shape: (state_priority, sprint_id, name). state_priority
+    # encodes the active > future > closed ranking (lower number = higher
+    # priority). Sort ascending by priority then descending by id to get
+    # the most-recent within the highest tier.
+    _STATE_PRIORITY = {"active": 0, "future": 1, "closed": 2}
+
+    candidates: list[tuple[int, int, str]] = []
+    for entry in raw:
+        if isinstance(entry, dict):
+            name = entry.get("name")
+            state = (entry.get("state") or "").lower()
+            sid = int(entry.get("id") or 0)
+            if name:
+                priority = _STATE_PRIORITY.get(state, 3)  # unknown state -> lowest
+                candidates.append((priority, sid, name))
+        elif isinstance(entry, str):
+            m_name = legacy_name_re.search(entry)
+            m_state = legacy_state_re.search(entry)
+            m_id = legacy_id_re.search(entry)
+            if m_name:
+                state = m_state.group(1).lower() if m_state else ""
+                sid = int(m_id.group(1)) if m_id else 0
+                priority = _STATE_PRIORITY.get(state, 3)
+                candidates.append((priority, sid, m_name.group(1).strip()))
+
+    if not candidates:
+        return None
+    # Sort: highest-priority tier first; within tier, newest sprint
+    # (highest id) wins. Reversed id sort via negation.
+    candidates.sort(key=lambda t: (t[0], -t[1]))
+    return candidates[0][2]
+
+
+def _extract_epic_key(raw: dict) -> str | None:
+    """DWB-363: pull the epic key the issue belongs to.
+
+    Two paths, tried in order:
+
+      1. parent.key when parent.fields.issuetype.name == "Epic". This is
+         the modern Jira ("next-gen" / Cloud post-2021) shape and the one
+         Roadvantage uses - 10/10 sampled POR tickets have their epic
+         accessible this way (probed 2026-06-10).
+
+      2. The legacy "Epic Link" customfield
+         (settings.JIRA_EPIC_LINK_CUSTOMFIELD; default customfield_10014).
+         Older Jira instances and team-managed projects expose the epic
+         here as a bare string key like "POR-100". Tolerated as a
+         fallback.
+
+    Sub-task case: if parent is NOT an Epic (e.g., parent is a Story or
+    Task), we return None here and let the sync's batched epic-resolver
+    do the one-hop walk. Keeping the per-issue extractor pure means the
+    sync controls the I/O cost of any cross-issue lookups.
+
+    Returns the epic key string or None.
+    """
+    fields = raw.get("fields") or {}
+
+    # Path 1: parent linkage.
+    parent = fields.get("parent") or {}
+    parent_key = parent.get("key")
+    parent_type = (
+        (parent.get("fields") or {}).get("issuetype") or {}
+    ).get("name", "")
+    if parent_key and parent_type.lower() == "epic":
+        return parent_key
+
+    # Path 2: legacy Epic Link customfield (string value).
+    epic_link = fields.get(settings.JIRA_EPIC_LINK_CUSTOMFIELD)
+    if isinstance(epic_link, str) and epic_link.strip():
+        return epic_link.strip()
+
+    return None
+
+
+def _autodetect_sprint_field(fields: dict) -> list | None:
+    """Scan all customfield_* keys on an issue payload for a sprint-shaped value.
+
+    Sprint shape fingerprint: list whose elements are dicts containing
+    BOTH a `name` AND a `state` key. The combination is distinctive
+    enough that no other Jira customfield in practice carries this
+    shape, so a positive match is the sprint field.
+
+    Returns the matching list (for the caller to parse) or None.
+    """
+    for key, value in fields.items():
+        if not key.startswith("customfield_"):
+            continue
+        if not isinstance(value, list) or not value:
+            continue
+        first = value[0]
+        if isinstance(first, dict) and "name" in first and "state" in first:
+            return value
+    return None
+
+
 def _normalize_issue(raw: dict) -> dict:
-    """Flatten Jira's deeply-nested issue shape into a frontend-friendly dict."""
+    """Flatten Jira's deeply-nested issue shape into a frontend-friendly dict.
+
+    DWB-356 adds two keys to the output:
+      - reporter:    issue.fields.reporter.displayName (string or None)
+      - sprint_name: active sprint name from the configurable customfield
+                     (settings.JIRA_SPRINT_CUSTOMFIELD; default
+                     'customfield_10020'); None when the issue has no
+                     active sprint.
+    """
     fields = raw.get("fields") or {}
     status = fields.get("status") or {}
     assignee = fields.get("assignee") or {}
+    reporter = fields.get("reporter") or {}
     issuetype = fields.get("issuetype") or {}
     parent = fields.get("parent") or {}
     parent_fields = parent.get("fields") or {}
     priority = fields.get("priority") or {}
+
+    sprint_name = _extract_active_sprint_name(
+        fields, settings.JIRA_SPRINT_CUSTOMFIELD,
+    )
+    epic_key = _extract_epic_key(raw)
 
     return {
         "key": raw.get("key"),
@@ -464,10 +680,27 @@ def _normalize_issue(raw: dict) -> dict:
         "status": status.get("name"),
         "status_category": (status.get("statusCategory") or {}).get("name"),
         "assignee": assignee.get("displayName"),
+        # DWB-356: reporter displayName, same flattening as assignee.
+        "reporter": reporter.get("displayName"),
         "issue_type": issuetype.get("name"),
+        # DWB-364: Jira's authoritative "this is a subtask" signal. Used
+        # by jira_sync to gate per-row jira_parent_key persistence (we
+        # only show the Parent column for subtasks; non-subtask rows
+        # would either be redundant with the Epic column or noise).
+        # Defaults to False when the field is missing (defensive on
+        # legacy payloads).
+        "issue_type_is_subtask": bool(issuetype.get("subtask", False)),
         "parent_key": parent.get("key"),
         "parent_type": (parent_fields.get("issuetype") or {}).get("name"),
         "priority": priority.get("name"),
         "created": fields.get("created"),
         "updated": fields.get("updated"),
+        # DWB-356: active sprint name from the configurable customfield.
+        "sprint_name": sprint_name,
+        # DWB-363: epic key derived from parent (modern Jira) or the
+        # legacy Epic Link customfield. None when the issue has no
+        # epic context (typical for stand-alone tasks and epics
+        # themselves). Epic NAME is resolved by jira_sync in a
+        # batched lookup to avoid N+1 per-issue fetches.
+        "epic_key": epic_key,
     }

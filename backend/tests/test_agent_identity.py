@@ -77,6 +77,7 @@ class TestIdentifyHappyPath:
             "agent_id", "name", "role", "project_id", "project_prefix",
             "jira_enabled",  # DWB-332
             "memory_dir", "scratchpad_excerpt", "instructions",
+            "memory_usage_rules",  # DWB-352
         }
         assert data["agent_id"] == agent["id"]
         assert data["project_id"] == project["id"]
@@ -224,8 +225,10 @@ class TestSpawnPrepareHappyPath:
         })
         assert r.status_code == 200
         data = r.json()
+        # DWB-341 added memory_dir; DWB-352 added memory_usage_rules.
         assert set(data.keys()) == {
-            "agent_id", "identity_prompt", "scratchpad_excerpt", "boundary_rules",
+            "agent_id", "identity_prompt", "scratchpad_excerpt",
+            "boundary_rules", "memory_dir", "memory_usage_rules",
         }
         assert data["agent_id"] == agent["id"]
         assert data["identity_prompt"].startswith("## Identity")

@@ -1,12 +1,12 @@
 # Path: app/models/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: DwbSession ORM model — passive user-bounded session for time + token rollup (DWB-335)
+# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline)
 # Caller: app/services/dwb_session.py (DWB-337), app/routers/dwb_sessions.py (DWB-338)
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: DwbSession, DwbOpenMethod, DwbCloseMethod, DwbCloseReason
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 import enum
 from datetime import datetime
@@ -20,6 +20,7 @@ from sqlalchemy import (
     Index,
     Integer,
     SmallInteger,
+    String,
     Text,
     func,
 )
@@ -93,6 +94,12 @@ class DwbSession(Base):
     total_time_seconds: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
     )
+
+    # DWB-346: short user-facing summary of what the session was about. Set
+    # optionally on close via POST /api/sessions/{id}/close. 80-char cap so
+    # the dashboard list row stays one line; longer text is the detail view's
+    # job, not the headline's.
+    headline: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     # Generated single-active marker: 1 when closed_at IS NULL, NULL when
     # closed_at IS NOT NULL. The (project_id, is_open) UNIQUE index above

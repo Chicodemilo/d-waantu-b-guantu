@@ -409,14 +409,9 @@ function ProjectPage() {
         <div className="dashboard__section-title">
           <Link to={`/projects/${id}/tickets`}>View All Tickets &rarr;</Link>
           {project.jira_project_key && (
-            <>
-              <Link to={`/projects/${id}/jira`} style={{ marginLeft: '24px' }}>
-                View Jira Issues &rarr;
-              </Link>
-              <Link to={`/projects/${id}/jira-rollup`} style={{ marginLeft: '24px' }}>
-                Jira Rollup &rarr;
-              </Link>
-            </>
+            <Link to={`/projects/${id}/jira`} style={{ marginLeft: '24px' }}>
+              View Jira Issues &rarr;
+            </Link>
           )}
         </div>
       </div>

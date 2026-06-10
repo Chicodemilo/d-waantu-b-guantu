@@ -5,9 +5,9 @@
 <!-- jira-only:start -->
 ## Canonical Tools
 
-On Jira-linked projects, all ticket ops go through D2J. `report` and `transition` rules in `docs/worker_playbook.md § Canonical Tools`. `create` flow (TL drafts, PM previews + submits) in `docs/pm_playbook.md § Canonical Tools`. Full CLI reference: `~/Dev/DWB_2_JIRA/README.md`.
+On Jira-linked projects, all ticket ops go through D2J. `report` and `transition` rules in `.claude/worker_playbook.md § Canonical Tools`. `create` flow (TL drafts, PM previews + submits) in `.claude/pm_playbook.md § Canonical Tools`. Full CLI reference: `~/Dev/DWB_2_JIRA/README.md`.
 
-**DWB is internal: never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content. The human approves all ticket proposals before anything is created.** Full context: `docs/worker_playbook.md § DWB Is an Internal Tool`.
+**DWB is internal: never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content. The human approves all ticket proposals before anything is created.** Full context: `.claude/worker_playbook.md § DWB Is an Internal Tool`.
 <!-- jira-only:end -->
 
 <!-- non-jira-only:start -->
@@ -22,7 +22,7 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 
 ## On Startup
 
-1. **Complete the identity flow** in `docs/worker_playbook.md` § On Spawn: Identity (identify, cache `agent_id`, read your memory dir: `identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). Same flow for every agent, TL included.
+1. **Complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity (identify, cache `agent_id`, read your memory dir: `identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). Same flow for every agent, TL included.
 2. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`
 3. Fetch the live team roster: `GET /api/projects/{project_id}/team`. The DB is authoritative, not a checked-in file.
 4. Read `ARCHITECTURE.md` / `README.md` only for cross-cutting work
@@ -31,7 +31,7 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 
 ### Your Personal Memory Dir
 
-Lives at `.claude/agents/memory/<project_prefix>/Archie_<PREFIX>/`. File purposes + write rules in `docs/worker_playbook.md § Memory Writes`. TL-flavored use: `scratchpad.md` for orchestration notes (who's spawned, what you're tracking); `lessons.md` for TL-specific patterns (spawn quirks, gate edge cases).
+Lives at `.claude/agents/memory/<project_prefix>/Archie_<PREFIX>/`. File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. TL-flavored use: `scratchpad.md` for orchestration notes (who's spawned, what you're tracking); `lessons.md` for TL-specific patterns (spawn quirks, gate edge cases).
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
 
@@ -155,7 +155,7 @@ If `.claude/ALERTS_PENDING.md` exists, **read it immediately, it takes priority.
 
 Don't let open alerts accumulate, an ignored queue trains everyone to ignore alerts.
 
-> **PM Jira authority is strictly read-only at the sprint level.** PMs cannot close/create/edit/delete Jira sprints, only DWB sprints. If you (the TL) need a Jira sprint operation, do it yourself with explicit human approval. See `docs/pm_playbook.md` § Safety, Hard Limits on Jira Manipulation.
+> **PM Jira authority is strictly read-only at the sprint level.** PMs cannot close/create/edit/delete Jira sprints, only DWB sprints. If you (the TL) need a Jira sprint operation, do it yourself with explicit human approval. See `.claude/pm_playbook.md` § Safety, Hard Limits on Jira Manipulation.
 
 ---
 
@@ -195,6 +195,19 @@ The hook resolver atomically renames the pending marker to the CC-assigned `sess
 ### Worker roles you can spawn
 
 `@frontend-worker`, `@backend-worker`, `@system-ops`, `@tester`, `@docs-writer`. **`@pm` only when 3+ parallel workers** (the no-PM-for-small-teams rule above). For 1-2 worker teams the TL drives directly; don't spawn a PM just because the table lists the role.
+
+### Protected files: TL handles directly (hard exception to TL-never-codes)
+
+Subagent edits to ANY path under `.claude/` trigger a permission dialog that crashes them in the ink renderer. Four workers died across S66 from this exact pattern, including some that followed prior playbook guidance to "append yourself" inside their own memory dir. The current model is stricter than what DWB-355 documented:
+
+- **Workers cannot safely write anything under `.claude/`** - that includes `.claude/settings.json`, the playbooks, the project_rules files, AND the worker's own memory dir at `.claude/agents/memory/<prefix>/<name>/`. The crash mode is identical.
+- **TL is the only agent that can directly Edit/Write `.claude/` files.** You run in the main CC window with a user attached for the permission dialog, so the prompt resolves instead of killing you. This is the hard exception to the TL-never-codes rule for harness-config edits.
+- **For worker memory writes**, route them through `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`. The FastAPI process has no permission dialog, so server-side writes are safe. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
+- Do NOT ticket a `.claude/settings.json` edit to a worker. Make the change yourself. The worker playbook carries the matching prohibition.
+
+### SendMessage routes by EXACT name
+
+When a teammate dies and is respawned, the spawn system can auto-suffix the new name (`Pam_DWB` -> `Pam_DWB-2`). `SendMessage({to: "..."})` routes by the literal name string; addressing the original name after a respawn silently drops the message into a dead inbox with no delivery error. Before sending, verify the current live name via `GET /api/projects/{id}/team` or the spawn-prepare response. If you find yourself getting no replies, suspect a stale name first.
 
 ## 4b. Code Review Gate
 
@@ -250,13 +263,22 @@ A DWB session bounds passive time + token tracking by user intent, not by Claude
 
 2. **Ambiguous.** Wording suggests intent but isn't certain (e.g. "let's wrap up" without "for the night"; "you are archie" with no playbook clause). Ask one short clarifying question before acting. If the user confirms, post with `open_method="ai_asked"` / `close_method="ai_asked"` so the rollup records which layer caught it.
 
-3. **Irrelevant.** Most messages. Do nothing. The regex fast path (Layer 1) catches obvious cases automatically via the SessionStart/SessionEnd hooks; the AI reasoning (Layer 2) is a backstop, not a per-turn ritual.
+3. **Irrelevant.** Most messages. Do nothing. The regex layer (Layer 1) catches obvious cases automatically; the AI reasoning (Layer 2) is a backstop, not a per-turn ritual.
+
+**Layer 1 fast paths (DWB-343 + DWB-344).** The regex layer now has two entry points so the open phrase is not lost to the SessionStart-before-transcript race:
+- **UserPromptSubmit hook (DWB-344):** Claude Code fires this synchronously on every user prompt with the raw text in the payload. The `/api/hooks/user-prompt` endpoint matches `match_open(prompt)` directly. Instant detection, no transcript scan.
+- **SessionEnd retry (DWB-343):** the `handle_session_end` path also re-runs `try_open_dwb_session_from_transcript` so any Stop/SessionEnd/SubagentStop after the first assistant turn catches an open phrase that the SessionStart scan missed.
+Both noop silently if a session is already open, so they cannot disturb a Layer-2 ai_confident open. Your AI-layer evaluation is the backstop for everything the regex catalogue does not cover.
 
 **Method enum:** `regex` = caught by the hook fast path, `ai_confident` = TL acted without asking, `ai_asked` = TL confirmed first. Stored on the DwbSession row so the dashboard can show which layer is doing the work.
+
+**Privacy rule (DWB-351).** On AI-layer opens and closes, **do NOT pass the user's literal message in `open_phrase` / `close_phrase`**. User-typed text is never persisted in DWB. The regex layer stores its matched catalogue substring (hardcoded text, not free-form input); your AI-layer POSTs should omit the phrase field entirely or send `null`. Future contributors who re-add user text here will reintroduce a privacy regression.
 
 **Race with the regex layer:** if the regex hook opens first, your AI-side attempt returns 409 with the active session's id, silently noop and read that id for any follow-up announcements. Same for close: the regex hook may beat you to it, in which case `close` returns 200 (idempotent), not an error.
 
 **Idle timeout:** after 60min of zero activity (no hook_session updates, no tracking_log writes), the background sweeper auto-closes with `close_method="idle_timeout"`. If you forget to close, the system catches it.
+
+**Ad Hoc bucket (DWB-353).** Worker sessions that ran without a filed ticket (skip-ceremony lane per § 4c) route to a project-level `ad_hoc` overhead bucket instead of firing an unattributed-tokens alert. Surfaced as `ad_hoc_overhead_tokens` + `ad_hoc_overhead_seconds` on the session detail rollup alongside TL and PM overhead. No action required from you; the routing is automatic in the hook tracking service.
 
 ## 5. TL Workflow: Typical Session
 

@@ -6,7 +6,7 @@
 // Callees: react (useState), react-router-dom (NavLink, useLocation), useStore
 // Data In: projects from store, current location pathname, open prop, onNavClick callback
 // Data Out: default export Sidebar component
-// Last Modified: 2026-04-16
+// Last Modified: 2026-06-10
 
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -54,6 +54,11 @@ function Sidebar({ open, onNavClick }) {
               </NavLink>
             </li>
             <li>
+              <NavLink to={`/projects/${p.id}/sessions`} className={linkClass} onClick={onNavClick}>
+                sessions
+              </NavLink>
+            </li>
+            <li>
               <NavLink to={`/projects/${p.id}/tests`} className={linkClass} onClick={onNavClick}>
                 tests
               </NavLink>
@@ -64,18 +69,11 @@ function Sidebar({ open, onNavClick }) {
               </NavLink>
             </li>
             {p.jira_project_key && (
-              <>
-                <li>
-                  <NavLink to={`/projects/${p.id}/jira`} className={linkClass} onClick={onNavClick}>
-                    jira
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink to={`/projects/${p.id}/jira-rollup`} className={linkClass} onClick={onNavClick}>
-                    jira_rollup
-                  </NavLink>
-                </li>
-              </>
+              <li>
+                <NavLink to={`/projects/${p.id}/jira`} className={linkClass} onClick={onNavClick}>
+                  jira
+                </NavLink>
+              </li>
             )}
           </ul>
         )}

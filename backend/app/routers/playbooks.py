@@ -52,6 +52,17 @@ AGENT_DEF_FILES = [
     "tester.md",
 ]
 
+# DWB-368: auxiliary docs cross-referenced by the playbook prose. Deployed
+# verbatim (no Jira-variant scrub) to each project's `.claude/` so refs like
+# `.claude/session_lifecycle.md` and `.claude/rules/global/code-header-format.md`
+# resolve on consumer projects, not just on DWB. Path inside the source repo
+# is mirrored under `.claude/`: docs/session_lifecycle.md -> .claude/session_lifecycle.md;
+# docs/rules/global/code-header-format.md -> .claude/rules/global/code-header-format.md.
+AUX_DOCS = [
+    "session_lifecycle.md",
+    "rules/global/code-header-format.md",
+]
+
 
 # DWB-332: scrub markers for variant-aware deploy. Playbook source carries
 # both Jira-flavored and non-Jira blocks side-by-side; on deploy we keep one
@@ -255,6 +266,19 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
             dst = agents_target_dir / filename
             shutil.copy2(src, dst)
             deployed.append(f"agents/{filename}")
+
+    # DWB-368: deploy auxiliary docs (session_lifecycle, code-header-format).
+    # These are cross-referenced by the playbook prose; without this copy the
+    # refs break on consumer projects. Verbatim copy, no variant scrub.
+    if target_dir.resolve() != (DWB_REPO_ROOT / ".claude").resolve():
+        for rel_path in AUX_DOCS:
+            src = DOCS_DIR / rel_path
+            if not src.is_file():
+                continue
+            dst = target_dir / rel_path
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            deployed.append(rel_path)
 
     # DWB-298: Scaffold memory dirs for every active agent on the project.
     # Best-effort per agent — a single failure is captured as an `error`
