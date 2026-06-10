@@ -53,11 +53,16 @@ def upgrade() -> None:
             )
         ).fetchall()
     }
-    # Spec mandate: rename Mona even if it has only one row, since it's a
-    # fixed-role PM name that will collide as soon as another project adds
-    # a Mona. Same intent for Archie/Pam — those are already in `colliding`
-    # via the data audit, but adding them defensively is cheap.
-    colliding.update({"Mona", "Archie", "Pam"})
+    # Spec mandate: rename Mona/Archie/Pam defensively even with one row,
+    # since they're fixed-role names that will collide as soon as another
+    # DWB project adds them. Only applies on the DWB work DB — on other
+    # DBs these names belong to *that* DB's roster and should be left alone.
+    # Fingerprint: a project with prefix='DWB'.
+    is_dwb_db = bind.execute(
+        sa.text("SELECT 1 FROM projects WHERE prefix = 'DWB' LIMIT 1")
+    ).first()
+    if is_dwb_db:
+        colliding.update({"Mona", "Archie", "Pam"})
 
     # 2. Walk every agent row. For colliding names, compute a unique name
     #    based on whether the row has a project (suffix with prefix) or is
