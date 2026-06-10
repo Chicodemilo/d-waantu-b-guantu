@@ -6,7 +6,7 @@
 # Callees: All routers, app/database.py
 # Data In: None
 # Data Out: FastAPI app instance
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 import os
 from contextlib import asynccontextmanager
@@ -23,6 +23,7 @@ from app.routers import (
     activity_logs,
     agents,
     alerts,
+    client_logs,
     comments,
     dwb_sessions,
     epics,
@@ -34,6 +35,7 @@ from app.routers import (
     playbooks,
     project_agents,
     projects,
+    server_logs,
     sprints,
     status,
     test_results,
@@ -41,13 +43,16 @@ from app.routers import (
     tokens,
     tracking,
 )
-from app.services import idle_sweeper, marker_sweep_task
+from app.services import idle_sweeper, marker_sweep_task, server_log_handler
 from app.services.failed_hook import log_failed_hook
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    # DWB-372: capture app-level log records into the ring buffer so
+    # GET /api/server-logs has a non-empty surface from boot.
+    server_log_handler.install()
     await idle_sweeper.start(app)
     # DWB-369: marker sweeper - cleans pending-* files whose worker died
     # pre-SubagentStop, plus finalized markers tied to completed
@@ -117,3 +122,5 @@ app.include_router(status.router)
 app.include_router(jira.router)
 app.include_router(dwb_sessions.router)
 app.include_router(dwb_sessions.project_sessions_router)
+app.include_router(client_logs.router)
+app.include_router(server_logs.router)

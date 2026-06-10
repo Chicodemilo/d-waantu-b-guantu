@@ -1,0 +1,60 @@
+/* Path: src/styles/error-boundary.css */
+/* File: error-boundary.css */
+/* Created: 2026-06-10 */
+/* Purpose: Styles for ErrorBoundary fallback UI - terminal aesthetic, red accent for the error frame, monospace label, reload action styled as inline-text affordance. */
+/* Last Modified: 2026-06-10 */
+
+.error-boundary {
+  padding: 24px;
+  margin: 24px;
+  border: 1px solid var(--red-dim, var(--red));
+  border-left: 3px solid var(--red);
+  background-color: var(--bg-alt);
+  font-family: var(--font-mono);
+  color: var(--green);
+}
+
+.error-boundary__title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+
+.error-boundary__message {
+  font-size: 13px;
+  color: var(--green);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.error-boundary__detail {
+  font-size: 11px;
+  color: var(--gray-light);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 12px;
+}
+
+.error-boundary__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.error-boundary__action {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--green-bright);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.error-boundary__action:hover {
+  color: var(--orange);
+}

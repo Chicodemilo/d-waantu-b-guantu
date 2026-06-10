@@ -1,7 +1,7 @@
 // Path: src/components/dashboard/TimeTokens.jsx
 // File: TimeTokens.jsx
 // Created: 2026-03-30
-// Purpose: Tabbed "Time & Tokens" section with data tables (by project, by agent, overhead) and expandable per-ticket breakdowns. Overhead section includes Team Lead + PM rows (per agent) plus an Ad Hoc row sourced from project_total.ad_hoc_overhead_tokens / ad_hoc_overhead_seconds (DWB-353/354). Ad Hoc fields are null-guarded to 0 so the row renders even before the backend ships them.
+// Purpose: Tabbed "Time & Tokens" section with data tables (by project, by agent, overhead) and expandable per-ticket breakdowns. Overhead section includes Team Lead + PM rows (per agent) plus an Ad Hoc row sourced from project_total.ad_hoc_overhead_tokens / ad_hoc_overhead_seconds (DWB-353/354). Ad Hoc fields are null-guarded to 0 so the row renders even before the backend ships them. Tracking summary fetches use AbortController to cancel on unmount (DWB-370).
 // Caller: DashboardPage.jsx, ProjectPage.jsx
 // Callees: react (useState, useEffect), useStore, services/tracking, utils/format, dashboard.css
 // Data In: Optional projectId prop (single project mode); projects from store; tracking summaries from API
@@ -85,20 +85,26 @@ function TimeTokens({ projectId }) {
   const [summaries, setSummaries] = useState({});
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     Promise.all(
       projects.map((p) =>
-        getTrackingSummary(p.id).then((data) => ({ id: p.id, data }))
+        getTrackingSummary(p.id, { signal: controller.signal })
+          .then((data) => ({ id: p.id, data }))
+          .catch(() => ({ id: p.id, data: null }))
       )
     )
       .then((results) => {
-        if (cancelled) return;
-        const map = {};
-        for (const r of results) map[r.id] = r.data;
-        setSummaries(map);
+        if (controller.signal.aborted) return;
+        setSummaries((prev) => {
+          const map = { ...prev };
+          for (const r of results) {
+            if (r.data) map[r.id] = r.data;
+          }
+          return map;
+        });
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [projects.map((p) => p.id).join(',')]);
 
   const allTickets = projects.flatMap((p) => {

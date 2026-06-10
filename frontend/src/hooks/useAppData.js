@@ -1,12 +1,12 @@
 // Path: src/hooks/useAppData.js
 // File: useAppData.js
 // Created: 2026-03-29
-// Purpose: Master data-fetching hook that polls all API endpoints and hydrates the Zustand store
+// Purpose: Master data-fetching hook that polls all API endpoints and hydrates the Zustand store. Emits a one-shot `store.hydrated` client-log on the first successful fetchAll (DWB-371) so the TL can see the boot completion in the lifecycle trail.
 // Caller: App.jsx
-// Callees: react, store/useStore, api/status, api/projects, api/sprints, api/epics, api/agents, api/tickets, api/comments, api/alerts, api/instructions, api/activityLogs, api/projectAgents, api/testResults, config
+// Callees: react, store/useStore, api/status, api/projects, api/sprints, api/epics, api/agents, api/tickets, api/comments, api/alerts, api/instructions, api/activityLogs, api/projectAgents, api/testResults, services/logger, config
 // Data In: None (reads polling intervals from config)
 // Data Out: Exports useAppData hook; populates entire Zustand store via polling
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-10
 
 import { useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
@@ -23,6 +23,7 @@ import { getActivityLogs } from '../api/activityLogs';
 import { getProjectAgents } from '../api/projectAgents';
 import { getTestRuns } from '../api/testResults';
 import { getHookSessions } from '../api/hooks';
+import { log } from '../services/logger';
 
 import { POLLING_ACTIVE_INTERVAL, POLLING_IDLE_INTERVAL, ACTIVITY_LOG_LIMIT } from '../config';
 
@@ -38,6 +39,7 @@ function parseActivityDetails(item) {
 function useAppData() {
   const store = useStore;
   const intervalRef = useRef(null);
+  const hydratedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +90,14 @@ function useAppData() {
         state.setTestRuns(testRuns.map(parseActivityDetails));
         state.setHookSessions(hookSessions);
         state.updateLastPolled();
+        if (!hydratedRef.current) {
+          hydratedRef.current = true;
+          log.info('store.hydrated', 'initial poll complete', {
+            projects: projects.length,
+            tickets: tickets.length,
+            agents: agents.length,
+          });
+        }
       } catch (err) {
         console.error('[useAppData] fetch error:', err);
       }

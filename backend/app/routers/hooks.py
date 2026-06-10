@@ -1,11 +1,11 @@
 # Path: app/routers/hooks.py
 # File: hooks.py
 # Created: 2026-04-09
-# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit) - DWB-351 privacy scrub on UserPromptSubmit failure path
+# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit) + git post-commit hook auto-close (DWB-345)
 # Caller: app/main.py
-# Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/models/hook_session.py
+# Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/services/git_hook.py, app/models/hook_session.py
 # Data In: HTTP POST from curl hook commands
-# Data Out: JSON responses (HookSession data)
+# Data Out: JSON responses (HookSession data, post-commit close result)
 # Last Modified: 2026-06-10
 
 """Hook endpoints for passive tracking.
@@ -21,10 +21,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.hook_session import HookSessionStatus
+from app.schemas.git_hook import PostCommitRequest, PostCommitResponse
 from app.schemas.hook_session import (
     HookEventInput,
     HookSessionRead,
 )
+from app.services import git_hook as git_hook_svc
 from app.services import hook_tracking as svc
 from app.services.failed_hook import log_failed_hook
 
@@ -120,6 +122,45 @@ def hook_user_prompt(data: HookEventInput, db: Session = Depends(get_db)):
         return {
             "status": "error",
             "detail": str(e),
+        }
+
+
+@router.post("/post-commit", response_model=PostCommitResponse, status_code=200)
+def hook_post_commit(data: PostCommitRequest, db: Session = Depends(get_db)):
+    """Parse commit message for <PREFIX>-NNN tokens and auto-close any
+    in_progress / in_review tickets to done (DWB-345).
+
+    Same fire-and-forget contract as the other hook endpoints: any error
+    is logged and returned as a 200 so the shell hook never blocks a
+    commit. Silently no-ops when repo_path doesn't match a known project
+    (a hook firing from a clone of an unrelated repo is normal).
+    """
+    try:
+        result = git_hook_svc.process_post_commit(
+            db,
+            repo_path=data.repo_path,
+            commit_message=data.commit_message,
+            commit_sha=data.commit_sha,
+        )
+        return result
+    except Exception as e:
+        logger.exception("hook_post_commit error")
+        log_failed_hook(
+            hook_event="PostCommit",
+            status_code=200,
+            raw_payload=data.model_dump(),
+            error=f"{type(e).__name__}: {e}",
+        )
+        # Still 200 with the failure shape - the hook treats anything
+        # non-2xx as a block-the-commit signal.
+        return {
+            "project_id": None,
+            "project_prefix": None,
+            "commit_sha": data.commit_sha,
+            "closed": [],
+            "skipped": [],
+            "unknown": [],
+            "reason": f"error: {type(e).__name__}",
         }
 
 

@@ -1,12 +1,12 @@
 # Path: app/services/project_agent.py
 # File: project_agent.py
 # Created: 2026-03-29
-# Purpose: Project-agent assignment CRUD + team listing
+# Purpose: Project-agent assignment CRUD + team listing; idempotent create (DWB-365 invariant pairing)
 # Caller: app/routers/project_agents.py, app/routers/projects.py
 # Callees: app/models/project_agent.py
 # Data In: db: Session, ProjectAgentCreate, project_id
 # Data Out: list[ProjectAgent], ProjectAgent, team-listing rows
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-10
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +34,19 @@ def get_project_agent(db: Session, pa_id: int) -> ProjectAgent | None:
 
 
 def create_project_agent(db: Session, data: ProjectAgentCreate) -> ProjectAgent:
+    # DWB-365: idempotent. create_agent now inserts the bridge automatically
+    # for any agent with project_id set, so callers that also POST
+    # /api/project-agents (legacy two-step flow) would otherwise trip the
+    # uq_project_agent UNIQUE constraint. Return the existing row instead.
+    existing = db.scalar(
+        select(ProjectAgent).where(
+            ProjectAgent.project_id == data.project_id,
+            ProjectAgent.agent_id == data.agent_id,
+        )
+    )
+    if existing is not None:
+        return existing
+
     pa = ProjectAgent(**data.model_dump())
     db.add(pa)
     db.commit()

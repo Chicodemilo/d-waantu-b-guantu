@@ -1,6 +1,10 @@
+> THIS PROJECT IS NOT LINKED TO JIRA.
+> Do not invoke `dwb2jira` tools or reference Jira issue keys.
+> All ticket transitions go through the DWB API directly: `PATCH /api/tickets/{id}` with `{"status": "..."}` and the `X-Agent-ID` header.
+
 # Worker Playbook (All Agents)
 
-> Common rules and workflow for all worker-class agents. Your agent definition at `.claude/agents/{role}.md` is a stub that points here — this is the source of truth.
+> Common rules and workflow for all worker-class agents. Your agent definition at `.claude/agents/{role}.md` is a stub that points here, this is the source of truth.
 
 ---
 
@@ -8,147 +12,136 @@
 
 D'Waantu B'Guantu is the human user's private project management system. **Never mention DWB** in Jira tickets, PR descriptions, commit messages, or any external-facing content. Never reference DWB ticket IDs outside of DWB itself.
 
-## Canonical Tools
+**Key vs key.** DWB keys (`DWB-123`, `CI-401`) are internal: fine to use in DWB comments, alerts, scratchpad. Jira keys (`POR-5897`) are external: that's the only key shape that may appear in commits, PR titles, Jira comments, or anything users outside DWB read. Don't conflate the two: a Jira-linked ticket has both, and which one you cite depends on the audience.
 
-> **If your project does not have Jira enabled (`project.jira_base_url` is null), skip this section** — use the DWB API directly for ticket transitions (`PATCH /api/tickets/{id}` with `{"status": "..."}` + `X-Agent-ID` header). The D2J CLI is only relevant for Jira-linked projects.
+<!-- non-jira-only:start -->
+## Canonical Tools (no Jira)
 
-All ticket operations go through the D2J (DWB_2_JIRA) CLI — it keeps Jira and DWB in lockstep.
+This project is not linked to Jira. All ticket operations go directly through the DWB API. Do not invoke `dwb2jira` tools; do not reference Jira issue keys.
 
-- **Transition your ticket:** `dwb2jira ticket transition POR-KEY --to "In Progress"` — atomic dual-write (Jira + DWB)
-- **Pull your ticket:** `dwb2jira report --jira POR-KEY` or `dwb2jira report` (defaults to your assigned work)
-- **Never** PATCH `/api/tickets/{id}` directly for status changes — it updates DWB only and leaves Jira drift. `dwb2jira ticket transition` is the canonical move.
-- **Never** use `dwb2jira ticket update --status` for status changes either — it updates Jira only and leaves DWB drift. `ticket transition` is dual-write aware; `ticket update` is not.
-- **If a teammate already did one of the above by mistake:** treat it like a bail-forward drift — tell the TL, PM does a one-sided DWB PATCH to realign. Don't try to un-do it yourself.
-- **D2J defaults to the project_id set in your D2J config; verify with `dwb2jira config show`.** If you need to operate on a different project than your shell's default (e.g. transitioning a D2J self-management ticket from a non-D2J working dir), prefix with `DWB_PROJECT_ID=N dwb2jira ticket transition ...` so the twin lookup hits the right project. Otherwise the dual-write falls back to Jira-only with a "no twin" warning.
+- **Transition your ticket:** `PATCH /api/tickets/{id}` with `{"status": "..."}` + `X-Agent-ID: {your_agent_id}` header.
+- **Pull tickets:** `GET /api/tickets?project_id={pid}&assigned_agent_id={your_id}`.
 
-Full reference: `~/Dev/DWB_2_JIRA/README.md`. Status vocabulary (terminal vs non-terminal, Jira↔DWB mapping): `~/Dev/DWB_2_JIRA/README.md §Terminal vs non-terminal status vocabulary`.
+Full workflow under § Ticket Workflow below.
+<!-- non-jira-only:end -->
 
-## On Spawn — Identity (REQUIRED)
+## On Spawn: Identity (REQUIRED)
 
 Before doing ANY work, establish who you are on this project:
 
-1. **Identify yourself.** `POST /api/agents/identify` with `{role, name, project_prefix}` (use the name from your spawn brief; for fixed-role agents this may be a `_<PROJECT_PREFIX>` suffixed form like `Archie_DWB`, but the endpoint accepts the short name too). Response: `{agent_id, memory_dir, scratchpad_excerpt, instructions[]}`.
+1. **Identify yourself.** `POST /api/agents/identify` with `{role, name, project_prefix}` (use the name from your spawn brief; for fixed-role agents this may be a `_<PROJECT_PREFIX>` suffixed form like `Archie_DWB`, but the endpoint accepts the short name too). Response includes `agent_id`, `memory_dir`, `scratchpad_excerpt`, `instructions[]`, `jira_enabled` (DWB-332), and `memory_usage_rules` (DWB-352): a condensed inline summary of the memory dir layout + append-only rule + ISO 8601 timestamp format. Treat that string as the authoritative quick-reference; the longer Memory Writes section below expands on it. Canonical shape lives in `app/schemas/agent.py::AgentIdentifyResponse`.
    - On `409 ambiguous` or `404 not found`: **HALT** and tell the TL. Never invent an agent_id.
 2. **Cache your `agent_id`.** Include `X-Agent-ID: {agent_id}` on **every** `POST`/`PATCH`/`PUT`/`DELETE` to `/api/`. Without it, your actions log as "system" and your tokens don't attribute.
-3. **Session marker — TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file** — subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop. If you think your marker is missing, tell the TL — they write it.
-4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. Read these in order — if any are missing, **HALT** and tell the TL:
-   - **`identity.md`** — system-generated profile (who you are, file purposes, ISO 8601 rule, read order). **Do not edit by hand** — `scaffold-memory` regenerates this file each time.
-   - **`scratchpad.md`** — your in-flight working notes. Append-only, one block per session. Use this as your running memory during a ticket.
-   - **`lessons.md`** — durable lessons across sessions. Append a block when something is worth remembering for next time (a gotcha, a pattern, a workaround). Future-you and other agents read this.
-   - **`recent_sessions.md`** — one-line index of past sessions. Append-only. Skim it to see what you (or your prior incarnation) did recently.
+3. **Session marker: TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file**: subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop. If you think your marker is missing, tell the TL, they write it.
+4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. As of DWB-341, the dir + all four files are guaranteed to exist on spawn: `spawn-prepare` auto-scaffolds idempotently (identity.md refreshed, the other three preserved byte-for-byte when present, created empty when missing). You no longer need to create them yourself; read in this order, and if any are still missing after scaffold, **HALT** and tell the TL:
+   - **`identity.md`**: system-generated profile (who you are, file purposes, ISO 8601 rule, read order). **Do not edit by hand**: `scaffold-memory` regenerates this file each time.
+   - **`scratchpad.md`**: your in-flight working notes. Append-only, one block per session. Use this as your running memory during a ticket.
+   - **`lessons.md`**: durable lessons across sessions. Append a block when something is worth remembering for next time (a gotcha, a pattern, a workaround). Future-you and other agents read this.
+   - **`recent_sessions.md`**: one-line index of past sessions. Append-only. Skim it to see what you (or your prior incarnation) did recently.
 
-## On Spawn — Read These First
+## On Spawn: Read These First
 
 After identity, read: (1) `.claude/project_rules_worker.md`, (2) `HANDOFF.md`, (3) `ARCHITECTURE.md`, (4) `README.md`. If any are missing, proceed with what you have and flag it.
 
-## Memory Writes — When and How
+For context on the DWB session model (open/close phrases, single-active rule, what gets tracked), see `.claude/session_lifecycle.md`. You are NOT responsible for opening or closing sessions: that is TL-only. The reference is there so you understand where your tokens land.
 
-You write to your memory dir during and after work. Two paths:
+## Protected Files: Never Write These
 
-**Easy path — `POST /api/agents/{your_agent_id}/session-complete`.** Send a summary payload at session end; the endpoint writes timestamped entries to `scratchpad.md`, `recent_sessions.md`, and (if `lessons` provided) `lessons.md` for you. Formats the ISO 8601 heading automatically. Use this when wrapping a session.
+The Claude Code permission dialog for editing files under `.claude/` crashes subagents in the ink renderer. Four sibling agents died across S66 from this exact pattern, including some that followed prior playbook guidance to "append yourself" inside the memory dir. The current ground truth is stricter:
 
-**Direct path — append the file yourself.** For in-flight notes during a ticket, append to `scratchpad.md` directly. Required format — every entry starts with an ISO 8601 UTC timestamp heading:
+- **NEVER** use `Edit`, `Write`, or `NotebookEdit` on ANY path under `.claude/`. This includes `.claude/settings.json`, `.claude/settings.local.json`, every playbook, every project_rules file, AND your own memory dir under `.claude/agents/memory/<prefix>/<name>/`. The dialog fires the same way; subagents die the same way.
+- Anywhere outside `.claude/` is safe to write directly (project code, `docs/`, `README.md`, `HANDOFF.md`, etc.).
+- Memory updates go through the API only: see Memory Writes below.
+- If your work requires a `.claude/settings.json` (or other harness-config) change, flag it to the TL; they'll handle the edit directly from the main CC window where a user is attached for the permission dialog.
 
+## Memory Writes: When and How
+
+All writes to your memory dir go through the API. The FastAPI process runs outside the CC ink renderer, so server-side writes never trigger the permission dialog that kills subagents. Two endpoints, one for in-flight notes and one for wrap-up.
+
+**Canonical in-flight path: `POST /api/agents/{your_agent_id}/memory/append`** (DWB-358). Use this whenever you want to drop a thought into `scratchpad.md` or capture a lesson mid-ticket. Body:
+
+```json
+{
+  "file": "scratchpad",
+  "content": "Trying X, hit Y, working around with Z.",
+  "session_id": "optional-cc-session-id"
+}
 ```
-## 2026-06-03T13:48:15Z
-<entry body>
-```
 
-Sortable, greppable, unambiguous across timezones. Other agents traversing your memory split on `## 20` to iterate entries.
+- `file` enum: `scratchpad` | `lessons` | `recent_sessions`. `identity.md` is system-managed; the Pydantic `Literal` rejects an `"identity"` value at 422, and the service layer also refuses it as a defense-in-depth check.
+- `content`: required, non-empty. Empty or whitespace-only bodies return 400.
+- Server prepends an ISO 8601 UTC heading (`## 2026-06-10T13:48:15+00:00`, or `## 2026-06-10T13:48:15+00:00 - session <id>` when you pass `session_id`) so headings stay consistent with the session-complete writer. You don't format the timestamp; the endpoint does.
+- Append-only. Existing content is never overwritten. Creates the file if scaffold somehow missed it (idempotent with DWB-341 auto-scaffold).
+- Returns 201 with `{agent_id, file, path, timestamp, bytes_written}` on success.
+- Errors: 422 (file value outside the Literal enum); 400 (empty content; agent has no project_id; project has no repo_path); 404 (agent not found, project row missing); 500 (memory dir or file unwritable).
+
+**Wrap-up path: `POST /api/agents/{your_agent_id}/session-complete`.** The natural close at session end. Send a summary payload and the endpoint writes timestamped entries to `scratchpad.md`, `recent_sessions.md`, and (if `lessons` provided) `lessons.md` in one call. Same ISO 8601 heading format. Use this to land the wrap; use the in-flight endpoint for everything before.
 
 **What goes where:**
-- `scratchpad.md` — "I'm trying X, hit Y, working around with Z." In-flight thinking.
-- `lessons.md` — "Next time you migrate enums in MySQL, autogenerate misses them. Always hand-write." Durable.
-- `recent_sessions.md` — "2026-06-05 — closed S64, gate-test passed clean." One-liner per session.
+- `scratchpad.md`: "I'm trying X, hit Y, working around with Z." In-flight thinking.
+- `lessons.md`: "Next time you migrate enums in MySQL, autogenerate misses them. Always hand-write." Durable.
+- `recent_sessions.md`: "2026-06-05, closed S64, gate-test passed clean." One-liner per session.
 
-**Never edit `identity.md`** — system-generated, regenerated on scaffold.
+**Never edit `identity.md`.** It is system-generated and regenerated on scaffold. The append endpoint will refuse writes to it.
+
+**Do not Edit/Write the memory files directly even though you can see them.** The dir lives under `.claude/`; the permission dialog fires on subagent writes there and crashes you. Go through the API.
 
 ## API
 
-**Base URL:** `http://localhost:8000/api` — used by `dwb2jira` and for GET queries. Mutating ticket calls go through `dwb2jira` (see Canonical Tools above).
+**Base URL:** `http://localhost:8000/api`. Used by `dwb2jira` and for GET queries. On Jira-linked projects, mutating ticket calls go through `dwb2jira` (see Canonical Tools above). On non-Jira projects (`project.jira_base_url` is null) you call the DWB API directly, no D2J reach.
 
-## Ticket IDs — Read Carefully
+## Ticket IDs: Read Carefully
 
 The DWB API uses two different identifiers for tickets; they are **NOT** interchangeable:
 
-- **`ticket_key`** (e.g., `DWB-285`) — human-readable label shown in the dashboard and comments
-- **`ticket_id`** / **`id`** (e.g., `762`) — database primary key, used in all API paths
+- **`ticket_key`** (e.g., `DWB-285`): human-readable label shown in the dashboard and comments
+- **`ticket_id`** / **`id`** (e.g., `762`): database primary key, used in all API paths
 
 API endpoints take the **database id**, not the number suffix of the ticket_key:
 
-- `PATCH /api/tickets/762` — correct (DWB-285 has id=762)
-- `PATCH /api/tickets/285` — wrong — hits a different ticket (likely in a different project) and can cause cross-project corruption
+- `PATCH /api/tickets/762`: correct (DWB-285 has id=762)
+- `PATCH /api/tickets/285`: wrong, hits a different ticket (likely in a different project) and can cause cross-project corruption
 
 When you receive a ticket assignment, the TL or PM gives you both forms: `DWB-285 (id=762)`. Use the `id` in API paths. If you only have the key, look it up: `GET /api/tickets?project_id={pid}` and filter by `ticket_key`.
 
-## Code Headers — Mandatory
+## Code Headers: Mandatory
 
-Every new file MUST have a code header. See `docs/rules/global/code-header-format.md` for the format. When editing a file that already has a header, update the `Last Modified` date.
+Every new file MUST have a code header. See `.claude/rules/global/code-header-format.md` for the format. When editing a file that already has a header, update the `Last Modified` date.
 
 ## Git Commit Rules
 
 - **NEVER** add `Co-Authored-By` lines or any AI/Claude attribution to commits.
 - **NEVER** mention "Claude", "Opus", or any model name in commit messages.
-- Do NOT commit unless the TL tells you to — the TL reviews and commits.
+- Do NOT commit unless the TL tells you to; the TL reviews and commits.
 
 ## Ticket Workflow
 
-### Discover first (if unsure)
+<!-- non-jira-only:start -->
+### Pick up -> work -> hand off (no Jira)
 
-If you don't know what transitions are valid on your assigned ticket — or if this project uses non-standard status labels — run this before anything:
+This project is not linked to Jira (`project.jira_base_url` is null). All ticket transitions go directly through the DWB API. Do not invoke `dwb2jira` tools; do not write to `jira_issue_key`.
 
-```
-dwb2jira ticket get POR-KEY
-```
-
-Lists the current status + available transitions. Use the exact transition label from this output in your next command.
-
-### Pick up → work → hand off
-
-1. **Pick up:** `dwb2jira ticket transition POR-KEY --to "In Progress"` (dual-writes Jira + DWB).
+1. **Pick up:**
+   ```
+   PATCH /api/tickets/{ticket_id} -H "X-Agent-ID: {agent_id}" -d '{"status": "in_progress"}'
+   ```
 2. **Do the work.**
-3. **Hand off:** `dwb2jira ticket transition POR-KEY --to "Ready for Testing/Review" --comment "<commit sha or summary>"`
-   — **Example:** `--comment "abc1234 — added /claims endpoint + 6 tests, all green, unstaged"`
-   — **Run the transition BEFORE messaging the TL** — the ticket state should be truth when the TL looks.
-4. **Message the TL** that work is ready for review. Include: what you did, files changed, staged/committed status, anything unexpected.
+3. **Hand off:**
+   ```
+   PATCH /api/tickets/{ticket_id} -H "X-Agent-ID: {agent_id}" -d '{"status": "in_review"}'
+   ```
+4. **Message the TL** that work is ready for review. Include what you did, files changed, staged/committed status, anything unexpected.
 
-### Jira → DWB status mapping
+Status vocabulary: `todo` -> `in_progress` -> `in_review` -> `done`. Use the ticket's database `id` in the URL path; the `ticket_key` (e.g. `PROJ-001`) is for human display, not API paths.
 
-If you see a DWB-side warning, this is what the tool maps to on the twin:
+If you get blocked on the work, message the TL, don't sit on it.
+<!-- non-jira-only:end -->
 
-| Jira target | DWB status |
-|-------------|------------|
-| `To Do` | `todo` |
-| `In Progress` | `in_progress` |
-| `Ready for Testing/Review` | `in_review` |
-| `Done` / `Resolved` / `Closed` / `Won't Do` | `done` |
-
-**Custom project statuses:** any non-terminal review-ish label (e.g. `In Review`, `Code Review`, `QA`) maps to `in_review`; any terminal label maps to `done`. If you're unsure, run `ticket get POR-KEY` first and ask the TL if the mapping isn't obvious.
-
-### Return + failure recovery
-
-**If TL returns the ticket:** TL runs `dwb2jira ticket transition POR-KEY --to "In Progress"` to send it back, and messages you with feedback. Re-read ticket comments for context, do the fixes, re-hand-off via step 3.
-
-**If `ticket transition` fails** (Jira 4xx/5xx, network error): `dwb2jira log --failures --tail 5` shows recent failures with response bodies. Other `log` flags (`--command`, `--since`, `--json`) are in README §Legacy CLI Reference. Escalate to TL — don't retry blindly; auth/permission errors can't be self-resolved.
-
-**Bail-forward: Jira succeeded but DWB PATCH failed.** The command will warn that the DWB twin is out of sync. Jira is NOT rolled back. **DO NOT re-run `ticket transition`** — it would re-attempt Jira and could double-transition. Tell the TL; PM does a one-sided DWB PATCH to realign:
-
-```bash
-curl -X PATCH http://localhost:8000/api/tickets/{dwb_id} \
-  -H "X-Agent-ID: {pm_id}" \
-  -H "Content-Type: application/json" \
-  -d '{"status": "<mapped-dwb-status>"}'
-```
-
-(PM owns that recovery — it's in their playbook § 4 Exception (a). Shown here so you can sanity-check the fix.)
-
-If you get blocked on the work itself, message the TL immediately — don't sit on it.
-
-## Sprint Close — Consolidation (REQUIRED)
+## Sprint Close: Consolidation (REQUIRED)
 
 DWB enforces a `force_consolidation` gate at sprint close. Every sprint participant must call `consolidate-complete` before the TL can close the sprint. The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 if your owned files are over ceiling, unless you provide per-file overrides with non-empty reasons.
 
-**When to ack:** as soon as your last ticket hits `in_review` (or `done`). Don't wait for the TL — the ack is yours to file.
+**When to ack:** as soon as your last ticket hits `in_review` (or `done`). Don't wait for the TL, the ack is yours to file.
 
 **How:**
 
@@ -173,7 +166,7 @@ Your block lists `owned_over_ceiling_files`. If non-empty: trim before acking.
 
 When the gate refuses your ack with violations:
 
-1. **Default path: TRIM the listed files.** That's the work. Re-ack with no overrides. Should pass clean. Don't wait for TL guidance — refusal means go fix.
+1. **Default path: TRIM the listed files.** That's the work. Re-ack with no overrides. Should pass clean. Don't wait for TL guidance, refusal means go fix.
 2. **Override path (rare): per-file reason.** Use only when the file is genuinely load-bearing and trim would lose meaning. Body: `{"sprint_id": N, "overrides": {"file_path": "non-empty reason text", ...}}`. Every file in the violation list must have a key. Empty/whitespace reasons rejected.
 3. **Cap-raise path (when override would repeat across sprints):** ping TL with proposed `_TOKEN_CEILINGS` change. Don't override the same file every sprint.
 
@@ -183,11 +176,21 @@ When the gate refuses your ack with violations:
 
 ## Reporting Status
 
-When done, message the TL: what you did, files changed, anything unexpected, whether changes are staged/committed or unstaged. Keep it concise — the TL reads the diff.
+When done, message the TL: what you did, files changed, anything unexpected, whether changes are staged/committed or unstaged. Keep it concise, the TL reads the diff.
+
+## Ad Hoc Work (No Filed Ticket)
+
+When the user signals the small-change waiver (see TL playbook § 4c) and the TL delegates a fix without filing a ticket, your tokens and time route to the project's **ad_hoc** bucket (DWB-353) instead of failing an unattributed-tokens alert. The bucket is computed automatically from `tracking_log` rows tagged `ad_hoc_token_report`; no special headers from you required. You don't need to think about it; just do the work. Real implementation work still goes through tickets as usual.
 
 ## Style Rules
 
-Project-specific style rules (CSS conventions, UI aesthetic, framework bans) live in `.claude/project_rules_worker.md`. Read them at session start.
+**Universal (apply everywhere):**
+
+- **No icons.** No emoji, lucide/heroicon glyphs, or decorative unicode in UI labels, docs, commit messages, ticket prose, or any user-facing output. Use plain text. If an existing component renders an icon next to a label, drop the icon when you touch the component.
+- **No em dashes.** Use a hyphen, colon, comma, or new sentence instead. Em dashes in code, docs, and prose read as AI-generated and the user wants them out.
+- **Inline text confirmations over modals.** For light confirm flows (mark closed, archive, dismiss, disable), the trigger swaps in-place to `confirm? yes / cancel` styled the same size as the trigger. Do not build modal components. Reference pattern: ProjectPage delete/disable flows, EpicList mark-as-closed.
+
+Project-specific style rules (CSS palette, framework bans, file structure) live in `.claude/project_rules_worker.md`. Read them at session start.
 
 ## STOP Means Stop
 

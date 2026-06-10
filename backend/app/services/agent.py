@@ -1,9 +1,9 @@
 # Path: app/services/agent.py
 # File: agent.py
 # Created: 2026-03-29
-# Purpose: Agent CRUD operations + identity lookup (DWB-289) + memory append (DWB-358)
+# Purpose: Agent CRUD operations + identity lookup (DWB-289) + memory append (DWB-358) + project_agents bridge invariant (DWB-365)
 # Caller: app/routers/agents.py
-# Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py
+# Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
 # Last Modified: 2026-06-10
@@ -12,13 +12,14 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.config.memory_rules import MEMORY_USAGE_RULES
 from app.models.agent import Agent
 from app.models.instruction import Instruction, InstructionScope
 from app.models.project import Project
+from app.models.project_agent import ProjectAgent
 from app.schemas.agent import AgentCreate, AgentUpdate
 
 
@@ -43,6 +44,17 @@ def get_agent(db: Session, agent_id: int) -> Agent | None:
 def create_agent(db: Session, data: AgentCreate) -> Agent:
     agent = Agent(**data.model_dump())
     db.add(agent)
+    db.flush()  # assign agent.id without committing
+
+    # DWB-365: invariant - any agent with a project_id MUST have a matching
+    # project_agents bridge row, inserted in the same transaction. FRAUDI
+    # hit a case where 3 agents had agents.project_id set but no bridge
+    # rows, so GET /api/projects/{id}/team returned empty. Bridging at
+    # create-time means the team listing is consistent the moment the
+    # agent row exists.
+    if agent.project_id is not None:
+        db.add(ProjectAgent(project_id=agent.project_id, agent_id=agent.id))
+
     db.commit()
     db.refresh(agent)
     # Best-effort scaffold of memory dir + identity.md (DWB-293).
@@ -67,6 +79,10 @@ def update_agent(db: Session, agent: Agent, data: AgentUpdate) -> Agent:
 
 
 def delete_agent(db: Session, agent: Agent) -> None:
+    # DWB-365: clear bridge rows first. The FK has no ON DELETE CASCADE and
+    # the ORM relationship doesn't cascade either, so the default behavior
+    # (NULL the FK) violates project_agents.agent_id NOT NULL.
+    db.execute(delete(ProjectAgent).where(ProjectAgent.agent_id == agent.id))
     db.delete(agent)
     db.commit()
 

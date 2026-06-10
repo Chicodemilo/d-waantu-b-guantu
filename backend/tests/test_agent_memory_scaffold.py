@@ -48,7 +48,7 @@ class TestScaffoldOnCreate:
         assert "**role:** backend-worker" in identity
         assert "SCF2 (Scaffold Two)" in identity
         # Self-orientation block
-        assert "## On Spawn — Read These First" in identity
+        assert "## On Spawn - Read These First" in identity
         # ISO 8601 entry rule
         assert "## ISO 8601 entry rule" in identity
 

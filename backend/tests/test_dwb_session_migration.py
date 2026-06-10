@@ -1,12 +1,12 @@
 # Path: tests/test_dwb_session_migration.py
 # File: test_dwb_session_migration.py
 # Created: 2026-06-09
-# Purpose: Verify the DWB-335 migration applies cleanly (downgrade + re-upgrade against lat_test); DWB-346 patch keeps schema at head after round-trip
+# Purpose: Verify the DWB-335 migration applies cleanly (downgrade + re-upgrade against lat_test); DWB-350 teardown rebuilds schema from ORM diff so future column adds don't need sibling lines
 # Caller: pytest
-# Callees: alembic.command, sqlalchemy.inspect
+# Callees: alembic.command, sqlalchemy.inspect, sqlalchemy.schema.AddColumn
 # Data In: lat_test (already at head via conftest create_all)
 # Data Out: Assertions on schema after up/down round-trip
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 """Round-trips the DWB-335 migration against the test database to verify the
 hand-written upgrade + downgrade both succeed and produce the expected
@@ -33,8 +33,10 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.schema import CreateColumn
 
 from app.config import settings
+from app.models.dwb_session import DwbSession
 
 PRIOR_REVISION = "dwb328e7a91b"
 THIS_REVISION = "dwb335a7b3c91"
@@ -149,22 +151,27 @@ def test_migration_round_trip(alembic_cfg):
         assert dwb_fk is not None
         assert dwb_fk["constrained_columns"] == ["dwb_session_id"]
     finally:
-        # DWB-346: the round-trip rebuilt dwb_sessions per the DWB-335 spec,
+        # DWB-350: the round-trip rebuilt dwb_sessions per the DWB-335 spec,
         # which predates later columns the test-session create_all baseline
-        # carries. Forward-roll the alembic chain doesn't work past
-        # dwb335a7b3c91 here because subsequent migrations
-        # (dwb331a7c8f4d epics.is_in_progress) collide with columns the
-        # ORM model already created. So we re-apply post-DWB-335
-        # dwb_sessions DDL inline. Future migrations that add columns to
-        # dwb_sessions need a sibling line here.
-        with engine.begin() as conn:
-            # DWB-346: dwb_sessions.headline (VARCHAR(80) NULL).
-            conn.execute(
-                text(
-                    "ALTER TABLE dwb_sessions "
-                    "ADD COLUMN headline VARCHAR(80) NULL"
-                )
-            )
+        # carries. Forward-rolling the alembic chain past dwb335a7b3c91
+        # collides with columns the ORM create_all already created. Instead
+        # we diff the current table against the ORM model and ALTER ADD any
+        # missing columns. Future migrations that add columns to
+        # dwb_sessions are picked up automatically - no sibling line here.
+        insp = inspect(engine)
+        existing = {c["name"] for c in insp.get_columns("dwb_sessions")}
+        missing = [
+            col for col in DwbSession.__table__.columns
+            if col.name not in existing
+        ]
+        if missing:
+            dialect = engine.dialect
+            with engine.begin() as conn:
+                for col in missing:
+                    col_ddl = CreateColumn(col).compile(dialect=dialect)
+                    conn.execute(
+                        text(f"ALTER TABLE dwb_sessions ADD COLUMN {col_ddl}")
+                    )
         # Leave alembic_version table behind but cleared so subsequent
         # test runs don't trip on a stale revision pointer.
         with engine.begin() as conn:

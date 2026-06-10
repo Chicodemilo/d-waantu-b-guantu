@@ -80,7 +80,12 @@ function titleFor(row) {
 }
 
 function SessionFooter() {
-  const projectMatch = useMatch('/projects/:id/*') || useMatch('/projects/:id');
+  // The splat pattern '/projects/:id/*' matches both `/projects/:id` and
+  // `/projects/:id/anything`, so a single useMatch is sufficient. Calling a
+  // second useMatch behind `||` is a Rules of Hooks violation - the hook
+  // count would change across the project boundary and trip
+  // `areHookInputsEqual` on the first render after crossing.
+  const projectMatch = useMatch('/projects/:id/*');
   const projectId = projectMatch?.params?.id || null;
 
   const polling = useStore((s) => s.polling);

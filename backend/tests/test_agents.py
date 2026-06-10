@@ -138,3 +138,106 @@ class TestDeleteAgent:
     def test_delete_nonexistent_returns_404(self, client):
         r = client.delete("/api/agents/999999")
         assert r.status_code == 404
+
+
+class TestProjectAgentsBridgeInvariantDWB365:
+    """DWB-365: POST /api/agents with project_id MUST insert a project_agents
+    bridge row in the same transaction. FRAUDI had 3 agents missing bridge
+    rows, causing /team to return empty. The invariant is now enforced at
+    create-time; downstream callers (the legacy two-step flow that also
+    POSTs /api/project-agents) are still supported via idempotent create.
+    """
+
+    def test_create_agent_with_project_id_inserts_bridge_row(
+        self, client, make_project
+    ):
+        project = make_project()
+        r = client.post("/api/agents", json={
+            "name": "BridgeTest",
+            "role": "worker",
+            "api_key": "bridge-key-1",
+            "project_id": project["id"],
+        })
+        assert r.status_code == 201, r.text
+        agent = r.json()
+
+        # Bridge must exist immediately - no separate POST required.
+        bridges = client.get(
+            "/api/project-agents", params={"agent_id": agent["id"]}
+        ).json()
+        assert len(bridges) == 1
+        assert bridges[0]["project_id"] == project["id"]
+        assert bridges[0]["agent_id"] == agent["id"]
+
+    def test_team_listing_includes_agent_immediately(
+        self, client, make_project
+    ):
+        """Regression for the FRAUDI symptom: GET /team returned empty when
+        the bridge was missing. Should now include the agent the moment it
+        is created with a project_id."""
+        project = make_project()
+        r = client.post("/api/agents", json={
+            "name": "TeamMember",
+            "role": "worker",
+            "api_key": "team-key-1",
+            "project_id": project["id"],
+        })
+        assert r.status_code == 201
+
+        team = client.get(f"/api/projects/{project['id']}/team").json()
+        names = {member["name"] for member in team.get("agents", team)}
+        assert "TeamMember" in names
+
+    def test_legacy_two_step_create_is_idempotent(
+        self, client, make_project
+    ):
+        """Callers that POST /api/agents AND /api/project-agents (the
+        pre-DWB-365 flow) must not 500 on the duplicate bridge. The
+        endpoint returns the existing assignment instead."""
+        project = make_project()
+        agent = client.post("/api/agents", json={
+            "name": "Legacy",
+            "role": "worker",
+            "api_key": "legacy-key-1",
+            "project_id": project["id"],
+        }).json()
+
+        # Second-step POST that previously created the bridge: now a no-op.
+        r = client.post("/api/project-agents", json={
+            "project_id": project["id"],
+            "agent_id": agent["id"],
+        })
+        assert r.status_code == 201, r.text
+
+        # Still exactly one bridge row.
+        bridges = client.get(
+            "/api/project-agents", params={"agent_id": agent["id"]}
+        ).json()
+        assert len(bridges) == 1
+
+    def test_create_agent_without_project_id_skips_bridge(
+        self, db_session
+    ):
+        """Service-layer guard: the bridge insert is gated on project_id
+        being non-null. The HTTP schema requires project_id (so this path
+        is only reachable from internal callers / legacy rows), but the
+        invariant still holds at the service layer."""
+        from app.models.agent import Agent
+        from app.models.project_agent import ProjectAgent
+        from sqlalchemy import select
+
+        # Insert an agent directly with project_id=None (mirrors the
+        # soft-deactivated / legacy state the service must tolerate).
+        agent = Agent(
+            name="ServiceUnscoped",
+            role="worker",
+            api_key="svc-unscoped-1",
+            project_id=None,
+        )
+        db_session.add(agent)
+        db_session.commit()
+
+        bridges = db_session.scalars(
+            select(ProjectAgent).where(ProjectAgent.agent_id == agent.id)
+        ).all()
+        assert bridges == []

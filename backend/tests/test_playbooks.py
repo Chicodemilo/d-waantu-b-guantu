@@ -6,7 +6,7 @@
 # Callees:       GET/POST /api/playbooks, POST /api/projects/:id/deploy-playbooks
 # Data In:       Factory-created projects via conftest fixtures; temp playbook files
 # Data Out:      Assertions on HTTP status codes and deployed playbook content
-# Last Modified: 2026-06-04
+# Last Modified: 2026-06-10
 
 """Tests for /api/playbooks and /api/projects/:id/deploy-playbooks."""
 
@@ -208,3 +208,104 @@ class TestDeployScaffoldsMemoryDirs:
                 # (Bobby's dir under project B's repo already exists from the
                 # auto-scaffold at agent-create time — that's not part of this
                 # deploy's contract.)
+
+
+class TestDeployScaffoldsRootDocs:
+    """DWB-366: deploy-playbooks must scaffold INITIAL.md, ARCHITECTURE.md,
+    HANDOFF.md at the project repo root when missing; never overwrite when
+    present; surface created entries in response.root_docs."""
+
+    _DOCS = ("INITIAL.md", "ARCHITECTURE.md", "HANDOFF.md")
+
+    def _deploy_or_skip(self, client, project_id):
+        r = client.post(f"/api/projects/{project_id}/deploy-playbooks")
+        if r.status_code == 500:
+            import pytest
+            pytest.skip("docs/ has no playbook files in this env")
+        assert r.status_code == 200
+        return r.json()
+
+    def test_creates_all_three_when_missing(self, client, make_project):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="RDOC1")
+            data = self._deploy_or_skip(client, project["id"])
+            assert "root_docs" in data
+            assert sorted(data["root_docs"]) == sorted(self._DOCS)
+            for name in self._DOCS:
+                path = Path(tmpdir) / name
+                assert path.is_file()
+                content = path.read_text(encoding="utf-8")
+                # Minimal H1 present (may be after non-Jira banner).
+                stem = name.removesuffix(".md")
+                assert f"# {stem.title()}" in content
+
+    def test_preserves_existing_files(self, client, make_project):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            existing = "# My handoff\n\nUser content - keep me.\n"
+            (Path(tmpdir) / "HANDOFF.md").write_text(existing)
+            (Path(tmpdir) / "INITIAL.md").write_text("# Custom initial\n")
+
+            project = make_project(repo_path=tmpdir, prefix="RDOC2")
+            data = self._deploy_or_skip(client, project["id"])
+
+            # Only the missing one (ARCHITECTURE.md) scaffolded.
+            assert data["root_docs"] == ["ARCHITECTURE.md"]
+            # Existing files untouched.
+            assert (Path(tmpdir) / "HANDOFF.md").read_text(
+                encoding="utf-8"
+            ) == existing
+            assert (Path(tmpdir) / "INITIAL.md").read_text(
+                encoding="utf-8"
+            ) == "# Custom initial\n"
+
+    def test_idempotent_second_deploy_creates_nothing(
+        self, client, make_project
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="RDOC3")
+            self._deploy_or_skip(client, project["id"])
+            # Second deploy: all files now exist.
+            data = self._deploy_or_skip(client, project["id"])
+            assert data["root_docs"] == []
+
+    def test_non_jira_prepends_banner_to_each_root_doc(
+        self, client, tmp_path
+    ):
+        project = client.post(
+            "/api/projects",
+            json={
+                "prefix": "RDNJ",
+                "name": "Non-Jira Root Docs",
+                "repo_path": str(tmp_path),
+                "jira_base_url": None,
+            },
+        ).json()
+        r = client.post(f"/api/projects/{project['id']}/deploy-playbooks")
+        if r.status_code == 500:
+            import pytest
+            pytest.skip("docs/ has no playbook files in this env")
+        assert r.status_code == 200
+        for name in self._DOCS:
+            content = (tmp_path / name).read_text(encoding="utf-8")
+            assert "THIS PROJECT IS NOT LINKED TO JIRA" in content, (
+                f"banner missing from {name}"
+            )
+
+    def test_jira_enabled_no_banner_on_root_docs(self, client, tmp_path):
+        project = client.post(
+            "/api/projects",
+            json={
+                "prefix": "RDJE",
+                "name": "Jira Root Docs",
+                "repo_path": str(tmp_path),
+                "jira_base_url": "https://example.atlassian.net",
+            },
+        ).json()
+        r = client.post(f"/api/projects/{project['id']}/deploy-playbooks")
+        if r.status_code == 500:
+            import pytest
+            pytest.skip("docs/ has no playbook files in this env")
+        assert r.status_code == 200
+        for name in self._DOCS:
+            content = (tmp_path / name).read_text(encoding="utf-8")
+            assert "THIS PROJECT IS NOT LINKED TO JIRA" not in content

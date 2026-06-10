@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Path: scripts/hooks/post-commit
+# Created: 2026-06-10
+# Purpose: Git post-commit hook - POSTs commit message to DWB to auto-close
+#   in_progress / in_review tickets referenced by <PREFIX>-NNN tokens (DWB-345).
+# Trigger: symlinked from .git/hooks/post-commit (via scripts/install-git-hooks.sh).
+#
+# Hook contract: NEVER block the commit. All failures swallow + exit 0.
+# The API endpoint is also fire-and-forget (always 200) on its side.
+#
+# Override the API URL via DWB_API_URL (defaults to http://localhost:8000).
+
+set -u
+
+API_URL="${DWB_API_URL:-http://localhost:8000}"
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+commit_sha="$(git rev-parse HEAD 2>/dev/null)" || exit 0
+commit_message="$(git log -1 --pretty=%B 2>/dev/null)" || exit 0
+
+# jq builds the JSON body so commit messages with quotes / newlines /
+# backslashes don't trip the curl payload. Falls back to a python one-liner
+# if jq isn't installed (CI / fresh dev machines).
+if command -v jq >/dev/null 2>&1; then
+  payload=$(jq -n \
+    --arg p "$repo_root" \
+    --arg m "$commit_message" \
+    --arg s "$commit_sha" \
+    '{repo_path:$p, commit_message:$m, commit_sha:$s}')
+elif command -v python3 >/dev/null 2>&1; then
+  payload=$(python3 -c '
+import json, sys
+print(json.dumps({
+  "repo_path": sys.argv[1],
+  "commit_message": sys.argv[2],
+  "commit_sha": sys.argv[3],
+}))' "$repo_root" "$commit_message" "$commit_sha")
+else
+  exit 0
+fi
+
+curl -fsS -X POST "$API_URL/api/hooks/post-commit" \
+  -H "Content-Type: application/json" \
+  -d "$payload" \
+  >/dev/null 2>&1 || true
+
+exit 0

@@ -6,7 +6,7 @@
 # Callees: app/services/project.py, app/services/agent_memory.py, pathlib, shutil, re
 # Data In: HTTP requests
 # Data Out: JSON responses (playbook list, deploy status incl. scaffolded memory dirs)
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 import logging
 import re
@@ -152,6 +152,28 @@ class DeployResult(BaseModel):
     deployed: list[str]
     target_dir: str
     memory_dirs: list[DeployedMemoryDir] = []
+    root_docs: list[str] = []  # DWB-366: skeletons created at repo root
+
+
+# DWB-366: minimal H1 + one-line stub for each root doc. Scaffolded when
+# missing on deploy-playbooks. Existing files are never overwritten - human
+# or TL prose stays intact. Non-Jira projects get the banner prepended.
+_ROOT_DOC_STUBS = {
+    "INITIAL.md": (
+        "# Initial\n\n"
+        "> Project initial state - requirements, phases, design decisions, "
+        "constraints, success criteria.\n"
+    ),
+    "ARCHITECTURE.md": (
+        "# Architecture\n\n"
+        "> System design and data model.\n"
+    ),
+    "HANDOFF.md": (
+        "# Handoff\n\n"
+        "> Session-to-session continuity. Read at session start, "
+        "update at end.\n"
+    ),
+}
 
 
 @router.get("/playbooks", response_model=list[PlaybookRead])
@@ -226,31 +248,29 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
             dst.write_text(content, encoding="utf-8")
             deployed.append(f"{filename} (created)")
 
-    # DWB-332: HANDOFF.md banner for non-Jira projects. Only scaffolds when
-    # the file does NOT exist at the repo root — never mutates an existing
-    # HANDOFF.md, because that's user-authored content. If the file is
-    # missing on a non-Jira project, drop a stub with the banner so the
-    # agent's first read of HANDOFF.md gets the visibility signal.
+    # DWB-366: scaffold root doc skeletons (INITIAL.md, ARCHITECTURE.md,
+    # HANDOFF.md) at the repo root when missing. Never mutates an existing
+    # file - human or TL prose stays intact. Non-Jira projects get the
+    # banner prepended so the agent's first read of any of these files
+    # gets the visibility signal.
     #
-    # The created path lives at <repo>/HANDOFF.md (matching force_handoff_md
-    # gate's expectation), NOT under .claude/. Surface it via a separate
-    # entry so the existing deployed[] consumers (which assume every entry
-    # resolves under .claude/) don't trip.
-    if not jira_enabled:
-        handoff_path = repo / "HANDOFF.md"
-        if not handoff_path.exists():
-            handoff_stub = (
-                _NON_JIRA_BANNER
-                + "# Handoff\n\n"
-                + "> Session-to-session continuity. Read at session start, "
-                + "update at end.\n\n"
-                + "## Current State\n\n_(Update each session.)_\n"
-            )
-            handoff_path.write_text(handoff_stub, encoding="utf-8")
-            logger.info(
-                "deploy-playbooks: scaffolded HANDOFF.md at %s "
-                "(non-Jira target)", handoff_path
-            )
+    # These paths live at <repo>/<name>.md (matching the force_*_md gates'
+    # expectation), NOT under .claude/. Surfaced via the response's
+    # root_docs[] field so existing deployed[] consumers (which assume
+    # every entry resolves under .claude/) don't trip.
+    root_docs: list[str] = []
+    for filename, stub in _ROOT_DOC_STUBS.items():
+        path = repo / filename
+        if path.exists():
+            continue
+        content = stub
+        if not jira_enabled:
+            content = _NON_JIRA_BANNER + content
+        path.write_text(content, encoding="utf-8")
+        root_docs.append(filename)
+        logger.info(
+            "deploy-playbooks: scaffolded %s at %s", filename, path
+        )
 
     # Deploy canonical role agent definitions to the target project's
     # `.claude/agents/`. Overwritten on each deploy. Project-specific defs
@@ -338,4 +358,5 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
         deployed=deployed,
         target_dir=str(target_dir),
         memory_dirs=memory_dirs,
+        root_docs=root_docs,
     )

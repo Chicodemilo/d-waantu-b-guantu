@@ -6,7 +6,7 @@
 // Callees: react-router-dom (useLocation, Link), useStore
 // Data In: location pathname, alerts and projects from store, onMenuClick callback
 // Data Out: default export Header component
-// Last Modified: 2026-04-16
+// Last Modified: 2026-06-10
 
 import { useLocation, Link } from 'react-router-dom';
 import useStore from '../../store/useStore';

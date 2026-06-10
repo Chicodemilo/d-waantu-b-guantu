@@ -6,7 +6,7 @@
 # Callees: All model modules
 # Data In: None
 # Data Out: All model classes
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-10
 
 from app.models.project import JiraSyncStatus, Project, ProjectStatus
 from app.models.sprint import Sprint, SprintStatus
@@ -23,6 +23,7 @@ from app.models.failure_record import FailureRecord
 from app.models.status_history import StatusHistory
 from app.models.tracking_log import TrackingLog
 from app.models.hook_session import HookSession, HookSessionStatus, HookSessionType
+from app.models.client_log import ClientLog, ClientLogLevel
 from app.models.error_log import ErrorLog, ErrorSource
 from app.models.failed_hook import FailedHook
 from app.models.agent_consolidation_ack import AgentConsolidationAck
@@ -50,6 +51,7 @@ __all__ = [
     "StatusHistory",
     "TrackingLog",
     "HookSession", "HookSessionStatus", "HookSessionType",
+    "ClientLog", "ClientLogLevel",
     "ErrorLog", "ErrorSource",
     "FailedHook",
     "AgentConsolidationAck",

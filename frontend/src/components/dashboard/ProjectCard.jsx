@@ -1,12 +1,12 @@
 // Path: src/components/dashboard/ProjectCard.jsx
 // File: ProjectCard.jsx
 // Created: 2026-03-29
-// Purpose: Dashboard card displaying a project summary with ticket stats, token usage, time spent, and progress bar
+// Purpose: Dashboard card displaying a project summary with ticket stats, token usage, time spent, and progress bar. Tracking summary fetch uses AbortController to cancel on unmount (DWB-370).
 // Caller: DashboardPage.jsx
 // Callees: react (useState, useEffect), react-router-dom (Link), useStore, services/tracking, utils/format, StatusBadge, AsciiProgressBar, dashboard.css
 // Data In: props { project }; tickets from store; tracking summary from API
 // Data Out: default export ProjectCard component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-10
 
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
@@ -23,11 +23,11 @@ function ProjectCard({ project }) {
   const [summary, setSummary] = useState(null);
 
   useEffect(() => {
-    let cancelled = false;
-    getTrackingSummary(project.id)
-      .then((data) => { if (!cancelled) setSummary(data); })
+    const controller = new AbortController();
+    getTrackingSummary(project.id, { signal: controller.signal })
+      .then((data) => { if (!controller.signal.aborted) setSummary(data); })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [project.id]);
 
   const totalTokens = summary ? (summary.project_total.tokens || 0) : 0;

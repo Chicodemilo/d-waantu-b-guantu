@@ -6,7 +6,7 @@
 // Callees: react, react-dom, react-router-dom, App.jsx, styles/theme.css
 // Data In: None
 // Data Out: None (renders root React component)
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-10
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';

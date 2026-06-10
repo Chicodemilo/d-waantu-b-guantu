@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-06-04
+// Last Modified: 2026-06-10
 
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -28,7 +28,9 @@ import '../styles/dashboard.css';
 function ProjectPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const project = useStore((s) => s.getProject(id));
+  const projects = useStore((s) => s.projects);
+  const lastPolled = useStore((s) => s.polling.lastUpdated);
+  const project = projects.find((p) => p.id === Number(id));
   const setAlerts = useStore((s) => s.setAlerts);
   const tickets = useStore((s) => s.getTicketsByProject(id));
   const jiraLinkedCount = tickets.filter((t) => t.jira_issue_key).length;
@@ -140,6 +142,9 @@ function ProjectPage() {
     }
   };
 
+  if (!lastPolled) {
+    return <div className="empty-state">Loading...</div>;
+  }
   if (!project) {
     return <div className="empty-state">Project not found</div>;
   }

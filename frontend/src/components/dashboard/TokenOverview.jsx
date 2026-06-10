@@ -1,12 +1,12 @@
 // Path: src/components/dashboard/TokenOverview.jsx
 // File: TokenOverview.jsx
 // Created: 2026-03-29
-// Purpose: Dashboard section with three AsciiCharts showing token usage by project, by agent, and overhead breakdown
+// Purpose: Dashboard section with three AsciiCharts showing token usage by project, by agent, and overhead breakdown. Tracking summary fetches use AbortController to cancel on unmount (DWB-370).
 // Caller: DashboardPage.jsx
 // Callees: react (useState, useEffect), useStore, services/tracking, utils/format, AsciiChart, dashboard.css
 // Data In: projects from store; tracking summaries from API
 // Data Out: default export TokenOverview component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-10
 
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
@@ -20,20 +20,26 @@ function TokenOverview() {
   const [summaries, setSummaries] = useState({});
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     Promise.all(
       projects.map((p) =>
-        getTrackingSummary(p.id).then((data) => ({ id: p.id, data }))
+        getTrackingSummary(p.id, { signal: controller.signal })
+          .then((data) => ({ id: p.id, data }))
+          .catch(() => ({ id: p.id, data: null }))
       )
     )
       .then((results) => {
-        if (cancelled) return;
-        const map = {};
-        for (const r of results) map[r.id] = r.data;
-        setSummaries(map);
+        if (controller.signal.aborted) return;
+        setSummaries((prev) => {
+          const map = { ...prev };
+          for (const r of results) {
+            if (r.data) map[r.id] = r.data;
+          }
+          return map;
+        });
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [projects.map((p) => p.id).join(',')]);
 
   const projectData = projects.map((p) => {

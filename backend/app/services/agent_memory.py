@@ -1,12 +1,12 @@
 # Path: app/services/agent_memory.py
 # File: agent_memory.py
 # Created: 2026-06-03
-# Purpose: Scaffold an agent's memory directory — identity.md + empty scratchpad/lessons/recent_sessions
+# Purpose: Scaffold an agent's memory directory - identity.md + empty scratchpad/lessons/recent_sessions
 # Caller: app/services/agent.create_agent, app/services/project_agent.create_project_agent, manual endpoint
 # Callees: app/models/agent, app/models/project
 # Data In: db: Session, agent_id: int
 # Data Out: ScaffoldResult (paths created, paths preserved, paths skipped)
-# Last Modified: 2026-06-03
+# Last Modified: 2026-06-10
 
 import logging
 from dataclasses import dataclass, field
@@ -55,7 +55,7 @@ def scaffold_agent_dir(db: Session, agent_id: int) -> ScaffoldResult:
 
     Raises ScaffoldError on hard failures (unknown agent, no project, no
     repo_path). Auto-triggers (from create_agent / create_project_agent)
-    should call this best-effort and catch — a memory-dir failure shouldn't
+    should call this best-effort and catch - a memory-dir failure shouldn't
     fail the agent-create or assignment.
     """
     agent = db.get(Agent, agent_id)
@@ -96,7 +96,7 @@ def scaffold_agent_dir(db: Session, agent_id: int) -> ScaffoldResult:
             f"could not create {memory_dir}: {e}",
         )
 
-    # identity.md — always regenerate (system-generated)
+    # identity.md - always regenerate (system-generated)
     identity_path = memory_dir / "identity.md"
     try:
         identity_path.write_text(_build_identity_md(agent, project), encoding="utf-8")
@@ -107,7 +107,7 @@ def scaffold_agent_dir(db: Session, agent_id: int) -> ScaffoldResult:
             f"could not write {identity_path}: {e}",
         )
 
-    # Agent-owned files — touch only if missing
+    # Agent-owned files - touch only if missing
     for fname in _AGENT_OWNED_FILES:
         path = memory_dir / fname
         if path.exists():
@@ -152,9 +152,9 @@ def _build_identity_md(agent: Agent, project: Project) -> str:
     refreshed = datetime.now(timezone.utc).isoformat(timespec="seconds")
     playbook = _playbook_for_role(agent.role)
     project_rules = _project_rules_for_role(agent.role)
-    return f"""# Identity — {agent.name}
+    return f"""# Identity - {agent.name}
 
-> System-generated. Do not edit by hand — `scaffold_agent_dir(agent_id={agent.id})` regenerates this file each time.
+> System-generated. Do not edit by hand - `scaffold_agent_dir(agent_id={agent.id})` regenerates this file each time.
 > Last refreshed: {refreshed}
 
 ## Who you are
@@ -165,15 +165,15 @@ def _build_identity_md(agent: Agent, project: Project) -> str:
 - **project:** {project.prefix} ({project.name})
 - **created:** {created}
 
-## On Spawn — Read These First
+## On Spawn - Read These First
 
 Before doing anything else, read these files in order:
 
-1. **Your playbook** — `{playbook}`
-2. **Your project rules** — `{project_rules}`
-3. **HANDOFF.md** — session continuity notes (current state, decisions, gotchas)
-4. **ARCHITECTURE.md** — system design and data model
-5. **README.md** — project overview, setup, API reference
+1. **Your playbook** - `{playbook}`
+2. **Your project rules** - `{project_rules}`
+3. **HANDOFF.md** - session continuity notes (current state, decisions, gotchas)
+4. **ARCHITECTURE.md** - system design and data model
+5. **README.md** - project overview, setup, API reference
 
 This gives you full context without needing to ask the TL. If any of these files don't exist, proceed with what you have and flag it.
 
@@ -181,9 +181,9 @@ This gives you full context without needing to ask the TL. If any of these files
 
 Three companion files live in this directory:
 
-- `scratchpad.md` — your in-flight working notes; one block per session, append-only
-- `lessons.md` — durable lessons learned across sessions; append a block when something is worth remembering
-- `recent_sessions.md` — one-line index of past sessions; append-only
+- `scratchpad.md` - your in-flight working notes; one block per session, append-only
+- `lessons.md` - durable lessons learned across sessions; append a block when something is worth remembering
+- `recent_sessions.md` - one-line index of past sessions; append-only
 
 ## How to write to them
 

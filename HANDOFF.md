@@ -6,112 +6,101 @@
 
 ## Current State
 
-**Sprint S66 active (id=107).** Epic 21 ("Fixing time and token tracking") in_progress.
+**Sprint S66 still active (id=107).** Epic 21 ("Fixing time and token tracking") in_progress. We kept S66 open today rather than closing — the work was small-ticket cleanup of the S66 backlog plus an emergent dashboard-rendering bug that pulled in real instrumentation.
 
-**Last DWB session: id=5, closed 2026-06-10T16:59:59 via `ai_confident`** with headline "S66 close: session-tracking arc + Jira unification + worker memory fix". Layer-1 regex (DWB-343/344) did not fire on open — opened via Layer 2 at 11:55 because the canonical phrase wasn't typed. Worth a verification next session.
+**Last DWB session: id=7, opened 2026-06-10T17:07:23 via Layer-1 regex (DWB-344 UserPromptSubmit hook).** First confirmed Layer-1 open in the wild — that was the verification flagged in yesterday's handoff and it landed for free today. Closed end-of-day via ai_confident.
 
-**Last commit:** `40887a1` — pushed to master. 94 files in one bundle covering ~25 shipped tickets.
-
-### S66 tickets shipped today (in commit 40887a1)
+## Tickets shipped today (11 total)
 
 | Ticket | Status | One-line |
 |---|---|---|
-| DWB-339 | done | SessionPanel live view |
-| DWB-340 | done | docs/session_lifecycle.md user-facing reference |
-| DWB-341 | done | Auto-scaffold agent memory dirs on POST /api/agents + spawn-prepare |
-| DWB-342 | done | Unified Jira page (single nav, 13-col table, fuzzy search, sortable, manual sync, read-only) |
-| DWB-343 | done | SessionEnd OPEN regex retry (catches the SessionStart-before-transcript race) |
-| DWB-344 | done | UserPromptSubmit hook for instant open-phrase detection |
-| DWB-346 | done | Sessions list aggregates + headline column |
-| DWB-347 | done | Sessions page + nav `sessions` link + phrase-help block |
-| DWB-348 | done | Session detail page at /projects/:pid/sessions/:sid |
-| DWB-349 | done | SessionFooter unified (5 dot states, merged with polling footer) |
-| DWB-351 | done | Privacy: AI-layer phrase fields forced NULL, UserPromptSubmit prompt scrubbed |
-| DWB-352 | done | memory_usage_rules inline on identify + spawn-prepare |
-| DWB-353 | done | Ad Hoc overhead bucket + dead-alert removal (unattributed + tokens-not-reported) |
-| DWB-354 | done | Ad Hoc UI row + tooltip |
-| DWB-355 | done | Playbook audit folding in S66 changes |
-| DWB-356 | done | Jira normalizer: sprint name (env-overridable customfield) + reporter |
-| DWB-357 | done | Parent: fix worker memory-write crash (umbrella) |
-| DWB-358 | done | POST /api/agents/{id}/memory/append (safe server-side writes) |
-| DWB-359 | done | Worker playbook scrub of deadly direct-write guidance |
-| DWB-360 | done | E2E verify memory-append (Barry self-test was the empirical proof) |
-| DWB-362 | done | Jira table type column |
-| DWB-363 | done | Jira table epic column (key + name via batched lookup) |
-| DWB-364 | done | Jira table parent column (gated on issuetype.subtask) |
-| DWB-367 | done | Agent .md files: rewrite docs/ refs to .claude/ |
-| DWB-368 | done | Playbook prose cross-refs + AUX_DOCS deploy manifest extension |
-| DWB-369 | done | marker_sweeper periodic task (pending-* GC + finalized cleanup) |
+| DWB-345 | done | Auto-PATCH ticket status from commit-message parse (server-side endpoint + shell hook + installer) |
+| DWB-350 | done | test_dwb_session_migration teardown rebuilt via ORM-diff (auto-handles future column adds) |
+| DWB-361 | done | Em-dash sweep on agent_memory.py identity template (16 instances + test assertion update) |
+| DWB-365 | done | project_agents bridge invariant enforced at agent-create + delete_agent FK landmine fixed |
+| DWB-366 | done | deploy-playbooks scaffolds root INITIAL/ARCHITECTURE/HANDOFF skeletons |
+| DWB-370 | done | Project page blank-screen on click (AbortController + .catch + ErrorBoundary at AppShell) |
+| DWB-371 | done | Frontend client log feed to backend — client_logs table + endpoints + frontend logger + instrumentation |
+| DWB-372 | done | Backend application log via API — ring buffer + custom logging.Handler + /api/server-logs |
+| DWB-374 | done | App remount root cause: SessionFooter conditional useMatch via `||` violated Rules of Hooks |
+| DWB-375 | done | Favicon: D'B monogram in GOB Bluth color order (green-orange-blue) |
+| Cross | -- | All 5 original S66-backlog tickets cleared (361, 350, 366, 365, 345); 6 emergent (370/371/372/374/375 + diagnostic work) |
 
-### Cross-project shipped today (D2J)
-
-| Ticket | Status | One-line |
-|---|---|---|
-| D2J-19 | done | dwb2jira create sprint membership via customfield PUT (not legacy agile POST) |
-| D2J-20 | done | dwb2jira report --sprint via JQL on customfield (not agile sprint-issue endpoint) |
-
-Shipped to `/Users/mchick/Dev/DWB_2_JIRA/` by Barry_DWB as cross-project assist (he had the Jira-sync context from same-day DWB work). D2J's HANDOFF.md updated with the heads-up for the eventual Archie_D2J spawn. `JIRA_SPRINT_CUSTOMFIELD=customfield_10021` set in D2J's `.env`.
-
-### Open backlog filed during the arc
+## Open backlog (S66)
 
 | Ticket | Notes |
 |---|---|
-| DWB-345 | Auto-PATCH ticket status=done via commit-message parse |
-| DWB-350 | test_dwb_session_migration teardown leaves schema missing post-335 cols |
-| DWB-361 | Em-dash sweep on agent_memory.py identity template |
-| DWB-365 | Enforce project_agents bridge invariant on agent creation |
-| DWB-366 | deploy-playbooks: also scaffold root INITIAL/ARCH/HANDOFF skeletons |
+| DWB-373 | Sessions table tix_done column always 0 — aggregator bug. Tokens column likely same root cause. Backlog. |
 
-All five are filed and prioritized as backlog — none blocking.
+## The big story — DWB-374 / SessionFooter
 
-## Key lessons captured today
+The dashboard blank-screen symptom started as DWB-370 (click project link → blank). Freddie shipped a layered fix: AbortController + .catch + ErrorBoundary at AppShell + the `lastPolled` gate on ProjectPage. That improved the refresh case but did NOT fix the click case. Symptom kept reproducing.
 
-These also live in `~/.claude/projects/.../memory/feedback_*.md` and the worker / TL playbooks via DWB-355 + DWB-359:
+We were guessing because there was no diagnostic surface. So we filed and shipped DWB-371 + DWB-372 to get logger feeds (frontend + backend) into the backend store, queryable via curl. The investment paid for itself immediately.
 
-1. **Subagents cannot Edit/Write/NotebookEdit ANY path under `.claude/`.** The CC permission dialog crashes them in the ink renderer. Casualties this session: Sylvie, Sylvie-2, Pam, Freddie, Dolores. Hard checklist: grep ticket scope for `.claude/` paths before assigning to a subagent. If hit, TL handles directly.
-2. **DWB-358 memory-append endpoint is the canonical in-flight memory write path** for workers. Direct Edit of memory files crashes them; the server-side endpoint bypasses the dialog.
-3. **`SendMessage` routes by literal teammate name.** After a respawn, `Pam_DWB` -> `Pam_DWB-2`. Addressing the original name silently drops the message into a dead inbox. Verify via `GET /api/projects/{id}/team` before sending.
-4. **Probe-first against real data before coding.** DWB-356 customfield ID (10020 default vs 10021 Roadvantage), D2J-19 spec inaccuracy, D2J-20 reproduction status all caught by direct Jira-payload inspection. Saved at least one wasted ship cycle.
-5. **Migration discipline: `alembic upgrade head` + re-sync FRAUDI + SQL spot-check BEFORE flipping in_review** on any schema-touching ticket. The DWB-362 migration gap 500'd every sync until manually applied. Now standard practice per Barry.
-6. **Read-only Jira contract enforced via `FakeReadOnlyJira` whitelist** in tests. Mock client refuses any non-whitelisted method, so future regression adding a write call fails loud.
-7. **Cross-project debugging works.** Archie_CI surfaced 5 systemic findings today; all five closed by end of day.
+The diagnostic arc:
+1. `store.hydrated` fired 12 times in 5 min of normal navigation → useAppData remounting → App.jsx remounting on every SPA nav.
+2. Instance counter probe (`APP_INSTANCE_COUNTER` module var + `useRef`) → instance number stayed at #2 across all nav. So same React instance was firing mount→unmount→mount repeatedly. Weird.
+3. Boundary-cross identification: app.lifecycle events only fired when crossing project↔top-level. Intra-project nav was clean.
+4. Triad probe (window.error listener + RootErrorBoundary above App + RootProbe above BrowserRouter) caught the actual throw with full componentStack.
+5. **Root cause: `SessionFooter.jsx:84` had `useMatch('/projects/:id/*') || useMatch('/projects/:id')`** — second useMatch called CONDITIONALLY. Hook count changed across the project↔top-level boundary. React's `areHookInputsEqual` tried to compare a stale undefined deps array to a new one, `.length` threw, the throw propagated past App (ErrorBoundary was inside AppShell, below the throw site), React tore down the entire tree.
+6. Fix: single `useMatch('/projects/:id/*')`. Splat matches zero or more segments, so it covers both `/projects/7` and `/projects/7/tickets`.
 
-## Plan for the next session
+One-line fix after ~10 layers of instrumentation. The DWB-371 + DWB-372 logger infrastructure was the unlock — without backend-readable client logs we'd still be guessing.
 
-1. **Verify Layer-1 regex actually fires on open** — open a fresh CC session with the canonical phrase `you are archie, read the playbook`. Footer should turn active before Archie's first response completes. `open_method=regex` on the new dwb_session row. This was the verification HANDOFF flagged from S66 day 1 and we still haven't seen Layer 1 catch a real open.
-2. **DWB-366**: extend deploy-playbooks to scaffold root INITIAL/ARCH/HANDOFF skeletons. Half done already (the .claude/-side scaffold landed); just need the root-doc skeletons added to the manifest.
-3. **DWB-345**: auto-PATCH ticket status on commit-message parse. Closes the last manual housekeeping step in the workflow.
-4. **DWB-365**: enforce project_agents bridge invariant. The FRAUDI drift today (3 missing links) was a one-off backfill; the underlying cause needs a service-level guarantee.
-5. **DWB-350/361** are tiny tech-debt items; can ride alongside any sprint.
+## Lessons captured today
+
+1. **DWB-371 + DWB-372 are the diagnostic substrate.** Browser-console-only debugging is dead for this project. When something blanks, curl `/api/client-logs?level=error` and `/api/server-logs?level=error` first.
+2. **Rules-of-Hooks violations show up as `Cannot read properties of undefined (reading 'length')` from `areHookInputsEqual`** when crossing render shapes. If you see that throw with a `useMemo`/`useEffect`/`useCallback` stack, look for conditional hook calls (`||`, `&&`, early-return-then-hook).
+3. **`client_logs.occurred_at` uses `sa.DateTime()` — no fractional seconds in MySQL.** Same-second events sort randomly. Use `id` (auto-increment) for true write order until DWB-376 (when we file it) fixes precision.
+4. **Diagnostic ordering: backend-only via DB id is more reliable than client-side `occurred_at` until the precision fix lands.**
+5. **DWB-365 delete_agent FK landmine:** when you add a child relationship (project_agents bridge insert on agent create), the matching delete needs an explicit pre-delete OR ON DELETE CASCADE. SQLA defaults to NULLing the FK which violates NOT NULL.
+6. **Server-side parse > shell-side parse for hook integrations** (DWB-345). Keep the shell as a thin curl, push all logic to a Python endpoint. Easier to test, single audit point, no env-var setup cliff per clone.
+7. **Skip-ceremony only when user signals it** — kept enforcing this today. Bug fixes that aren't trivially scoped still go through tickets.
+8. **TIX DONE column in sessions table is broken** (DWB-373) — aggregator doesn't count done-transitions in the session window. Cosmetic but noticed.
+9. **Workers cannot Edit/Write any path under `.claude/`** — still the hard rule. All memory writes go through `POST /api/agents/{id}/memory/append` or `/session-complete`. Today all three workers (Barry, Freddie, Sylvie) wrote notes cleanly via that path. Zero crashes.
+
+## Plan for next session
+
+1. **DWB-373** — tix_done aggregator. Probe status_history transitions within session window first, then fix the aggregator. Likely 30-min ticket.
+2. **DWB-376 (TO FILE)** — `client_logs.occurred_at` precision. Migrate to `DateTime(fsp=3)` for millisecond ordering. Small.
+3. **DWB-377 (TO FILE)** — Dashboard fetch fan-out: 16+ parallel `getTrackingSummary` calls on dashboard mount. CrossProjectSummary + TimeTokens + 4 ProjectCards each map over projects independently. Deduplicate via shared cache hook.
+4. **IDEAS.md backlog** (in repo root) — 9 design ideas captured, ranked into tiers. Pick from Tier 1 (#3 session info on project headers, #1 team status cleanup) when bandwidth opens.
+5. **Sage reactivated today** (id=6, project 1). She's on the roster again — use for next sprint's testing work.
+6. **GHK1 (project id=11) deleted** — was a leftover smoke-test artifact from Barry's DWB-345 verification. Cleaned up mid-session.
 
 ## Team status at session close
 
 | Agent | Role | State |
 |---|---|---|
-| Archie_DWB (13) | TL | Active |
-| Pam_DWB-2 (14) | PM | Alive at close — write-up requested via session-complete |
-| Barry_DWB (21) | Backend | Alive — write-up requested |
-| Freddie (19) | Frontend | Alive — write-up requested |
-| Sage (6) | Tester | Alive — write-up requested |
-| Dolores (28) | Docs | Dead (crashed on DWB-367 protected-file Edit, not respawning) |
-
-5 casualties total this session — all `.claude/` protected-file crashes. Memory rule strengthened so future spawns inherit the awareness via memory_usage_rules + the hardened worker playbook.
+| Archie_DWB (13) | TL | Active (you, on next spawn) |
+| Barry_DWB (21) | Backend | Alive — wrote session notes via session-complete |
+| Freddie (19) | Frontend | Alive — wrote session notes after DWB-374 ship |
+| Sylvie (27) | System-ops | Alive — wrote session notes |
+| Sage (6) | Tester | Reactivated mid-session, no work assigned yet |
+| Pam_DWB (14) | PM | Not spawned today (small team mode, TL drove) |
+| Dolores (28) | Docs | Not spawned (still recovering from yesterday's `.claude/` crash class) |
 
 ## Gotchas (carry forward)
 
-- **`.claude/` Edit by subagent = crash.** Hard rule.
-- **Alembic upgrade ALWAYS before in_review** on schema-touching tickets.
-- **Customfield IDs vary per Jira instance.** Probe real payloads; make IDs env-overridable.
+- **`.claude/` Edit by subagent = crash.** Hard rule (unchanged from yesterday).
+- **Rules of Hooks violations cascade to whole-tree teardown** if no error boundary above the throw site. ErrorBoundary inside AppShell is below App; a throw in a layout component sibling of AppShell propagates past it. Consider whether the inner ErrorBoundary should hoist.
+- **client_logs DateTime precision** (above).
+- **Customfield IDs vary per Jira instance.** Probe payloads first.
 - **`SendMessage` is name-literal.** Verify suffix on respawned teammates.
-- **Marker sweeper runs every 10 min** with 30-min stale threshold. If marker dirs look stale, the sweeper's likely off or the env vars need tuning.
+- **Marker sweeper runs every 10 min** with 30-min stale threshold.
 - **GET /api/projects/{id}/sessions does NOT accept a `status` query param.** Filter client-side.
-- **`app/config/` is a package now.** Both `from app.config import settings` and submodule imports work.
+- **`app/config/` is a package now.**
 - **`participants_for_sprint` counts TL admin acks** (DWB-329 backlog).
+- **Vite Fast Refresh module-state behavior:** module-level `let` variables persist across HMR updates of the same module, but `useRef` returns new objects on full component remount. The instance-counter probe relied on this — useful diagnostic tool.
 
-## Test count
+## Test counts at close
 
-**931 backend tests passing** on the DWB suite. **152 D2J tests passing** post D2J-19/20.
+- **Backend: 991 passing** (931 baseline + 21 from S66 cleanup + 16 client_logs + 23 server_logs)
+- **Frontend: ~92 passing** (24 pre-existing failures from `__tests__/api/*` mock + JiraIssuesPage date-pad, unrelated)
 
-## Session-end notes (2026-06-10)
+## Session-end notes (2026-06-10 PM)
 
-Heavy day. ~25 DWB tickets + 2 D2J tickets shipped, 1 mega-commit pushed, Archie_CI cross-project audit fully closed end-to-end. The worker memory-write fix (DWB-357 arc) is the structural unblock — workers can now record their own lessons without dying. Five casualties on the protected-file crash class — all documented, all rule-bound. Team parked alive for tomorrow.
+Big day. 11 tickets shipped, the diagnostic infrastructure that's now permanent in the codebase, and the root cause of a multi-day blank-screen ghost finally pinned to a single conditional `||` in SessionFooter. The hunt took ~10 instrumentation iterations but every one yielded a clean next step — which is what good diagnostic surfaces are for. DWB-371 + DWB-372 paid for themselves on their first real use case.
+
+Team parked alive. Sage back on the roster.
