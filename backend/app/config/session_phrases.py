@@ -6,7 +6,11 @@
 # Callees: re (stdlib)
 # Data In: free-form user text
 # Data Out: matched phrase substring or None
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-11
+#
+# DWB-378 (2026-06-11): broadened _CLOSE_SOURCES with target-suffixed +
+# lighter wrap-up variants observed missing from real CI sessions (idle_timeout
+# was the only close path firing for those evenings).
 
 """Versioned regex catalogue for the DWB session-lifecycle regex fast path.
 
@@ -87,6 +91,23 @@ _CLOSE_SOURCES: list[str] = [
     "wrap up for the night",
     "end of session",
     "that's a wrap",
+    # DWB-378: target-suffixed + lighter wrap-up variants. The <name>
+    # placeholder uses the same alphanumeric-token compile as the open
+    # side, so "shut down ci" and "wrap up barry for the night" both
+    # match. Bare "time" or "logging" alone won't trip these because
+    # the trailing-clause discriminator is required.
+    "shut down for the night",
+    "shut down <name>",
+    "shut down <name> for the night",
+    "wrap up <name>",
+    "wrap up <name> for the night",
+    "done for the day",
+    "done for the night",
+    "logging off",
+    "lets close it",
+    "time to close",
+    "thats it for tonight",
+    "thats it for the night",
 ]
 
 
@@ -113,10 +134,14 @@ def _compile(source: str) -> re.Pattern[str]:
       4. Restore: placeholders → ``\\w+`` and ``\\s+`` respectively.
 
     Result for ``"you are <name>, read the playbook"`` is the regex
-    ``"you\\s+are\\s+\\w+,\\s+read\\s+the\\s+playbook"`` (compiled
+    ``"you\\s+are\\s+\\w+,?\\s+read\\s+the\\s+playbook"`` (compiled
     case-insensitive), which matches the real user phrase plus all the
     whitespace and case variants. The escape step preserves the literal
-    comma — re.escape leaves commas alone.
+    comma (re.escape leaves commas alone), and a final pass (DWB-376)
+    relaxes any ``,\\s+`` to ``,?\\s+`` so the comma is optional in
+    natural English ("you are archie read your playbook" matches the
+    same as "you are archie, read your playbook"). The whitespace run
+    is still required; only the comma itself is relaxed.
 
     Why not split-on-whitespace tokens: a token like ``<name>,`` doesn't
     equal ``<name>`` and the original implementation escaped it as a
@@ -128,6 +153,13 @@ def _compile(source: str) -> re.Pattern[str]:
     s = re.escape(s)
     s = s.replace(_NAME_PLACEHOLDER, r"\w+")
     s = s.replace(_WHITESPACE_PLACEHOLDER, r"\s+")
+    # DWB-376: make the comma between <name> and the trailing clause
+    # optional so natural-English "you are archie read your playbook"
+    # matches the same as the comma form. The whitespace run is still
+    # required; only the comma itself is relaxed. Applies to OPEN and
+    # CLOSE sources alike (CLOSE has no commas today but the rule must
+    # not regress them if any are added later).
+    s = s.replace(r",\s+", r",?\s+")
     return re.compile(s, re.IGNORECASE)
 
 

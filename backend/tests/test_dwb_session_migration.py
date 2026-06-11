@@ -1,12 +1,12 @@
 # Path: tests/test_dwb_session_migration.py
 # File: test_dwb_session_migration.py
 # Created: 2026-06-09
-# Purpose: Verify the DWB-335 migration applies cleanly (downgrade + re-upgrade against lat_test); DWB-350 teardown rebuilds schema from ORM diff so future column adds don't need sibling lines
+# Purpose: Verify the DWB-335 migration applies cleanly (downgrade + re-upgrade against lat_test); DWB-350 teardown rebuilds schema from ORM diff so future column adds don't need sibling lines; DWB-381 teardown also forward-rolls enum members so future enum extensions don't need sibling lines either
 # Caller: pytest
 # Callees: alembic.command, sqlalchemy.inspect, sqlalchemy.schema.AddColumn
 # Data In: lat_test (already at head via conftest create_all)
 # Data Out: Assertions on schema after up/down round-trip
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-11
 
 """Round-trips the DWB-335 migration against the test database to verify the
 hand-written upgrade + downgrade both succeed and produce the expected
@@ -36,7 +36,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.schema import CreateColumn
 
 from app.config import settings
-from app.models.dwb_session import DwbSession
+from app.models.dwb_session import DwbCloseMethod, DwbOpenMethod, DwbSession
 
 PRIOR_REVISION = "dwb328e7a91b"
 THIS_REVISION = "dwb335a7b3c91"
@@ -172,6 +172,28 @@ def test_migration_round_trip(alembic_cfg):
                     conn.execute(
                         text(f"ALTER TABLE dwb_sessions ADD COLUMN {col_ddl}")
                     )
+        # DWB-381: forward-roll the open_method + close_method enums to the
+        # current model definition. The DWB-335 upgrade re-creates the table
+        # at that revision's enum shape; later migrations (e.g. DWB-381) add
+        # values. Without this MODIFY, subsequent tests in the session that
+        # insert with the newer enum value get rejected by the column. Sourced
+        # from the model so future enum extensions land here for free, no
+        # sibling line per ticket.
+        open_values = ",".join(f"'{m.value}'" for m in DwbOpenMethod)
+        close_values = ",".join(f"'{m.value}'" for m in DwbCloseMethod)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"ALTER TABLE dwb_sessions MODIFY COLUMN open_method "
+                    f"ENUM({open_values}) NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    f"ALTER TABLE dwb_sessions MODIFY COLUMN close_method "
+                    f"ENUM({close_values}) NULL"
+                )
+            )
         # Leave alembic_version table behind but cleared so subsequent
         # test runs don't trip on a stale revision pointer.
         with engine.begin() as conn:

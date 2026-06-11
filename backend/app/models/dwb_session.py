@@ -1,12 +1,12 @@
 # Path: app/models/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline)
+# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback)
 # Caller: app/services/dwb_session.py (DWB-337), app/routers/dwb_sessions.py (DWB-338)
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: DwbSession, DwbOpenMethod, DwbCloseMethod, DwbCloseReason
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-11
 
 import enum
 from datetime import datetime
@@ -33,6 +33,18 @@ class DwbOpenMethod(str, enum.Enum):
     regex = "regex"
     ai_confident = "ai_confident"
     ai_asked = "ai_asked"
+    # DWB-381: deterministic slash-command escape hatch. Stamped when the
+    # user types /dwb-open and the slash command curls /api/sessions/open
+    # with open_method=slash. Independent of the regex + AI layers so the
+    # user always has a guaranteed open path regardless of phrase matching.
+    slash = "slash"
+    # DWB-382: async Haiku classifier fallback. Stamped when the
+    # UserPromptSubmit hook's match_open AND match_close both miss, and the
+    # fire-and-forget Anthropic classifier returns intent=open with
+    # confidence=high. Runs out-of-band, so the hook response is unaffected.
+    # AI-method (privacy: open_phrase nulled out before persist, per
+    # DWB-351).
+    ai_classifier = "ai_classifier"
 
 
 class DwbCloseMethod(str, enum.Enum):
@@ -40,6 +52,18 @@ class DwbCloseMethod(str, enum.Enum):
     ai_confident = "ai_confident"
     ai_asked = "ai_asked"
     idle_timeout = "idle_timeout"
+    # DWB-381: deterministic slash-command escape hatch. Stamped when the
+    # user types /dwb-close and the slash command curls
+    # /api/sessions/{id}/close with close_method=slash. Mirrors the open
+    # side of the escape hatch above.
+    slash = "slash"
+    # DWB-382: async Haiku classifier fallback. Stamped when the
+    # UserPromptSubmit hook's match_open AND match_close both miss, and the
+    # fire-and-forget Anthropic classifier returns intent=close with
+    # confidence=high (and an active session exists). Mirrors ai_classifier
+    # on the open side; AI-method (privacy: close_phrase nulled out before
+    # persist, per DWB-351 ai_confident / ai_asked precedent).
+    ai_classifier = "ai_classifier"
 
 
 class DwbCloseReason(str, enum.Enum):

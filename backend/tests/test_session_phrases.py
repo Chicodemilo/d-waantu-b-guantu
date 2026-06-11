@@ -6,7 +6,10 @@
 # Callees: app.config.session_phrases
 # Data In: free-form strings
 # Data Out: Assertions on match_open / match_close return values
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-11
+#
+# DWB-378 (2026-06-11): added TestCloseVariants for the broadened
+# _CLOSE_SOURCES catalogue (target-suffixed + lighter wrap-up variants).
 
 """Tests for the DWB session phrase regex catalogue.
 
@@ -146,6 +149,139 @@ class TestSubstringExtraction:
         assert match is not None
         assert match in wrapper
         assert "write docs" in match.lower()
+
+
+class TestOpenCommaOptional:
+    """DWB-376: comma between <name> and the trailing clause is optional.
+
+    Natural English drops the comma ("you are archie read your playbook").
+    Layer-1 must match both forms identically.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # "you are <name>, you are team lead, read the playbook" — both commas dropped
+            "you are archie you are team lead read the playbook",
+            "you are archie, you are team lead, read the playbook",
+            # "you are <name>, you are team lead, read your playbook"
+            "you are barry you are team lead read your playbook",
+            "you are barry, you are team lead, read your playbook",
+            # "you are <name>, read the playbook"
+            "you are sylvie read the playbook",
+            "you are sylvie, read the playbook",
+            # "you are <name>, read your playbook"
+            "you are pam read your playbook",
+            "you are pam, read your playbook",
+            # "you are <name>, read your handoff and playbook"
+            "you are archie read your handoff and playbook",
+            "you are archie, read your handoff and playbook",
+            # "you are <name>, read the handoff and playbook"
+            "you are barry read the handoff and playbook",
+            "you are barry, read the handoff and playbook",
+            # "you are <name>, read your handoff"
+            "you are sylvie read your handoff",
+            "you are sylvie, read your handoff",
+        ],
+    )
+    def test_with_and_without_comma_match(self, text):
+        result = match_open(text)
+        assert result is not None, f"expected match for {text!r}"
+        assert len(result.strip()) > 0
+
+    def test_bare_name_still_no_match(self):
+        # No discriminator clause = no open. Comma-optional must not turn
+        # this into a false positive.
+        assert match_open("you are archie") is None
+
+    def test_close_with_no_commas_still_matches(self):
+        # CLOSE patterns currently have no commas. The comma-optional pass
+        # must not regress them.
+        for text in [
+            "have the team write docs and exit",
+            "close the dwb session",
+            "shut it down for the night",
+            "that's a wrap",
+        ]:
+            assert match_close(text) is not None, f"close regressed on {text!r}"
+
+
+class TestCloseVariants:
+    """DWB-378: target-suffixed + lighter wrap-up close variants.
+
+    Each new phrase is tested in two shapes: the bare canonical form and a
+    natural-English form with surrounding text ("ok shut down ci for the
+    night now"). Negative case: the leading token of a multi-token phrase
+    (e.g., "time" alone) must not match — the trailing clause discriminator
+    is the load-bearing half of every catalogue entry.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # shut down for the night
+            "shut down for the night",
+            "ok shut down for the night now",
+            # shut down <name>
+            "shut down ci",
+            "barry, shut down dwb please",
+            # shut down <name> for the night
+            "shut down ci for the night",
+            "ok shut down ci for the night now",
+            # wrap up <name>
+            "wrap up ci",
+            "lets wrap up barry and call it",
+            # wrap up <name> for the night
+            "wrap up ci for the night",
+            "ok wrap up barry for the night",
+            # done for the day
+            "done for the day",
+            "im done for the day",
+            # done for the night
+            "done for the night",
+            "alright, done for the night",
+            # logging off
+            "logging off",
+            "ok logging off now",
+            # lets close it
+            "lets close it",
+            "alright lets close it for now",
+            # time to close
+            "time to close",
+            "i think its time to close this out",
+            # thats it for tonight
+            "thats it for tonight",
+            "alright thats it for tonight team",
+            # thats it for the night
+            "thats it for the night",
+            "ok thats it for the night",
+        ],
+    )
+    def test_new_close_variants_match(self, text):
+        result = match_close(text)
+        assert result is not None, f"expected close match for {text!r}"
+        assert len(result.strip()) > 0
+
+    def test_bare_leading_token_does_not_match(self):
+        # "time" alone is not a close phrase. The trailing-clause
+        # discriminator ("to close") is required.
+        assert match_close("time") is None
+        # Same for other leading tokens that would be too generic on their own.
+        assert match_close("logging") is None
+        assert match_close("done") is None
+        assert match_close("wrap") is None
+
+    def test_existing_close_phrases_still_match(self):
+        # Belt-and-suspenders: the new appends must not regress the
+        # original catalogue.
+        for text in [
+            "have the team write docs and exit",
+            "close the session",
+            "shut it down for the night",
+            "end of session",
+            "that's a wrap",
+        ]:
+            assert match_close(text) is not None, f"close regressed on {text!r}"
 
 
 class TestCatalogueShape:

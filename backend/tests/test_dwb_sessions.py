@@ -1,12 +1,12 @@
 # Path: tests/test_dwb_sessions.py
 # File: test_dwb_sessions.py
 # Created: 2026-06-09
-# Purpose: Endpoint + service tests for /api/sessions/open and /api/sessions/{id}/close (DWB-336)
+# Purpose: Endpoint + service tests for /api/sessions/open and /api/sessions/{id}/close (DWB-336, DWB-381 slash method)
 # Caller: pytest
 # Callees: app.routers.dwb_sessions, app.services.dwb_session, app.models.dwb_session
 # Data In: factory fixtures (make_project), test client
 # Data Out: Assertions on HTTP status codes, response bodies, DB state
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-11
 
 """End-to-end tests for the DWB session lifecycle endpoints.
 
@@ -36,6 +36,8 @@ Covers:
 from datetime import datetime, timedelta, timezone
 from inspect import signature
 
+import pytest
+
 from app.models.dwb_session import DwbCloseMethod, DwbCloseReason, DwbOpenMethod
 from app.models.hook_session import HookSession, HookSessionStatus, HookSessionType
 
@@ -47,14 +49,21 @@ def _opened_at_iso(minus_hours: int = 0) -> str:
 
 
 class TestOpenEndpoint:
-    def test_201_minimum_body(self, client, make_project):
+    @pytest.mark.parametrize("open_method", ["regex", "slash"])
+    def test_201_minimum_body(self, client, make_project, open_method):
+        """DWB-381: `slash` is a first-class open_method alongside `regex`.
+
+        Parametrized so the slash escape hatch is exercised by the same
+        round-trip assertions as the canonical regex open path - row
+        persisted, enum echoed back, is_open marker flipped to 1.
+        """
         project = make_project()
         r = client.post(
             "/api/sessions/open",
             json={
                 "project_id": project["id"],
                 "opened_at": _opened_at_iso(),
-                "open_method": "regex",
+                "open_method": open_method,
             },
         )
         assert r.status_code == 201, r.text
@@ -62,7 +71,7 @@ class TestOpenEndpoint:
         assert body["id"] is not None
         assert body["project_id"] == project["id"]
         assert body["closed_at"] is None
-        assert body["open_method"] == "regex"
+        assert body["open_method"] == open_method
         assert body["open_phrase"] is None
         assert body["is_open"] == 1
         assert body["total_tokens"] == 0
@@ -212,25 +221,37 @@ class TestCloseEndpoint:
         assert r.status_code == 201, r.text
         return r.json()
 
-    def test_200_happy_close(self, client, make_project):
+    @pytest.mark.parametrize(
+        "close_method,close_phrase",
+        [
+            ("regex", "have the team write docs and exit"),
+            # DWB-381: `slash` is a first-class close_method. The slash
+            # command supplies its own static phrase (`/dwb-close`) when
+            # firing the API, so the parametrized phrase covers both shapes.
+            ("slash", "/dwb-close"),
+        ],
+    )
+    def test_200_happy_close(
+        self, client, make_project, close_method, close_phrase
+    ):
         project = make_project()
         opened = self._open(client, project["id"])
 
         r = client.post(
             f"/api/sessions/{opened['id']}/close",
             json={
-                "close_method": "regex",
+                "close_method": close_method,
                 "close_reason": "explicit",
-                "close_phrase": "have the team write docs and exit",
+                "close_phrase": close_phrase,
             },
         )
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["id"] == opened["id"]
         assert body["closed_at"] is not None
-        assert body["close_method"] == "regex"
+        assert body["close_method"] == close_method
         assert body["close_reason"] == "explicit"
-        assert body["close_phrase"] == "have the team write docs and exit"
+        assert body["close_phrase"] == close_phrase
         assert body["is_open"] is None  # generated column flipped to NULL
 
     def test_200_idempotent_on_already_closed(self, client, make_project):
@@ -394,16 +415,80 @@ class TestServiceContract:
 
 
 class TestEnumValues:
-    """Sanity test the enum values so a future rename gets caught."""
+    """Sanity test the enum values so a future rename gets caught.
+
+    DWB-381: `slash` added to both DwbOpenMethod and DwbCloseMethod for the
+    /dwb-open and /dwb-close slash-command escape hatches.
+
+    DWB-382: `ai_classifier` added to both for the Layer-2 Haiku fallback
+    in handle_user_prompt.
+    """
 
     def test_open_methods(self):
         names = {m.value for m in DwbOpenMethod}
-        assert names == {"regex", "ai_confident", "ai_asked"}
+        assert names == {
+            "regex",
+            "ai_confident",
+            "ai_asked",
+            "slash",
+            "ai_classifier",
+        }
 
     def test_close_methods(self):
         names = {m.value for m in DwbCloseMethod}
-        assert names == {"regex", "ai_confident", "ai_asked", "idle_timeout"}
+        assert names == {
+            "regex",
+            "ai_confident",
+            "ai_asked",
+            "idle_timeout",
+            "slash",
+            "ai_classifier",
+        }
 
     def test_close_reasons(self):
         names = {m.value for m in DwbCloseReason}
         assert names == {"explicit", "idle", "manual"}
+
+
+class TestSlashEscapeHatch:
+    """DWB-381: end-to-end round-trip for the /dwb-open + /dwb-close
+    slash-command escape hatch. The slash command files (TL-direct) curl
+    /api/sessions/open / /api/sessions/{id}/close with method=slash; this
+    pins the row stamping so the persisted enum survives a future rewrite.
+    """
+
+    def test_slash_open_then_slash_close_roundtrip(self, client, make_project):
+        project = make_project()
+
+        ro = client.post(
+            "/api/sessions/open",
+            json={
+                "project_id": project["id"],
+                "opened_at": _opened_at_iso(),
+                "open_method": "slash",
+                "open_phrase": "/dwb-open",
+            },
+        )
+        assert ro.status_code == 201, ro.text
+        opened = ro.json()
+        assert opened["open_method"] == "slash"
+        # `slash` is a deterministic escape hatch (not AI-method), so the
+        # phrase persists like regex does — the DWB-351 null-out only fires
+        # for ai_confident / ai_asked.
+        assert opened["open_phrase"] == "/dwb-open"
+
+        rc = client.post(
+            f"/api/sessions/{opened['id']}/close",
+            json={
+                "close_method": "slash",
+                "close_reason": "explicit",
+                "close_phrase": "/dwb-close",
+            },
+        )
+        assert rc.status_code == 200, rc.text
+        closed = rc.json()
+        assert closed["close_method"] == "slash"
+        assert closed["close_reason"] == "explicit"
+        assert closed["close_phrase"] == "/dwb-close"
+        assert closed["closed_at"] is not None
+        assert closed["is_open"] is None

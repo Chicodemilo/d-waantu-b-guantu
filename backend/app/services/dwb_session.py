@@ -1,12 +1,12 @@
 # Path: app/services/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: Service-layer business logic for DWB session open/close + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases)
+# Purpose: Service-layer business logic for DWB session open/close + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases, DWB-382 ai_classifier added to AI-set)
 # Caller: app/services/idle_sweeper.py (sweep loop), app/routers/dwb_sessions.py (open + close endpoints)
 # Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-11
 
 """DWB session business logic.
 
@@ -119,22 +119,29 @@ def open_session(
     index, so racing opens still fail safely with IntegrityError — this
     pre-check is for the friendly conflict body, not correctness.
 
-    DWB-351 privacy guard: when ``open_method`` is ``ai_confident`` or
-    ``ai_asked``, the user's literal text is never persisted - the
-    ``open_phrase`` field is silently nulled out regardless of what the
-    caller passed. Regex opens may continue to store the matched
-    catalogue substring (deterministic, bounded by the hardcoded
-    phrase list in ``app.config.session_phrases``). Silent rather than
-    400 by design (TL playbook recommends omitting the field for AI
-    opens, but a stale caller that still sends it gets quiet
+    DWB-351 privacy guard: when ``open_method`` is ``ai_confident``,
+    ``ai_asked``, or ``ai_classifier`` (DWB-382), the user's literal
+    text is never persisted - the ``open_phrase`` field is silently
+    nulled out regardless of what the caller passed. Regex opens may
+    continue to store the matched catalogue substring (deterministic,
+    bounded by the hardcoded phrase list in
+    ``app.config.session_phrases``); ``slash`` opens persist the static
+    `/dwb-open` token. Silent rather than 400 by design (TL playbook
+    recommends omitting the field for AI opens, but a stale caller that
+    still sends it gets quiet
     null-out instead of a hard failure).
     """
     existing = get_active_session(db, project_id)
     if existing is not None:
         return None, existing
 
-    # DWB-351: privacy null-out on AI-layer opens.
-    if open_method in (DwbOpenMethod.ai_confident, DwbOpenMethod.ai_asked):
+    # DWB-351: privacy null-out on AI-layer opens. DWB-382 added
+    # ai_classifier to the AI set.
+    if open_method in (
+        DwbOpenMethod.ai_confident,
+        DwbOpenMethod.ai_asked,
+        DwbOpenMethod.ai_classifier,
+    ):
         open_phrase = None
 
     row = DwbSession(
@@ -240,17 +247,23 @@ def close_session(
         sweeper never supplies one (machine-driven close has nothing to
         say); only the explicit close endpoint does.
 
-    DWB-351 privacy guard: when ``close_method`` is ``ai_confident`` or
-    ``ai_asked`` the ``close_phrase`` is silently nulled out before
-    persisting. Regex closes may continue to store the matched catalogue
-    substring; idle_timeout closes never receive a phrase to begin with.
-    See ``open_session`` for the matching open-side guard.
+    DWB-351 privacy guard: when ``close_method`` is ``ai_confident``,
+    ``ai_asked``, or ``ai_classifier`` (DWB-382) the ``close_phrase`` is
+    silently nulled out before persisting. Regex / slash closes may store
+    the matched catalogue substring or the static `/dwb-close` token;
+    idle_timeout closes never receive a phrase to begin with. See
+    ``open_session`` for the matching open-side guard.
     """
     if session.closed_at is not None:
         return session
 
-    # DWB-351: privacy null-out on AI-layer closes.
-    if close_method in (DwbCloseMethod.ai_confident, DwbCloseMethod.ai_asked):
+    # DWB-351: privacy null-out on AI-layer closes. DWB-382 added
+    # ai_classifier to the AI set.
+    if close_method in (
+        DwbCloseMethod.ai_confident,
+        DwbCloseMethod.ai_asked,
+        DwbCloseMethod.ai_classifier,
+    ):
         close_phrase = None
 
     closed_at = _strip_tz(now) if now is not None else _utcnow()
