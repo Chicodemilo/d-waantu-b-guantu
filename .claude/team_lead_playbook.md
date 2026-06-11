@@ -261,18 +261,26 @@ A DWB session bounds passive time + token tracking by user intent, not by Claude
 
 3. **Irrelevant.** Most messages. Do nothing. The regex layer (Layer 1) catches obvious cases automatically; the AI reasoning (Layer 2) is a backstop, not a per-turn ritual.
 
-**Layer 1 fast paths (DWB-343 + DWB-344).** The regex layer now has two entry points so the open phrase is not lost to the SessionStart-before-transcript race:
-- **UserPromptSubmit hook (DWB-344):** Claude Code fires this synchronously on every user prompt with the raw text in the payload. The `/api/hooks/user-prompt` endpoint matches `match_open(prompt)` directly. Instant detection, no transcript scan.
-- **SessionEnd retry (DWB-343):** the `handle_session_end` path also re-runs `try_open_dwb_session_from_transcript` so any Stop/SessionEnd/SubagentStop after the first assistant turn catches an open phrase that the SessionStart scan missed.
-Both noop silently if a session is already open, so they cannot disturb a Layer-2 ai_confident open. Your AI-layer evaluation is the backstop for everything the regex catalogue does not cover.
+**Detection layers (5 in total).** The five layers run independently; each one noops silently if a session is already open (or already closed), so they cannot collide. Your AI-layer reasoning sits between the regex catalogue and the deterministic slash escape hatch:
 
-**Method enum:** `regex` = caught by the hook fast path, `ai_confident` = TL acted without asking, `ai_asked` = TL confirmed first. Stored on the DwbSession row so the dashboard can show which layer is doing the work.
+| Layer | Trigger | Method enum (open / close) | Source |
+|-------|---------|----------------------------|--------|
+| 1a regex (open) | UserPromptSubmit hook matches `match_open(prompt)` instantly. Comma between `<name>` and the trailing clause is optional, so "you are archie read your playbook" matches the same as "you are archie, read your playbook". | `regex` | DWB-344, DWB-376 |
+| 1a regex (close) | UserPromptSubmit hook matches `match_close(prompt)` instantly. Mirrors the open fast path so close phrases no longer wait for the SessionEnd transcript scan. Broadened `_CLOSE_SOURCES` catalogue covers target-suffixed and lighter wrap-up variants ("shut down for the night", "wrap up archie", "done for the night", "logging off", "lets close it", etc.). | `regex` | DWB-377, DWB-378 |
+| 1b transcript scan | SessionEnd retry path re-runs `try_open_dwb_session_from_transcript`, so any Stop/SessionEnd/SubagentStop after the first assistant turn catches a phrase the SessionStart scan missed. | `regex` | DWB-343 |
+| 2 AI classifier | Async fire-and-forget Anthropic Haiku call when both `match_open` and `match_close` miss. Env-gated on `ANTHROPIC_API_KEY` (silent noop without). Only acts on high-confidence `intent=open` or `intent=close` returns; ambiguous or unrelated outputs noop. | `ai_classifier` | DWB-382 |
+| 3 slash commands | `/dwb-open` and `/dwb-close` ship in `<repo>/.claude/commands/` with the clone. Deterministic escape hatch when nothing else fired (or you want to override). | `slash` | DWB-381 |
+| Safety | 60-minute idle sweeper auto-closes if no hook_session updates or tracking_log writes land in the window. | `idle_timeout` (close only) | pre-existing |
 
-**Privacy rule (DWB-351).** On AI-layer opens and closes, **do NOT pass the user's literal message in `open_phrase` / `close_phrase`**. User-typed text is never persisted in DWB. The regex layer stores its matched catalogue substring (hardcoded text, not free-form input); your AI-layer POSTs should omit the phrase field entirely or send `null`. Future contributors who re-add user text here will reintroduce a privacy regression.
+Your AI-layer evaluation (the three outcomes at the top of § 4e) is still the backstop for everything the catalogue does not cover. When you act, post with `open_method="ai_confident"` or `"ai_asked"` as before; the new enum values above belong to the system-driven layers, not to your manual TL action.
 
-**Race with the regex layer:** if the regex hook opens first, your AI-side attempt returns 409 with the active session's id, silently noop and read that id for any follow-up announcements. Same for close: the regex hook may beat you to it, in which case `close` returns 200 (idempotent), not an error.
+**Method enum (DwbOpenMethod / DwbCloseMethod):** `regex` (Layer 1a/1b), `ai_classifier` (Layer 2, system-driven), `slash` (Layer 3 slash command), `ai_confident` (TL acted without asking), `ai_asked` (TL confirmed first), `idle_timeout` (close only, sweeper). The row records which layer caught the open / close so the dashboard can show the breakdown.
 
-**Idle timeout:** after 60min of zero activity (no hook_session updates, no tracking_log writes), the background sweeper auto-closes with `close_method="idle_timeout"`. If you forget to close, the system catches it.
+**Privacy rule (DWB-351, reinforced by DWB-382).** User-typed text is never persisted in DWB. On AI-layer opens and closes (TL `ai_confident`/`ai_asked` AND the Layer-2 `ai_classifier`), do NOT pass the user's literal message in `open_phrase` / `close_phrase`; omit the field or send `null`. The regex layer stores its matched catalogue substring (hardcoded text, not free-form input); slash commands carry no phrase. The Layer-2 classifier sends the prompt to Anthropic for classification but the phrase is nulled in two places (call site + service-layer AI-set defense) before the DB write. Future contributors who re-add user text here will reintroduce a privacy regression.
+
+**Race between layers:** if any layer opens first, your AI-side attempt returns 409 with the active session's id, silently noop and read that id for any follow-up announcements. Same for close: a faster layer may beat you to it, in which case `close` returns 200 (idempotent), not an error.
+
+**Hook listener install location.** Unchanged: the hooks live in `<repo>/.claude/settings.json` and ship with the clone. There is no user-level install and no cross-project hook deployment; do not propose either.
 
 **Ad Hoc bucket (DWB-353).** Worker sessions that ran without a filed ticket (skip-ceremony lane per § 4c) route to a project-level `ad_hoc` overhead bucket instead of firing an unattributed-tokens alert. Surfaced as `ad_hoc_overhead_tokens` + `ad_hoc_overhead_seconds` on the session detail rollup alongside TL and PM overhead. No action required from you; the routing is automatic in the hook tracking service.
 
