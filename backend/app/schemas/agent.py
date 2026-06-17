@@ -185,3 +185,29 @@ class MemoryAppendResponse(BaseModel):
     path: str
     timestamp: str
     bytes_written: int
+
+
+class MemoryCompactRequest(BaseModel):
+    """POST /api/agents/{agent_id}/memory/compact body.
+
+    Compaction is a full-file REPLACE (not an append): the agent submits the
+    leaner, rewritten content for one memory file and the server overwrites it.
+
+    file: which memory file to compact. identity.md is system-generated and
+          not accepted.
+    content: the COMPLETE compacted file contents (the server writes it
+             verbatim, no heading is prepended). Refused if empty or if its
+             estimated token count still exceeds the file's ceiling.
+    """
+
+    file: Literal["scratchpad", "lessons", "recent_sessions"]
+    content: str
+
+
+class MemoryCompactResponse(BaseModel):
+    agent_id: int
+    file: str
+    path: str
+    tokens: int
+    ceiling: int
+    bytes_written: int

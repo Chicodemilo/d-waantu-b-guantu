@@ -27,13 +27,16 @@ The service-layer close fn is shared with the idle sweeper (DWB-337) so
 both code paths produce identically-shaped closed rows.
 """
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.dwb_session import DwbSession
+from app.models.dwb_session import DwbCloseMethod, DwbSession
+from app.services import agent_consolidation as consolidation_svc
 from app.models.project import Project
 from app.schemas.dwb_session import (
     DwbSessionCloseRequest,
@@ -131,6 +134,72 @@ def close_dwb_session(
         raise HTTPException(404, f"DWB session {session_id} not found")
 
     was_already_closed = row.closed_at is not None
+
+    # Headline is REQUIRED on the conscious-bot close methods (ai_confident /
+    # ai_asked) — those are the only closes where an agent (Archie) is the
+    # actor and can summarise the session. The machine-driven layers
+    # (regex / slash / ai_classifier / idle_timeout) carry a fixed payload
+    # with no summariser and stay exempt. An already-closed row is an
+    # idempotent no-op and is not re-validated. The message is written for the
+    # closing agent: it carries the session window so the bot summarises the
+    # right span.
+    needs_headline = not was_already_closed and body.close_method in (
+        DwbCloseMethod.ai_confident,
+        DwbCloseMethod.ai_asked,
+    )
+    if needs_headline and not (body.headline and body.headline.strip()):
+        start = row.opened_at.strftime("%Y-%m-%d %H:%M UTC")
+        end = (body.closed_at or datetime.now(UTC)).strftime("%Y-%m-%d %H:%M UTC")
+        raise HTTPException(
+            422,
+            (
+                f"You must provide a headline: 5 to 10 words of what was done "
+                f"in this session from {start} to {end}. It does not need to be "
+                f"a full complete sentence, it can just be descriptive words. "
+                f"If you need to recall what happened, check your own session "
+                f"context first, then GET /api/sessions/{session_id} for the "
+                f"rollup (tickets completed, work by ticket/role) and "
+                f"GET /api/tracking/summary?project_id={row.project_id} for "
+                f"token/time activity in the window."
+            ),
+        )
+
+    # Compaction gate (parallel, autonomous, HARD). On the conscious-bot
+    # closes the whole project's spawn-loaded docs must be within ceiling
+    # before the session can close. The TL fans this out: every agent compacts
+    # its OWN memory files at once via POST /api/agents/{id}/memory/compact, and
+    # the TL compacts the shared root docs (HANDOFF/ARCHITECTURE/README) + its
+    # own. The close is refused until all are within budget — the refusal IS
+    # the gate. idle/regex/slash/classifier closes are exempt (no live team to
+    # compact). Same method scoping as the headline gate above.
+    if needs_headline:  # i.e. ai_confident / ai_asked, not already closed
+        project = db.get(Project, row.project_id)
+        over = consolidation_svc.over_ceiling_files_for_project(db, project)
+        if over:
+            by_owner: dict[str, list[str]] = {}
+            for f in over:
+                owner = f["agent_name"] or "team-lead (shared root docs)"
+                by_owner.setdefault(owner, []).append(
+                    f"{f['name']} (~{f['tokens']}/{f['ceiling']} tok)"
+                )
+            offenders = "; ".join(
+                f"{owner} -> {', '.join(items)}"
+                for owner, items in sorted(by_owner.items())
+            )
+            raise HTTPException(
+                422,
+                (
+                    "Compaction gate: this session cannot close until the "
+                    "over-ceiling docs below are compacted. Have every owner "
+                    "compact their files IN PARALLEL, now, without waiting to be "
+                    "asked — each agent rewrites its own memory files leaner and "
+                    "submits via POST /api/agents/{agent_id}/memory/compact "
+                    "{file, content}; the team-lead compacts the shared root "
+                    "docs (HANDOFF / ARCHITECTURE / README). Then retry the "
+                    f"close. Over ceiling: {offenders}"
+                ),
+            )
+
     svc.close_session(
         db,
         row,

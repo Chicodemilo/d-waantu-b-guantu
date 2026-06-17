@@ -6,7 +6,7 @@
 # Callees: AgentConsolidationAck, Agent, Project, Sprint, compute_token_budget
 # Data In: db: Session, project/sprint/agent ids, optional notes, optional overrides
 # Data Out: AgentConsolidationAck rows; status dicts; violation lists
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-12 (DWB-329)
 
 """Consolidation gate service.
 
@@ -133,6 +133,34 @@ def over_ceiling_files_for_agent(
     )
     owned = files_by_owner.get(agent.id, [])
     return [f for f in owned if f["status"] == "over"]
+
+
+def over_ceiling_files_for_project(db: Session, project: Project) -> list[dict]:
+    """Every file in the project's token budget currently at status='over'.
+
+    Powers the session-close compaction gate: at session close the whole
+    project's spawn-loaded docs (per-agent memory + TL-owned root docs +
+    playbooks) must be within ceiling. Each entry carries `agent_name` (the
+    owning agent for per-agent memory files, else None for shared docs) so the
+    gate can tell each owner which of their files to compact. Empty when
+    everything is inside ceiling.
+    """
+    if not project or not project.repo_path:
+        return []
+    try:
+        budget = compute_token_budget(db, project)
+    except ValueError:
+        return []
+    return [
+        {
+            "name": f["name"],
+            "tokens": f["tokens"],
+            "ceiling": f["ceiling"],
+            "agent_name": f.get("agent_name"),
+        }
+        for f in budget["files"]
+        if f["status"] == "over"
+    ]
 
 
 def create_ack(
@@ -367,12 +395,22 @@ def participants_for_sprint(db: Session, sprint: Sprint) -> set[int]:
     ids.update(r for r in rows if r is not None)
 
     # 5. activity_log within the sprint window
+    #
+    # DWB-329: exclude entity_type='agent_consolidation_ack' rows. The TL
+    # rubber-stamping a consolidate-complete ack on behalf of an agent
+    # creates an activity_log row attributed to that agent, which would
+    # otherwise pull non-working agents into the participant set of any
+    # sprint whose window covers the ack timestamp. The other four
+    # participation signals (tickets, comments, tracking_log,
+    # hook_sessions) catch agents doing real sprint work, so dropping the
+    # ack-only signal is safe.
     if sprint.start_date:
         start_dt = datetime.combine(sprint.start_date, datetime.min.time())
         stmt = (
             select(ActivityLog.agent_id)
             .where(ActivityLog.project_id == sprint.project_id)
             .where(ActivityLog.agent_id.is_not(None))
+            .where(ActivityLog.entity_type != "agent_consolidation_ack")
             .where(ActivityLog.created_at >= start_dt)
         )
         if sprint.end_date:

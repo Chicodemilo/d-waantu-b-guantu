@@ -152,6 +152,7 @@ class TestClosePhraseNullOnAILayer:
             "close_method": "ai_confident",
             "close_reason": "explicit",
             "close_phrase": "alright that's a wrap for tonight",
+            "headline": "privacy test session close",
         })
         assert r.status_code == 200, r.text
         body = r.json()
@@ -171,6 +172,7 @@ class TestClosePhraseNullOnAILayer:
             "close_method": "ai_asked",
             "close_reason": "manual",
             "close_phrase": "want me to close? yes",
+            "headline": "privacy test session close",
         })
         assert r.status_code == 200, r.text
         assert r.json()["close_phrase"] is None

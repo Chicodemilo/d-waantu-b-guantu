@@ -385,6 +385,7 @@ class TestUserPromptClosesViaRegexFastPath:
         r_close = client.post(f"/api/sessions/{seeded_id}/close", json={
             "close_method": "ai_confident",
             "close_reason": "explicit",
+            "headline": "hook user-prompt test close",
         })
         assert r_close.status_code in (200, 201), r_close.text
 

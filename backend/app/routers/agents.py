@@ -24,6 +24,8 @@ from app.schemas.agent import (
     MarkerResponse,
     MemoryAppendRequest,
     MemoryAppendResponse,
+    MemoryCompactRequest,
+    MemoryCompactResponse,
     SessionCompleteRequest,
     SessionCompleteResponse,
     SpawnPrepareRequest,
@@ -308,6 +310,49 @@ def append_agent_memory(
             status = 400
         elif e.code in ("memory_dir_unwritable", "memory_file_unwritable"):
             status = 500
+        else:
+            status = 500
+        raise HTTPException(status, e.detail)
+
+
+@router.post(
+    "/{agent_id}/memory/compact",
+    response_model=MemoryCompactResponse,
+    status_code=200,
+)
+def compact_agent_memory(
+    agent_id: int,
+    data: MemoryCompactRequest,
+    db: Session = Depends(get_db),
+):
+    """Compact (full-file replace) one of the agent's memory files.
+
+    The agent submits a leaner rewrite of the whole file; the server
+    overwrites it ONLY if the result is within the file's token ceiling. A
+    result still over ceiling is refused 422 — that refusal is the hard
+    compaction gate (it cannot be satisfied by a no-op, and empty content is
+    rejected so the file cannot be blanked to pass).
+
+    Errors: 404 agent/project missing; 422 still over ceiling; 400 bad file /
+    empty content / unscoped agent / no repo_path; 500 disk write failure.
+    """
+    try:
+        return svc.compact_memory(
+            db, agent_id=agent_id, file=data.file, content=data.content
+        )
+    except svc.MemoryCompactError as e:
+        if e.code in ("agent_not_found", "project_not_found"):
+            status = 404
+        elif e.code == "still_over_ceiling":
+            status = 422
+        elif e.code in (
+            "file_protected",
+            "invalid_file",
+            "empty_content",
+            "agent_unscoped",
+            "repo_path_missing",
+        ):
+            status = 400
         else:
             status = 500
         raise HTTPException(status, e.detail)

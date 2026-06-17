@@ -66,12 +66,17 @@ class DwbSessionOpenRequest(BaseModel):
     """POST /api/sessions/open body (DWB-336).
 
     Same shape as DwbSessionCreate but kept distinct so the endpoint signature
-    can evolve without disturbing model-level CRUD usage. opened_at is required
-    so the caller controls when the session is anchored (regex hook uses the
-    SessionStart timestamp; TL AI uses the user-turn timestamp)."""
+    can evolve without disturbing model-level CRUD usage.
+
+    opened_at is OPTIONAL. Deterministic callers (the regex/transcript/slash
+    hooks) may pass a real machine-clock anchor. The AI/manual TL layer
+    (ai_confident / ai_asked) MUST omit it: the service ignores any value on
+    those methods and stamps the server clock, because a language-model-built
+    timestamp can be hours wrong. When omitted on any method, the server
+    defaults opened_at to datetime.now(UTC)."""
 
     project_id: int
-    opened_at: datetime
+    opened_at: datetime | None = None
     open_method: DwbOpenMethod
     open_phrase: str | None = None
 
@@ -85,9 +90,17 @@ class DwbSessionCloseRequest(BaseModel):
     sweeper (DWB-337) has no phrase to attribute. closed_at is optional;
     omitted means 'now' (server-side default).
 
-    headline (DWB-346): optional short summary (<=80 chars) of what the
+    headline (DWB-346): short summary (5-10 words, <=80 chars) of what the
     session was about. Persisted on dwb_sessions.headline; surfaced by the
-    list endpoint. None means 'use the auto-derived ticket_summary instead'.
+    list endpoint as the per-session SUMMARY (it differentiates sessions that
+    share an epic, which the auto-derived ticket_summary cannot).
+
+    REQUIRED for human/AI/slash closes: the endpoint rejects a missing/blank
+    headline with a 422 that instructs the closing agent how to write one.
+    Only the idle sweeper (close_method=idle_timeout) is exempt — it has no
+    summariser. Kept nullable here (rather than a required str) so the request
+    still parses and reaches the endpoint, which returns the helpful,
+    window-aware message instead of a generic Pydantic validation error.
     """
 
     close_method: DwbCloseMethod

@@ -6,7 +6,7 @@
 # Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-06-11
+# Last Modified: 2026-06-17
 
 """DWB session business logic.
 
@@ -43,7 +43,7 @@ elapsed since open.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Iterable
 
 from sqlalchemy import func, or_, select
@@ -98,7 +98,7 @@ def open_session(
     db: Session,
     *,
     project_id: int,
-    opened_at: datetime,
+    opened_at: datetime | None = None,
     open_method: DwbOpenMethod,
     open_phrase: str | None = None,
 ) -> tuple[DwbSession | None, DwbSession | None]:
@@ -119,6 +119,13 @@ def open_session(
     index, so racing opens still fail safely with IntegrityError — this
     pre-check is for the friendly conflict body, not correctness.
 
+    Timestamp authority: ``opened_at`` is optional. For the ``ai_confident``
+    and ``ai_asked`` methods (the language-model TL layer) any caller-supplied
+    value is ignored and the server stamps ``datetime.now(UTC)`` — the LLM
+    must not anchor the session, because a fabricated timestamp can be hours
+    off. For every other method an explicit ``opened_at`` is honoured (the
+    hooks pass a real machine clock); when omitted, it defaults to now().
+
     DWB-351 privacy guard: when ``open_method`` is ``ai_confident``,
     ``ai_asked``, or ``ai_classifier`` (DWB-382), the user's literal
     text is never persisted - the ``open_phrase`` field is silently
@@ -134,6 +141,20 @@ def open_session(
     existing = get_active_session(db, project_id)
     if existing is not None:
         return None, existing
+
+    # Timestamp authority. The ai_confident/ai_asked methods are the only
+    # callers where a language model (the TL main loop) hand-builds opened_at,
+    # and a fabricated value can be off by hours (observed: a model passed
+    # midnight-UTC, which rendered as 7pm-prior-day in local time). Those two
+    # methods therefore do NOT control the anchor: the server always stamps
+    # now(). This mirrors the privacy null-out below — the LLM cannot set the
+    # value, so it cannot get it wrong. All other methods (regex/transcript/
+    # slash/idle/ai_classifier) carry a real machine clock and keep their
+    # explicit anchor; if omitted, the server defaults to now().
+    if open_method in (DwbOpenMethod.ai_confident, DwbOpenMethod.ai_asked):
+        opened_at = datetime.now(UTC)
+    elif opened_at is None:
+        opened_at = datetime.now(UTC)
 
     # DWB-351: privacy null-out on AI-layer opens. DWB-382 added
     # ai_classifier to the AI set.

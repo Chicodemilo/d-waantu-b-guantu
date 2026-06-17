@@ -756,28 +756,16 @@ def get_project_activity_feed(
 #   initial:        1500 → 2000  (was 91% warn)
 # Unchanged: handoff (good headroom), memory_*, agent_def (stubs cap stays;
 # 1500 is wasteful for 50-token stubs but flagged out of scope).
-_TOKEN_CEILINGS = {
-    "agent_def": 1500,
-    "playbook": 4000,
-    "claude_md": 2000,
-    "project_rules": 3000,
-    "handoff": 1500,
-    "architecture": 7500,
-    "readme": 3500,
-    "initial": 2000,
-    "memory_identity": 600,
-    "memory_scratchpad": 2000,
-    "memory_lessons": 1500,
-    "memory_recent": 1000,
-}
-
-# Memory files scanned per active agent (filename -> category)
-_MEMORY_FILES = {
-    "identity.md": "memory_identity",
-    "scratchpad.md": "memory_scratchpad",
-    "lessons.md": "memory_lessons",
-    "recent_sessions.md": "memory_recent",
-}
+# Token ceilings, memory-file map, classifier, and estimator now live in
+# app.config.token_budget (single source of truth shared with the
+# consolidation gate and the memory-compaction gate). Aliased to the existing
+# private names so the rest of this module is unchanged.
+from app.config.token_budget import (  # noqa: E402
+    MEMORY_FILES as _MEMORY_FILES,
+    TOKEN_CEILINGS as _TOKEN_CEILINGS,
+    classify_file as _classify_file,
+    estimate_tokens as _estimate_tokens,
+)
 
 # Which files each role reads at startup (post-stub: playbooks are the real load)
 _ROLE_FILES = {
@@ -788,30 +776,6 @@ _ROLE_FILES = {
     "tester": ["CLAUDE.md", "worker_playbook.md"],
     "system-ops": ["CLAUDE.md", "worker_playbook.md"],
 }
-
-
-def _classify_file(name: str) -> str:
-    lower = name.lower()
-    if lower == "claude.md":
-        return "claude_md"
-    if lower == "handoff.md":
-        return "handoff"
-    if lower == "architecture.md":
-        return "architecture"
-    if lower == "readme.md":
-        return "readme"
-    if lower == "initial.md":
-        return "initial"
-    if "project_rules" in lower:
-        return "project_rules"
-    if lower.endswith("_playbook.md"):
-        return "playbook"
-    # Files in agents/ directory
-    return "agent_def"
-
-
-def _estimate_tokens(text: str) -> int:
-    return int(len(text.split()) * 1.3)
 
 
 def compute_token_budget(db: Session, project) -> dict:

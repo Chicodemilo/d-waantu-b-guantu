@@ -152,6 +152,37 @@ def _build_identity_md(agent: Agent, project: Project) -> str:
     refreshed = datetime.now(timezone.utc).isoformat(timespec="seconds")
     playbook = _playbook_for_role(agent.role)
     project_rules = _project_rules_for_role(agent.role)
+    is_tl = agent.role in ("team-lead", "team_lead")
+    if is_tl:
+        spawn_section = f"""## On Spawn - Read These First
+
+Before doing anything else, read these in order:
+
+1. **Your playbook** - `{playbook}`
+2. **Your project rules** - `{project_rules}`
+3. **HANDOFF.md** - session continuity (current state, decisions). TL-owned.
+4. **ARCHITECTURE.md** - system design + operational reference.
+5. **README.md** - project overview, setup, API reference.
+6. **Your memory dir** (below) - `scratchpad` / `lessons` / `recent_sessions`.
+
+You (the team lead) are the ONLY agent that owns root-level project docs
+(HANDOFF / ARCHITECTURE / README). Do NOT create any other root-level doc -
+durable knowledge goes in your memory dir or those existing root docs, never a
+new file. A repo hook blocks new top-level *.md files at the root."""
+    else:
+        spawn_section = f"""## On Spawn - Read These First
+
+Before doing anything else, read these in order:
+
+1. **Your playbook** - `{playbook}`
+2. **Your project rules** - `{project_rules}`
+3. **Your memory dir** (below) - `scratchpad` / `lessons` / `recent_sessions`.
+   This is your memory; rely on it plus the brief the TL gives you.
+
+Root-level project docs (HANDOFF / ARCHITECTURE / README) belong to the team
+lead. Read ARCHITECTURE.md / README.md ONLY if your task is cross-cutting and
+the TL points you there; never maintain or create root-level docs. Your durable
+knowledge lives in your memory dir, not in root files."""
     return f"""# Identity - {agent.name}
 
 > System-generated. Do not edit by hand - `scaffold_agent_dir(agent_id={agent.id})` regenerates this file each time.

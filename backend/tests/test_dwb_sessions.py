@@ -77,6 +77,66 @@ class TestOpenEndpoint:
         assert body["total_tokens"] == 0
         assert body["total_time_seconds"] == 0
 
+    @pytest.mark.parametrize("open_method", ["ai_confident", "ai_asked"])
+    def test_ai_method_ignores_supplied_opened_at(
+        self, client, make_project, open_method
+    ):
+        """The ai_confident/ai_asked layer must NOT anchor the session.
+
+        A language-model-built opened_at can be hours wrong (observed: a
+        midnight-UTC value that rendered as 7pm-prior-day in local time).
+        The service ignores any value on those methods and stamps now(),
+        so a stale/fabricated input cannot mis-anchor the row.
+        """
+        project = make_project()
+        before = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        r = client.post(
+            "/api/sessions/open",
+            json={
+                "project_id": project["id"],
+                "opened_at": _opened_at_iso(minus_hours=12),  # deliberately stale
+                "open_method": open_method,
+            },
+        )
+        assert r.status_code == 201, r.text
+        opened = datetime.fromisoformat(r.json()["opened_at"]).replace(tzinfo=None)
+        after = datetime.now(timezone.utc).replace(tzinfo=None)
+        assert before - timedelta(seconds=2) <= opened <= after + timedelta(
+            seconds=2
+        ), f"{open_method} opened_at {opened} not server-now [{before}, {after}]"
+
+    def test_opened_at_optional_defaults_to_now(self, client, make_project):
+        """opened_at is optional: omitting it stamps server-now (any method)."""
+        project = make_project()
+        before = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        r = client.post(
+            "/api/sessions/open",
+            json={
+                "project_id": project["id"],
+                "open_method": "regex",
+            },
+        )
+        assert r.status_code == 201, r.text
+        opened = datetime.fromisoformat(r.json()["opened_at"]).replace(tzinfo=None)
+        assert opened >= before - timedelta(seconds=2)
+
+    def test_regex_method_honours_supplied_opened_at(self, client, make_project):
+        """Deterministic callers keep their real anchor (e.g. 2h-ago backfill)."""
+        project = make_project()
+        opened_iso = _opened_at_iso(minus_hours=2)
+        r = client.post(
+            "/api/sessions/open",
+            json={
+                "project_id": project["id"],
+                "opened_at": opened_iso,
+                "open_method": "regex",
+            },
+        )
+        assert r.status_code == 201, r.text
+        opened = datetime.fromisoformat(r.json()["opened_at"]).replace(tzinfo=None)
+        expected = datetime.fromisoformat(opened_iso).replace(tzinfo=None)
+        assert opened == expected
+
     def test_201_with_open_phrase(self, client, make_project):
         """DWB-351: AI-method opens null out the phrase regardless of
         what the caller sends (privacy: user-typed text never persisted).
@@ -253,6 +313,67 @@ class TestCloseEndpoint:
         assert body["close_reason"] == "explicit"
         assert body["close_phrase"] == close_phrase
         assert body["is_open"] is None  # generated column flipped to NULL
+
+    @pytest.mark.parametrize("close_method", ["ai_confident", "ai_asked"])
+    @pytest.mark.parametrize("headline", [None, "", "   "])
+    def test_422_ai_close_requires_headline(
+        self, client, make_project, close_method, headline
+    ):
+        """ai_confident/ai_asked closes MUST carry a non-blank headline.
+
+        A missing/blank one is rejected 422 with a window-aware instruction
+        written for the closing agent, and the session stays open so the bot
+        can retry with a real summary.
+        """
+        project = make_project()
+        opened = self._open(client, project["id"])
+        payload = {"close_method": close_method, "close_reason": "explicit"}
+        if headline is not None:
+            payload["headline"] = headline
+
+        r = client.post(f"/api/sessions/{opened['id']}/close", json=payload)
+        assert r.status_code == 422, r.text
+        detail = r.json()["detail"]
+        assert "headline" in detail.lower()
+        assert "5 to 10 words" in detail
+
+        # The rejected close must NOT have closed the row.
+        rows = client.get(f"/api/projects/{project['id']}/sessions").json()
+        assert rows[0]["id"] == opened["id"]
+        assert rows[0]["status"] == "open"
+
+    @pytest.mark.parametrize("close_method", ["ai_confident", "ai_asked"])
+    def test_200_ai_close_with_headline_persists(
+        self, client, make_project, close_method
+    ):
+        project = make_project()
+        opened = self._open(client, project["id"])
+        r = client.post(
+            f"/api/sessions/{opened['id']}/close",
+            json={
+                "close_method": close_method,
+                "close_reason": "explicit",
+                "headline": "shipped session headline requirement",
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["headline"] == "shipped session headline requirement"
+
+    @pytest.mark.parametrize(
+        "close_method,close_reason",
+        [("idle_timeout", "idle"), ("regex", "explicit"), ("slash", "explicit")],
+    )
+    def test_200_machine_close_exempt_from_headline(
+        self, client, make_project, close_method, close_reason
+    ):
+        """Machine-driven layers (idle/regex/slash) close fine with no headline."""
+        project = make_project()
+        opened = self._open(client, project["id"])
+        r = client.post(
+            f"/api/sessions/{opened['id']}/close",
+            json={"close_method": close_method, "close_reason": close_reason},
+        )
+        assert r.status_code == 200, r.text
 
     def test_200_idempotent_on_already_closed(self, client, make_project):
         """Closing an already-closed session is a 200 no-op, NOT a 409.

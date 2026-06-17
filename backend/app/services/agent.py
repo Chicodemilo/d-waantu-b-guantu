@@ -16,6 +16,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.config.memory_rules import MEMORY_USAGE_RULES
+from app.config.token_budget import ceiling_for_file, estimate_tokens
 from app.models.agent import Agent
 from app.models.instruction import Instruction, InstructionScope
 from app.models.project import Project
@@ -664,6 +665,126 @@ def append_memory(
         "path": str(target),
         "timestamp": timestamp,
         "bytes_written": len(block.encode("utf-8")),
+    }
+
+
+class MemoryCompactError(Exception):
+    """Raised when the memory-compact (replace) endpoint cannot validate or write.
+
+    code is one of:
+      - agent_not_found / agent_unscoped / project_not_found / repo_path_missing
+      - invalid_file / file_protected / empty_content
+      - still_over_ceiling   (compacted content still exceeds the file's ceiling)
+      - memory_dir_unwritable / memory_file_unwritable
+    """
+
+    def __init__(self, code: str, detail: str, *, tokens: int | None = None,
+                 ceiling: int | None = None):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+        self.tokens = tokens
+        self.ceiling = ceiling
+
+
+def compact_memory(
+    db: Session,
+    *,
+    agent_id: int,
+    file: str,
+    content: str,
+) -> dict:
+    """Replace (compact) one of the agent's memory files with a leaner version.
+
+    The memory-append endpoint is append-only by design; compaction is a
+    *rewrite*, so this is its own endpoint. The agent reads its bloated file,
+    produces a compacted full-file replacement, and submits it here. The
+    server overwrites the file on the agent's behalf (same .claude/-write
+    workaround as append_memory) — but ONLY if the compacted content is within
+    the file's token ceiling. If it is still over, the write is refused with
+    ``still_over_ceiling`` so the gate cannot be satisfied by a no-op; the
+    agent must trim further and resubmit. This refusal is the hard gate.
+
+    identity.md is protected (scaffold owns it). Empty content is refused so a
+    file cannot be blanked to pass the ceiling.
+    """
+    if file in _PROTECTED_FILES:
+        raise MemoryCompactError(
+            "file_protected",
+            f"file '{file}.md' is system-generated and cannot be compacted "
+            f"(scaffold regenerates it)",
+        )
+    if file not in _APPENDABLE_FILES:
+        raise MemoryCompactError(
+            "invalid_file",
+            f"file '{file}' is not a compactable memory file; "
+            f"allowed: {sorted(_APPENDABLE_FILES)}",
+        )
+    if not content or not content.strip():
+        raise MemoryCompactError(
+            "empty_content",
+            "content is empty or whitespace-only; refusing to blank the file "
+            "to pass the ceiling — compaction must preserve real content",
+        )
+
+    fname = f"{file}.md"
+    tokens = estimate_tokens(content)
+    ceiling = ceiling_for_file(fname)
+    if tokens > ceiling:
+        raise MemoryCompactError(
+            "still_over_ceiling",
+            f"compacted {fname} is ~{tokens} tokens but the ceiling is "
+            f"{ceiling}; trim further (dedupe, drop superseded entries, "
+            f"summarise) and resubmit",
+            tokens=tokens,
+            ceiling=ceiling,
+        )
+
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        raise MemoryCompactError("agent_not_found", f"agent id {agent_id} not found")
+    if agent.project_id is None:
+        raise MemoryCompactError(
+            "agent_unscoped",
+            f"agent id {agent_id} has no project_id - cannot resolve memory_dir",
+        )
+    project = db.get(Project, agent.project_id)
+    if project is None:
+        raise MemoryCompactError(
+            "project_not_found",
+            f"agent id {agent_id} references project {agent.project_id} which is missing",
+        )
+    if not project.repo_path:
+        raise MemoryCompactError(
+            "repo_path_missing",
+            f"project '{project.prefix}' has no repo_path - cannot resolve memory_dir",
+        )
+
+    memory_dir = Path(_memory_dir(project, agent))
+    try:
+        memory_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise MemoryCompactError(
+            "memory_dir_unwritable",
+            f"could not create memory dir {memory_dir}: {e}",
+        )
+
+    target = memory_dir / fname
+    normalized = content.rstrip("\n") + "\n"
+    try:
+        target.write_text(normalized, encoding="utf-8")
+    except OSError as e:
+        raise MemoryCompactError(
+            "memory_file_unwritable", f"could not write {target}: {e}"
+        )
+
+    return {
+        "agent_id": agent.id,
+        "file": file,
+        "path": str(target),
+        "tokens": tokens,
+        "ceiling": ceiling,
+        "bytes_written": len(normalized.encode("utf-8")),
     }
 
 
