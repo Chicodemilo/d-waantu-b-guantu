@@ -26,7 +26,7 @@ You're an agent and you landed here? Here's what to read:
 1. **CLAUDE.md** — project rules, API reference, hierarchy (auto-loaded)
 2. **Your agent def** — `.claude/agents/{your-role}.md` (auto-loaded)
 3. **Your playbook** — `docs/{role}_playbook.md` is the **canonical source**; `.claude/{role}_playbook.md` is the **deployed copy** that `POST /api/projects/{id}/deploy-playbooks` writes into each target repo. Edits should land in `docs/` and be re-deployed; never edit the deployed `.claude/` copy directly.
-4. **HANDOFF.md** — what happened last session, what needs doing next
+4. **HANDOFF.md** — last session's state + what's next. **Team-lead only.** Workers and the PM rely on their own memory dir (`.claude/agents/memory/<PREFIX>/<Name>/` → `scratchpad`/`lessons`/`recent_sessions`) plus the TL's brief — not HANDOFF. Read `ARCHITECTURE.md` / `README.md` only if your task is cross-cutting and the TL points you there; never create or maintain root-level docs.
 5. **Team roster** — `GET /api/projects/{id}/team` is the **DB-authoritative roster**. The old checked-in `TEAM.md` file was removed in DWB-312 (2026-06-05); the LiveSessions panel and any agent that needs the roster reads from the API. Don't grep for or write to TEAM.md — it isn't there.
 
 ### Agent identity flow at spawn

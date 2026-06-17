@@ -21,7 +21,7 @@ At most one DWB session is open per project at any time. This is enforced at the
 
 ## Opening a session
 
-You open a session by saying something the TL recognizes as an open phrase. The detection runs in two layers:
+You open a session by saying something the TL recognizes as an open phrase. The detection runs in two main layers (plus an async AI classifier and the `/dwb-open` slash escape hatch, both shown in the method table below):
 
 **Layer 1 - regex fast path.** A small catalogue of common phrases is matched directly on every user prompt. When one hits, the system opens the session before the TL has even read your message. Examples that fire the regex layer today:
 
@@ -47,15 +47,19 @@ Every open is tagged with an `open_method` so the dashboard can show which layer
 
 | `open_method` | Meaning |
 |---|---|
-| `regex` | Layer 1 caught it on a hook (instant) |
-| `ai_confident` | Layer 2 - TL acted without asking |
-| `ai_asked` | Layer 2 - TL confirmed with you first |
+| `regex` | Regex fast-path caught it on a hook (instant) |
+| `ai_classifier` | Async AI classifier (Haiku) caught it when the regex layer missed |
+| `slash` | `/dwb-open` slash command (deterministic escape hatch) |
+| `ai_confident` | TL reasoning - acted without asking |
+| `ai_asked` | TL reasoning - confirmed with you first |
+
+**The caller never supplies the open timestamp.** `opened_at` is server-stamped (`now()`); on the AI methods (`ai_confident`/`ai_asked`) any value sent is ignored, because a hand-built timestamp can be hours wrong. Omit the field.
 
 For regex-method opens, the matched catalogue phrase is recorded on the row (it comes from the hardcoded list in `session_phrases.py`, not free-form user text). For AI-layer opens, only the `open_method` enum is kept; the user's literal message is never persisted.
 
 ## Closing a session
 
-Same two-layer model, in reverse. You signal you want to stop, and the system closes the session.
+Same model as open, in reverse. You signal you want to stop, and the system closes the session.
 
 **Layer 1 phrases** (regex catalogue, current list):
 
@@ -76,15 +80,19 @@ Same two-layer model, in reverse. You signal you want to stop, and the system cl
 
 **Idle auto-close.** If you forget to close, the system catches it. A background sweeper runs every minute or so, and any open session whose last activity is older than 60 minutes (the default) auto-closes. The session is tagged `close_method=idle_timeout`, `close_reason=idle` so the dashboard can distinguish a forgotten close from an explicit one.
 
-**Optional headline (planned, DWB-346).** The close endpoint will accept an optional `headline` field (80-char cap) so the TL can pass a short summary at close time, e.g. "Layer-1 regex fix" or "Frontend session panel". When omitted, the dashboard falls back to an auto-derived summary like "epic-name (N tickets done)". Additive; current closes that don't pass it keep working unchanged.
+**Required headline (TL closes).** `ai_confident`/`ai_asked` closes MUST carry a `headline` - 5 to 10 words describing what the session did (it becomes the dashboard SUMMARY). The close is **rejected 422** without one, and the rejection carries the session window (`opened_at` to now) so the TL can summarise the right span. Machine-driven closes (`regex`/`slash`/`idle_timeout`/`ai_classifier`) are exempt - they have no summariser.
+
+**Compaction gate (TL closes).** Before an `ai_confident`/`ai_asked` close can complete, every spawn-loaded doc must be within its token ceiling. The close is **rejected 422** until then, listing each over-ceiling file and its owner. Owners compact in parallel, autonomously: each agent rewrites its own memory files leaner and submits via `POST /api/agents/{id}/memory/compact {file, content}` (a full-file replace; the server rejects it if the result is still over ceiling, so a no-op can't satisfy the gate). The TL compacts the shared root docs (HANDOFF / ARCHITECTURE / README). Machine-driven closes are exempt.
 
 ### How the close is recorded
 
 | `close_method` | Meaning |
 |---|---|
-| `regex` | Layer 1 phrase match on a hook |
-| `ai_confident` | Layer 2 - TL acted without asking |
-| `ai_asked` | Layer 2 - TL confirmed with you first |
+| `regex` | Regex phrase match on a hook |
+| `ai_classifier` | Async AI classifier caught the close intent |
+| `slash` | `/dwb-close` slash command |
+| `ai_confident` | TL reasoning - acted without asking |
+| `ai_asked` | TL reasoning - confirmed with you first |
 | `idle_timeout` | Background sweeper closed an inactive session |
 
 Plus a `close_reason`:
@@ -113,9 +121,9 @@ There are three overhead buckets:
 
 - **TL overhead** - team-lead coordination, orchestration, review.
 - **PM overhead** - PM monitoring, sprint hygiene, comment writing.
-- **Ad Hoc** (shipping in DWB-353) - worker session tokens for small fixes the user waived the ticket workflow on (see the skip-ceremony rule in the TL playbook). Before DWB-353, these tokens fired an unattributed alert; now they route to the bucket automatically.
+- **Ad Hoc** - worker session tokens for small fixes the user waived the ticket workflow on (see the skip-ceremony rule in the TL playbook). These tokens route to the bucket automatically instead of firing an unattributed alert.
 
-**Computed aggregates (planned, DWB-346/347).** The dashboard's Recent Sessions strip will also show `tickets_made`, `tickets_completed`, `agents_active`, `open_method`, and `close_method` per session. These are derived automatically from existing tracking data - no extra signaling from the user or workers is needed.
+**Computed aggregates.** The dashboard's Recent Sessions strip also shows `tickets_made`, `tickets_completed`, `agents_active`, `open_method`, `close_method`, and the `headline` (or auto-derived `ticket_summary`) per session. These are derived automatically from existing tracking data - no extra signaling from the user or workers is needed.
 
 ## Multi-project
 

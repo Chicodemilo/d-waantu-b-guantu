@@ -127,6 +127,8 @@ Boolean toggles that gate sprint completion:
 | `force_initial_md` | `INITIAL.md` exists at repo root |
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
 | `force_handoff_md` | `HANDOFF.md` exists at repo root |
+| `force_consolidation` | Every participating agent acked consolidation; all owned spawn-loaded docs within token ceiling (DWB-328) |
+| `force_headers` | Source files carry the standard header block |
 | Failure records | Unreviewed stubs always block close |
 
 Check gates: `GET /api/projects/{id}/gate-status`
@@ -225,9 +227,15 @@ Standard CRUD exists for all resources (projects, epics, sprints, tickets, agent
 | POST | `/api/hooks/session-start` | Receive SessionStart hook |
 | POST | `/api/hooks/session-end` | Receive SessionEnd/SubagentStop hook |
 | GET | `/api/hooks/sessions` | List hook sessions (filter by `status=orphan` for cleanup) |
+| POST | `/api/sessions/open` | Open a DWB session — OMIT `opened_at` (server-stamped; AI methods ignore any supplied value) |
+| POST | `/api/sessions/{id}/close` | Close a DWB session — `headline` required on `ai_confident`/`ai_asked` (422 otherwise); compaction gate blocks the close until every spawn-loaded doc is within ceiling |
+| GET | `/api/projects/{id}/sessions` | List DWB sessions, most recent first |
+| GET | `/api/sessions/{id}` | DWB session detail rollup (by_role / by_ticket / overhead) |
 | POST | `/api/agents/identify` | Resolve identity from `(role, name, project_prefix)` — accepts short or `<name>_<PREFIX>` form (DWB-289, 315) |
 | POST | `/api/agents/spawn-prepare` | Identify + return ready-to-paste markdown for the spawn brief |
 | POST | `/api/agents/{id}/session-complete` | Append session entry to scratchpad / lessons / recent_sessions (DWB-293) |
+| POST | `/api/agents/{id}/memory/append` | Append to one memory file (append-only, DWB-358) |
+| POST | `/api/agents/{id}/memory/compact` | Replace a memory file with a compacted version; rejects 422 if still over ceiling |
 | POST | `/api/agents/{id}/scaffold-memory` | Idempotently scaffold the agent's memory dir |
 | GET | `/api/projects/{id}/team` | Single-roundtrip team roster (DWB-313) |
 | DELETE | `/api/test-results/{id}` | Operator orphan-row cleanup, 204/404 (DWB-310) |

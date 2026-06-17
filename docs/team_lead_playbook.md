@@ -36,7 +36,7 @@ Lives at `.claude/agents/memory/<project_prefix>/Archie_<PREFIX>/`. File purpose
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
 
-**Memory model (canonical home — DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up) — do NOT free-write memory into root-level docs just because you (the TL) can. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md` — durable lessons go in `lessons.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md`. A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
+**Memory model (canonical home — DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up) — do NOT free-write memory into root-level docs just because you (the TL) can. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md` — durable lessons go in `lessons.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
 
 ### Playbook locations
 
@@ -115,6 +115,8 @@ Status flow: `backlog` → `todo` → `in_progress` → `in_review` → `done`. 
 TL drafts a YAML proposal, Pam (PM) previews + shows human, human approves, Pam submits via `echo Y | dwb2jira create`. Creation atomic across Jira + DWB; human approves before anything exists.
 
 ### Querying
+
+> **Showing tickets to the human:** relay the canonical 8-column table defined in `.claude/pm_playbook.md § Ticket Display Format` (`| DWB # | Jira # | DWB Sprint | Jira Epic | Jira Sprint | Title | Owner | Status |`). Pam builds it; relay it verbatim. **Never paste raw `dwb2jira report` output** — its columns differ (Parent/Created/Updated, Assignee, no DWB-Sprint) and must be re-shaped into the 8-col table. That mismatch is the recurring "wrong columns" problem.
 
 - Your work today: `dwb2jira report --status "To Do,In Progress,Ready for Testing/Review"`
 - Last 2 weeks: `dwb2jira report --assignee '*' --updated ">=YYYY-MM-DD"`
@@ -337,7 +339,7 @@ GET /api/projects/{pid}/consolidation-status?sprint_id={sid}
 - If `gate_satisfied: true`, every participant acked. Safe to PATCH.
 - If `gate_satisfied: false`, do NOT close. Walk the `agents[]` list, name every `acked: false`, ping with their `owned_over_ceiling_files`.
 
-**TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same file mean the cap is wrong, raise it in `_TOKEN_CEILINGS`.
+**TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same file mean the cap is wrong, raise it in `_TOKEN_CEILINGS` (in the shared `backend/app/config/token_budget.py`, which also holds the `max(len//4, words)` token estimator every gate uses).
 
 **Autonomy expectation across the team (DWB-328 lesson):** refusal IS the signal to fix. Workers who get a 400 should trim and retry on their own without waiting for TL guidance. If a worker is idling on a refused ack, that's a worker-side process bug, message them with "trim is the work, not the wait." Don't accept "I tried, was refused, waiting" as a final state.
 
