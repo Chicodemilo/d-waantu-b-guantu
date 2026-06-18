@@ -6,9 +6,10 @@
 # Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking
 # Data In: db: Session, TicketCreate/Update
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-12
 
 import logging
+from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -154,12 +155,22 @@ def update_ticket(db: Session, ticket: Ticket, data: TicketUpdate) -> Ticket:
         if project is not None:
             _raise_if_jira_disabled(project, updates["jira_issue_key"])
 
+    status_changed = "status" in updates and updates["status"] != old_status
+
     for key, value in updates.items():
         setattr(ticket, key, value)
+
+    # DWB-373: Stamp completed_at on transition INTO done so the sessions list
+    # aggregator (filters on Ticket.completed_at in [opened_at, closed_at])
+    # can count completions within a session window. The column existed since
+    # day one but was only written by seed_demo; PATCH-to-done left it NULL,
+    # so tickets_completed was always 0. Re-stamp on every done crossing so a
+    # rework→done loop attributes to the later session that closed it.
+    if status_changed and updates["status"] == TicketStatus.done:
+        ticket.completed_at = datetime.utcnow()
+
     db.commit()
     db.refresh(ticket)
-
-    status_changed = "status" in updates and updates["status"] != old_status
 
     # Record status change in history
     if status_changed:
@@ -314,14 +325,20 @@ def get_ticket_history(db: Session, ticket_id: int) -> list[StatusHistory]:
 
 
 def stale_check(db: Session, ticket: Ticket, project_id: int, minutes_stale: int, agent_name: str) -> dict:
-    """Check for existing stale alert and create one if none exists. Returns {alert_created, alert_id}."""
-    # Dedup: look for an open/acknowledged alert matching this ticket + threshold
+    """Check for existing stale alert and create one if none exists. Returns {alert_created, alert_id}.
+
+    DWB-388: dedup key is (ticket_id, alert_type=stale, open|acknowledged).
+    The previous title-substring match included f"{minutes_stale}m", so the
+    LiveSessions frontend sweeper's incrementing 10m/20m/30m thresholds bypassed
+    dedup and produced one alert per 10-min hop (13 dupes seen on RVP-007).
+    "stale" in the title acts as the type discriminator so this dedup does not
+    accidentally swallow other ticket-bound alerts like rework notifications.
+    """
     existing = db.scalars(
         select(Alert)
         .where(Alert.ticket_id == ticket.id)
         .where(Alert.status.in_([AlertStatus.open, AlertStatus.acknowledged]))
-        .where(Alert.title.contains(ticket.ticket_key))
-        .where(Alert.title.contains(f"{minutes_stale}m"))
+        .where(Alert.title.contains("stale"))
     ).first()
     if existing:
         return {"alert_created": False, "alert_id": None}

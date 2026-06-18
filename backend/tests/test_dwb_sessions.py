@@ -1,12 +1,12 @@
 # Path: tests/test_dwb_sessions.py
 # File: test_dwb_sessions.py
 # Created: 2026-06-09
-# Purpose: Endpoint + service tests for /api/sessions/open and /api/sessions/{id}/close (DWB-336, DWB-381 slash method)
+# Purpose: Endpoint + service tests for /api/sessions/open, /close, and /reopen (DWB-336, DWB-381 slash method, DWB-395 reopen)
 # Caller: pytest
 # Callees: app.routers.dwb_sessions, app.services.dwb_session, app.models.dwb_session
 # Data In: factory fixtures (make_project), test client
 # Data Out: Assertions on HTTP status codes, response bodies, DB state
-# Last Modified: 2026-06-11
+# Last Modified: 2026-06-17
 
 """End-to-end tests for the DWB session lifecycle endpoints.
 
@@ -613,3 +613,100 @@ class TestSlashEscapeHatch:
         assert closed["close_phrase"] == "/dwb-close"
         assert closed["closed_at"] is not None
         assert closed["is_open"] is None
+
+
+class TestReopenEndpoint:
+    """DWB-395: POST /api/sessions/{id}/reopen.
+
+    Nulls closed_at / close_method / close_reason / close_phrase and re-flips
+    the generated is_open marker. Re-validates the single-active invariant:
+    a different open session for the project blocks the reopen with 409.
+    """
+
+    def _open(self, client, project_id, open_method="regex"):
+        r = client.post(
+            "/api/sessions/open",
+            json={
+                "project_id": project_id,
+                "opened_at": _opened_at_iso(),
+                "open_method": open_method,
+            },
+        )
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    def _close(self, client, sid, close_method="regex"):
+        r = client.post(
+            f"/api/sessions/{sid}/close",
+            json={
+                "close_method": close_method,
+                "close_reason": "explicit",
+                "close_phrase": "close the session",
+            },
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_reopen_happy_path(self, client, make_project):
+        project = make_project()
+        sid = self._open(client, project["id"])
+        closed = self._close(client, sid)
+        assert closed["closed_at"] is not None
+        assert closed["is_open"] is None
+
+        r = client.post(f"/api/sessions/{sid}/reopen")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["id"] == sid
+        assert body["closed_at"] is None
+        assert body["close_method"] is None
+        assert body["close_reason"] is None
+        assert body["close_phrase"] is None
+        # Generated STORED is_open recomputes from closed_at.
+        assert body["is_open"] == 1
+
+    def test_reopen_unknown_session_404(self, client):
+        r = client.post("/api/sessions/999999/reopen")
+        assert r.status_code == 404
+
+    def test_reopen_blocked_by_existing_active_session_409(
+        self, client, make_project
+    ):
+        project = make_project()
+        # Open A, close A, open B. B is now the single active session.
+        a = self._open(client, project["id"])
+        self._close(client, a)
+        b = self._open(client, project["id"])
+
+        # Reopening A would create a second open session -> 409.
+        r = client.post(f"/api/sessions/{a}/reopen")
+        assert r.status_code == 409, r.text
+        body = r.json()
+        assert body["active_session_id"] == b
+        assert "opened_at" in body
+        assert str(b) in body["detail"]
+
+        # A stays closed; the invariant held.
+        ra = client.get(f"/api/sessions/{a}")
+        assert ra.json()["status"] == "closed"
+
+    def test_reopen_already_open_is_idempotent(self, client, make_project):
+        project = make_project()
+        sid = self._open(client, project["id"])
+        # Reopening a row that is already open is a no-op success.
+        r = client.post(f"/api/sessions/{sid}/reopen")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["id"] == sid
+        assert body["closed_at"] is None
+        assert body["is_open"] == 1
+
+    def test_reopened_session_can_close_again(self, client, make_project):
+        """After a reopen the close path still works (full lifecycle)."""
+        project = make_project()
+        sid = self._open(client, project["id"])
+        self._close(client, sid)
+        client.post(f"/api/sessions/{sid}/reopen")
+        reclosed = self._close(client, sid)
+        assert reclosed["closed_at"] is not None
+        assert reclosed["is_open"] is None

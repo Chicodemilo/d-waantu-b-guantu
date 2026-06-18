@@ -6,10 +6,12 @@
 # Callees: app.config.session_phrases
 # Data In: free-form strings
 # Data Out: Assertions on match_open / match_close return values
-# Last Modified: 2026-06-11
+# Last Modified: 2026-06-17
 #
 # DWB-378 (2026-06-11): added TestCloseVariants for the broadened
 # _CLOSE_SOURCES catalogue (target-suffixed + lighter wrap-up variants).
+# DWB-394 (2026-06-17): added TestCloseNegativeContext for the close-matcher
+# interrogative / reported-speech guard + <name> stop-word exclusion.
 
 """Tests for the DWB session phrase regex catalogue.
 
@@ -282,6 +284,88 @@ class TestCloseVariants:
             "that's a wrap",
         ]:
             assert match_close(text) is not None, f"close regressed on {text!r}"
+
+
+class TestCloseNegativeContext:
+    """DWB-394: questions / reported speech about shutting down must never
+    close a session.
+
+    The trigger bug: "...didn't close when I said shut down last?" matched the
+    "shut down <name>" pattern because <name> compiled to a bare ``\\w+`` and
+    "last" satisfied the name slot. Two layers now prevent it: a stop-word
+    exclusion on the close <name> slot, and an interrogative / reported-speech
+    guard on the matched span.
+    """
+
+    def test_regression_question_does_not_close(self):
+        # The exact phrase from the incident must NOT match.
+        assert (
+            match_close("...didn't close when I said shut down last?") is None
+        )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # Stop-word fillers can't satisfy the <name> slot, so these never
+            # match regardless of punctuation.
+            "shut down last",
+            "shut down when",
+            "shut down it",
+            "shut down that",
+            "shut down this",
+            "wrap up last",
+        ],
+    )
+    def test_stopword_name_slot_does_not_match(self, text):
+        assert match_close(text) is None, f"unexpected close match for {text!r}"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # A real agent name (archie) DOES satisfy the slot, so these are
+            # blocked purely by the interrogative / reported-speech guard.
+            "what happens when I said shut down archie?",
+            "why did you shut down archie",
+            "what does shut down archie even do",
+            "should I shut down archie",
+            "when I said shut down archie I meant later",
+            "did you shut it down for the night already?",
+        ],
+    )
+    def test_interrogative_or_reported_speech_does_not_close(self, text):
+        assert match_close(text) is None, f"unexpected close match for {text!r}"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # Genuine commands still close.
+            "shut it down for the night",
+            "shut down archie",
+            "shut down ci",
+            "wrap up barry for the night",
+            "close the session",
+            "that's a wrap",
+        ],
+    )
+    def test_genuine_commands_still_close(self, text):
+        result = match_close(text)
+        assert result is not None, f"expected close match for {text!r}"
+        assert len(result.strip()) > 0
+
+    def test_command_after_a_separate_question_still_closes(self):
+        # The question is its own sentence; the close command stands alone in
+        # the next sentence and must still fire.
+        result = match_close("Are you done? shut it down for the night.")
+        assert result is not None
+        assert "shut it down" in result.lower()
+
+    def test_command_later_in_text_after_quoted_span_still_closes(self):
+        # An earlier quoted/questioned span is skipped; a real command later
+        # in the same text still closes.
+        text = "I didn't say shut down archie. anyway, shut it down for the night"
+        result = match_close(text)
+        assert result is not None
+        assert "shut it down" in result.lower()
 
 
 class TestCatalogueShape:

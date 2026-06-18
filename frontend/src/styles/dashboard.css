@@ -82,6 +82,24 @@
   line-height: 1.5;
 }
 
+.project-card__session {
+  font-size: 11px;
+  color: var(--gray-light);
+  margin-bottom: 10px;
+  font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-info--card {
+  color: var(--gray-light);
+}
+
+.session-info--none {
+  color: var(--gray);
+}
+
 .project-card__stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

@@ -98,21 +98,19 @@ The `tracking_log` table is the source of truth. It records discrete events: `st
 
 Hook config lives in `.claude/settings.json`. Zero manual intervention needed.
 
-**Overhead** — TL/PM coordination time tracked at the project level via `overhead_start`/`overhead_stop` events. Tokens land in per-role buckets: `projects.tl_overhead_tokens` for the team-lead and `projects.pm_overhead_tokens` for the PM (DWB-305, 2026-06-05). Both buckets are computed from `tracking_log.event_type='overhead_token_report'` rows and must equal the project-wide overhead total; the invariant is enforced by the bucket-backfill migration (`dwb305c7f1e2a`) and a regression test (`test_overhead_bucket_invariant.py`).
+**Overhead** — TL/PM coordination tracked at the project level via `overhead_start`/`overhead_stop` events. Tokens land in per-role buckets (`projects.tl_overhead_tokens`, `projects.pm_overhead_tokens`), computed from `overhead_token_report` rows; the bucket sum must equal the project-wide overhead total (invariant enforced by migration + regression test).
 
-**Per-agent rollup includes overhead** (DWB-306, 2026-06-05). `GET /api/tracking/summary` `per_agent` rows now carry a `tokens` total that aggregates both `token_report` (ticket-attributed) and `overhead_token_report` events, plus a separate `overhead_tokens` field that exposes just the overhead portion. Dashboards see a correct headline number for PM/TL agents while keeping the breakdown visible.
+**Per-agent rollup includes overhead.** `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total (ticket-attributed + overhead) plus a separate `overhead_tokens` field, so PM/TL agents show a correct headline number with the breakdown still visible.
 
-**SubagentStop fallback** (DWB-311, 2026-06-05). Claude Code's SubagentStop hook reports a synthetic `agent_transcript_path` (a `subagents/agent-<sid>.jsonl` file that doesn't exist on disk); the real subagent transcript lives inline in the parent session's `.jsonl` tagged with `agentName`. When the primary parse hits the missing file, `_handle_subagent_stop` walks the CC projects directory and accumulates usage from lines matching the resolved agent's name.
+**SubagentStop fallback.** CC's SubagentStop hook reports a synthetic `agent_transcript_path` that doesn't exist on disk; the real subagent transcript lives inline in the parent `.jsonl` tagged with `agentName`. On a missing-file parse, `_handle_subagent_stop` walks the CC projects dir and sums usage from lines matching the resolved agent.
 
-**Large test-result payloads** (DWB-308, 2026-06-05). `test_results.details` is `MEDIUMTEXT` (up to 16MB) so gate-sized payloads — ~600 per-test entries plus a 4000-char output tail, ~85KB — round-trip cleanly. Earlier `TEXT` column capped at 64KB and produced HTTP 500.
-
-**Manual fallback** — Claude Code lifecycle hooks handle backfill and recovery automatically; no separate scan script is needed.
+Hooks handle backfill and recovery automatically; no separate scan script is needed.
 
 ---
 
 ## DWB Sessions
 
-A DWB session is a user-bounded span of work on a project: it opens when you signal the team to start ("you are archie, read the playbook"), closes when you signal them to stop ("write docs and exit", "shut it down for the night"), and rolls up the total tokens and wall-clock time across every Claude Code session that ran in between (TL, workers, subagents). One DWB session typically spans many CC sessions. Single-active per project, DB-enforced. Five detection layers cover the lifecycle: Layer 1a regex on the UserPromptSubmit hook (instant open and close fast paths, broadened close catalogue), Layer 1b regex retry on SessionEnd transcript scan, Layer 2 async AI classifier (Anthropic Haiku, env-gated on `ANTHROPIC_API_KEY`, never persists the user's text), Layer 3 deterministic slash commands `/dwb-open` and `/dwb-close` shipped in `<repo>/.claude/commands/`, and a 60-minute idle sweeper safety net. The `open_method` / `close_method` enum on each row records which layer caught the transition (`regex`, `ai_classifier`, `slash`, `ai_confident`, `ai_asked`, `idle_timeout`) so the dashboard can show the breakdown. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
+A DWB session is a user-bounded span of work: it opens when you signal the team to start, closes when you signal them to stop, and rolls up total tokens + wall-clock time across every CC session in between (TL, workers, subagents). One DWB session spans many CC sessions. Single-active per project, DB-enforced. Five detection layers: 1a regex fast path (UserPromptSubmit open/close), 1b regex retry (SessionEnd transcript scan), 2 async AI classifier (Haiku, env-gated, never persists user text), 3 deterministic slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. Each row's `open_method`/`close_method` records which layer caught it. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
 
 ---
 
@@ -202,9 +200,9 @@ Run history: `GET /api/test-results/performance`
 
 112 endpoints across 19 routers. Full interactive docs at http://localhost:8000/docs.
 
-**Slim responses:** List endpoints strip heavy fields by default — test-results omit `details` (can be 65k+), agents omit `api_key`. Tickets, alerts, and sprints support `?fields=slim` for minimal payloads (id, key fields, status only).
+**Slim responses:** List endpoints strip heavy fields by default (test-results omit `details`, agents omit `api_key`); tickets/alerts/sprints support `?fields=slim`.
 
-Standard CRUD exists for all resources (projects, epics, sprints, tickets, agents, alerts, comments, instructions, failure records, activity logs, test results). Below are the non-obvious and automation endpoints:
+Standard CRUD exists for all resources. Below are the non-obvious and automation endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -215,15 +213,9 @@ Standard CRUD exists for all resources (projects, epics, sprints, tickets, agent
 | GET | `/api/projects/{id}/gate-status` | Check sprint gates |
 | GET | `/api/projects/{id}/activity-feed` | Activity feed (newest first) |
 | GET | `/api/projects/{id}/docs` | Scan project doc files |
-| GET | `/api/projects/{id}/playbook-files` | List deployed playbook files |
 | GET | `/api/projects/{id}/token-budget` | Context file token counts + ceilings |
 | POST | `/api/tickets/stale-check` | Stale ticket alert (called by frontend timer) |
-| POST | `/api/tracking/start` | Log work start |
-| POST | `/api/tracking/stop` | Log work stop |
-| POST | `/api/tracking/tokens` | Report tokens |
-| POST | `/api/tracking/overhead/start` | Start overhead tracking |
-| POST | `/api/tracking/overhead/stop` | Stop overhead tracking |
-| GET | `/api/tracking/summary` | Project tracking summary |
+| GET | `/api/tracking/summary` | Project tracking summary (start/stop/tokens/overhead also under `/api/tracking/*`) |
 | POST | `/api/hooks/session-start` | Receive SessionStart hook |
 | POST | `/api/hooks/session-end` | Receive SessionEnd/SubagentStop hook |
 | GET | `/api/hooks/sessions` | List hook sessions (filter by `status=orphan` for cleanup) |
@@ -237,17 +229,12 @@ Standard CRUD exists for all resources (projects, epics, sprints, tickets, agent
 | POST | `/api/agents/{id}/memory/append` | Append to one memory file (append-only, DWB-358) |
 | POST | `/api/agents/{id}/memory/compact` | Replace a memory file with a compacted version; rejects 422 if still over ceiling |
 | POST | `/api/agents/{id}/scaffold-memory` | Idempotently scaffold the agent's memory dir |
-| GET | `/api/projects/{id}/team` | Single-roundtrip team roster (DWB-313) |
-| DELETE | `/api/test-results/{id}` | Operator orphan-row cleanup, 204/404 (DWB-310) |
+| GET | `/api/projects/{id}/team` | Single-roundtrip team roster |
 | POST | `/api/alerts/dismiss-all` | Bulk dismiss open alerts |
 | POST | `/api/alerts/send-to-team` | Write alerts to ALERTS_PENDING.md |
-| POST | `/api/alerts/run-tests` | Request a test run |
-| POST | `/api/errors` | Log frontend error |
-| GET | `/api/errors` | List logged errors |
 | GET | `/api/tokens/audit` | Token usage audit |
 | GET | `/api/failure-records/summary` | Aggregated failure analysis |
 | GET | `/api/status` | Health check |
-| GET | `/api/status/test-coverage` | Router test coverage |
 | POST | `/api/system/run-tests` | Trigger test suite |
 
 ---

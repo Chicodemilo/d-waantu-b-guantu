@@ -1,13 +1,14 @@
 # Path: app/routers/playbooks.py
 # File: playbooks.py
 # Created: 2026-03-29
-# Purpose: Playbook listing and deployment (TL, PM, worker) to project repos, with Jira-awareness (DWB-332)
+# Purpose: Playbook listing and deployment (TL, PM, worker) to project repos, with Jira-awareness (DWB-332) + hooks settings.json deploy (DWB-390)
 # Caller: app/main.py
-# Callees: app/services/project.py, app/services/agent_memory.py, pathlib, shutil, re
+# Callees: app/services/project.py, app/services/agent_memory.py, pathlib, shutil, re, json
 # Data In: HTTP requests
 # Data Out: JSON responses (playbook list, deploy status incl. scaffolded memory dirs)
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-12
 
+import json
 import logging
 import re
 import shutil
@@ -153,6 +154,126 @@ class DeployResult(BaseModel):
     target_dir: str
     memory_dirs: list[DeployedMemoryDir] = []
     root_docs: list[str] = []  # DWB-366: skeletons created at repo root
+    hooks_settings: str | None = None  # DWB-390: 'created'|'merged'|'unchanged'|None
+
+
+# DWB-390: hooks block written into each project's `.claude/settings.json`
+# so SessionStart / SessionEnd / Stop / SubagentStop / UserPromptSubmit fire
+# in sibling repos the same way they do in DWB. Without this, projects
+# 2/4/5/7/8/11 (and any new project) silently log zero token data because
+# their `.claude/` has no hooks configured at all. The hook command shape
+# matches DWB's own settings.json: curl POST the JSON payload to localhost
+# (`$(cat)` re-emits stdin, which is what CC pipes the hook payload through).
+# Deploy is idempotent: existing top-level keys in settings.json are
+# preserved; only the `hooks` key is replaced. A missing settings.json is
+# created fresh.
+_HOOKS_SETTINGS_BLOCK: dict = {
+    "SessionStart": [{
+        "hooks": [{
+            "type": "command",
+            "command": (
+                "curl -sf -X POST http://localhost:8000/api/hooks/session-start "
+                "-H 'Content-Type: application/json' -d \"$(cat)\""
+            ),
+            "timeout": 5,
+        }],
+    }],
+    "UserPromptSubmit": [{
+        "hooks": [{
+            "type": "command",
+            "command": (
+                "curl -sf -X POST http://localhost:8000/api/hooks/user-prompt "
+                "-H 'Content-Type: application/json' -d \"$(cat)\""
+            ),
+            "timeout": 5,
+        }],
+    }],
+    "SessionEnd": [{
+        "hooks": [{
+            "type": "command",
+            "command": (
+                "curl -sf -X POST http://localhost:8000/api/hooks/session-end "
+                "-H 'Content-Type: application/json' -d \"$(cat)\""
+            ),
+            "timeout": 30,
+        }],
+    }],
+    "Stop": [{
+        "hooks": [{
+            "type": "command",
+            "command": (
+                "curl -sf -X POST http://localhost:8000/api/hooks/session-end "
+                "-H 'Content-Type: application/json' -d \"$(cat)\""
+            ),
+            "timeout": 30,
+        }],
+    }],
+    "SubagentStop": [{
+        "hooks": [{
+            "type": "command",
+            "command": (
+                "curl -sf -X POST http://localhost:8000/api/hooks/session-end "
+                "-H 'Content-Type: application/json' -d \"$(cat)\""
+            ),
+            "timeout": 30,
+        }],
+    }],
+}
+
+
+def _deploy_hooks_settings(target_dir: Path) -> str | None:
+    """Write the DWB hooks block into <target_dir>/settings.json.
+
+    Returns:
+      - "created": settings.json did not exist; we wrote a fresh file
+        containing only the hooks block.
+      - "merged": settings.json existed; we replaced its top-level "hooks"
+        key with the DWB block and preserved every other top-level key.
+      - "unchanged": settings.json's existing "hooks" key already matches
+        the DWB block byte-for-byte; no write performed.
+      - None: settings.json existed but was unparseable JSON (e.g. user-
+        edited and broken). We do NOT overwrite a broken file — that would
+        clobber the user's in-flight edit. Caller may log/warn.
+
+    Path is <target_dir>/settings.json. The file is the project-shared
+    settings file (not settings.local.json which is user-local).
+    """
+    settings_path = target_dir / "settings.json"
+
+    if not settings_path.exists():
+        settings_path.write_text(
+            json.dumps({"hooks": _HOOKS_SETTINGS_BLOCK}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return "created"
+
+    try:
+        existing = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning(
+            "deploy-playbooks: settings.json at %s is unparseable; "
+            "refusing to overwrite to preserve user edits",
+            settings_path,
+        )
+        return None
+
+    if not isinstance(existing, dict):
+        # JSON valid but not an object — same caution: don't clobber.
+        logger.warning(
+            "deploy-playbooks: settings.json at %s is not a JSON object; "
+            "refusing to overwrite",
+            settings_path,
+        )
+        return None
+
+    if existing.get("hooks") == _HOOKS_SETTINGS_BLOCK:
+        return "unchanged"
+
+    existing["hooks"] = _HOOKS_SETTINGS_BLOCK
+    settings_path.write_text(
+        json.dumps(existing, indent=2) + "\n", encoding="utf-8"
+    )
+    return "merged"
 
 
 # DWB-366: minimal H1 + one-line stub for each root doc. Scaffolded when
@@ -351,6 +472,16 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
                 )
             )
 
+    # DWB-390: write the hooks block into <repo>/.claude/settings.json so
+    # SessionStart / SessionEnd / SubagentStop / UserPromptSubmit fire on
+    # this project's CC instance and POST to /api/hooks/* on localhost.
+    # Skipped when the target is DWB itself (we are the source of truth -
+    # source==destination would still no-op via the unchanged path, but the
+    # explicit skip avoids needlessly re-reading our own settings.json).
+    hooks_settings: str | None = None
+    if target_dir.resolve() != (DWB_REPO_ROOT / ".claude").resolve():
+        hooks_settings = _deploy_hooks_settings(target_dir)
+
     project.playbooks_deployed_at = datetime.now(timezone.utc)
     db.commit()
 
@@ -359,4 +490,5 @@ def deploy_playbooks(project_id: int, db: Session = Depends(get_db)):
         target_dir=str(target_dir),
         memory_dirs=memory_dirs,
         root_docs=root_docs,
+        hooks_settings=hooks_settings,
     )

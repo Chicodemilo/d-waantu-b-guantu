@@ -1,16 +1,16 @@
 // Path: src/components/dashboard/TimeTokens.jsx
 // File: TimeTokens.jsx
 // Created: 2026-03-30
-// Purpose: Tabbed "Time & Tokens" section with data tables (by project, by agent, overhead) and expandable per-ticket breakdowns. Overhead section includes Team Lead + PM rows (per agent) plus an Ad Hoc row sourced from project_total.ad_hoc_overhead_tokens / ad_hoc_overhead_seconds (DWB-353/354). Ad Hoc fields are null-guarded to 0 so the row renders even before the backend ships them. Tracking summary fetches use AbortController to cancel on unmount (DWB-370).
+// Purpose: Tabbed "Time & Tokens" section with data tables (by project, by agent, overhead) and expandable per-ticket breakdowns. Overhead section includes Team Lead + PM rows (per agent) plus an Ad Hoc row sourced from project_total.ad_hoc_overhead_tokens / ad_hoc_overhead_seconds (DWB-353/354). Ad Hoc fields are null-guarded to 0 so the row renders even before the backend ships them. Tracking summaries come from the shared cache hook so all dashboard consumers share one fetch per project (DWB fan-out dedup).
 // Caller: DashboardPage.jsx, ProjectPage.jsx
-// Callees: react (useState, useEffect), useStore, services/tracking, utils/format, dashboard.css
-// Data In: Optional projectId prop (single project mode); projects from store; tracking summaries from API
+// Callees: react (useState), useStore, hooks/useTrackingSummary, utils/format, dashboard.css
+// Data In: Optional projectId prop (single project mode); projects from store; tracking summaries from shared cache
 // Data Out: default export TimeTokens component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-12
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import useStore from '../../store/useStore';
-import { getTrackingSummary } from '../../services/tracking';
+import { useTrackingSummaries } from '../../hooks/useTrackingSummary';
 import { formatTokens, formatTime } from '../../utils/format';
 import '../../styles/dashboard.css';
 
@@ -82,30 +82,7 @@ function TimeTokens({ projectId }) {
   const projects = projectId
     ? allProjects.filter((p) => p.id === Number(projectId))
     : allProjects;
-  const [summaries, setSummaries] = useState({});
-
-  useEffect(() => {
-    const controller = new AbortController();
-    Promise.all(
-      projects.map((p) =>
-        getTrackingSummary(p.id, { signal: controller.signal })
-          .then((data) => ({ id: p.id, data }))
-          .catch(() => ({ id: p.id, data: null }))
-      )
-    )
-      .then((results) => {
-        if (controller.signal.aborted) return;
-        setSummaries((prev) => {
-          const map = { ...prev };
-          for (const r of results) {
-            if (r.data) map[r.id] = r.data;
-          }
-          return map;
-        });
-      })
-      .catch(() => {});
-    return () => { controller.abort(); };
-  }, [projects.map((p) => p.id).join(',')]);
+  const summaries = useTrackingSummaries(projects.map((p) => p.id));
 
   const allTickets = projects.flatMap((p) => {
     const summary = summaries[p.id];

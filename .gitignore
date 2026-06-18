@@ -48,3 +48,6 @@ ALERTS_PENDING.md
 
 # OS
 .DS_Store
+
+# stray empty sqlite artifact (real DB is MySQL)
+backend/dwb.db

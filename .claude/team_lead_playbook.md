@@ -9,7 +9,7 @@
 <!-- non-jira-only:start -->
 ## Canonical Tools (no Jira)
 
-This project is not linked to Jira (`project.jira_base_url` is null). All ticket ops go directly through the DWB API. Do not invoke `dwb2jira`; do not draft Jira-flavored YAML. Tickets are created directly via `POST /api/tickets`, transitions via `PATCH /api/tickets/{id}` with `X-Agent-ID`. The TL drafts and creates without a PM dual-write gate.
+This project is not linked to Jira (`project.jira_base_url` is null). All ticket ops go directly through the DWB API. Do not invoke `dwb2jira`; do not draft Jira-flavored YAML. Tickets are created via `POST /api/tickets`, transitions via `PATCH /api/tickets/{id}` with `X-Agent-ID`. Creation flow: the TL drafts the spec; when a PM is on the team, the PM files it via `POST /api/tickets`. The TL files directly only on PM-less small teams (1-2 workers). Same division of labor as Jira projects, just without the dual-write gate.
 
 DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or external content even though no Jira mirror exists.
 <!-- non-jira-only:end -->
@@ -21,9 +21,10 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 1. **Complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity (identify, cache `agent_id`, read your memory dir: `identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). Same flow for every agent, TL included.
 2. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`
 3. Fetch the live team roster: `GET /api/projects/{project_id}/team`. The DB is authoritative, not a checked-in file.
-4. Read `ARCHITECTURE.md` / `README.md` only for cross-cutting work
-5. Check open alerts (API + `ALERTS_PENDING.md`)
-6. Jump to § 5 for the typical session flow
+4. **Respawn a parked team.** Claude Code teams do NOT survive across CC sessions; a team that `HANDOFF.md` describes as "parked" or "standing by" no longer exists as live processes. If the session's work needs workers, re-create the team via `TeamCreate` (reuse the prior team name when sensible), then run the full spawn flow per § 4a for each worker: spawn-prepare handshake, pending marker, spawn. Do not assign work or SendMessage to roster names from HANDOFF before respawning; those inboxes are dead and messages drop silently.
+5. Read `ARCHITECTURE.md` / `README.md` only for cross-cutting work
+6. Check open alerts (API + `ALERTS_PENDING.md`)
+7. Jump to § 5 for the typical session flow
 
 ### Your Personal Memory Dir
 
@@ -31,9 +32,40 @@ Lives at `.claude/agents/memory/<project_prefix>/Archie_<PREFIX>/`. File purpose
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
 
+**Memory model (canonical home — DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up) — do NOT free-write memory into root-level docs just because you (the TL) can. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md` — durable lessons go in `lessons.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
+
 ### Playbook locations
 
 Deployed to each project's `.claude/` via the Deploy Playbooks button. Playbooks get overwritten on deploy; `project_rules_*.md` never are.
+
+---
+
+## Communicating with the Human (REQUIRED)
+
+The human runs parallel CC sessions and a life alongside them. Every substantive message to the human — status, findings, proposals, decisions needed — MUST use the scannable block format below so it can be read at a glance.
+
+**This is a hard rule.** If a block feels like it won't fit, the answer is almost always *make it fit* — tighten the statement, split into more blocks, cut words. The only sanctioned violation is information that genuinely cannot be conveyed this way, and that bar is very high. "It was easier as a paragraph" is not a reason; suck it and make it fit.
+
+**Block pattern** — separator, blank return, header, indented bullets:
+
+────────────────────────────────────────────
+
+🟥 HIGH · 🚧 BLOCKER · ≤10-word statement of the thing
+  - terse bullet, lowercase, one fact per line
+  - include only if it adds something the header doesn't
+
+────────────────────────────────────────────
+
+- **Separator:** a box-drawing line `─` (U+2500), ~3/4 terminal width (~44 chars), with a blank return directly under it. NOT hyphens — markdown collapses `---` into a stub rule.
+- **Header:** `<severity> · <type> · statement`, statement ≤10 words. Icon AND text, always both.
+- **Severity** (your guess; the human corrects): 🟥 `HIGH` · 🟨 `MED` · 🟩 `LOW`.
+- **Type:** 🚧 `BLOCKER` · 🐞 `BUG` · 🤖 `TODO` (us bots' queue) · 👋 `YOU` (your action needed) · ❓ `ASK` (your decision needed) · ℹ️ `FYI` · ✅ `DONE`. `YOU` = do a thing; `ASK` = answer/decide.
+- **Bullets:** two-space indent, terse, lowercase, no end punctuation. Drop them when the statement stands alone.
+- **One topic per block.** A topic shift gets a fresh separator + header.
+- **A requested list/table is ONE item** — "my todo list", "show me tickets" → the whole list sits under a single header, even if its rows span topics. Never fragment a requested list by topic.
+- **A closing sentence or two of plain prose is allowed** after the blocks.
+
+**Short acknowledgments are exempt.** A 1-5 word reply ("Got it.", "Holding.", "On it.", "Done.") needs no banner — just say it. Banner anything the human needs to scan, act on, or decide.
 
 ---
 
@@ -91,7 +123,7 @@ Full endpoint reference: `README.md § API Reference`. TL-critical endpoints not
 | Gate status | `GET /api/projects/{id}/gate-status` | Doc gates + consolidation. |
 | Dismiss alerts | `POST /api/alerts/dismiss-all` | Use after sprint close if queue is stale. |
 | Tracking summary | `GET /api/tracking/summary?project_id={pid}` | Token + time rollups (automatic via hooks). |
-| Open DWB session | `POST /api/sessions/open` | Body: `{project_id, opened_at, open_method, open_phrase?}`. 201 new row, 409 active session exists. |
+| Open DWB session | `POST /api/sessions/open` | Body: `{project_id, open_method, open_phrase?}`. **Omit `opened_at`** — the server stamps now() (and ignores any value you send on `ai_confident`/`ai_asked`; a model-built timestamp can be hours wrong). 201 new row, 409 active session exists. |
 | Close DWB session | `POST /api/sessions/{id}/close` | Body: `{close_method, close_reason, close_phrase?, closed_at?}`. 200 (idempotent on already-closed). |
 | List DWB sessions | `GET /api/projects/{id}/sessions?limit=20&offset=0` | Most-recent-first. No status query param yet; filter client-side for `closed_at IS NULL` to find the active one. |
 | Session detail | `GET /api/sessions/{id}` | Full rollup: meta + totals + by_role + by_ticket + tl/pm overhead + `live` flag. |
@@ -102,25 +134,25 @@ Full endpoint reference: `README.md § API Reference`. TL-critical endpoints not
 
 Status flow: `backlog` → `todo` → `in_progress` → `in_review` → `done`. Time/token tracking is automatic via lifecycle hooks.
 
-### Creation flow
+<!-- non-jira-only:start -->
+### Creation flow (no Jira)
 
-TL drafts a YAML proposal, Pam (PM) previews + shows human, human approves, Pam submits via `echo Y | dwb2jira create`. Creation atomic across Jira + DWB; human approves before anything exists.
+TL drafts the spec (title, description, acceptance criteria, both `ticket_key` and db `id` conventions per project), human approves, PM files via `POST /api/tickets` with `X-Agent-ID`. On PM-less small teams the TL files directly. Tickets auto-assign to the active sprint and inherit its epic.
 
-### Querying
+### Querying (no Jira)
 
-- Your work today: `dwb2jira report --status "To Do,In Progress,Ready for Testing/Review"`
-- Last 2 weeks: `dwb2jira report --assignee '*' --updated ">=YYYY-MM-DD"`
-- Single ticket: `dwb2jira report --jira POR-KEY`
+- Sprint board: `GET /api/tickets?sprint_id={sid}`
+- An agent's queue: `GET /api/tickets?project_id={pid}&assigned_agent_id={aid}`
+- Single ticket: `GET /api/tickets/{id}` (database id, not the `ticket_key` suffix)
 
-Default `dwb2jira report` returns ALL statuses, add `--status` to filter. Status vocabulary: see `~/Dev/DWB_2_JIRA/README.md`.
+### Duplicate cleanup (no Jira)
+
+No preview gate warns you, so check for an existing ticket before drafting (`GET /api/tickets?project_id={pid}` + title scan). Found dupes: keep the canonical one, `DELETE /api/tickets/{id}` the others.
+<!-- non-jira-only:end -->
 
 ### Bulk operations
 
-Bulk ops are rare by design (`create` gate + dual-write tools prevent drift). If you hit a genuine need, propose the batch to the human first, don't hand-roll REST loops without approval.
-
-### Duplicate cleanup
-
-`dwb2jira create` warns on likely duplicates at preview. If you find existing dupes, pick the canonical one and `dwb2jira ticket delete POR-KEY` the others, the DWB twin deletes too.
+Bulk ops are rare by design (the creation gate + canonical tools prevent drift). If you hit a genuine need, propose the batch to the human first, don't hand-roll REST loops without approval.
 
 ### Sprint hygiene
 
@@ -179,7 +211,7 @@ echo '{"agent_id": <id>, "agent_name": "<name>", "role": "<role>", "project_pref
   > .claude/agents/active/pending-<id>-$(date +%s000)-$(openssl rand -hex 2)
 ```
 
-The hook resolver atomically renames the pending marker to the CC-assigned `session_id` on first SubagentStop. If a worker reports their marker is missing, the TL writes it on their behalf.
+The hook resolver atomically renames the pending marker to the CC-assigned `session_id` on first SubagentStop. The claim is agent-id-aware (DWB-390): when the hook payload carries `agent_type`/`agent_name`, the resolver only claims a marker whose `agent_id` matches, so concurrent spawns cannot cross-attribute; without a hint it falls back to oldest-first. If a worker reports their marker is missing, the TL writes it on their behalf.
 
 ### Naming rules
 
@@ -204,6 +236,8 @@ Subagent edits to ANY path under `.claude/` trigger a permission dialog that cra
 ### SendMessage routes by EXACT name
 
 When a teammate dies and is respawned, the spawn system can auto-suffix the new name (`Pam_DWB` -> `Pam_DWB-2`). `SendMessage({to: "..."})` routes by the literal name string; addressing the original name after a respawn silently drops the message into a dead inbox with no delivery error. Before sending, verify the current live name via `GET /api/projects/{id}/team` or the spawn-prepare response. If you find yourself getting no replies, suspect a stale name first.
+
+**After a context compaction or session resume, your memory of teammate names is suspect.** Before the first SendMessage after either event: (1) run `ls ~/.claude/teams/<team>/inboxes/` once and pin the exact names; (2) treat the `teammate_id` on incoming messages as the authoritative spelling and reply to that exact string; (3) when a teammate goes silent after you message them, check the inbox name BEFORE concluding they are dead or respawning a duplicate. A wrong-name send loses the message, strands the worker waiting, and a panic respawn doubles the damage (duplicate agent, dead-inbox cleanup, user-directed shutdown).
 
 ## 4b. Code Review Gate
 
@@ -254,8 +288,8 @@ A DWB session bounds passive time + token tracking by user intent, not by Claude
 **On every user turn, evaluate the message against three outcomes:**
 
 1. **Confident open or close.** The user clearly says open ("you are archie, read the playbook") or close ("have the team write docs and exit", "shut it down for the night"). Act, then announce in one line.
-   - Open: `POST /api/sessions/open` with `open_method="ai_confident"` (or `"regex"` if the SessionStart hook already caught it; check `GET /api/projects/{id}/sessions` and filter for `closed_at IS NULL` to find any active session first). On 201, announce "Opened DWB session N."
-   - Close: `POST /api/sessions/{id}/close` with `close_method="ai_confident"`, `close_reason="explicit"`. On 200, announce "Closing DWB session N (X tokens, Y seconds)."
+   - Open: `POST /api/sessions/open` with `open_method="ai_confident"` and **no `opened_at`** (the server stamps now(); never hand-build the timestamp). Use `"regex"` if the SessionStart hook already caught it; check `GET /api/projects/{id}/sessions` and filter for `closed_at IS NULL` to find any active session first. On 201, announce "Opened DWB session N."
+   - Close: `POST /api/sessions/{id}/close` with `close_method="ai_confident"`, `close_reason="explicit"`, and a **required `headline`** — 5-10 words describing what the session actually did (it becomes the dashboard SUMMARY). `ai_confident`/`ai_asked` closes are **rejected 422** without one. On 200, announce "Closing DWB session N (X tokens, Y seconds)."
 
 2. **Ambiguous.** Wording suggests intent but isn't certain (e.g. "let's wrap up" without "for the night"; "you are archie" with no playbook clause). Ask one short clarifying question before acting. If the user confirms, post with `open_method="ai_asked"` / `close_method="ai_asked"` so the rollup records which layer caught it.
 
@@ -280,17 +314,17 @@ Your AI-layer evaluation (the three outcomes at the top of § 4e) is still the b
 
 **Race between layers:** if any layer opens first, your AI-side attempt returns 409 with the active session's id, silently noop and read that id for any follow-up announcements. Same for close: a faster layer may beat you to it, in which case `close` returns 200 (idempotent), not an error.
 
-**Hook listener install location.** Unchanged: the hooks live in `<repo>/.claude/settings.json` and ship with the clone. There is no user-level install and no cross-project hook deployment; do not propose either.
+**Hook listener install location.** The hooks live in `<repo>/.claude/settings.json` and ship with the clone. For TRACKED projects (sibling repos DWB monitors), `POST /api/projects/{id}/deploy-playbooks` also writes the hooks block into that repo's `.claude/settings.json` (DWB-390): merge-preserving, idempotent, replaces only the `hooks` key. That is the ONLY sanctioned cross-repo write lane, because it is explicit and operator-invoked, riding the same deploy action that already writes playbooks. Still banned: user-level installs (`~/.claude/settings.json`) and any automatic or background write into another repo. Do not propose either.
 
 **Ad Hoc bucket (DWB-353).** Worker sessions that ran without a filed ticket (skip-ceremony lane per § 4c) route to a project-level `ad_hoc` overhead bucket instead of firing an unattributed-tokens alert. Surfaced as `ad_hoc_overhead_tokens` + `ad_hoc_overhead_seconds` on the session detail rollup alongside TL and PM overhead. No action required from you; the routing is automatic in the hook tracking service.
 
 ## 5. TL Workflow: Typical Session
 
 1. Check open alerts (`GET /api/alerts?status=open` + `ALERTS_PENDING.md`)
-2. Review active sprint: `dwb2jira report --sprint active --status "Ready for Testing/Review"`
-3. Accept or return reviewed tickets
-4. Propose new tickets via YAML → `dwb2jira create --dry-run prop.yaml`, show preview to human
-5. On approval: `echo Y | dwb2jira create prop.yaml` (or hand off to PM)
+2. Review active sprint. Jira: `dwb2jira report --sprint active --status "Ready for Testing/Review"`. Non-Jira: `GET /api/tickets?sprint_id={sid}` and filter `in_review`.
+3. Accept or return reviewed tickets (§ 4b review gate first; done is TL-only)
+4. Propose new tickets per § 3 Creation flow (Jira: YAML + `--dry-run` preview; non-Jira: spec for the PM), show the human
+5. On approval, PM files them (Jira: `echo Y | dwb2jira create prop.yaml`; non-Jira: `POST /api/tickets`)
 6. Assign tickets to agents (update `assigned_agent_id`)
 7. Log significant decisions in the activity log
 8. Check `GET /api/tracking/summary?project_id={pid}` for token outliers
@@ -310,13 +344,29 @@ GET /api/projects/{pid}/consolidation-status?sprint_id={sid}
 - If `gate_satisfied: true`, every participant acked. Safe to PATCH.
 - If `gate_satisfied: false`, do NOT close. Walk the `agents[]` list, name every `acked: false`, ping with their `owned_over_ceiling_files`.
 
-**TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same file mean the cap is wrong, raise it in `_TOKEN_CEILINGS`.
+**What the gate counts (DWB-397):** only docs an agent authors and can edit — their memory files plus the root continuity docs their role owns (TL owns `HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`). DWB's shipped governance docs (playbooks, `project_rules_*`, agent defs) are EXEMPT — never counted against any agent, never an ack/close blocker. Keeping those lean is DWB's editorial job (advisory on the budget panel), not a downstream agent's. Don't chase anyone to trim a playbook.
+
+**TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same root doc mean the cap is wrong, raise it in `TOKEN_CEILINGS` (in the shared `backend/app/config/token_budget.py`, which also holds the `max(len//4, words)` token estimator every gate uses).
 
 **Autonomy expectation across the team (DWB-328 lesson):** refusal IS the signal to fix. Workers who get a 400 should trim and retry on their own without waiting for TL guidance. If a worker is idling on a refused ack, that's a worker-side process bug, message them with "trim is the work, not the wait." Don't accept "I tried, was refused, waiting" as a final state.
 
 **TL admin acks** are for edge cases only, e.g. DWB-329 (participants_for_sprint counts admin-only activity_log entries as participation). Document the reason in the ack notes; don't normalize the pattern.
 
 Marking an agent inactive removes them from the gate. Use only when an agent has actually gone dark, not as a workaround for chasing acks.
+
+---
+
+## 5b. Session End: HANDOFF.md Is the LAST Act
+
+`HANDOFF.md` describes the state the next session will actually find. Write it last, after every state-changing action is finished, in this order:
+
+1. Workers land their wrap-ups (`session-complete` posts, final ticket transitions).
+2. Team disposition is settled and EXECUTED: if the team is shutting down, send the shutdown requests and confirm termination; if it stays parked, leave it alone.
+3. **Parallel doc compaction (hard gate).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while any gated doc is over its token ceiling — memory files and root continuity docs only; shipped playbooks/`project_rules`/agent defs are exempt (DWB-397). This is autonomous and parallel: the moment you go to close, have **every agent compact their own memory files at the same time** — each rewrites its own `scratchpad`/`lessons`/`recent_sessions` leaner and submits via `POST /api/agents/{id}/memory/compact {file, content}` (a full-file replace; the server rejects 422 if still over, so a no-op can't satisfy it). You (the TL) compact the shared root docs (`HANDOFF`/`ARCHITECTURE`/`README`) + your own dir. Don't serialize this or ask permission — fan it out. The 422 body lists every owner and their over files; clear them all, then close.
+4. DWB session close fires (any layer) or you close it explicitly per § 4e.
+5. **Only then** update `HANDOFF.md`, recording the state as it now is, and exit.
+
+Never write team state ("parked alive", "workers standing by") before the disposition is final. A HANDOFF written early describes a plan, not a state; if the team is then shut down (or anything else changes), the next session inherits a lie and acts on it. If anything state-changing happens after you wrote HANDOFF, update HANDOFF again before exiting. No action of any kind after the final HANDOFF write.
 
 ---
 

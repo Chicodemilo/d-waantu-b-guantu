@@ -1,12 +1,12 @@
 # Path: app/routers/dwb_sessions.py
 # File: dwb_sessions.py
 # Created: 2026-06-09
-# Purpose: REST endpoints for DWB session open/close + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket)
+# Purpose: REST endpoints for DWB session open/close/reopen + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-395 reopen)
 # Caller: app/main.py
 # Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/schemas/dwb_session.py
 # Data In: HTTP POST JSON bodies, GET query/path params
 # Data Out: DwbSessionRead, DwbSessionListItem[], DwbSessionDetail (or 404/409)
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-17
 
 """HTTP layer for DWB session lifecycle.
 
@@ -214,6 +214,67 @@ def close_dwb_session(
         db.commit()
         db.refresh(row)
     return row
+
+
+@router.post(
+    "/{session_id}/reopen",
+    status_code=200,
+    response_model=DwbSessionRead,
+    responses={
+        409: {
+            "model": DwbSessionOpenConflict,
+            "description": "Another session is already open for this project",
+        },
+    },
+)
+def reopen_dwb_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+):
+    """Reopen a closed DWB session (DWB-395).
+
+    Nulls closed_at / close_method / close_reason / close_phrase and returns
+    the reopened row. ``is_open`` is a generated STORED column that recomputes
+    from closed_at, so nulling closed_at is sufficient to flip the single-active
+    marker.
+
+    This endpoint replaces the manual DB null-out that has been done by hand
+    several times after a false close (e.g. TL prose tripping the Layer-1 close
+    catalogue).
+
+    Status semantics:
+      200 OK       -> session reopened (DwbSessionRead body). Also returned on
+                      the idempotent no-op when the row was already open.
+      404 Not Found -> session_id does not exist.
+      409 Conflict -> a DIFFERENT session is already open for this project;
+                      the body surfaces the blocking session's id + opened_at +
+                      headline. The single-active invariant forbids two open
+                      sessions per project, so the existing one must be closed
+                      first.
+    """
+    row = db.get(DwbSession, session_id)
+    if row is None:
+        raise HTTPException(404, f"DWB session {session_id} not found")
+
+    reopened, conflict = svc.reopen_session(db, row)
+
+    if conflict is not None:
+        body = DwbSessionOpenConflict(
+            detail=(
+                f"Project {row.project_id} already has an open DWB session "
+                f"(id={conflict.id}, opened_at={conflict.opened_at.isoformat()}); "
+                f"close it before reopening session {session_id}"
+            ),
+            active_session_id=conflict.id,
+            opened_at=conflict.opened_at,
+            headline=conflict.headline,
+        )
+        return JSONResponse(status_code=409, content=body.model_dump(mode="json"))
+
+    assert reopened is not None  # narrow for type checkers
+    db.commit()
+    db.refresh(reopened)
+    return reopened
 
 
 # ---------------------------------------------------------------------------

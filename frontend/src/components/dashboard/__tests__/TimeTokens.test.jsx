@@ -3,10 +3,10 @@
 // Created: 2026-06-10
 // Purpose: Tests for the OVERHEAD section of TimeTokens — Ad Hoc row renders alongside TL/PM rows, value comes from project_total.ad_hoc_overhead_tokens, null-guards to 0 when the field is absent (pre-DWB-353), and the updated tooltip text describes ad-hoc work without an em dash
 // Caller: vitest test runner
-// Callees: ../TimeTokens, ../../../store/useStore (mocked), ../../../services/tracking (mocked)
+// Callees: ../TimeTokens, ../../../store/useStore (mocked), ../../../services/tracking (mocked), ../../../services/trackingCache (reset between tests)
 // Data In: Mocked store + tracking summary
 // Data Out: Test assertions
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-12
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
@@ -24,6 +24,7 @@ vi.mock('../../../services/tracking', () => ({
 
 import TimeTokens from '../TimeTokens';
 import { getTrackingSummary } from '../../../services/tracking';
+import { __resetTrackingCacheForTests } from '../../../services/trackingCache';
 
 function summary(overrides = {}) {
   return {
@@ -45,6 +46,7 @@ function summary(overrides = {}) {
 describe('TimeTokens — Ad Hoc overhead row', () => {
   beforeEach(() => {
     getTrackingSummary.mockReset();
+    __resetTrackingCacheForTests();
   });
 
   afterEach(() => {

@@ -45,7 +45,7 @@ Before doing ANY work, establish who you are on this project:
 1. **Identify yourself.** `POST /api/agents/identify` with `{role, name, project_prefix}` (use the name from your spawn brief; for fixed-role agents this may be a `_<PROJECT_PREFIX>` suffixed form like `Archie_DWB`, but the endpoint accepts the short name too). Response includes `agent_id`, `memory_dir`, `scratchpad_excerpt`, `instructions[]`, `jira_enabled` (DWB-332), and `memory_usage_rules` (DWB-352): a condensed inline summary of the memory dir layout + append-only rule + ISO 8601 timestamp format. Treat that string as the authoritative quick-reference; the longer Memory Writes section below expands on it. Canonical shape lives in `app/schemas/agent.py::AgentIdentifyResponse`.
    - On `409 ambiguous` or `404 not found`: **HALT** and tell the TL. Never invent an agent_id.
 2. **Cache your `agent_id`.** Include `X-Agent-ID: {agent_id}` on **every** `POST`/`PATCH`/`PUT`/`DELETE` to `/api/`. Without it, your actions log as "system" and your tokens don't attribute.
-3. **Session marker: TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file**: subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop. If you think your marker is missing, tell the TL, they write it.
+3. **Session marker: TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file**: subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop, matching on your agent_id when the hook payload carries one (DWB-390) so concurrent spawns can't cross-attribute. If you think your marker is missing, tell the TL, they write it.
 4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. As of DWB-341, the dir + all four files are guaranteed to exist on spawn: `spawn-prepare` auto-scaffolds idempotently (identity.md refreshed, the other three preserved byte-for-byte when present, created empty when missing). You no longer need to create them yourself; read in this order, and if any are still missing after scaffold, **HALT** and tell the TL:
    - **`identity.md`**: system-generated profile (who you are, file purposes, ISO 8601 rule, read order). **Do not edit by hand**: `scaffold-memory` regenerates this file each time.
    - **`scratchpad.md`**: your in-flight working notes. Append-only, one block per session. Use this as your running memory during a ticket.
@@ -209,6 +209,8 @@ If you get blocked on the work, message the TL, don't sit on it.
 
 DWB enforces a `force_consolidation` gate at sprint close. Every sprint participant must call `consolidate-complete` before the TL can close the sprint. The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 if your owned files are over ceiling, unless you provide per-file overrides with non-empty reasons.
 
+**Your owned files are the docs you author and can edit — your memory files** (`scratchpad`/`lessons`/`recent_sessions`). DWB's shipped playbooks, `project_rules`, and agent defs are EXEMPT (DWB-397); they're never counted against you. Keeping those lean is the DWB team's job, not yours.
+
 **When to ack:** as soon as your last ticket hits `in_review` (or `done`). Don't wait for the TL, the ack is yours to file.
 
 **How:**
@@ -236,15 +238,17 @@ When the gate refuses your ack with violations:
 
 1. **Default path: TRIM the listed files.** That's the work. Re-ack with no overrides. Should pass clean. Don't wait for TL guidance, refusal means go fix.
 2. **Override path (rare): per-file reason.** Use only when the file is genuinely load-bearing and trim would lose meaning. Body: `{"sprint_id": N, "overrides": {"file_path": "non-empty reason text", ...}}`. Every file in the violation list must have a key. Empty/whitespace reasons rejected.
-3. **Cap-raise path (when override would repeat across sprints):** ping TL with proposed `_TOKEN_CEILINGS` change. Don't override the same file every sprint.
+3. **Cap-raise path (when override would repeat across sprints):** ping TL with proposed `TOKEN_CEILINGS` change. Don't override the same file every sprint.
 
-**Subagents can't write to `.claude/` paths.** If your over-ceiling files live under `.claude/agents/memory/<name>/` or `.claude/agents/<role>.md` etc, send the TL the trim payload via SendMessage and they'll write it on your behalf. Then retry.
+**You can't Edit `.claude/` paths directly (it crashes you), so compact your memory through the API:** `POST /api/agents/{your_agent_id}/memory/compact {file, content}` (full-file replace; rejected 422 if still over). Your memory files are the only thing that'll land in your over-ceiling list — the playbooks and agent defs under `.claude/` are exempt (DWB-397), never counted against you.
 
 **Idling on refusal is the anti-pattern.** The TL doesn't want to nag every agent every sprint to trim their files. The system tells you what's over; you trim; you retry. That's the contract.
 
 ## Reporting Status
 
 When done, message the TL: what you did, files changed, anything unexpected, whether changes are staged/committed or unstaged. Keep it concise, the TL reads the diff.
+
+**`in_review` is your terminal state.** Do not flip your ticket to `done` (TL-only after review) and do not mark your team-board task completed; the TL flips the board task when the review verdict lands. A board that says "completed" before review makes the TL's queue lie. Hand off, message, stand by.
 
 ## Ad Hoc Work (No Filed Ticket)
 

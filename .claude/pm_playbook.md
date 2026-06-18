@@ -10,9 +10,34 @@
 
 `report` and `transition` rules are in `.claude/worker_playbook.md § Canonical Tools`. PM-unique tool:
 
-- **`dwb2jira create`**: YAML input, preview + approval gate, auto-sprint, auto-DWB twin. Flow: PM drafts YAML → `--dry-run` for preview → show human/TL for approval → `echo Y | dwb2jira create proposal.yaml` to submit. Piping `Y` does NOT bypass approval; the hash-sidecar gate requires that `--dry-run` ran first against the exact same YAML content. Edits between preview and submit trip the drift gate (exit 7). TL may edit or reject before PM submits. **Never `POST /api/tickets` directly.** The drift gate exists for a reason.
+<!-- non-jira-only:start -->
+- **Ticket creation (no Jira)**: on projects without Jira (`project.jira_base_url` is null) there is no `dwb2jira` and no dual-write gate. The PM files tickets directly via `POST /api/tickets` with `X-Agent-ID: {pm_id}`, from a TL-drafted, human-approved spec. Filing tickets is still the PM's job, not the TL's; the TL drafts, you file. The approval order is unchanged: human sees the spec before anything is created. Tickets auto-assign to the active sprint and inherit its epic.
+<!-- non-jira-only:end -->
 
 **DWB is internal: never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content.** Full context: `.claude/worker_playbook.md § DWB Is an Internal Tool`.
+
+## Ticket Display Format
+
+Whenever you show tickets to the TL or the human, use this EXACT 8-column table, in this order — never reorder, never drop a column:
+
+```
+| DWB # | Jira # | DWB Sprint | Jira Epic | Jira Sprint | Title | Owner | Status |
+```
+
+- **DWB #** — internal key, `CI-NNN`.
+- **Jira #** — `POR-NNNN`.
+- **DWB Sprint** — the DWB sprint name/number.
+- **Jira Epic** — the parent Jira epic key (e.g. `POR-5152`).
+- **Jira Sprint** — the Jira sprint name.
+- **Title** — ticket title (trim very long ones).
+- **Owner** — the assigned agent / Jira assignee.
+- **Status** — the DWB status.
+
+One row per ticket; `—` for an empty cell; filter to the current project only.
+
+**The tool does NOT emit this layout — you must re-shape its output.** `dwb2jira report` prints a *different* set:
+`DWB # | Jira # | Epic | Parent | Title | Status | Assignee | Jira Sprint | Created | Updated`
+(no DWB-Sprint column, Assignee instead of Owner, extra Parent / Created / Updated). Use `report` as the **data source**, then transform into the 8-column table above (map `Assignee`→`Owner`, add the DWB sprint, drop Parent/Created/Updated). **Never paste raw `report` output to the human** — that mismatch is the recurring "wrong columns" problem this section exists to kill.
 
 ## Safety: Hard Limits on Jira Manipulation
 
@@ -53,7 +78,7 @@ Session marker is TL-written (you can't create your own); see worker_playbook §
 Monitor, track, communicate, escalate. The PM does NOT create projects, assign tickets, or run tests; the TL owns those.
 
 **Proactive communication (mandatory):**
-- After batch ticket closures: summary table to TL
+- After batch ticket closures: the 8-column ticket table to TL (see § Ticket Display Format — never raw `dwb2jira report` output)
 - After sprint eval: findings to TL + human
 - Hygiene issues (missing links, stale tickets, status drift): flag immediately via SendMessage
 - Significant ticket count changes (5+): report new sprint status
@@ -67,7 +92,7 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 
 - `GET /api/projects/{id}/gate-status`, if gates failing, raise warning alert for missing docs
 - Verify project has: meaningful description, `repo_path` set, TL/PM/worker agents assigned
-- Track TL onboarding: epic + sprint created, agents assigned, INITIAL.md + ARCHITECTURE.md written, initial tickets created via `dwb2jira create`
+- Track TL onboarding: epic + sprint created, agents assigned, INITIAL.md + ARCHITECTURE.md written, initial tickets created via the project's canonical creation flow (see § Canonical Tools)
 - Flag anything missing as warning alert
 
 ---
@@ -76,9 +101,6 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 
 - `GET /api/sprints?project_id={pid}&status=active`, find active sprint
 - `GET /api/tickets?sprint_id={sid}`, DWB-side view
-- `dwb2jira report --sprint active`, cross-system (DWB + Jira merged)
-- `dwb2jira epic list --project {JIRA_PROJECT}`, discover epic keys (useful for `--epic` filter)
-
 **Red flags:** pileup in `todo` (blocked agents?), stuck `in_progress` (check activity logs), empty `in_review` (agents not finishing or TL not reviewing?), skewed token usage (one ticket 10x+ others). Bucket by status, report to TL if burndown is off.
 
 ---
@@ -97,18 +119,20 @@ Deterministic; no manual registration or hooks needed. Keep ticket statuses accu
 
 ## 4. Ticket Status Moves
 
-All status moves on linked tickets go through `dwb2jira ticket transition`; it's dual-write.
+<!-- non-jira-only:start -->
+All status moves go directly through the DWB API; there is no dual-write tool and raw PATCH is the canonical move:
 
 ```bash
-dwb2jira ticket transition {JIRA-KEY} --to "{target}" [--comment "..."]
-# See JIRA_INTEGRATION.md for the Jira↔DWB status mapping.
+curl -X PATCH http://localhost:8000/api/tickets/{id} \
+  -H "X-Agent-ID: {pm_id}" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "todo"}'
 ```
 
-- PM moves: `backlog` → `todo` (sprint planning confirmed), `in_review` → `done` (after TL approval)
+- PM moves: `backlog` → `todo` (sprint planning confirmed), `in_review` → `done` (only after the TL's review verdict; on small TL-driven teams the TL flips `done` directly)
 - PM does NOT move tickets to `in_progress`; that's the worker's signal
-- **If TL already transitioned Jira manually:** check with TL before running; you may need a one-sided DWB PATCH. That's the only time raw status PATCH is acceptable, and only with TL confirmation.
-- **`--comment` requires `DWB_AGENT_ID` in `.env`.** Without it, the DWB-side comment is skipped with a warning (Jira still gets the comment). Set it once at environment setup.
-- **Never touch `jira_issue_key` by hand.** `dwb2jira create` sets it; if a link is missing, report it as a tool bug.
+- Use the database `id` in the path, never the `ticket_key` suffix (see Resolving a DWB numeric id below)
+<!-- non-jira-only:end -->
 
 ### Resolving a DWB numeric id
 
@@ -124,36 +148,18 @@ curl -s "http://localhost:8000/api/tickets?project_id={pid}&jira_issue_key=POR-5
 curl -s "http://localhost:8000/api/tickets?project_id={pid}&ticket_key=DWB-285" | jq '.[0].id'
 ```
 
-### Exceptions where raw PATCH IS sanctioned
+<!-- non-jira-only:start -->
+### Sprint carryover (no Jira)
 
-**(a) TL already transitioned Jira manually.** One-sided DWB PATCH to catch DWB up:
-```bash
-curl -X PATCH http://localhost:8000/api/tickets/{id} \
-  -H "X-Agent-ID: {pm_id}" \
-  -H "Content-Type: application/json" \
-  -d '{"status": "done"}'
-```
+No tool covers DWB sprint-field changes; carryover is a raw PATCH:
 
-**(b) Sprint carryover.** No tool covers DWB sprint-field changes:
 ```bash
 curl -X PATCH http://localhost:8000/api/tickets/{id} \
   -H "X-Agent-ID: {pm_id}" \
   -H "Content-Type: application/json" \
   -d '{"sprint_id": {next_sprint_id}, "status": "backlog"}'
 ```
-
-**Known gap on (b):** this moves the DWB twin only. The Jira issue stays pinned to the OLD sprint. Stakeholders watching Jira will see the ticket stuck there. **No `dwb2jira` command currently moves a Jira issue between sprints.** The TL needs to move each Jira issue manually via the Jira UI (or a future tool). Flag the list of carryover tickets to the TL at sprint close so the Jira side gets moved. Don't silently leave Jira mis-sprinted.
-
-### Two warning shapes after `ticket transition`
-
-When `--comment` is used, the tool can surface two different warnings, they have different recovery paths:
-
-| Warning text contains | What failed | Recovery |
-|-----------------------|-------------|----------|
-| `DWB twin status update failed` (or `DWB-side PATCH got ...`) | Jira transitioned, DWB status PATCH failed. **Status drift.** | Use exception (a) above, one-sided DWB PATCH to match Jira. |
-| `DWB_AGENT_ID not set` or `DWB comment skipped` | Jira transitioned + Jira comment posted, but DWB comment skipped. **Comment drift only, status is fine.** | Set `DWB_AGENT_ID` in `.env`, then `POST /api/comments` manually to restore the DWB-side paper trail. |
-
-If a warning doesn't match either shape, escalate to TL with the raw output rather than guessing.
+<!-- non-jira-only:end -->
 
 ---
 
@@ -275,7 +281,7 @@ Failure types: `context_degradation`, `spec_drift`, `sycophantic_confirmation`, 
 
 ## 12a. Sprint Close: Consolidation Gate (REQUIRED)
 
-DWB's `force_consolidation` gate blocks sprint close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): naked ack with over-ceiling files returns HTTP 400 with violations. The PM's role at sprint close:
+DWB's `force_consolidation` gate blocks sprint close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): naked ack with over-ceiling files returns HTTP 400 with violations. **What counts (DWB-397):** an agent's own authored + editable docs — their memory files and the root docs their role owns. Shipped playbooks/`project_rules`/agent-defs are EXEMPT; never chase an agent to trim those (keeping them lean is the DWB team's job). The PM's role at sprint close:
 
 1. **Verify gate state.** `GET /api/projects/{pid}/consolidation-status?sprint_id={sid}` returns `agents[]` with `acked: true/false` + `owned_over_ceiling_files` per agent, and `gate_satisfied` overall.
 2. **Surface refusals proactively.** If any participant has over-ceiling files and hasn't acked yet, ping them BY NAME with their file list and the autonomy expectation: "refusal is the signal to trim, not idle." Don't let agents sit on a refused ack waiting for instructions.
@@ -307,7 +313,7 @@ PM shares with TL at session end. At minimum, PM contributes: sprint snapshot (X
 
 1. `GET /api/alerts?project_id={pid}&status=open`, anything on fire?
 2. `GET /api/sprints?project_id={pid}&status=active`, active sprint
-3. `dwb2jira report --sprint active`, merged DWB + Jira distribution across statuses
+3. Sprint distribution across statuses. Jira: `dwb2jira report --sprint active` (DWB + Jira merged). Non-Jira: `GET /api/tickets?sprint_id={sid}`, bucket by status.
 4. Investigate any `in_progress` tickets that look stuck, cross-reference activity logs + hook sessions
 5. `GET /api/test-results?project_id={pid}&limit=3`, tests green?
 6. Log a progress observation to activity log

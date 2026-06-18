@@ -1,12 +1,12 @@
 # Path: tests/test_client_logs.py
 # File: test_client_logs.py
 # Created: 2026-06-10
-# Purpose: Tests for /api/client-logs - batch POST (lenient), GET filters, retention enforcement (DWB-371)
+# Purpose: Tests for /api/client-logs - batch POST (lenient), GET filters, retention enforcement (DWB-371, DWB-384)
 # Caller: pytest
 # Callees: app/routers/client_logs.py, app/services/client_log.py
 # Data In: HTTP requests via TestClient
 # Data Out: Assertions on response shape + DB state
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-12
 
 """DWB-371: client-side log feed.
 
@@ -220,3 +220,48 @@ class TestClientLogsRetention:
     def test_default_cap_is_10000(self):
         # Sanity-check the documented default so it can't quietly change.
         assert svc.DEFAULT_RETENTION_CAP == 10_000
+
+
+class TestClientLogsOccurredAtPrecision:
+    """DWB-384: occurred_at carries millisecond precision so same-second
+    emits keep stable ordering. Plain MySQL DATETIME truncates fractional
+    seconds, so two records 1ms apart would collapse to the same instant
+    and ORDER BY occurred_at would be non-deterministic.
+    """
+
+    def test_millisecond_precision_round_trips(self, client, db_session):
+        from app.models.client_log import ClientLog
+        from sqlalchemy import select
+
+        base = datetime(2026, 6, 12, 12, 0, 0, 123_000)
+        client.post("/api/client-logs", json=[
+            _record(message="ms-precision", occurred_at=base.isoformat()),
+        ])
+
+        row = db_session.scalars(
+            select(ClientLog).where(ClientLog.message == "ms-precision")
+        ).one()
+        assert row.occurred_at == base
+        # The microseconds field is populated (would be 0 under plain DATETIME).
+        assert row.occurred_at.microsecond == 123_000
+
+    def test_order_by_occurred_at_breaks_ties_at_ms(self, client, db_session):
+        from app.models.client_log import ClientLog
+        from sqlalchemy import select
+
+        t0 = datetime(2026, 6, 12, 12, 0, 0, 100_000)
+        t1 = datetime(2026, 6, 12, 12, 0, 0, 200_000)
+        t2 = datetime(2026, 6, 12, 12, 0, 0, 300_000)
+        # Insert out of order so an ORDER BY is doing real work.
+        client.post("/api/client-logs", json=[
+            _record(message="m1", occurred_at=t1.isoformat()),
+            _record(message="m2", occurred_at=t2.isoformat()),
+            _record(message="m0", occurred_at=t0.isoformat()),
+        ])
+
+        rows = db_session.scalars(
+            select(ClientLog)
+            .where(ClientLog.message.in_({"m0", "m1", "m2"}))
+            .order_by(ClientLog.occurred_at.asc())
+        ).all()
+        assert [r.message for r in rows] == ["m0", "m1", "m2"]

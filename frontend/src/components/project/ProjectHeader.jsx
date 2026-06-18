@@ -1,19 +1,21 @@
 // Path: src/components/project/ProjectHeader.jsx
 // File: ProjectHeader.jsx
 // Created: 2026-03-29
-// Purpose: Renders project header with stacked info lines: status/created, tokens/time, epic/sprint, path
+// Purpose: Renders project header with stacked info lines: status/created/tests, tokens/time, epic/sprint, session (IDEAS Tier 1 #3), path. Tracking summary subscribed via the shared cache hook so this row participates in dashboard-wide dedup.
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect), react-router-dom (Link), useStore, services/tracking, utils/format, StatusBadge, api/testResults (getProjectTestRuns)
+// Callees: react (useState, useEffect), react-router-dom (Link), useStore, hooks/useTrackingSummary, hooks/useProjectSessions, utils/format, StatusBadge, SessionInfoLine, api/testResults (getProjectTestRuns)
 // Data In: project prop (full project object)
 // Data Out: default export ProjectHeader component
-// Last Modified: 2026-03-30
+// Last Modified: 2026-06-12
 
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
-import { getTrackingSummary } from '../../services/tracking';
+import { useTrackingSummary } from '../../hooks/useTrackingSummary';
+import { useCurrentSession } from '../../hooks/useProjectSessions';
 import { formatTime, formatTokens } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
+import SessionInfoLine from '../common/SessionInfoLine';
 import { getProjectTestRuns } from '../../api/testResults';
 
 function TestStatusIcon({ projectId }) {
@@ -61,16 +63,8 @@ function ProjectHeader({ project }) {
   const sprints = useStore((s) => s.getSprintsByProject(project?.id));
   const activeEpic = epics.find((e) => e.status === 'active' || e.status === 'in_progress');
   const activeSprint = sprints.find((s) => s.status === 'active' || s.status === 'in_progress');
-  const [summary, setSummary] = useState(null);
-
-  useEffect(() => {
-    if (!project?.id) return;
-    let cancelled = false;
-    getTrackingSummary(project.id)
-      .then((data) => { if (!cancelled) setSummary(data); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [project?.id]);
+  const summary = useTrackingSummary(project?.id);
+  const currentSession = useCurrentSession(project?.id);
 
   const totalTokens = summary ? (summary.project_total.tokens || 0) : 0;
   const totalTime = summary ? (summary.project_total.time_seconds || 0) : 0;
@@ -112,6 +106,9 @@ function ProjectHeader({ project }) {
         ) : (
           <span className="project-header__meta-value project-header__meta-value--dim">none</span>
         )}
+      </div>
+      <div className="project-header__row">
+        <SessionInfoLine session={currentSession} variant="header" projectId={project.id} />
       </div>
       {project.repo_path && (
         <div className="project-header__row">

@@ -615,6 +615,175 @@ class TestPendingMarkerFallback:
         )
 
 
+# ---------------------------------------------------------------------------
+# DWB-390 - agent_id-aware pending-marker claim
+#
+# The DWB-304 FIFO selection works fine when only one agent's pending marker
+# is in the dir, but when several pending markers from a single TL spawn batch
+# coexist and concurrent SubagentStops race the claim, FIFO can stamp one
+# agent's session_id onto another agent's pending marker - misattribution by
+# luck of timing. When the hook payload carries an identity hint
+# (agent_type / agent_name) the resolver should claim only the marker whose
+# agent_id matches the hint. No hint -> legacy FIFO is preserved.
+# ---------------------------------------------------------------------------
+
+
+class TestPendingMarkerAgentIdHint:
+
+    def test_agent_type_hint_claims_matching_pending(
+        self, client, marker_project, tmp_path, make_agent,
+    ):
+        """Two pending markers for different agents. Subagent stop carries
+        agent_type that resolves to the SECOND-in-time agent. Verify the
+        SECOND pending is claimed (not the FIFO-oldest)."""
+        pid = marker_project["id"]
+        # First-by-unix_ms agent (would win under FIFO).
+        first_agent = make_agent(
+            project_id=pid, name="FifoLoser",
+            role="frontend-worker", api_key="hint-fifo-loser",
+        )
+        # Second-by-unix_ms agent (matches the hint).
+        target = make_agent(
+            project_id=pid, name="HintWinner",
+            role="backend-worker", api_key="hint-target",
+        )
+        _assign(client, pid, first_agent["id"])
+        _assign(client, pid, target["id"])
+
+        _write_pending_marker(
+            tmp_path, agent_id=first_agent["id"], project_id=pid,
+            unix_ms=1000, rand="0001", role="frontend-worker",
+            agent_name="FifoLoser",
+        )
+        _write_pending_marker(
+            tmp_path, agent_id=target["id"], project_id=pid,
+            unix_ms=2000, rand="0002", role="backend-worker",
+            agent_name="HintWinner",
+        )
+
+        subagent_sid = f"b1{uuid.uuid4().hex[:15]}"
+        client.post("/api/hooks/session-end", json={
+            "session_id": "parent-sid",
+            "cwd": str(tmp_path),
+            "hook_event_name": "SubagentStop",
+            "agent_id": subagent_sid,
+            "agent_type": "backend-worker",
+            "agent_transcript_path": _write_transcript(
+                tmp_path, name="hintwinner", input_tokens=10, output_tokens=5,
+            ),
+        })
+
+        session = client.get(f"/api/hooks/sessions/{subagent_sid}").json()
+        assert session["agent_id"] == target["id"], (
+            "agent_type hint should override FIFO selection - target agent "
+            f"({target['id']}) must win, got agent_id={session['agent_id']}"
+        )
+
+        # Target's pending marker consumed; first agent's marker still on disk.
+        marker_dir = tmp_path / ".claude" / "agents" / "active"
+        remaining = sorted(p.name for p in marker_dir.glob("pending-*"))
+        assert remaining == [f"pending-{first_agent['id']}-1000-0001"], (
+            f"only the non-matching pending should remain; got {remaining}"
+        )
+        assert (marker_dir / subagent_sid).is_file(), (
+            "target's pending should have been renamed to the session_id"
+        )
+
+    def test_agent_type_hint_no_match_refuses_claim(
+        self, client, marker_project, tmp_path, make_agent,
+    ):
+        """Pending marker exists for agent X. SubagentStop carries agent_type
+        resolving to agent Y (no pending for Y). The resolver must NOT claim
+        X's marker - misattribution-by-luck is exactly the bug to fix."""
+        pid = marker_project["id"]
+        unrelated = make_agent(
+            project_id=pid, name="UnrelatedPending",
+            role="frontend-worker", api_key="hint-unrelated",
+        )
+        hinted = make_agent(
+            project_id=pid, name="HintHasNoMarker",
+            role="backend-worker", api_key="hint-no-marker",
+        )
+        _assign(client, pid, unrelated["id"])
+        _assign(client, pid, hinted["id"])
+
+        _write_pending_marker(
+            tmp_path, agent_id=unrelated["id"], project_id=pid,
+            role="frontend-worker", agent_name="UnrelatedPending",
+        )
+
+        subagent_sid = f"b2{uuid.uuid4().hex[:15]}"
+        client.post("/api/hooks/session-end", json={
+            "session_id": "parent-sid",
+            "cwd": str(tmp_path),
+            "hook_event_name": "SubagentStop",
+            "agent_id": subagent_sid,
+            "agent_type": "backend-worker",  # resolves to hinted, no pending for it
+            "agent_transcript_path": _write_transcript(
+                tmp_path, name="nopending", input_tokens=10, output_tokens=5,
+            ),
+        })
+
+        # Unrelated's marker must still be on disk - the resolver refused to
+        # claim a marker whose agent_id didn't match the hint.
+        marker_dir = tmp_path / ".claude" / "agents" / "active"
+        remaining = list(marker_dir.glob("pending-*"))
+        assert len(remaining) == 1, (
+            "non-matching pending must not be claimed when hint is unambiguous"
+        )
+
+        # The session falls through to the legacy resolve_agent path. agent_type
+        # = "backend-worker" matches `hinted` by role, so attribution still lands
+        # on the right agent - the marker just didn't help.
+        session = client.get(f"/api/hooks/sessions/{subagent_sid}").json()
+        assert session["agent_id"] == hinted["id"], (
+            "legacy resolve_agent should still match by role when marker miss"
+        )
+
+    def test_no_hint_preserves_fifo_when_payload_has_no_agent_type(
+        self, client, marker_project, tmp_path, make_agent,
+    ):
+        """Backstop: DWB-304 FIFO behaviour preserved when the payload carries
+        no agent_type / agent_name (older CC clients, transcript-only flows)."""
+        pid = marker_project["id"]
+        first = make_agent(
+            project_id=pid, name="NoHintFirst",
+            role="backend-worker", api_key="no-hint-first",
+        )
+        second = make_agent(
+            project_id=pid, name="NoHintSecond",
+            role="backend-worker", api_key="no-hint-second",
+        )
+        _assign(client, pid, first["id"])
+        _assign(client, pid, second["id"])
+
+        _write_pending_marker(
+            tmp_path, agent_id=first["id"], project_id=pid,
+            unix_ms=3000, rand="0003",
+        )
+        _write_pending_marker(
+            tmp_path, agent_id=second["id"], project_id=pid,
+            unix_ms=4000, rand="0004",
+        )
+
+        subagent_sid = f"b3{uuid.uuid4().hex[:15]}"
+        # No agent_type / agent_name in the payload -> hint is None.
+        client.post("/api/hooks/session-end", json={
+            "session_id": "parent-sid",
+            "cwd": str(tmp_path),
+            "hook_event_name": "SubagentStop",
+            "agent_id": subagent_sid,
+            "agent_transcript_path": _write_transcript(
+                tmp_path, name="nohint", input_tokens=10, output_tokens=5,
+            ),
+        })
+
+        session = client.get(f"/api/hooks/sessions/{subagent_sid}").json()
+        assert session["agent_id"] == first["id"], (
+            "no-hint payload should fall back to FIFO (oldest unix_ms wins)"
+        )
+
+
 # =====================================================================
 # DWB-311 — SubagentStop production transcript-path regression
 # =====================================================================

@@ -121,6 +121,52 @@ class TestCloseCompactionGate:
         assert r2.status_code == 200, r2.text
         assert r2.json()["closed_at"] is not None
 
+    def test_over_ceiling_playbook_does_not_block_close(self, client, tmp_path):
+        """DWB-397: an over-ceiling shipped playbook/project_rules must NOT block
+        an ai_confident close. Those docs are deployed from DWB and un-editable
+        downstream, so gating a close on them is unfixable."""
+        project, _ = _project_and_agent(client, tmp_path, "GATE3", name="Pat")
+        # Over-ceiling playbook + project_rules, but NO over-ceiling memory.
+        claude = Path(tmp_path) / ".claude"
+        claude.mkdir(parents=True, exist_ok=True)
+        (claude / "worker_playbook.md").write_text(OVER, encoding="utf-8")
+        (claude / "project_rules_worker.md").write_text(OVER, encoding="utf-8")
+        # Keep Pat's memory clean (no over-ceiling scratchpad).
+        opened = client.post("/api/sessions/open", json={
+            "project_id": project["id"], "open_method": "ai_confident",
+        }).json()
+        r = client.post(f"/api/sessions/{opened['id']}/close", json={
+            "close_method": "ai_confident", "close_reason": "explicit",
+            "headline": "shipped governance-doc gate exemption",
+        })
+        assert r.status_code == 200, r.text
+        assert r.json()["closed_at"] is not None
+
+    def test_over_ceiling_memory_still_blocks_alongside_exempt_playbook(
+        self, client, tmp_path
+    ):
+        """DWB-397 guard: the playbook exemption must NOT sweep up memory files.
+        An over-ceiling per-agent memory file still blocks even when an exempt
+        over-ceiling playbook is present."""
+        project, agent = _project_and_agent(client, tmp_path, "GATE4", name="Quinn")
+        self._seed_over_ceiling(tmp_path, "GATE4", "Quinn")
+        claude = Path(tmp_path) / ".claude"
+        claude.mkdir(parents=True, exist_ok=True)
+        (claude / "worker_playbook.md").write_text(OVER, encoding="utf-8")
+        opened = client.post("/api/sessions/open", json={
+            "project_id": project["id"], "open_method": "ai_confident",
+        }).json()
+        r = client.post(f"/api/sessions/{opened['id']}/close", json={
+            "close_method": "ai_confident", "close_reason": "explicit",
+            "headline": "memory still gates past exempt playbook",
+        })
+        assert r.status_code == 422, r.text
+        detail = r.json()["detail"]
+        assert "Compaction gate" in detail
+        # The memory file is named in the refusal; the exempt playbook is not.
+        assert "scratchpad" in detail
+        assert "worker_playbook.md" not in detail
+
     def test_idle_close_exempt_from_compaction_gate(self, client, tmp_path):
         project, _ = _project_and_agent(client, tmp_path, "GATE2", name="Ivy")
         self._seed_over_ceiling(tmp_path, "GATE2", "Ivy")

@@ -1,12 +1,12 @@
 # Path: app/middleware/activity_logger.py
 # File: activity_logger.py
 # Created: 2026-03-29
-# Purpose: Middleware to auto-log POST/PATCH/DELETE activity to activity_log
+# Purpose: Middleware to auto-log POST/PATCH/DELETE activity to activity_log (DWB-329: subpath-aware entity_type for consolidate-complete)
 # Caller: app/main.py
 # Callees: app/database.SessionLocal, app/models/activity_log.ActivityLog
 # Data In: HTTP request/response, X-Agent-ID header
 # Data Out: activity_log rows (side effect)
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-12 (DWB-329)
 
 """FastAPI middleware that auto-inserts activity_log rows for mutating requests."""
 
@@ -37,9 +37,26 @@ _METHOD_ACTION = {
 # Pattern: /api/<entity_type> or /api/<entity_type>/<id>/...
 _PATH_RE = re.compile(r"^/api/([a-z][a-z0-9_-]+)")
 
+# DWB-329 subpath-aware overrides. Some /api/agents/{id}/<subpath> endpoints
+# are administrative acks rather than agent-create work; tagging them with a
+# more specific entity_type lets participants_for_sprint exclude them from
+# the sprint-participation activity_log signal. Add more entries here when
+# new admin/gate subpaths emerge (e.g. dismiss-all, reopen-sprint).
+_CONSOLIDATE_COMPLETE_RE = re.compile(
+    r"^/api/agents/\d+/consolidate-complete(?:/\d+)?/?$"
+)
+
 
 def _parse_entity_type(path: str) -> str | None:
-    """Extract entity type from URL path, e.g. /api/tickets/5 → 'ticket'."""
+    """Extract entity type from URL path, e.g. /api/tickets/5 → 'ticket'.
+
+    DWB-329: /api/agents/{id}/consolidate-complete (POST + DELETE) maps to
+    the dedicated entity_type 'agent_consolidation_ack' so participation
+    signals can exclude it. All other /api/agents subpaths still resolve to
+    'agent'.
+    """
+    if _CONSOLIDATE_COMPLETE_RE.match(path):
+        return "agent_consolidation_ack"
     m = _PATH_RE.match(path)
     if not m:
         return None

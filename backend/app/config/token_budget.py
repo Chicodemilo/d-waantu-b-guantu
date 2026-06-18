@@ -6,7 +6,7 @@
 # Callees: -
 # Data In: file names + text
 # Data Out: ceilings (int), classifications (str), token estimates (int)
-# Last Modified: 2026-06-17
+# Last Modified: 2026-06-18 (DWB-397)
 
 """Canonical token-budget config.
 
@@ -52,6 +52,15 @@ MEMORY_FILES = {
 # inconsistently across scan blocks).
 DEFAULT_CEILING = 1000
 
+# Categories that are DWB-shipped governance docs: deployed from DWB,
+# regenerated on deploy, and un-editable by any agent (.claude/ writes crash;
+# only DWB's own TL authors them). Keeping them lean is DWB's editorial job, an
+# advisory warning on the budget panel, NOT a close-blocking gate elsewhere
+# (DWB-397). They still appear in compute_token_budget output; only the gate
+# enforcement skips them. Agents are gated only on docs they author + can edit:
+# their memory files + root continuity docs (HANDOFF/ARCHITECTURE/README/INITIAL).
+GATE_EXEMPT_CATEGORIES = {"playbook", "project_rules", "agent_def"}
+
 
 def classify_file(name: str) -> str:
     lower = name.lower()
@@ -71,6 +80,20 @@ def classify_file(name: str) -> str:
         return "playbook"
     # Files in agents/ directory
     return "agent_def"
+
+
+def is_gate_enforced(name: str) -> bool:
+    """True when an over-ceiling `name` should BLOCK a close/ack gate.
+
+    DWB-397: shipped governance docs (playbooks, project_rules, agent defs) are
+    advisory only — they classify into GATE_EXEMPT_CATEGORIES and return False.
+    Everything else (root continuity docs, memory files that classify by
+    fallback) returns True. NOTE: per-agent memory files classify as "agent_def"
+    by name alone (they match none of the prefixes in classify_file), so callers
+    that operate on budget entries MUST guard memory files by `agent_name`
+    before applying this exemption — see agent_consolidation.py.
+    """
+    return classify_file(name) not in GATE_EXEMPT_CATEGORIES
 
 
 def estimate_tokens(text: str) -> int:

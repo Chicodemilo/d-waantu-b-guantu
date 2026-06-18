@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: ProjectAgentCreate, ProjectAgentRead, ProjectTeamMember, ProjectTeamRead
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-12
 
 from datetime import datetime
 
@@ -28,12 +28,16 @@ class ProjectAgentRead(BaseModel):
 
 
 # DWB-313 — single-roundtrip team listing for GET /api/projects/{id}/team
+# DWB-387 — last_seen + presumed_live so callers can distinguish a parked-idle
+# teammate from a dead one without scanning hook_sessions separately.
 class ProjectTeamMember(BaseModel):
     agent_id: int
     name: str
     role: str
     is_active: bool
     assigned_at: datetime
+    last_seen: datetime | None
+    presumed_live: bool
 
 
 class ProjectTeamRead(BaseModel):

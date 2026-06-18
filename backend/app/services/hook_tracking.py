@@ -1,12 +1,12 @@
 # Path: app/services/hook_tracking.py
 # File: hook_tracking.py
 # Created: 2026-04-09
-# Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path, DWB-353 ad_hoc routing + alert removal, DWB-382 Layer-2 Haiku classifier fallback)
+# Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path, DWB-353 ad_hoc routing + alert removal, DWB-373 hook_session.dwb_session_id linker, DWB-382 Layer-2 Haiku classifier fallback, DWB-390 agent-id-aware pending-marker claim, DWB-395 grace-window resurrect)
 # Caller: app/routers/hooks.py
 # Callees: app/models/hook_session.py, app/services/tracking.py, app/services/dwb_session.py, app/models/alert.py, app/config/session_phrases.py, anthropic SDK (lazy)
 # Data In: db: Session, hook event JSON from Claude Code hooks
-# Data Out: HookSession records, tracking_log events via tracking.py, opened/closed DwbSession rows
-# Last Modified: 2026-06-11
+# Data Out: HookSession records, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
+# Last Modified: 2026-06-17 (DWB-395)
 #
 # DWB-377 (2026-06-11): UserPromptSubmit close fast-path. Mirrors DWB-344 on
 # the close side - when match_open misses, try match_close and close the
@@ -42,7 +42,12 @@ from app.config.session_phrases import match_close, match_open
 from app.models.agent import Agent
 # DWB-353: app.models.alert imports removed - the only consumer in this
 # module was _create_unattributed_alert, which is gone.
-from app.models.dwb_session import DwbCloseMethod, DwbCloseReason, DwbOpenMethod
+from app.models.dwb_session import (
+    DwbCloseMethod,
+    DwbCloseReason,
+    DwbOpenMethod,
+    DwbSession,
+)
 from app.models.hook_session import HookSession, HookSessionStatus, HookSessionType
 from app.models.project import Project
 from app.models.project_agent import ProjectAgent
@@ -56,6 +61,120 @@ logger = logging.getLogger(__name__)
 
 # Roles treated as overhead (not ticket work)
 OVERHEAD_ROLES = {"team-lead", "pm"}
+
+
+def _active_dwb_session_id(db: Session, project_id: int) -> int | None:
+    """DWB-373: Resolve the active DWB session id for a project, or None.
+
+    Wraps dwb_svc.get_active_session so HookSession inserts can stamp the
+    enclosing window in one expression. Without this link the sessions list
+    aggregator (_rollup_tokens) sums an empty set and reports 0 tokens for
+    every closed DWB session - the symptom DWB-373 surfaced.
+
+    DWB-395: this is also the grace-window resurrect hook-in point. Every
+    hook_session insert / backfill flows through here, so it's exactly where
+    "tracking activity landed" is observable. When no session is open we first
+    attempt to resurrect a just-closed low-precision session (see
+    ``_maybe_grace_resurrect_dwb_session``); the resurrected id is then returned
+    so the incoming hook_session links to the reopened window rather than to a
+    fresh session that would fragment the rollup.
+    """
+    active = dwb_svc.get_active_session(db, project_id)
+    if active is not None:
+        return active.id
+    return _maybe_grace_resurrect_dwb_session(db, project_id)
+
+
+# DWB-395: grace window for auto-resurrecting a just-closed DWB session.
+#
+# A low-precision close (Layer-1 regex catalogue hit, or Layer-2 ai_classifier)
+# can fire on text that wasn't really a close - e.g. TL prose like "shut down
+# cycle" tripping the catalogue. When real tracking activity (a hook_session or
+# tracking_log write) lands within this window of such a close, we treat the
+# close as false and reopen the same session, rather than opening a brand-new
+# one that splits the time/token rollup across two rows.
+#
+# Deliberate closes are NEVER auto-undone:
+#   - slash        : the user explicitly typed /dwb-close
+#   - ai_confident : the TL consciously closed with a headline
+#   - ai_asked     : the TL closed after confirming with the user
+#   - idle_timeout : the safety sweeper, which only fires when there was
+#                    genuinely no activity for the idle window
+# Only `regex` and `ai_classifier` - the two low-precision, no-human-in-loop
+# layers - are eligible.
+_GRACE_RESURRECT_SECONDS = 120
+_GRACE_RESURRECT_METHODS = (DwbCloseMethod.regex, DwbCloseMethod.ai_classifier)
+
+
+def _maybe_grace_resurrect_dwb_session(
+    db: Session, project_id: int, now: datetime | None = None
+) -> int | None:
+    """DWB-395: reopen a just-closed low-precision DWB session when tracking
+    activity lands inside the grace window. Returns the resurrected session id,
+    or None when nothing was resurrected.
+
+    Conditions (all must hold):
+      - the project currently has NO open DWB session
+      - its most-recently-closed session was closed via `regex` or
+        `ai_classifier` (the low-precision layers)
+      - that close happened within ``_GRACE_RESURRECT_SECONDS`` of ``now``
+
+    Fire-and-forget contract, like the rest of this module: any failure is
+    swallowed + logged to failed_hooks. Token/time attribution must never break
+    because a resurrect attempt raised. The caller owns the commit (this runs
+    inside the hook handler's transaction, alongside the hook_session insert).
+    """
+    try:
+        # The caller only invokes this when no session is open, but re-check so
+        # the helper is correct in isolation and after any racing open.
+        if dwb_svc.get_active_session(db, project_id) is not None:
+            return None
+
+        recent = db.scalar(
+            select(DwbSession)
+            .where(DwbSession.project_id == project_id)
+            .where(DwbSession.closed_at.isnot(None))
+            .order_by(DwbSession.closed_at.desc())
+            .limit(1)
+        )
+        if recent is None:
+            return None
+        if recent.close_method not in _GRACE_RESURRECT_METHODS:
+            return None
+
+        # closed_at is naive UTC; normalise the reference clock to match.
+        ref = now or datetime.now(UTC)
+        if ref.tzinfo is not None:
+            ref = ref.astimezone(UTC).replace(tzinfo=None)
+        elapsed = (ref - recent.closed_at).total_seconds()
+        if elapsed > _GRACE_RESURRECT_SECONDS:
+            return None
+
+        resurrected, conflict = dwb_svc.reopen_session(db, recent)
+        if resurrected is None or conflict is not None:
+            # Lost a race to a concurrent open; leave it be.
+            return None
+
+        logger.info(
+            "DWB-395 grace resurrect: reopened DWB session id=%s "
+            "(closed via %s, %.0fs ago) for project_id=%s",
+            recent.id,
+            recent.close_method.value if recent.close_method else "?",
+            elapsed,
+            project_id,
+        )
+        return resurrected.id
+    except Exception as e:
+        logger.exception(
+            "DWB-395 grace resurrect failed for project_id=%s", project_id
+        )
+        log_failed_hook(
+            hook_event="dwb_session_grace_resurrect",
+            status_code=None,
+            raw_payload={"project_id": project_id},
+            error=f"{type(e).__name__}: {e}",
+        )
+        return None
 
 # Subdirectory under <project.repo_path>/.claude where per-session marker
 # files live. Each marker is a JSON file named <session_id> containing
@@ -154,6 +273,7 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
         project_id=project.id,
         ticket_id=ticket.id if ticket else None,
         sprint_id=sprint_id,
+        dwb_session_id=_active_dwb_session_id(db, project.id),
         status=HookSessionStatus.active,
         session_type=session_type,
         agent_name=agent_name,
@@ -263,6 +383,7 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
             project_id=project.id,
             ticket_id=ticket.id if ticket else None,
             sprint_id=sprint_id,
+            dwb_session_id=_active_dwb_session_id(db, project.id),
             status=HookSessionStatus.active,
             session_type=session_type,
             agent_name=agent_name,
@@ -273,6 +394,12 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         # Update transcript path if we have a better one
         if transcript_path and not session.transcript_path:
             session.transcript_path = transcript_path
+
+        # DWB-373: Backfill dwb_session_id if SessionStart landed before the
+        # enclosing DWB session opened. Only stamp on a still-NULL field so
+        # we never reattribute a hook_session that already linked at start.
+        if session.dwb_session_id is None:
+            session.dwb_session_id = _active_dwb_session_id(db, session.project_id)
 
         # Re-resolve agent if we didn't get one at session start
         if not session.agent_id:
@@ -562,12 +689,19 @@ def resolve_agent_from_marker(
          where the TL knows the session_id and can pre-write a matching
          marker, and by direct-write tests.
       2. DWB-304 pending-marker fallback: when the literal file is missing,
-         scan for the oldest unconsumed `pending-<agent_id>-<ms>-<rand>`
-         marker that belongs to this project and atomically rename it to
-         <session_id>. CC's SubagentStop session_ids are generated internally
-         and can't be pre-computed by the TL, so the TL writes pending markers
-         keyed on agent identity instead. The rename is the consume signal —
-         os.rename is atomic, so concurrent SubagentStops can't double-claim.
+         scan for an unconsumed `pending-<agent_id>-<ms>-<rand>` marker that
+         belongs to this project and atomically rename it to <session_id>.
+         CC's SubagentStop session_ids are generated internally and can't be
+         pre-computed by the TL, so the TL writes pending markers keyed on
+         agent identity instead. The rename is the consume signal — os.rename
+         is atomic, so concurrent SubagentStops can't double-claim.
+
+         DWB-390: when the hook payload carries an agent identity hint
+         (``agent_type`` / ``agent_name``), the scan filters candidates to
+         the matching ``agent_id`` so concurrent SubagentStops from different
+         agents can't race-claim each other's markers. Without a hint (older
+         SessionStart paths, hooks fired before the TL writes a marker) the
+         scan falls back to FIFO across all pending markers for this project.
 
     The marker file is authoritative when present: it skips the role/name
     resolve heuristics that historically lost attribution (the PM=50-tokens
@@ -585,8 +719,12 @@ def resolve_agent_from_marker(
             db, project, marker_path, session_id, hook_event,
         )
 
-    # Step 2: pending-marker fallback (DWB-304).
-    claimed = _claim_pending_marker(marker_dir, project.id, marker_path, hook_event)
+    # Step 2: pending-marker fallback (DWB-304 + DWB-390 agent_id-aware claim).
+    agent_id_hint = _hint_agent_id_from_hook(db, project, hook_data)
+    claimed = _claim_pending_marker(
+        marker_dir, project.id, marker_path, hook_event,
+        agent_id_hint=agent_id_hint,
+    )
     if claimed:
         return _read_marker_and_resolve(
             db, project, marker_path, session_id, hook_event,
@@ -657,15 +795,54 @@ def _read_marker_and_resolve(
     return agent
 
 
+def _hint_agent_id_from_hook(
+    db: Session, project: Project, hook_data: dict
+) -> int | None:
+    """DWB-390: pull the agent_id hint out of a hook payload for the pending-
+    marker claim filter.
+
+    SubagentStop payloads include ``agent_type`` (the role/name CC matched on
+    when spawning the subagent). SessionStart/SessionEnd payloads may include
+    ``agent_name`` when the caller pre-fills it. Either is enough to resolve
+    one Agent row inside this project; we then filter the pending-marker scan
+    to that agent_id so a concurrent stop from a sibling agent can't claim
+    this agent's marker.
+
+    Returns the Agent.id when the hook payload identifies exactly one matching
+    agent in this project; returns None when the payload carries no hint or
+    the hint doesn't resolve (caller falls back to FIFO behavior).
+    """
+    name = hook_data.get("agent_type") or hook_data.get("agent_name")
+    if not name or not isinstance(name, str) or not name.strip():
+        return None
+    agent = resolve_agent(db, name, project.id)
+    return agent.id if agent else None
+
+
 def _claim_pending_marker(
     marker_dir: Path,
     project_id: int,
     target_path: Path,
     hook_event: str,
+    *,
+    agent_id_hint: int | None = None,
 ) -> bool:
-    """Find the oldest unconsumed pending-* marker for this project and rename it
-    to `target_path` (the actual SubagentStop session_id). Returns True if a
+    """Find an unconsumed pending-* marker for this project and rename it to
+    `target_path` (the actual SubagentStop session_id). Returns True if a
     marker was successfully claimed, False otherwise.
+
+    Selection rules:
+
+      - When ``agent_id_hint`` is provided (DWB-390), the scan considers only
+        candidates whose marker JSON's ``agent_id`` equals the hint. The
+        oldest such candidate wins by unix_ms. If no candidate matches the
+        hint, no claim is made: better to fall through to the legacy
+        resolve_agent path than to misattribute by stealing a sibling agent's
+        marker.
+      - When ``agent_id_hint`` is None (older hook paths, payloads with no
+        identity hint), the scan falls back to FIFO across every project-
+        matching pending marker. This preserves the DWB-304 single-pending
+        behavior.
 
     Lazy garbage-collection: any pending marker older than
     `_PENDING_MARKER_STALE_SECONDS` (mtime-based) is unlinked during the scan.
@@ -710,13 +887,28 @@ def _claim_pending_marker(
         # Project guard — read the JSON, drop markers that don't belong here.
         try:
             data = json.loads(entry.read_text(encoding="utf-8", errors="replace"))
-            marker_pid = data.get("project_id") if isinstance(data, dict) else None
         except (OSError, ValueError, TypeError):
             # Unparseable markers are NOT claimable; we don't want to
             # claim-then-fail-to-parse and orphan the rename. Skip.
             continue
+        if not isinstance(data, dict):
+            continue
+        marker_pid = data.get("project_id")
         if marker_pid is not None and int(marker_pid) != project_id:
             continue
+
+        # DWB-390 agent-aware claim: when the hook payload identifies one
+        # specific agent, only that agent's pending markers are eligible.
+        # Without a hint, every pending marker for this project is fair game
+        # (legacy FIFO path).
+        if agent_id_hint is not None:
+            marker_aid = data.get("agent_id")
+            try:
+                marker_aid_int = int(marker_aid) if marker_aid is not None else None
+            except (TypeError, ValueError):
+                marker_aid_int = None
+            if marker_aid_int != agent_id_hint:
+                continue
 
         unix_ms = int(m.group(2))
         candidates.append((unix_ms, entry))
@@ -938,6 +1130,10 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
         session.sprint_id = sprint_id
         session.session_type = session_type
         session.agent_name = agent_type
+        # DWB-373: Backfill dwb_session_id if the subagent_id row was
+        # created before any DWB session opened. Only stamp on NULL.
+        if session.dwb_session_id is None:
+            session.dwb_session_id = _active_dwb_session_id(db, session.project_id)
     else:
         # Create new session keyed on subagent_id
         session = HookSession(
@@ -947,6 +1143,7 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
             project_id=project.id,
             ticket_id=ticket.id if ticket else None,
             sprint_id=sprint_id,
+            dwb_session_id=_active_dwb_session_id(db, project.id),
             status=HookSessionStatus.active,
             session_type=session_type,
             agent_name=agent_type,

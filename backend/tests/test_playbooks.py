@@ -309,3 +309,100 @@ class TestDeployScaffoldsRootDocs:
         for name in self._DOCS:
             content = (tmp_path / name).read_text(encoding="utf-8")
             assert "THIS PROJECT IS NOT LINKED TO JIRA" not in content
+
+
+class TestDeployHooksSettings:
+    """DWB-390: deploy-playbooks must write the hooks block into the target
+    project's `.claude/settings.json` so SessionStart / SessionEnd / Stop /
+    SubagentStop / UserPromptSubmit hooks fire on that project's CC instance.
+    Sibling projects had ZERO hook_sessions because their `.claude/` had no
+    settings.json at all.
+    """
+
+    _EXPECTED_HOOK_EVENTS = {
+        "SessionStart", "UserPromptSubmit", "SessionEnd", "Stop", "SubagentStop"
+    }
+
+    def _deploy_or_skip(self, client, project_id):
+        import pytest
+        r = client.post(f"/api/projects/{project_id}/deploy-playbooks")
+        if r.status_code == 500:
+            pytest.skip("docs/ has no playbook files in this env")
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_creates_settings_json_when_missing(self, client, make_project, tmp_path):
+        import json
+        project = make_project(repo_path=str(tmp_path))
+        data = self._deploy_or_skip(client, project["id"])
+
+        assert data["hooks_settings"] == "created"
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        assert settings_path.is_file()
+        contents = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert set(contents["hooks"].keys()) == self._EXPECTED_HOOK_EVENTS
+        # Each hook entry points at the local DWB API.
+        for event in self._EXPECTED_HOOK_EVENTS:
+            block = contents["hooks"][event][0]["hooks"][0]
+            assert block["type"] == "command"
+            assert "http://localhost:8000/api/hooks/" in block["command"]
+
+    def test_merges_into_existing_settings_json(
+        self, client, make_project, tmp_path
+    ):
+        """Existing top-level keys (model, permissions, theme...) must survive;
+        only the `hooks` key is replaced."""
+        import json
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        settings_path = claude_dir / "settings.json"
+        settings_path.write_text(
+            json.dumps({
+                "model": "claude-sonnet-4-5",
+                "permissions": {"allow": ["Bash(git status:*)"]},
+                "hooks": {"SessionStart": [{"hooks": [{"command": "old"}]}]},
+            }, indent=2),
+            encoding="utf-8",
+        )
+
+        project = make_project(repo_path=str(tmp_path))
+        data = self._deploy_or_skip(client, project["id"])
+        assert data["hooks_settings"] == "merged"
+
+        merged = json.loads(settings_path.read_text(encoding="utf-8"))
+        # Preserved top-level keys.
+        assert merged["model"] == "claude-sonnet-4-5"
+        assert merged["permissions"]["allow"] == ["Bash(git status:*)"]
+        # Replaced hooks block - all five events now present, old "old" gone.
+        assert set(merged["hooks"].keys()) == self._EXPECTED_HOOK_EVENTS
+        cmd = merged["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        assert "session-start" in cmd
+        assert "old" not in cmd
+
+    def test_unchanged_when_hooks_block_already_matches(
+        self, client, make_project, tmp_path
+    ):
+        """Second deploy with no settings drift should report unchanged."""
+        project = make_project(repo_path=str(tmp_path))
+        first = self._deploy_or_skip(client, project["id"])
+        assert first["hooks_settings"] == "created"
+
+        second = self._deploy_or_skip(client, project["id"])
+        assert second["hooks_settings"] == "unchanged"
+
+    def test_unparseable_settings_json_is_preserved(
+        self, client, make_project, tmp_path
+    ):
+        """An existing but broken settings.json must NOT be overwritten -
+        the user may be in the middle of editing it. hooks_settings is None."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        broken = claude_dir / "settings.json"
+        broken.write_text("{ not valid json", encoding="utf-8")
+
+        project = make_project(repo_path=str(tmp_path))
+        data = self._deploy_or_skip(client, project["id"])
+        assert data["hooks_settings"] is None
+        # File contents untouched.
+        assert broken.read_text(encoding="utf-8") == "{ not valid json"

@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: ClientLog, ClientLogLevel
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-12
 
 import enum
 from datetime import datetime
@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.mysql import DATETIME as MySQLDateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -61,7 +62,12 @@ class ClientLog(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     context_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     route: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # DWB-384: fsp=3 on MySQL so same-second client emits keep stable
+    # ordering. Plain DateTime() variant retained for non-MySQL dialects.
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime().with_variant(MySQLDateTime(fsp=3), "mysql"),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,

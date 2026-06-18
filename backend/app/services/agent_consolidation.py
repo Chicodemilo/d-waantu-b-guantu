@@ -6,7 +6,7 @@
 # Callees: AgentConsolidationAck, Agent, Project, Sprint, compute_token_budget
 # Data In: db: Session, project/sprint/agent ids, optional notes, optional overrides
 # Data Out: AgentConsolidationAck rows; status dicts; violation lists
-# Last Modified: 2026-06-12 (DWB-329)
+# Last Modified: 2026-06-18 (DWB-397)
 
 """Consolidation gate service.
 
@@ -35,6 +35,7 @@ from app.models.agent import Agent
 from app.models.agent_consolidation_ack import AgentConsolidationAck
 from app.models.project import Project
 from app.models.sprint import Sprint
+from app.config.token_budget import is_gate_enforced
 from app.routers.projects import compute_token_budget
 
 
@@ -42,6 +43,14 @@ from app.routers.projects import compute_token_budget
 # Files not listed here have no enforced owner and will not appear under any
 # agent's owned_over_ceiling_files. The mapping uses the same `name` strings
 # emitted by compute_token_budget.
+#
+# DWB-397: the .claude/ playbook + project_rules entries were removed. Those are
+# DWB-shipped governance docs — deployed, regenerated on deploy, un-editable by
+# any agent — so gating a downstream agent on them blocks a close they cannot
+# fix. Keeping them lean is DWB's editorial job (advisory on the budget panel),
+# not a close gate. Only docs an agent authors + can edit stay owned: the
+# repo-root continuity docs below + per-agent memory files (matched by
+# agent_name in compute_token_budget, not via this map).
 _OWNER_MAP: dict[str, list[str]] = {
     # Repo-root docs — team-lead owns
     "CLAUDE.md": ["team-lead"],
@@ -49,14 +58,6 @@ _OWNER_MAP: dict[str, list[str]] = {
     "ARCHITECTURE.md": ["team-lead"],
     "README.md": ["team-lead"],
     "INITIAL.md": ["team-lead"],
-    # Per-role playbooks + project rules (agent defs are 8-line stubs — not owned)
-    ".claude/team_lead_playbook.md": ["team-lead"],
-    ".claude/project_rules_team_lead.md": ["team-lead"],
-    ".claude/pm_playbook.md": ["pm"],
-    ".claude/project_rules_pm.md": ["pm"],
-    # Worker-shared files — every worker role is responsible
-    ".claude/worker_playbook.md": ["frontend-worker", "backend-worker", "system-ops", "tester"],
-    ".claude/project_rules_worker.md": ["frontend-worker", "backend-worker", "system-ops", "tester"],
 }
 
 
@@ -68,6 +69,21 @@ def _slim_file_entry(f: dict) -> dict:
         "ceiling": f["ceiling"],
         "status": f["status"],
     }
+
+
+def _gate_counts(f: dict) -> bool:
+    """Whether a token-budget entry should be enforced by a close/ack gate.
+
+    DWB-397: shipped governance docs (playbooks, project_rules, agent defs) are
+    advisory only — they never block a gate. They are exempt ONLY when they are
+    shared (non-agent) files: an entry carrying `agent_name` is a per-agent
+    memory file, which classify_file would mislabel as "agent_def" by name
+    alone. Those memory files MUST still gate, so the exemption is applied only
+    when `agent_name` is None.
+    """
+    if f.get("agent_name"):
+        return True
+    return is_gate_enforced(f["name"])
 
 
 def _build_owner_index(
@@ -92,6 +108,10 @@ def _owned_files_from_budget(
     }
     for f in budget_files:
         if f["status"] == "ok":
+            continue
+        # DWB-397: shipped governance docs (playbooks/project_rules/agent defs)
+        # are advisory, never gated. Memory files keep their agent_name guard.
+        if not _gate_counts(f):
             continue
         if f.get("agent_name"):
             owner_agent = agent_by_name.get(f["agent_name"])
@@ -159,7 +179,10 @@ def over_ceiling_files_for_project(db: Session, project: Project) -> list[dict]:
             "agent_name": f.get("agent_name"),
         }
         for f in budget["files"]
-        if f["status"] == "over"
+        # DWB-397: shipped governance docs are advisory, not close-blocking. The
+        # _gate_counts guard keeps per-agent memory files (which carry
+        # agent_name) gated while exempting shared playbooks/project_rules/defs.
+        if f["status"] == "over" and _gate_counts(f)
     ]
 
 

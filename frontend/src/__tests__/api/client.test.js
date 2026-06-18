@@ -6,7 +6,7 @@
 // Callees: ../../api/client (get, post, patch, del, ApiError)
 // Data In: Mock fetch responses
 // Data Out: Test assertions
-// Last Modified: 2026-04-09
+// Last Modified: 2026-06-12
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { get, post, patch, del, ApiError } from '../../api/client';
@@ -16,10 +16,12 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 function jsonResponse(data, status = 200) {
+  const body = data === undefined ? '' : JSON.stringify(data);
   return Promise.resolve({
     ok: status >= 200 && status < 300,
     status,
     json: () => Promise.resolve(data),
+    text: () => Promise.resolve(body),
   });
 }
 
@@ -28,6 +30,7 @@ function noContentResponse() {
     ok: true,
     status: 204,
     json: () => Promise.reject(new Error('No content')),
+    text: () => Promise.resolve(''),
   });
 }
 
@@ -37,6 +40,7 @@ function errorResponse(status, detail = null) {
     ok: false,
     status,
     json: () => (data ? Promise.resolve(data) : Promise.reject(new Error('no body'))),
+    text: () => Promise.resolve(data ? JSON.stringify(data) : ''),
   });
 }
 

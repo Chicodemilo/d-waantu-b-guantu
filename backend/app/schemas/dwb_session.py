@@ -111,14 +111,19 @@ class DwbSessionCloseRequest(BaseModel):
 
 
 class DwbSessionOpenConflict(BaseModel):
-    """409 response body for POST /api/sessions/open when a session is already
-    open for the project. Surfaces the active session's id + opened_at so
-    the caller can debug ('why didn't my open succeed?') without a follow-up
-    GET."""
+    """409 response body for POST /api/sessions/open and
+    POST /api/sessions/{id}/reopen (DWB-395) when a session is already open for
+    the project. Surfaces the active session's id + opened_at so the caller can
+    debug ('why didn't my open/reopen succeed?') without a follow-up GET.
+
+    ``headline`` (DWB-395) carries the active session's user-facing summary when
+    one is set, so the conflict names the blocking session rather than forcing
+    the caller to look it up. None when the active session has no headline."""
 
     detail: str
     active_session_id: int
     opened_at: datetime
+    headline: str | None = None
 
 
 # ---------------------------------------------------------------------------

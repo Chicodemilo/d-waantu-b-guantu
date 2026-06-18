@@ -1,34 +1,28 @@
 // Path: src/components/dashboard/ProjectCard.jsx
 // File: ProjectCard.jsx
 // Created: 2026-03-29
-// Purpose: Dashboard card displaying a project summary with ticket stats, token usage, time spent, and progress bar. Tracking summary fetch uses AbortController to cancel on unmount (DWB-370).
+// Purpose: Dashboard card displaying a project summary with ticket stats, token usage, time spent, current-session info (IDEAS Tier 1 #3), and progress bar. Tracking summary and current-session both come from shared cache hooks so the dashboard mount stays at one fetch per project for each data source.
 // Caller: DashboardPage.jsx
-// Callees: react (useState, useEffect), react-router-dom (Link), useStore, services/tracking, utils/format, StatusBadge, AsciiProgressBar, dashboard.css
-// Data In: props { project }; tickets from store; tracking summary from API
+// Callees: react-router-dom (Link), useStore, hooks/useTrackingSummary, hooks/useProjectSessions, utils/format, StatusBadge, SessionInfoLine, AsciiProgressBar, dashboard.css
+// Data In: props { project }; tickets from store; tracking summary + current session from shared caches
 // Data Out: default export ProjectCard component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-12
 
-import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
-import { getTrackingSummary } from '../../services/tracking';
+import { useTrackingSummary } from '../../hooks/useTrackingSummary';
+import { useCurrentSession } from '../../hooks/useProjectSessions';
 import { formatTime, formatTokens } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
+import SessionInfoLine from '../common/SessionInfoLine';
 import AsciiProgressBar from '../common/AsciiProgressBar';
 import '../../styles/dashboard.css';
 
 function ProjectCard({ project }) {
   const tickets = useStore((s) => s.getTicketsByProject(project.id));
   const done = tickets.filter((t) => t.status === 'done').length;
-  const [summary, setSummary] = useState(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    getTrackingSummary(project.id, { signal: controller.signal })
-      .then((data) => { if (!controller.signal.aborted) setSummary(data); })
-      .catch(() => {});
-    return () => { controller.abort(); };
-  }, [project.id]);
+  const summary = useTrackingSummary(project.id);
+  const currentSession = useCurrentSession(project.id);
 
   const totalTokens = summary ? (summary.project_total.tokens || 0) : 0;
   const totalTime = summary ? (summary.project_total.time_seconds || 0) : 0;
@@ -41,6 +35,9 @@ function ProjectCard({ project }) {
       </div>
       <div className="project-card__name">{project.name}</div>
       <div className="project-card__desc">{project.description}</div>
+      <div className="project-card__session">
+        <SessionInfoLine session={currentSession} variant="card" projectId={project.id} />
+      </div>
       <div className="project-card__stats">
         <div className="project-card__stat">
           <div className="project-card__stat-value">{tickets.length}</div>

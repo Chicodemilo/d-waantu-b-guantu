@@ -1,8 +1,8 @@
 # Path: app/services/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: Service-layer business logic for DWB session open/close + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases, DWB-382 ai_classifier added to AI-set)
-# Caller: app/services/idle_sweeper.py (sweep loop), app/routers/dwb_sessions.py (open + close endpoints)
+# Purpose: Service-layer business logic for DWB session open/close/reopen + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases, DWB-382 ai_classifier added to AI-set, DWB-395 reopen_session)
+# Caller: app/services/idle_sweeper.py (sweep loop), app/routers/dwb_sessions.py (open + close + reopen endpoints), app/services/hook_tracking.py (grace-window resurrect)
 # Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
@@ -300,6 +300,55 @@ def close_session(
     )
     db.flush()
     return session
+
+
+def reopen_session(
+    db: Session, session: DwbSession
+) -> tuple[DwbSession | None, DwbSession | None]:
+    """Reopen a closed DwbSession (DWB-395).
+
+    Nulls ``closed_at`` / ``close_method`` / ``close_reason`` / ``close_phrase``
+    so the row becomes active again. ``is_open`` is a generated STORED column
+    that recomputes from ``closed_at`` (1 when NULL), so nulling ``closed_at``
+    is sufficient to flip the single-active marker; the row is refreshed so the
+    new ``is_open`` value is visible to the caller.
+
+    Returns a ``(reopened, conflict)`` tuple mirroring ``open_session``:
+
+      - ``(session, None)``   — success, or an idempotent no-op when the row
+                                 was already open.
+      - ``(None, existing)``  — another session is already open for this
+                                 project; caller translates to HTTP 409. We do
+                                 NOT touch the row in this case, so the
+                                 (project_id, is_open) UNIQUE index is never
+                                 tripped.
+
+    The caller owns the commit; this function flushes only. The DB UNIQUE
+    index is the backstop if a racing open lands between the pre-check and the
+    flush.
+
+    Totals (``total_tokens`` / ``total_time_seconds``) and ``headline`` are
+    intentionally left as-is: they were frozen at the prior close and will be
+    recomputed on the next close. The reopen only undoes the close stamp.
+    """
+    # Already open: nothing to undo. Idempotent success.
+    if session.closed_at is None:
+        return session, None
+
+    # Single-active invariant: a different open session for this project blocks
+    # the reopen. (The just-closed row we're reopening is, by definition, not
+    # the active one, so get_active_session can only return a *different* row.)
+    existing = get_active_session(db, session.project_id)
+    if existing is not None and existing.id != session.id:
+        return None, existing
+
+    session.closed_at = None
+    session.close_method = None
+    session.close_reason = None
+    session.close_phrase = None
+    db.flush()
+    db.refresh(session)
+    return session, None
 
 
 def find_idle_sessions(

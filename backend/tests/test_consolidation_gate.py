@@ -227,30 +227,29 @@ class TestConsolidationStatus:
         assert "ARCHITECTURE.md" in names
         assert "HANDOFF.md" in names
 
-    def test_owner_mapping_pm_owns_pm_playbook(self, client, gate_ctx):
-        body = client.get(
-            f"/api/projects/{gate_ctx['project']['id']}/consolidation-status",
-            params={"sprint_id": gate_ctx["sprint"]["id"]},
-        ).json()
-        mona = next(a for a in body["agents"] if a["name"] == "Mona")
-        names = {f["name"] for f in mona["owned_over_ceiling_files"]}
-        assert ".claude/pm_playbook.md" in names
-        assert ".claude/project_rules_pm.md" in names
-        # PM should NOT own worker-shared files
-        assert ".claude/worker_playbook.md" not in names
+    def test_playbooks_and_project_rules_not_owned_by_anyone(self, client, gate_ctx):
+        """DWB-397: shipped governance docs are advisory, never owned/gated.
 
-    def test_owner_mapping_backend_worker_owns_worker_shared(
-        self, client, gate_ctx
-    ):
+        Playbooks, project_rules, and agent defs must not appear under ANY
+        agent's owned_over_ceiling_files even though the fixture writes them
+        far over ceiling.
+        """
         body = client.get(
             f"/api/projects/{gate_ctx['project']['id']}/consolidation-status",
             params={"sprint_id": gate_ctx["sprint"]["id"]},
         ).json()
-        barry = next(a for a in body["agents"] if a["name"] == "Barry")
-        names = {f["name"] for f in barry["owned_over_ceiling_files"]}
-        # worker_playbook + project_rules_worker are shared across all worker roles
-        assert ".claude/worker_playbook.md" in names
-        assert ".claude/project_rules_worker.md" in names
+        exempt = {
+            ".claude/pm_playbook.md",
+            ".claude/project_rules_pm.md",
+            ".claude/worker_playbook.md",
+            ".claude/project_rules_worker.md",
+        }
+        for agent in body["agents"]:
+            names = {f["name"] for f in agent["owned_over_ceiling_files"]}
+            assert exempt.isdisjoint(names), (
+                f"{agent['name']} should not own any shipped governance doc: "
+                f"{names & exempt}"
+            )
 
     def test_owner_mapping_memory_files_belong_to_agent(self, client, gate_ctx):
         body = client.get(
@@ -411,33 +410,36 @@ class TestOverCeilingEnforcement:
         assert r.status_code == 400, r.text
         detail = r.json()["detail"]
         assert detail["error"] == "over_ceiling_files_must_be_trimmed_or_overridden"
-        # Barry owns worker_playbook.md, project_rules_worker.md, and his own
-        # memory/scratchpad — all 'over' in the fixture. Every entry has the
-        # expected shape.
+        # DWB-397: Barry's shipped playbooks/project_rules are exempt; the only
+        # over-ceiling file he still OWNS is his own memory/scratchpad.
         names = {v["file"] for v in detail["violations"]}
-        assert ".claude/worker_playbook.md" in names
-        assert ".claude/project_rules_worker.md" in names
         assert any(n.startswith("memory/Barry/") for n in names)
+        # Shipped governance docs must NOT appear as violations.
+        assert ".claude/worker_playbook.md" not in names
+        assert ".claude/project_rules_worker.md" not in names
         for v in detail["violations"]:
             assert isinstance(v["tokens"], int) and v["tokens"] > v["ceiling"]
             assert isinstance(v["ceiling"], int)
 
-    def test_ack_with_partial_overrides_refused(self, client, gate_ctx):
-        """Some files justified, others not → 400 listing the missing ones."""
+    def test_ack_with_full_memory_override_succeeds(self, client, gate_ctx):
+        """DWB-397: with playbooks exempt, justifying only the owned memory file
+        is enough to ack — the agent no longer has to override docs they can't edit."""
         agent = gate_ctx["agents"]["Barry"]
-        # Justify only one file
+        status = client.get(
+            f"/api/projects/{gate_ctx['project']['id']}/consolidation-status",
+            params={"sprint_id": gate_ctx["sprint"]["id"]},
+        ).json()
+        barry = next(a for a in status["agents"] if a["agent_id"] == agent["id"])
+        over = [f for f in barry["owned_over_ceiling_files"] if f["status"] == "over"]
+        # Only memory files remain owned + over for a worker now.
+        assert over, "Barry should still own at least his over-ceiling memory file"
+        assert all(f["name"].startswith("memory/") for f in over)
+        overrides = {f["name"]: "load-bearing in-flight notes" for f in over}
         r = client.post(f"/api/agents/{agent['id']}/consolidate-complete", json={
             "sprint_id": gate_ctx["sprint"]["id"],
-            "overrides": {".claude/worker_playbook.md": "load-bearing role guide"},
+            "overrides": overrides,
         })
-        assert r.status_code == 400, r.text
-        detail = r.json()["detail"]
-        assert detail["error"] == "over_ceiling_files_must_be_trimmed_or_overridden"
-        missing = {v["file"] for v in detail["violations"]}
-        # Justified file is NOT in the violations list anymore
-        assert ".claude/worker_playbook.md" not in missing
-        # Others still demand justification
-        assert ".claude/project_rules_worker.md" in missing
+        assert r.status_code == 201, r.text
 
     def test_ack_with_empty_reason_refused(self, client, gate_ctx):
         """A whitespace-only reason is not a real override → still refused for that file."""
@@ -730,6 +732,137 @@ class TestParticipantScoping:
             assert "consolidation gate failed" not in r.json()["detail"]
         else:
             assert r.status_code == 200
+
+    def test_consolidate_complete_path_maps_to_dedicated_entity_type(self):
+        """DWB-329 middleware leg: _parse_entity_type must return
+        'agent_consolidation_ack' for the consolidate-complete subpaths so
+        participants_for_sprint can filter ack-only signals out. Direct unit
+        test on the path-parsing function because the consolidate-complete
+        response schema lacks project_id, so the middleware short-circuits
+        before emitting a row today - the tagging is still load-bearing for
+        any future path (audit subscription, manual log insert) that takes
+        the same URL through the parser.
+        """
+        from app.middleware.activity_logger import _parse_entity_type
+
+        # POST /api/agents/{id}/consolidate-complete
+        assert (
+            _parse_entity_type("/api/agents/14/consolidate-complete")
+            == "agent_consolidation_ack"
+        )
+        # DELETE /api/agents/{id}/consolidate-complete/{sprint_id}
+        assert (
+            _parse_entity_type("/api/agents/14/consolidate-complete/27")
+            == "agent_consolidation_ack"
+        )
+        # Trailing slash variant
+        assert (
+            _parse_entity_type("/api/agents/14/consolidate-complete/")
+            == "agent_consolidation_ack"
+        )
+        # POST /api/agents itself stays as the generic 'agent' type so agent
+        # create/update activity is still attributable.
+        assert _parse_entity_type("/api/agents") == "agent"
+        assert _parse_entity_type("/api/agents/14") == "agent"
+        assert (
+            _parse_entity_type("/api/agents/14/memory/append") == "agent"
+        )
+        # Tickets / sprints unaffected.
+        assert _parse_entity_type("/api/tickets/899") == "ticket"
+        assert _parse_entity_type("/api/sprints/107") == "sprint"
+
+    def test_ack_only_activity_does_not_make_agent_participant(
+        self, client, make_project, make_epic, make_sprint, db_session
+    ):
+        """DWB-329 service leg: an agent whose ONLY in-window activity is a
+        consolidate-complete ack must NOT be counted as a sprint participant.
+
+        Reproduces the S62/S63 bug: Pam acked S62 inside S63's window and
+        got pulled into S63's required-ack set despite doing zero S63 work.
+
+        Uses a direct DB insert for the activity_log row so the test doesn't
+        couple to the consolidate-complete gate's over-ceiling refusal path -
+        the middleware tagging is covered in the sibling test above.
+        """
+        from datetime import datetime, time, timedelta
+
+        from app.models.activity_log import ActivityLog
+        from app.services.agent_consolidation import participants_for_sprint
+        from app.models.sprint import Sprint
+
+        project = make_project(prefix="PRT329S")
+        epic = make_epic(project_id=project["id"])
+        sprint = make_sprint(
+            project_id=project["id"], epic_id=epic["id"], sprint_number=1,
+            start_date="2026-06-01", end_date="2026-06-07",
+        )
+        sprint_row = db_session.get(Sprint, sprint["id"])
+        assert sprint_row.start_date is not None
+
+        worker = client.post("/api/agents", json={
+            "project_id": project["id"], "name": "RealWorker",
+            "role": "backend-worker", "api_key": f"prt329s-w-{project['id']}",
+        }).json()
+        pamlike = client.post("/api/agents", json={
+            "project_id": project["id"], "name": "AckOnly",
+            "role": "pm", "api_key": f"prt329s-p-{project['id']}",
+        }).json()
+
+        # Real worker has a ticket on this sprint -> legitimate participant.
+        client.post("/api/tickets", json={
+            "project_id": project["id"],
+            "sprint_id": sprint["id"],
+            "epic_id": epic["id"],
+            "ticket_number": 1,
+            "ticket_key": "PRT329S-001",
+            "title": "Real work",
+            "assigned_agent_id": worker["id"],
+        })
+
+        # Drop two activity_log rows inside the sprint window, both for
+        # PamLike: one for a (notional) prior-sprint ack, one for a misc
+        # admin action with the generic 'agent' entity_type. The ack row
+        # MUST NOT count toward participation; the generic 'agent' row WILL.
+        window_ts = datetime.combine(sprint_row.start_date, time(12, 0, 0))
+        # Build a sprint window timestamp 1 day into the sprint.
+        window_ts = window_ts + timedelta(days=1)
+        db_session.add(ActivityLog(
+            project_id=project["id"],
+            agent_id=pamlike["id"],
+            entity_type="agent_consolidation_ack",
+            entity_id=999,
+            action="created",
+            details=None,
+            created_at=window_ts,
+        ))
+        db_session.commit()
+
+        participants = participants_for_sprint(db_session, sprint_row)
+        assert worker["id"] in participants
+        assert pamlike["id"] not in participants, (
+            "agent_consolidation_ack rows must not be counted as "
+            "sprint-participation activity"
+        )
+
+        # Sanity: a non-ack activity_log row in the same window DOES count.
+        # This guards against an over-broad filter (e.g. excluding all
+        # entity_type='agent' rows would have caught both real and admin
+        # signals).
+        db_session.add(ActivityLog(
+            project_id=project["id"],
+            agent_id=pamlike["id"],
+            entity_type="agent",  # different entity_type, still counts
+            entity_id=998,
+            action="updated",
+            details=None,
+            created_at=window_ts + timedelta(seconds=1),
+        ))
+        db_session.commit()
+
+        participants = participants_for_sprint(db_session, sprint_row)
+        assert pamlike["id"] in participants, (
+            "non-ack activity_log rows must still produce participation"
+        )
 
     def test_comment_author_counts_as_participant(
         self, client, make_project, make_epic, make_sprint, tmp_path

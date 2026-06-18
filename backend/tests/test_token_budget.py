@@ -235,3 +235,30 @@ class TestCeilingRebalance:
         assert by_category["playbook"] == 4000
         assert by_category["claude_md"] == 2000
         assert by_category["initial"] == 2000
+
+
+class TestGateEnforcedHelper:
+    """DWB-397: is_gate_enforced — shipped governance docs are advisory."""
+
+    def test_playbooks_and_rules_and_defs_exempt(self):
+        from app.config.token_budget import is_gate_enforced
+
+        assert is_gate_enforced(".claude/team_lead_playbook.md") is False
+        assert is_gate_enforced(".claude/worker_playbook.md") is False
+        assert is_gate_enforced(".claude/project_rules_worker.md") is False
+        assert is_gate_enforced(".claude/agents/backend-worker.md") is False
+
+    def test_root_docs_enforced(self):
+        from app.config.token_budget import is_gate_enforced
+
+        for name in ("CLAUDE.md", "HANDOFF.md", "ARCHITECTURE.md",
+                     "README.md", "INITIAL.md"):
+            assert is_gate_enforced(name) is True, name
+
+    def test_memory_file_names_classify_as_agent_def_by_name(self):
+        # Memory files match no classify_file prefix, so they fall through to
+        # 'agent_def' and is_gate_enforced returns False on the NAME alone.
+        # This is exactly why agent_consolidation guards them by agent_name.
+        from app.config.token_budget import is_gate_enforced
+
+        assert is_gate_enforced("memory/Barry/scratchpad.md") is False

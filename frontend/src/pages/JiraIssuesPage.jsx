@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom (useParams, useNavigate), store/useStore, api/jira (getProjectJiraTickets, triggerProjectJiraSync, getProjectJiraSyncStatus), api/client (ApiError), styles/jira.css
 // Data In: Route param :id (DWB project id)
 // Data Out: Default export JiraIssuesPage component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-12
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -53,10 +53,10 @@ function formatDateShort(iso) {
   const d = parseUtc(iso);
   if (!d) return DASH;
   const pad = (n) => String(n).padStart(2, '0');
-  const dd = d.getDate();
-  const mm = d.getMonth() + 1;
+  const dd = pad(d.getDate());
+  const mm = pad(d.getMonth() + 1);
   const yy = pad(d.getFullYear() % 100);
-  const hh = d.getHours();
+  const hh = pad(d.getHours());
   const mi = pad(d.getMinutes());
   return `${dd}-${mm}-${yy} ${hh}:${mi}`;
 }

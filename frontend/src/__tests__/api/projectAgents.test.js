@@ -6,7 +6,7 @@
 // Callees: ../../api/projectAgents (getProjectAgents)
 // Data In: Mock fetch responses
 // Data Out: Test assertions
-// Last Modified: 2026-04-09
+// Last Modified: 2026-06-12
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getProjectAgents } from '../../api/projectAgents';
@@ -15,10 +15,12 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 function jsonResponse(data, status = 200) {
+  const body = data === undefined ? '' : JSON.stringify(data);
   return Promise.resolve({
     ok: true,
     status,
     json: () => Promise.resolve(data),
+    text: () => Promise.resolve(body),
   });
 }
 

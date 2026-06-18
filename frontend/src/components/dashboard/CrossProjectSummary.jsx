@@ -1,16 +1,15 @@
 // Path: src/components/dashboard/CrossProjectSummary.jsx
 // File: CrossProjectSummary.jsx
 // Created: 2026-03-29
-// Purpose: Dashboard summary panels showing aggregate counts and token/time totals across active projects. Tracking summary fetches use AbortController to cancel on unmount (DWB-370).
+// Purpose: Dashboard summary panels showing aggregate counts and token/time totals across active projects. Tracking summaries come from the shared cache hook so all dashboard consumers share one fetch per project (DWB fan-out dedup).
 // Caller: DashboardPage.jsx
-// Callees: react (useState, useEffect), useStore, services/tracking, utils/format, dashboard.css
-// Data In: projects, tickets, alerts from store; tracking summaries from API
+// Callees: useStore, hooks/useTrackingSummary, utils/format, dashboard.css
+// Data In: projects, tickets, alerts from store; tracking summaries from shared cache
 // Data Out: default export CrossProjectSummary component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-12
 
-import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
-import { getTrackingSummary } from '../../services/tracking';
+import { useTrackingSummaries } from '../../hooks/useTrackingSummary';
 import { formatTokens, formatTime } from '../../utils/format';
 import '../../styles/dashboard.css';
 
@@ -22,30 +21,7 @@ function CrossProjectSummary() {
   const alerts = useStore((s) => s.alerts).filter(
     (a) => a.status === 'open' && projects.some((p) => p.id === a.project_id)
   );
-  const [summaries, setSummaries] = useState({});
-
-  useEffect(() => {
-    const controller = new AbortController();
-    Promise.all(
-      projects.map((p) =>
-        getTrackingSummary(p.id, { signal: controller.signal })
-          .then((data) => ({ id: p.id, data }))
-          .catch(() => ({ id: p.id, data: null }))
-      )
-    )
-      .then((results) => {
-        if (controller.signal.aborted) return;
-        setSummaries((prev) => {
-          const map = { ...prev };
-          for (const r of results) {
-            if (r.data) map[r.id] = r.data;
-          }
-          return map;
-        });
-      })
-      .catch(() => {});
-    return () => { controller.abort(); };
-  }, [projects.map((p) => p.id).join(',')]);
+  const summaries = useTrackingSummaries(projects.map((p) => p.id));
 
   let totalTokens = 0;
   let totalTime = 0;

@@ -44,6 +44,35 @@ Deployed to each project's `.claude/` via the Deploy Playbooks button. Playbooks
 
 ---
 
+## Communicating with the Human (REQUIRED)
+
+The human runs parallel CC sessions and a life alongside them. Every substantive message to the human — status, findings, proposals, decisions needed — MUST use the scannable block format below so it can be read at a glance.
+
+**This is a hard rule.** If a block feels like it won't fit, the answer is almost always *make it fit* — tighten the statement, split into more blocks, cut words. The only sanctioned violation is information that genuinely cannot be conveyed this way, and that bar is very high. "It was easier as a paragraph" is not a reason; suck it and make it fit.
+
+**Block pattern** — separator, blank return, header, indented bullets:
+
+────────────────────────────────────────────
+
+🟥 HIGH · 🚧 BLOCKER · ≤10-word statement of the thing
+  - terse bullet, lowercase, one fact per line
+  - include only if it adds something the header doesn't
+
+────────────────────────────────────────────
+
+- **Separator:** a box-drawing line `─` (U+2500), ~3/4 terminal width (~44 chars), with a blank return directly under it. NOT hyphens — markdown collapses `---` into a stub rule.
+- **Header:** `<severity> · <type> · statement`, statement ≤10 words. Icon AND text, always both.
+- **Severity** (your guess; the human corrects): 🟥 `HIGH` · 🟨 `MED` · 🟩 `LOW`.
+- **Type:** 🚧 `BLOCKER` · 🐞 `BUG` · 🤖 `TODO` (us bots' queue) · 👋 `YOU` (your action needed) · ❓ `ASK` (your decision needed) · ℹ️ `FYI` · ✅ `DONE`. `YOU` = do a thing; `ASK` = answer/decide.
+- **Bullets:** two-space indent, terse, lowercase, no end punctuation. Drop them when the statement stands alone.
+- **One topic per block.** A topic shift gets a fresh separator + header.
+- **A requested list/table is ONE item** — "my todo list", "show me tickets" → the whole list sits under a single header, even if its rows span topics. Never fragment a requested list by topic.
+- **A closing sentence or two of plain prose is allowed** after the blocks.
+
+**Short acknowledgments are exempt.** A 1-5 word reply ("Got it.", "Holding.", "On it.", "Done.") needs no banner — just say it. Banner anything the human needs to scan, act on, or decide.
+
+---
+
 ## 1. Project Setup
 
 | Action | Endpoint | Notes |
@@ -339,7 +368,9 @@ GET /api/projects/{pid}/consolidation-status?sprint_id={sid}
 - If `gate_satisfied: true`, every participant acked. Safe to PATCH.
 - If `gate_satisfied: false`, do NOT close. Walk the `agents[]` list, name every `acked: false`, ping with their `owned_over_ceiling_files`.
 
-**TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same file mean the cap is wrong, raise it in `_TOKEN_CEILINGS` (in the shared `backend/app/config/token_budget.py`, which also holds the `max(len//4, words)` token estimator every gate uses).
+**What the gate counts (DWB-397):** only docs an agent authors and can edit — their memory files plus the root continuity docs their role owns (TL owns `HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`). DWB's shipped governance docs (playbooks, `project_rules_*`, agent defs) are EXEMPT — never counted against any agent, never an ack/close blocker. Keeping those lean is DWB's editorial job (advisory on the budget panel), not a downstream agent's. Don't chase anyone to trim a playbook.
+
+**TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same root doc mean the cap is wrong, raise it in `TOKEN_CEILINGS` (in the shared `backend/app/config/token_budget.py`, which also holds the `max(len//4, words)` token estimator every gate uses).
 
 **Autonomy expectation across the team (DWB-328 lesson):** refusal IS the signal to fix. Workers who get a 400 should trim and retry on their own without waiting for TL guidance. If a worker is idling on a refused ack, that's a worker-side process bug, message them with "trim is the work, not the wait." Don't accept "I tried, was refused, waiting" as a final state.
 
@@ -355,7 +386,7 @@ Marking an agent inactive removes them from the gate. Use only when an agent has
 
 1. Workers land their wrap-ups (`session-complete` posts, final ticket transitions).
 2. Team disposition is settled and EXECUTED: if the team is shutting down, send the shutdown requests and confirm termination; if it stays parked, leave it alone.
-3. **Parallel doc compaction (hard gate).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while any spawn-loaded doc is over its token ceiling. This is autonomous and parallel: the moment you go to close, have **every agent compact their own memory files at the same time** — each rewrites its own `scratchpad`/`lessons`/`recent_sessions` leaner and submits via `POST /api/agents/{id}/memory/compact {file, content}` (a full-file replace; the server rejects 422 if still over, so a no-op can't satisfy it). You (the TL) compact the shared root docs (`HANDOFF`/`ARCHITECTURE`/`README`) + your own dir. Don't serialize this or ask permission — fan it out. The 422 body lists every owner and their over files; clear them all, then close.
+3. **Parallel doc compaction (hard gate).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while any gated doc is over its token ceiling — memory files and root continuity docs only; shipped playbooks/`project_rules`/agent defs are exempt (DWB-397). This is autonomous and parallel: the moment you go to close, have **every agent compact their own memory files at the same time** — each rewrites its own `scratchpad`/`lessons`/`recent_sessions` leaner and submits via `POST /api/agents/{id}/memory/compact {file, content}` (a full-file replace; the server rejects 422 if still over, so a no-op can't satisfy it). You (the TL) compact the shared root docs (`HANDOFF`/`ARCHITECTURE`/`README`) + your own dir. Don't serialize this or ask permission — fan it out. The 422 body lists every owner and their over files; clear them all, then close.
 4. DWB session close fires (any layer) or you close it explicitly per § 4e.
 5. **Only then** update `HANDOFF.md`, recording the state as it now is, and exit.
 
