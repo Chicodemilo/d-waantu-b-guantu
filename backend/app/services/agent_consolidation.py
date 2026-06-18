@@ -6,7 +6,7 @@
 # Callees: AgentConsolidationAck, Agent, Project, Sprint, compute_token_budget
 # Data In: db: Session, project/sprint/agent ids, optional notes, optional overrides
 # Data Out: AgentConsolidationAck rows; status dicts; violation lists
-# Last Modified: 2026-06-18 (DWB-397)
+# Last Modified: 2026-06-18 (DWB-399)
 
 """Consolidation gate service.
 
@@ -44,12 +44,19 @@ from app.routers.projects import compute_token_budget
 # agent's owned_over_ceiling_files. The mapping uses the same `name` strings
 # emitted by compute_token_budget.
 #
-# DWB-397: the .claude/ playbook + project_rules entries were removed. Those are
-# DWB-shipped governance docs — deployed, regenerated on deploy, un-editable by
-# any agent — so gating a downstream agent on them blocks a close they cannot
-# fix. Keeping them lean is DWB's editorial job (advisory on the budget panel),
-# not a close gate. Only docs an agent authors + can edit stay owned: the
-# repo-root continuity docs below + per-agent memory files (matched by
+# DWB-397: the .claude/ playbook entries were removed. Playbooks are DWB-shipped
+# doctrine — deployed, regenerated on deploy, un-editable by any agent — so
+# gating a downstream agent on them blocks a close they cannot fix. Keeping them
+# lean is DWB's editorial job (advisory on the budget panel), not a close gate.
+#
+# DWB-399: project_rules are NOT shipped — they're project-specific and never
+# overwritten by Deploy Playbooks. They ARE budgeted, but only the team-lead can
+# edit .claude/ files, so they map to team-lead ONLY. Gating workers/pm on them
+# would re-make the DWB-397 bug (an agent blocked on a file it cannot fix). The
+# playbook entries stay out of this map.
+#
+# Owned docs are those an agent authors + can edit: the repo-root continuity
+# docs + project_rules (team-lead) + per-agent memory files (matched by
 # agent_name in compute_token_budget, not via this map).
 _OWNER_MAP: dict[str, list[str]] = {
     # Repo-root docs — team-lead owns
@@ -58,6 +65,10 @@ _OWNER_MAP: dict[str, list[str]] = {
     "ARCHITECTURE.md": ["team-lead"],
     "README.md": ["team-lead"],
     "INITIAL.md": ["team-lead"],
+    # Project-specific role conventions — TL-editable, team-lead owns (DWB-399)
+    ".claude/project_rules_team_lead.md": ["team-lead"],
+    ".claude/project_rules_pm.md": ["team-lead"],
+    ".claude/project_rules_worker.md": ["team-lead"],
 }
 
 

@@ -227,28 +227,46 @@ class TestConsolidationStatus:
         assert "ARCHITECTURE.md" in names
         assert "HANDOFF.md" in names
 
-    def test_playbooks_and_project_rules_not_owned_by_anyone(self, client, gate_ctx):
-        """DWB-397: shipped governance docs are advisory, never owned/gated.
+    def test_playbooks_not_owned_by_anyone(self, client, gate_ctx):
+        """DWB-397: shipped DWB doctrine is advisory, never owned/gated.
 
-        Playbooks, project_rules, and agent defs must not appear under ANY
-        agent's owned_over_ceiling_files even though the fixture writes them
-        far over ceiling.
+        Playbooks (and agent defs) must not appear under ANY agent's
+        owned_over_ceiling_files even though the fixture writes them far over
+        ceiling.
         """
         body = client.get(
             f"/api/projects/{gate_ctx['project']['id']}/consolidation-status",
             params={"sprint_id": gate_ctx["sprint"]["id"]},
         ).json()
-        exempt = {
-            ".claude/pm_playbook.md",
-            ".claude/project_rules_pm.md",
-            ".claude/worker_playbook.md",
-            ".claude/project_rules_worker.md",
-        }
+        exempt = {".claude/pm_playbook.md", ".claude/worker_playbook.md"}
         for agent in body["agents"]:
             names = {f["name"] for f in agent["owned_over_ceiling_files"]}
             assert exempt.isdisjoint(names), (
-                f"{agent['name']} should not own any shipped governance doc: "
+                f"{agent['name']} should not own any shipped playbook: "
                 f"{names & exempt}"
+            )
+
+    def test_project_rules_owned_by_team_lead_only(self, client, gate_ctx):
+        """DWB-399: project_rules are budgeted + TL-editable, so they gate
+        against the team-lead ONLY. Workers/pm must not be blocked on a file
+        only the TL can edit (that was the DWB-397 bug)."""
+        body = client.get(
+            f"/api/projects/{gate_ctx['project']['id']}/consolidation-status",
+            params={"sprint_id": gate_ctx["sprint"]["id"]},
+        ).json()
+        rules = {".claude/project_rules_pm.md", ".claude/project_rules_worker.md"}
+
+        archie = next(a for a in body["agents"] if a["name"] == "Archie")  # TL
+        archie_names = {f["name"] for f in archie["owned_over_ceiling_files"]}
+        assert rules <= archie_names, (
+            f"team-lead should own all project_rules: missing {rules - archie_names}"
+        )
+
+        for name in ("Mona", "Barry"):  # pm, backend-worker
+            block = next(a for a in body["agents"] if a["name"] == name)
+            names = {f["name"] for f in block["owned_over_ceiling_files"]}
+            assert rules.isdisjoint(names), (
+                f"{name} must not own project_rules (TL-only): {names & rules}"
             )
 
     def test_owner_mapping_memory_files_belong_to_agent(self, client, gate_ctx):
@@ -410,16 +428,34 @@ class TestOverCeilingEnforcement:
         assert r.status_code == 400, r.text
         detail = r.json()["detail"]
         assert detail["error"] == "over_ceiling_files_must_be_trimmed_or_overridden"
-        # DWB-397: Barry's shipped playbooks/project_rules are exempt; the only
-        # over-ceiling file he still OWNS is his own memory/scratchpad.
+        # DWB-397/399: a worker owns neither playbooks (exempt) nor project_rules
+        # (TL-only). The only over-ceiling file Barry still OWNS is his own
+        # memory/scratchpad.
         names = {v["file"] for v in detail["violations"]}
         assert any(n.startswith("memory/Barry/") for n in names)
-        # Shipped governance docs must NOT appear as violations.
+        # Shipped playbook + TL-only project_rules must NOT appear for a worker.
         assert ".claude/worker_playbook.md" not in names
         assert ".claude/project_rules_worker.md" not in names
         for v in detail["violations"]:
             assert isinstance(v["tokens"], int) and v["tokens"] > v["ceiling"]
             assert isinstance(v["ceiling"], int)
+
+    def test_tl_ack_blocked_by_over_ceiling_project_rules(self, client, gate_ctx):
+        """DWB-399: the team-lead DOES gate on over-ceiling project_rules
+        (TL-editable). They must appear in the TL's ack violations, while
+        playbooks (exempt) must not."""
+        archie = gate_ctx["agents"]["Archie"]
+        r = client.post(f"/api/agents/{archie['id']}/consolidate-complete", json={
+            "sprint_id": gate_ctx["sprint"]["id"],
+            "notes": None,
+        })
+        assert r.status_code == 400, r.text
+        names = {v["file"] for v in r.json()["detail"]["violations"]}
+        assert ".claude/project_rules_pm.md" in names
+        assert ".claude/project_rules_worker.md" in names
+        # Playbooks stay exempt even for the TL.
+        assert ".claude/team_lead_playbook.md" not in names
+        assert ".claude/pm_playbook.md" not in names
 
     def test_ack_with_full_memory_override_succeeds(self, client, gate_ctx):
         """DWB-397: with playbooks exempt, justifying only the owned memory file

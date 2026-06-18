@@ -756,6 +756,11 @@
   color: var(--red);
 }
 
+/* DWB-398: shipped governance docs are gate-exempt — neutral, no judgment. */
+.token-budget__indicator--exempt {
+  color: var(--gray);
+}
+
 .token-budget__name {
   color: var(--green);
   flex: 1;
@@ -793,6 +798,12 @@
 
 .token-budget__bar-fill.token-budget__bar--over {
   background-color: var(--red);
+}
+
+/* DWB-398: exempt rows render a flat muted track, not a filled judgment bar. */
+.token-budget__bar-fill.token-budget__bar--exempt {
+  width: 100%;
+  background-color: var(--border);
 }
 
 /* --- Token Budget: Sections + Subgroups --- */

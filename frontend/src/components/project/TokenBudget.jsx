@@ -6,7 +6,7 @@
 // Callees: react (useState, useEffect, useMemo), config (API_BASE_URL), styles/dashboard.css
 // Data In: projectId prop
 // Data Out: default export TokenBudget component
-// Last Modified: 2026-06-05
+// Last Modified: 2026-06-18 (DWB-399)
 
 import { useState, useEffect, useMemo } from 'react';
 import { API_BASE_URL } from '../../config';
@@ -33,6 +33,7 @@ const SECTIONS = [
       'Covers: how to use the DWB system per role (team-lead, pm, worker). Not project-specific — same content across every DWB-managed project.',
       "Who edits: you only. Agents can't edit playbooks.",
       'When updated: when DWB doctrine evolves in the DWB repo, then pushed here via the Deploy Playbooks button.',
+      "Size isn't gated — these just exist.",
     ],
   },
   {
@@ -85,6 +86,11 @@ function InfoIcon({ bullets }) {
 }
 
 function FileRow({ f }) {
+  // DWB-398/399: DWB-shipped docs (playbooks, agent defs) are gate-exempt — they
+  // just exist, no over/warning judgment. project_rules are budgeted (DWB-399).
+  // Exempt rows render neutral:
+  // muted indicator, no ratio, a flat muted track instead of a colored bar.
+  const exempt = f.status === 'exempt';
   const pct = f.ceiling > 0 ? Math.round((f.tokens / f.ceiling) * 100) : 0;
   const barWidth = Math.min(pct, 100);
   const barClass =
@@ -93,7 +99,13 @@ function FileRow({ f }) {
       : f.status === 'warning'
         ? 'token-budget__bar--warning'
         : 'token-budget__bar--ok';
-  const indicator = f.status === 'over' ? '✗' : f.status === 'warning' ? '●' : '✓';
+  const indicator = exempt
+    ? '–'
+    : f.status === 'over'
+      ? '✗'
+      : f.status === 'warning'
+        ? '●'
+        : '✓';
   return (
     <div className="token-budget__file">
       <div className="token-budget__file-row">
@@ -102,14 +114,18 @@ function FileRow({ f }) {
         </span>
         <span className="token-budget__name">{f.name}</span>
         <span className="token-budget__count">
-          {formatTokens(f.tokens)}/{formatTokens(f.ceiling)}
+          {exempt ? formatTokens(f.tokens) : `${formatTokens(f.tokens)}/${formatTokens(f.ceiling)}`}
         </span>
       </div>
       <div className="token-budget__bar-track">
-        <div
-          className={`token-budget__bar-fill ${barClass}`}
-          style={{ width: `${barWidth}%` }}
-        />
+        {exempt ? (
+          <div className="token-budget__bar-fill token-budget__bar--exempt" />
+        ) : (
+          <div
+            className={`token-budget__bar-fill ${barClass}`}
+            style={{ width: `${barWidth}%` }}
+          />
+        )}
       </div>
     </div>
   );

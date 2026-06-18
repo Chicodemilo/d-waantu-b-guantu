@@ -6,7 +6,7 @@
 # Callees: -
 # Data In: file names + text
 # Data Out: ceilings (int), classifications (str), token estimates (int)
-# Last Modified: 2026-06-18 (DWB-397)
+# Last Modified: 2026-06-18 (DWB-399)
 
 """Canonical token-budget config.
 
@@ -28,7 +28,7 @@ TOKEN_CEILINGS = {
     "agent_def": 1500,
     "playbook": 4000,
     "claude_md": 2000,
-    "project_rules": 3000,
+    "project_rules": 4000,
     "handoff": 1500,
     "architecture": 7500,
     "readme": 3500,
@@ -58,8 +58,16 @@ DEFAULT_CEILING = 1000
 # advisory warning on the budget panel, NOT a close-blocking gate elsewhere
 # (DWB-397). They still appear in compute_token_budget output; only the gate
 # enforcement skips them. Agents are gated only on docs they author + can edit:
-# their memory files + root continuity docs (HANDOFF/ARCHITECTURE/README/INITIAL).
-GATE_EXEMPT_CATEGORIES = {"playbook", "project_rules", "agent_def"}
+# their memory files + root continuity docs (HANDOFF/ARCHITECTURE/README/INITIAL)
+# + project_rules.
+#
+# DWB-399: project_rules removed from the exempt set. Unlike playbooks (shipped
+# DWB doctrine, identical across every project, overwritten on deploy),
+# project_rules are project-specific and TL-editable — never overwritten by
+# Deploy Playbooks. So they ARE budgeted/judged and gated, but only against the
+# team-lead (the only agent who can edit .claude/ files); see _OWNER_MAP in
+# agent_consolidation.py. Gating workers/pm on them would re-make the DWB-397 bug.
+GATE_EXEMPT_CATEGORIES = {"playbook", "agent_def"}
 
 
 def classify_file(name: str) -> str:
@@ -85,10 +93,12 @@ def classify_file(name: str) -> str:
 def is_gate_enforced(name: str) -> bool:
     """True when an over-ceiling `name` should BLOCK a close/ack gate.
 
-    DWB-397: shipped governance docs (playbooks, project_rules, agent defs) are
-    advisory only — they classify into GATE_EXEMPT_CATEGORIES and return False.
-    Everything else (root continuity docs, memory files that classify by
-    fallback) returns True. NOTE: per-agent memory files classify as "agent_def"
+    DWB-397/399: shipped DWB doctrine (playbooks, agent defs) is advisory only —
+    it classifies into GATE_EXEMPT_CATEGORIES and returns False. Everything else
+    (root continuity docs, project_rules, memory files that classify by
+    fallback) returns True. project_rules are TL-editable project docs, so they
+    are gated against the team-lead only (see _OWNER_MAP). NOTE: per-agent
+    memory files classify as "agent_def"
     by name alone (they match none of the prefixes in classify_file), so callers
     that operate on budget entries MUST guard memory files by `agent_name`
     before applying this exemption — see agent_consolidation.py.

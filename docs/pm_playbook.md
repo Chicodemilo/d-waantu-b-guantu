@@ -73,6 +73,39 @@ Session marker is TL-written (you can't create your own); see worker_playbook §
 
 ---
 
+## The Doc Model (what loads, who owns it, what's budgeted)
+
+Four doc layers load into an agent at spawn. Which layer a file is in decides **who may edit it** and **whether its size is gated** at sprint/session close.
+
+```
+<repo>/
+├─ CLAUDE.md          project overview + rules, auto-loaded by everyone
+├─ ARCHITECTURE.md    system design + data model
+├─ README.md          project reference (endpoints, setup)
+├─ HANDOFF.md         session-to-session continuity (TL writes at close)
+├─ INITIAL.md         original requirements / constraints
+│     root docs · edit: human + TL · BUDGETED (TL-owned)
+└─ .claude/
+   ├─ *_playbook.md          how to use DWB, per role — generic, same on every project
+   │     shipped from DWB, overwritten on deploy · edit: DWB team only · EXEMPT
+   ├─ project_rules_<role>.md   conventions the TL sets per role for THIS repo
+   │     _team_lead = TL's rules for himself · _pm = TL's rules for the PM
+   │     _worker = TL's rules for all workers · stack, ports, ticket prefix…
+   │     deploy never touches · authored by TL · BUDGETED (TL-owned)
+   ├─ agents/*.md            role agent-def stubs — shipped from DWB
+   │     overwritten on deploy · edit: DWB team · EXEMPT
+   └─ agents/memory/<prefix>/<name>/   per-agent personal memory
+      ├─ identity.md         system-generated · NEVER edit
+      ├─ scratchpad.md       in-flight notes
+      ├─ lessons.md          durable patterns
+      └─ recent_sessions.md  session index
+            owner writes via the memory API (never Edit) · BUDGETED (per-agent)
+```
+
+**Budgeted vs exempt:** a doc is *budgeted* (its size gated at close) only when an agent can actually edit it — your memory plus the root/project docs you own. DWB-shipped docs (playbooks, agent defs) are *exempt*: keeping those lean is the DWB team's editorial job, never a close-blocker. No agent can Edit a `.claude/` path directly (it crashes the session) — memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
+
+---
+
 ## 1. The PM's Job
 
 Monitor, track, communicate, escalate. The PM does NOT create projects, assign tickets, or run tests; the TL owns those.

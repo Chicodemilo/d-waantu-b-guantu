@@ -6,7 +6,7 @@
 # Callees:       GET /api/projects/:id/token-budget
 # Data In:       Temp repo dir with .claude/ + memory layout, factory-created project + agents
 # Data Out:      Assertions on category/agent_name fields and inclusion of new docs/memory files
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-18 (DWB-398)
 
 """Tests for the /api/projects/:id/token-budget endpoint.
 
@@ -198,14 +198,15 @@ class TestCeilingRebalance:
         )
         assert agent_def["ceiling"] == 1500
 
-    def test_project_rules_ceiling_is_3000(self, client, make_project, tmp_path):
+    def test_project_rules_ceiling_is_4000(self, client, make_project, tmp_path):
+        # DWB-399: bumped 3000 -> 4000 (worker rules are ~3042, need headroom).
         repo = _setup_repo(tmp_path, "DR2", agent_names=[])
         proj = make_project(prefix="DR2", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         rules = next(
             f for f in data["files"] if f["category"] == "project_rules"
         )
-        assert rules["ceiling"] == 3000
+        assert rules["ceiling"] == 4000
 
     def test_architecture_ceiling_is_7500(self, client, make_project, tmp_path):
         repo = _setup_repo(tmp_path, "DR3", agent_names=[])
@@ -238,15 +239,23 @@ class TestCeilingRebalance:
 
 
 class TestGateEnforcedHelper:
-    """DWB-397: is_gate_enforced — shipped governance docs are advisory."""
+    """DWB-397/399: is_gate_enforced — shipped DWB doctrine is advisory;
+    project_rules are budgeted (TL-editable)."""
 
-    def test_playbooks_and_rules_and_defs_exempt(self):
+    def test_playbooks_and_defs_exempt(self):
         from app.config.token_budget import is_gate_enforced
 
         assert is_gate_enforced(".claude/team_lead_playbook.md") is False
         assert is_gate_enforced(".claude/worker_playbook.md") is False
-        assert is_gate_enforced(".claude/project_rules_worker.md") is False
         assert is_gate_enforced(".claude/agents/backend-worker.md") is False
+
+    def test_project_rules_enforced(self):
+        # DWB-399: project_rules are NOT shipped doctrine; they gate.
+        from app.config.token_budget import is_gate_enforced
+
+        assert is_gate_enforced(".claude/project_rules_worker.md") is True
+        assert is_gate_enforced(".claude/project_rules_team_lead.md") is True
+        assert is_gate_enforced(".claude/project_rules_pm.md") is True
 
     def test_root_docs_enforced(self):
         from app.config.token_budget import is_gate_enforced
@@ -262,3 +271,81 @@ class TestGateEnforcedHelper:
         from app.config.token_budget import is_gate_enforced
 
         assert is_gate_enforced("memory/Barry/scratchpad.md") is False
+
+
+class TestExemptStatus:
+    """DWB-398/399: gate-exempt categories (playbook, agent_def) report status
+    'exempt' on the budget endpoint instead of over/warning/ok. They just exist;
+    size isn't judged. Root docs + project_rules + memory are judged
+    (over/warning/ok). project_rules left the exempt set in DWB-399.
+    """
+
+    def test_exempt_categories_report_exempt(self, client, make_project, tmp_path):
+        repo = _setup_repo(tmp_path, "EX1", agent_names=[])
+        proj = make_project(prefix="EX1", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+
+        from app.config.token_budget import GATE_EXEMPT_CATEGORIES
+
+        exempt_entries = [
+            f for f in data["files"] if f["category"] in GATE_EXEMPT_CATEGORIES
+        ]
+        assert exempt_entries, "expected at least one playbook/agent_def"
+        for entry in exempt_entries:
+            assert entry["status"] == "exempt", (
+                f"{entry['name']} ({entry['category']}) should be exempt, "
+                f"got {entry['status']}"
+            )
+
+    def test_project_rules_judged_not_exempt(self, client, make_project, tmp_path):
+        # DWB-399: project_rules are budgeted now — under-ceiling fixture reads 'ok'.
+        repo = _setup_repo(tmp_path, "EX5", agent_names=[])
+        proj = make_project(prefix="EX5", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        rules = next(f for f in data["files"] if f["category"] == "project_rules")
+        assert rules["status"] in ("over", "warning", "ok")
+        assert rules["status"] != "exempt"
+
+    def test_over_ceiling_playbook_still_exempt_not_over(
+        self, client, make_project, tmp_path
+    ):
+        # A playbook far past its 4000 ceiling must still read 'exempt', proving
+        # the exemption short-circuits the ratio judgment.
+        repo = tmp_path / "repo"
+        _write(repo / ".claude" / "worker_playbook.md", "# huge\n" + "word " * 6000)
+        proj = make_project(prefix="EX2", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        pb = next(f for f in data["files"] if f["category"] == "playbook")
+        assert pb["tokens"] > pb["ceiling"], "test fixture should exceed ceiling"
+        assert pb["status"] == "exempt"
+
+    def test_exempt_keeps_tokens_and_ceiling(self, client, make_project, tmp_path):
+        # Only status changes; tokens + ceiling stay in the payload.
+        repo = _setup_repo(tmp_path, "EX3", agent_names=[])
+        proj = make_project(prefix="EX3", repo_path=str(repo))
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        pb = next(f for f in data["files"] if f["category"] == "playbook")
+        assert isinstance(pb["tokens"], int) and pb["tokens"] > 0
+        assert pb["ceiling"] == 4000
+
+    def test_root_docs_and_memory_not_exempt(
+        self, client, make_project, make_agent, tmp_path
+    ):
+        prefix = "EX4"
+        repo = _setup_repo(tmp_path, prefix, agent_names=["Barry"])
+        proj = make_project(prefix=prefix, repo_path=str(repo))
+        make_agent(project_id=proj["id"], name="Barry", role="backend-worker")
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+
+        non_exempt = [
+            f
+            for f in data["files"]
+            if f["name"] in ("CLAUDE.md", "ARCHITECTURE.md")
+            or f["name"].startswith("memory/")
+        ]
+        assert non_exempt
+        for entry in non_exempt:
+            assert entry["status"] != "exempt", (
+                f"{entry['name']} should be judged, not exempt"
+            )
+            assert entry["status"] in ("over", "warning", "ok")

@@ -58,6 +58,39 @@ After identity, read: (1) `.claude/project_rules_worker.md`, (2) `HANDOFF.md`, (
 
 For context on the DWB session model (open/close phrases, single-active rule, what gets tracked), see `.claude/session_lifecycle.md`. You are NOT responsible for opening or closing sessions: that is TL-only. The reference is there so you understand where your tokens land. The `open_method` / `close_method` enum on a DwbSession row now spans five values: `regex` (Layer 1 catalogue hit on UserPromptSubmit or SessionEnd retry), `ai_classifier` (Layer 2 system-driven Haiku classification, DWB-382), `slash` (Layer 3 deterministic `/dwb-open` and `/dwb-close` escape hatches in `<repo>/.claude/commands/`, DWB-381), `ai_confident` / `ai_asked` (TL layer), and `idle_timeout` (close-only safety sweeper). Workers do not call any of these; the field exists so you know which layer attributed the surrounding work.
 
+## The Doc Model (what loads, who owns it, what's budgeted)
+
+Four doc layers load into an agent at spawn. Which layer a file is in decides **who may edit it** and **whether its size is gated** at sprint/session close.
+
+```
+<repo>/
+├─ CLAUDE.md          project overview + rules, auto-loaded by everyone
+├─ ARCHITECTURE.md    system design + data model
+├─ README.md          project reference (endpoints, setup)
+├─ HANDOFF.md         session-to-session continuity (TL writes at close)
+├─ INITIAL.md         original requirements / constraints
+│     root docs · edit: human + TL · BUDGETED (TL-owned)
+└─ .claude/
+   ├─ *_playbook.md          how to use DWB, per role — generic, same on every project
+   │     shipped from DWB, overwritten on deploy · edit: DWB team only · EXEMPT
+   ├─ project_rules_<role>.md   conventions the TL sets per role for THIS repo
+   │     _team_lead = TL's rules for himself · _pm = TL's rules for the PM
+   │     _worker = TL's rules for all workers · stack, ports, ticket prefix…
+   │     deploy never touches · authored by TL · BUDGETED (TL-owned)
+   ├─ agents/*.md            role agent-def stubs — shipped from DWB
+   │     overwritten on deploy · edit: DWB team · EXEMPT
+   └─ agents/memory/<prefix>/<name>/   per-agent personal memory
+      ├─ identity.md         system-generated · NEVER edit
+      ├─ scratchpad.md       in-flight notes
+      ├─ lessons.md          durable patterns
+      └─ recent_sessions.md  session index
+            owner writes via the memory API (never Edit) · BUDGETED (per-agent)
+```
+
+**Budgeted vs exempt:** a doc is *budgeted* (its size gated at close) only when an agent can actually edit it — your memory plus the root/project docs you own. DWB-shipped docs (playbooks, agent defs) are *exempt*: keeping those lean is the DWB team's editorial job, never a close-blocker. You can't Edit a `.claude/` path directly (it crashes you) — your memory goes through the API, and the TL edits the other `.claude/` files.
+
+---
+
 ## Protected Files: Never Write These
 
 The Claude Code permission dialog for editing files under `.claude/` crashes subagents in the ink renderer. Four sibling agents died across S66 from this exact pattern, including some that followed prior playbook guidance to "append yourself" inside the memory dir. The current ground truth is stricter:

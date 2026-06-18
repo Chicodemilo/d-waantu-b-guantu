@@ -6,7 +6,7 @@
 # Callees: app/services/project.py, app/services/project_agent.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-18 (DWB-398)
 
 import json
 import re
@@ -761,11 +761,27 @@ def get_project_activity_feed(
 # consolidation gate and the memory-compaction gate). Aliased to the existing
 # private names so the rest of this module is unchanged.
 from app.config.token_budget import (  # noqa: E402
+    GATE_EXEMPT_CATEGORIES as _GATE_EXEMPT_CATEGORIES,
     MEMORY_FILES as _MEMORY_FILES,
     TOKEN_CEILINGS as _TOKEN_CEILINGS,
     classify_file as _classify_file,
     estimate_tokens as _estimate_tokens,
 )
+
+
+def _budget_status(tokens: int, ceiling: int, category: str) -> str:
+    """Status for a budget file row. DWB-398: shipped governance docs
+    (GATE_EXEMPT_CATEGORIES — playbooks, project_rules, agent defs) are never
+    judged over/warning; they just exist, so they report "exempt". Everything
+    else gets the usual over/warning/ok by tokens-to-ceiling ratio.
+    NOTE: per-agent memory files classify as "agent_def" by name alone, so this
+    is only safe at call sites where the category reflects a real shipped doc;
+    the memory scan passes a memory_* category and is unaffected.
+    """
+    if category in _GATE_EXEMPT_CATEGORIES:
+        return "exempt"
+    ratio = tokens / ceiling if ceiling > 0 else 0
+    return "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
 
 # Which files each role reads at startup (post-stub: playbooks are the real load)
 _ROLE_FILES = {
@@ -807,8 +823,7 @@ def compute_token_budget(db: Session, project) -> dict:
             tokens = _estimate_tokens(text)
             category = _classify_file(name)
             ceiling = _TOKEN_CEILINGS.get(category, 1000)
-            ratio = tokens / ceiling if ceiling > 0 else 0
-            status = "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
+            status = _budget_status(tokens, ceiling, category)
             files.append({
                 "path": str(filepath),
                 "name": name,
@@ -833,8 +848,7 @@ def compute_token_budget(db: Session, project) -> dict:
             tokens = _estimate_tokens(text)
             category = _classify_file(filepath.name)
             ceiling = _TOKEN_CEILINGS.get(category, 800)
-            ratio = tokens / ceiling if ceiling > 0 else 0
-            status = "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
+            status = _budget_status(tokens, ceiling, category)
             files.append({
                 "path": str(filepath),
                 "name": f".claude/agents/{filepath.name}",
@@ -858,10 +872,7 @@ def compute_token_budget(db: Session, project) -> dict:
                 tokens = _estimate_tokens(text)
                 category = _classify_file(filepath.name)
                 ceiling = _TOKEN_CEILINGS.get(category, 1000)
-                ratio = tokens / ceiling if ceiling > 0 else 0
-                status = (
-                    "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
-                )
+                status = _budget_status(tokens, ceiling, category)
                 files.append({
                     "path": str(filepath),
                     "name": f".claude/{filepath.name}",
@@ -897,10 +908,7 @@ def compute_token_budget(db: Session, project) -> dict:
                     text = ""
                 tokens = _estimate_tokens(text)
                 ceiling = _TOKEN_CEILINGS.get(category, 1000)
-                ratio = tokens / ceiling if ceiling > 0 else 0
-                status = (
-                    "over" if ratio > 1.0 else "warning" if ratio > 0.8 else "ok"
-                )
+                status = _budget_status(tokens, ceiling, category)
                 files.append({
                     "path": str(filepath),
                     "name": f"memory/{agent.name}/{fname}",
