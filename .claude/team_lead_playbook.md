@@ -21,7 +21,7 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 1. **Complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity (identify, cache `agent_id`, read your memory dir: `identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). Same flow for every agent, TL included.
 2. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`
 3. Fetch the live team roster: `GET /api/projects/{project_id}/team`. The DB is authoritative, not a checked-in file.
-4. **Respawn a parked team.** Claude Code teams do NOT survive across CC sessions; a team that `HANDOFF.md` describes as "parked" or "standing by" no longer exists as live processes. If the session's work needs workers, re-create the team via `TeamCreate` (reuse the prior team name when sensible), then run the full spawn flow per § 4a for each worker: spawn-prepare handshake, pending marker, spawn. Do not assign work or SendMessage to roster names from HANDOFF before respawning; those inboxes are dead and messages drop silently.
+4. **Respawn a parked team.** Claude Code teams do NOT survive across CC sessions; a team that `HANDOFF.md` describes as "parked" or "standing by" no longer exists as live processes. If the session's work needs workers, respawn each one via the full spawn flow per § 4a: spawn-prepare handshake, pending marker, then spawn with the Agent tool. There is no separate team-creation step. `TeamCreate`/`TeamDelete` were removed in CC 2.1.178, so a spawned teammate joins this session's team automatically. Do not assign work or SendMessage to roster names from HANDOFF before respawning; those inboxes are dead and messages drop silently.
 5. Read `ARCHITECTURE.md` / `README.md` only for cross-cutting work
 6. Check open alerts (API + `ALERTS_PENDING.md`)
 7. Jump to § 5 for the typical session flow
@@ -224,6 +224,12 @@ Don't let open alerts accumulate, an ignored queue trains everyone to ignore ale
 
 **No PM for small teams (1-2 workers).** TL drives directly. PM only earns a slot at 3+ parallel workers. Keep teams alive across sprints, only shut down when the user explicitly says.
 
+### How spawning works (CC 2.1.178+)
+
+Spawn teammates with the **Agent tool**; that is the whole mechanism. `TeamCreate`/`TeamDelete` were removed in 2.1.178, so the spawned agent joins this session's team automatically (the old `team_name` arg is accepted but ignored, so passing it is harmless and unnecessary). Spawning didn't change in capability: teammates still SendMessage each other, claim shared tasks, and report back. Only the setup step went away.
+
+**Seeing your team.** Teammates show in the in-session agent panel (up/down to select, Enter to open a transcript, Esc to interrupt) or, with `"teammateMode": "tmux"` in `~/.claude/settings.json`, each in its own iTerm/tmux pane. The display default flipped to `in-process` (one panel) in 2.1.179, and on 2.1.181 **idle teammates auto-hide after ~30s** and reappear on activity. An empty panel does NOT mean the team is gone. Confirm liveness via `GET /api/projects/{id}/team` or `ls ~/.claude/teams/<team>/inboxes/` before concluding a worker died.
+
 ### Spawn-Prepare (REQUIRED before every spawn)
 
 ```
@@ -299,7 +305,7 @@ When that signal lands AND the change fits these bounds:
 - in 1-2 files
 - with an unambiguous spec
 
-then edit directly. Don't draft YAML. Don't TeamCreate. Don't spawn a worker.
+then edit directly. Don't draft YAML. Don't spawn a worker.
 
 If the user does NOT signal the waiver, the default holds: draft a ticket, route through the normal flow even for small changes. The user's signal is what creates the exception, not the TL's read of the change size.
 
@@ -377,7 +383,7 @@ GET /api/projects/{pid}/consolidation-status?sprint_id={sid}
 - If `gate_satisfied: true`, every participant acked. Safe to PATCH.
 - If `gate_satisfied: false`, do NOT close. Walk the `agents[]` list, name every `acked: false`, ping with their `owned_over_ceiling_files`.
 
-**What the gate counts (DWB-397):** only docs an agent authors and can edit — their memory files plus the root continuity docs their role owns (TL owns `HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`). DWB's shipped governance docs (playbooks, `project_rules_*`, agent defs) are EXEMPT — never counted against any agent, never an ack/close blocker. Keeping those lean is DWB's editorial job (advisory on the budget panel), not a downstream agent's. Don't chase anyone to trim a playbook.
+**What the gate counts (DWB-397/399):** only docs an agent authors and can edit — their memory files plus the docs their role owns. You (the TL) own the repo-root docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) AND all three `project_rules_*` files (you author them per role), so those are budgeted against you. Only DWB-shipped docs — playbooks and agent defs — are EXEMPT: keeping those lean is DWB's editorial job (advisory on the budget panel), never an ack/close blocker. Don't chase anyone to trim a playbook; do keep your own `project_rules` lean.
 
 **TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same root doc mean the cap is wrong, raise it in `TOKEN_CEILINGS` (in the shared `backend/app/config/token_budget.py`, which also holds the `max(len//4, words)` token estimator every gate uses).
 
@@ -395,7 +401,7 @@ Marking an agent inactive removes them from the gate. Use only when an agent has
 
 1. Workers land their wrap-ups (`session-complete` posts, final ticket transitions).
 2. Team disposition is settled and EXECUTED: if the team is shutting down, send the shutdown requests and confirm termination; if it stays parked, leave it alone.
-3. **Parallel doc compaction (hard gate).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while any gated doc is over its token ceiling — memory files and root continuity docs only; shipped playbooks/`project_rules`/agent defs are exempt (DWB-397). This is autonomous and parallel: the moment you go to close, have **every agent compact their own memory files at the same time** — each rewrites its own `scratchpad`/`lessons`/`recent_sessions` leaner and submits via `POST /api/agents/{id}/memory/compact {file, content}` (a full-file replace; the server rejects 422 if still over, so a no-op can't satisfy it). You (the TL) compact the shared root docs (`HANDOFF`/`ARCHITECTURE`/`README`) + your own dir. Don't serialize this or ask permission — fan it out. The 422 body lists every owner and their over files; clear them all, then close.
+3. **Parallel doc compaction (hard gate).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while any gated doc is over its token ceiling — memory files, root continuity docs, and `project_rules` (TL-owned); only shipped playbooks + agent defs are exempt (DWB-397/399). This is autonomous and parallel: the moment you go to close, have **every agent compact their own memory files at the same time** — each rewrites its own `scratchpad`/`lessons`/`recent_sessions` leaner and submits via `POST /api/agents/{id}/memory/compact {file, content}` (a full-file replace; the server rejects 422 if still over, so a no-op can't satisfy it). You (the TL) compact the shared root docs (`HANDOFF`/`ARCHITECTURE`/`README`) + your own dir. Don't serialize this or ask permission — fan it out. The 422 body lists every owner and their over files; clear them all, then close.
 4. DWB session close fires (any layer) or you close it explicitly per § 4e.
 5. **Only then** update `HANDOFF.md`, recording the state as it now is, and exit.
 

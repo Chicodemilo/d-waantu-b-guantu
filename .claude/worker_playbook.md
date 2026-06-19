@@ -174,7 +174,7 @@ If you get blocked on the work, message the TL, don't sit on it.
 
 DWB enforces a `force_consolidation` gate at sprint close. Every sprint participant must call `consolidate-complete` before the TL can close the sprint. The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 if your owned files are over ceiling, unless you provide per-file overrides with non-empty reasons.
 
-**Your owned files are the docs you author and can edit — your memory files** (`scratchpad`/`lessons`/`recent_sessions`). DWB's shipped playbooks, `project_rules`, and agent defs are EXEMPT (DWB-397); they're never counted against you. Keeping those lean is the DWB team's job, not yours.
+**Your owned files are the docs you author and can edit — your memory files** (`scratchpad`/`lessons`/`recent_sessions`). Nothing under `.claude/` is ever counted against you: playbooks + agent defs are exempt (the DWB team's job), and `project_rules` are budgeted but TL-owned (the TL authors them for each role and keeps them lean). You're only on the hook for your own memory.
 
 **When to ack:** as soon as your last ticket hits `in_review` (or `done`). Don't wait for the TL, the ack is yours to file.
 

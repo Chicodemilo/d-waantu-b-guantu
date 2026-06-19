@@ -314,7 +314,7 @@ Failure types: `context_degradation`, `spec_drift`, `sycophantic_confirmation`, 
 
 ## 12a. Sprint Close: Consolidation Gate (REQUIRED)
 
-DWB's `force_consolidation` gate blocks sprint close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): naked ack with over-ceiling files returns HTTP 400 with violations. **What counts (DWB-397):** an agent's own authored + editable docs — their memory files and the root docs their role owns. Shipped playbooks/`project_rules`/agent-defs are EXEMPT; never chase an agent to trim those (keeping them lean is the DWB team's job). The PM's role at sprint close:
+DWB's `force_consolidation` gate blocks sprint close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): naked ack with over-ceiling files returns HTTP 400 with violations. **What counts (DWB-397/399):** an agent's own authored + editable docs — their memory files (and, for the TL, the root docs + all three `project_rules_*` files the TL owns). Playbooks + agent defs are exempt (the DWB team's job). `project_rules` are budgeted but TL-owned — never chase a worker (or yourself) to trim them; that's the TL's. Your own gated files are just your memory. The PM's role at sprint close:
 
 1. **Verify gate state.** `GET /api/projects/{pid}/consolidation-status?sprint_id={sid}` returns `agents[]` with `acked: true/false` + `owned_over_ceiling_files` per agent, and `gate_satisfied` overall.
 2. **Surface refusals proactively.** If any participant has over-ceiling files and hasn't acked yet, ping them BY NAME with their file list and the autonomy expectation: "refusal is the signal to trim, not idle." Don't let agents sit on a refused ack waiting for instructions.

@@ -6,8 +6,16 @@
 
 - **Sprint S66 (id=107) active**, epic 21 in_progress.
 - **Last DWB session: id=26**, opened 2026-06-17 18:41 (regex), closed 20:02 (regex/explicit on user "shut it down"). ~936k tokens, ~80 min. Headline set manually (regex closes carry none).
-- **Team `session-26822b38` down:** Pam_DWB (14) + Barry_DWB (21) posted session-complete and were sent shutdown after their work. Respawn next session via Agent/TeamCreate + spawn-prepare + pending marker; do NOT SendMessage these names cold.
+- **Team `session-26822b38` down:** Pam_DWB (14) + Barry_DWB (21) posted session-complete and were sent shutdown after their work. Respawn next session via the Agent tool + spawn-prepare + pending marker (TeamCreate is gone, see Carryover below); do NOT SendMessage these names cold.
 - **Working tree dirty, UNCOMMITTED** (carried from prior sessions + today). Untracked `backend/dwb.db` is a stray SQLite artifact — investigate before any commit, do not commit it blindly.
+
+## Carryover: spawn-model doc fix (2026-06-18, UNCOMMITTED, VERIFIED)
+
+- **What:** CC 2.1.178 removed `TeamCreate`/`TeamDelete`. Spawn teammates with the **Agent tool** directly; `team_name` arg is accepted-but-ignored; teammates still coordinate (mailbox, SendMessage, idle notifications). Display default flipped to `in-process` in 2.1.179; idle teammates auto-hide ~30s on 2.1.181.
+- **Verified live:** spawned a throwaway teammate (Canary) this session — spawn, mailbox, TL->teammate SendMessage, teammate->TL reply, idle notifications all confirmed green. Not just doc-sourced.
+- **Edits made (uncommitted):** `docs/team_lead_playbook.md` + `.claude/team_lead_playbook.md` (respawn step, new "How spawning works" note in 4a, dropped dead TeamCreate mention in 4c); HANDOFF stale line above. Memory: deleted `feedback_use_teamcreate.md`, added `feedback_spawn_model.md`. Added `"teammateMode": "tmux"` to `~/.claude/settings.json`.
+- **NEXT:** user is restarting CC to confirm teammates pane out in iTerm (tmux mode only takes effect on fresh launch). After that visual confirm, **commit the spawn-model fixes** (scope: the team_lead_playbook + HANDOFF spawn-model changes; ask before bundling the pre-existing pm/worker playbook dirt or `backend/dwb.db`).
+- **Deferred:** ~15 PRE-EXISTING em dashes in both playbooks violate the no-em-dash rule; user hasn't decided whether to sweep them. My own additions are em-dash-clean.
 
 ## Shipped today (S66)
 
