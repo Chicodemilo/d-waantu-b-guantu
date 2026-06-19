@@ -18,7 +18,7 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 
 ## On Startup
 
-1. **Complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity (identify, cache `agent_id`, read your memory dir: `identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). Same flow for every agent, TL included.
+1. **Complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity (identify, cache `agent_id`, read your memory dir: `identity.md` + `memory.md`). Same flow for every agent, TL included.
 2. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`
 3. Fetch the live team roster: `GET /api/projects/{project_id}/team`. The DB is authoritative, not a checked-in file.
 4. **Respawn a parked team.** Claude Code teams do NOT survive across CC sessions; a team that `HANDOFF.md` describes as "parked" or "standing by" no longer exists as live processes. If the session's work needs workers, respawn each one via the full spawn flow per § 4a: spawn-prepare handshake, pending marker, then spawn with the Agent tool. There is no separate team-creation step. `TeamCreate`/`TeamDelete` were removed in CC 2.1.178, so a spawned teammate joins this session's team automatically. Do not assign work or SendMessage to roster names from HANDOFF before respawning; those inboxes are dead and messages drop silently.
@@ -28,11 +28,11 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 
 ### Your Personal Memory Dir
 
-Lives at `.claude/agents/memory/<project_prefix>/Archie_<PREFIX>/`. File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. TL-flavored use: `scratchpad.md` for orchestration notes (who's spawned, what you're tracking); `lessons.md` for TL-specific patterns (spawn quirks, gate edge cases).
+Lives at `.dwb/memory/<project_prefix>/Archie_<PREFIX>/` (DWB-401: moved out of `.claude/`). File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. TL-flavored use: `memory.md` (single free-form file) for orchestration notes (who's spawned, what you're tracking) and TL-specific patterns (spawn quirks, gate edge cases).
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
 
-**Memory model (canonical home — DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up) — do NOT free-write memory into root-level docs just because you (the TL) can. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md` — durable lessons go in `lessons.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
+**Memory model (canonical home — DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up) — do NOT free-write memory into root-level docs just because you (the TL) can. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md` — durable lessons go in your `memory.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
 
 ### Playbook locations
 
@@ -59,14 +59,13 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
    │     _team_lead = TL's rules for himself · _pm = TL's rules for the PM
    │     _worker = TL's rules for all workers · stack, ports, ticket prefix…
    │     deploy never touches · authored by TL · BUDGETED (TL-owned)
-   ├─ agents/*.md            role agent-def stubs — shipped from DWB
-   │     overwritten on deploy · edit: DWB team · EXEMPT
-   └─ agents/memory/<prefix>/<name>/   per-agent personal memory
+   └─ agents/*.md            role agent-def stubs — shipped from DWB
+         overwritten on deploy · edit: DWB team · EXEMPT
+└─ .dwb/                     DWB-401: agent memory lives here (writable, outside .claude/)
+   └─ memory/<prefix>/<name>/   per-agent personal memory
       ├─ identity.md         system-generated · NEVER edit
-      ├─ scratchpad.md       in-flight notes
-      ├─ lessons.md          durable patterns
-      └─ recent_sessions.md  session index
-            owner writes via the memory API (never Edit) · BUDGETED (per-agent)
+      └─ memory.md           single free-form memory (scratchpad + lessons merged)
+            owner writes via the memory API · GATE-EXEMPT (passive trim, never blocks close)
 ```
 
 **Budgeted vs exempt:** a doc is *budgeted* (its size gated at close) only when an agent can actually edit it — your memory plus the root/project docs you own. DWB-shipped docs (playbooks, agent defs) are *exempt*: keeping those lean is the DWB team's editorial job, never a close-blocker. No agent can Edit a `.claude/` path directly (it crashes the session) — memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
@@ -269,7 +268,7 @@ The hook resolver atomically renames the pending marker to the CC-assigned `sess
 
 Subagent edits to ANY path under `.claude/` trigger a permission dialog that crashes them in the ink renderer. Four workers died across S66 from this exact pattern, including some that followed prior playbook guidance to "append yourself" inside their own memory dir. The current model is stricter than what DWB-355 documented:
 
-- **Workers cannot safely write anything under `.claude/`** - that includes `.claude/settings.json`, the playbooks, the project_rules files, AND the worker's own memory dir at `.claude/agents/memory/<prefix>/<name>/`. The crash mode is identical.
+- **Workers cannot safely write anything under `.claude/`** - that includes `.claude/settings.json`, the playbooks, and the project_rules files. (DWB-401 moved agent memory OUT to `.dwb/memory/<prefix>/<name>/`, which is writable — so the memory dir is no longer in this danger zone, though writes still go through the API for the ISO heading + passive trim.)
 - **TL is the only agent that can directly Edit/Write `.claude/` files.** You run in the main CC window with a user attached for the permission dialog, so the prompt resolves instead of killing you. This is the hard exception to the TL-never-codes rule for harness-config edits.
 - **For worker memory writes**, route them through `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`. The FastAPI process has no permission dialog, so server-side writes are safe. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
 - Do NOT ticket a `.claude/settings.json` edit to a worker. Make the change yourself. The worker playbook carries the matching prohibition.
@@ -334,24 +333,24 @@ A DWB session bounds passive time + token tracking by user intent, not by Claude
 
 2. **Ambiguous.** Wording suggests intent but isn't certain (e.g. "let's wrap up" without "for the night"; "you are archie" with no playbook clause). Ask one short clarifying question before acting. If the user confirms, post with `open_method="ai_asked"` / `close_method="ai_asked"` so the rollup records which layer caught it.
 
-3. **Irrelevant.** Most messages. Do nothing. The regex layer (Layer 1) catches obvious cases automatically; the AI reasoning (Layer 2) is a backstop, not a per-turn ritual.
+3. **Irrelevant.** Most messages. Do nothing. The regex layer (Layer 1) catches obvious cases automatically; your AI reasoning is a backstop, not a per-turn ritual.
 
-**Detection layers (5 in total).** The five layers run independently; each one noops silently if a session is already open (or already closed), so they cannot collide. Your AI-layer reasoning sits between the regex catalogue and the deterministic slash escape hatch:
+**Detection layers (4 active; the Layer-2 AI classifier was retired in DWB-402).** The layers run independently; each one noops silently if a session is already open (or already closed), so they cannot collide. Your AI-layer reasoning sits between the regex catalogue and the deterministic slash escape hatch:
 
 | Layer | Trigger | Method enum (open / close) | Source |
 |-------|---------|----------------------------|--------|
 | 1a regex (open) | UserPromptSubmit hook matches `match_open(prompt)` instantly. Comma between `<name>` and the trailing clause is optional, so "you are archie read your playbook" matches the same as "you are archie, read your playbook". | `regex` | DWB-344, DWB-376 |
 | 1a regex (close) | UserPromptSubmit hook matches `match_close(prompt)` instantly. Mirrors the open fast path so close phrases no longer wait for the SessionEnd transcript scan. Broadened `_CLOSE_SOURCES` catalogue covers target-suffixed and lighter wrap-up variants ("shut down for the night", "wrap up archie", "done for the night", "logging off", "lets close it", etc.). | `regex` | DWB-377, DWB-378 |
 | 1b transcript scan | SessionEnd retry path re-runs `try_open_dwb_session_from_transcript`, so any Stop/SessionEnd/SubagentStop after the first assistant turn catches a phrase the SessionStart scan missed. | `regex` | DWB-343 |
-| 2 AI classifier | Async fire-and-forget Anthropic Haiku call when both `match_open` and `match_close` miss. Env-gated on `ANTHROPIC_API_KEY` (silent noop without). Only acts on high-confidence `intent=open` or `intent=close` returns; ambiguous or unrelated outputs noop. | `ai_classifier` | DWB-382 |
+| 2 AI classifier | RETIRED in DWB-402. Was an async Haiku call when both `match_open` and `match_close` missed; a regex-miss is now a plain noop. The `ai_classifier` enum value is kept as a tombstone so historical rows still load. | `ai_classifier` (legacy) | DWB-382, DWB-402 |
 | 3 slash commands | `/dwb-open` and `/dwb-close` ship in `<repo>/.claude/commands/` with the clone. Deterministic escape hatch when nothing else fired (or you want to override). | `slash` | DWB-381 |
 | Safety | 60-minute idle sweeper auto-closes if no hook_session updates or tracking_log writes land in the window. | `idle_timeout` (close only) | pre-existing |
 
 Your AI-layer evaluation (the three outcomes at the top of § 4e) is still the backstop for everything the catalogue does not cover. When you act, post with `open_method="ai_confident"` or `"ai_asked"` as before; the new enum values above belong to the system-driven layers, not to your manual TL action.
 
-**Method enum (DwbOpenMethod / DwbCloseMethod):** `regex` (Layer 1a/1b), `ai_classifier` (Layer 2, system-driven), `slash` (Layer 3 slash command), `ai_confident` (TL acted without asking), `ai_asked` (TL confirmed first), `idle_timeout` (close only, sweeper). The row records which layer caught the open / close so the dashboard can show the breakdown.
+**Method enum (DwbOpenMethod / DwbCloseMethod):** `regex` (Layer 1a/1b), `ai_classifier` (Layer 2, retired DWB-402 — legacy rows only), `slash` (Layer 3 slash command), `ai_confident` (TL acted without asking), `ai_asked` (TL confirmed first), `idle_timeout` (close only, sweeper). The row records which layer caught the open / close so the dashboard can show the breakdown.
 
-**Privacy rule (DWB-351, reinforced by DWB-382).** User-typed text is never persisted in DWB. On AI-layer opens and closes (TL `ai_confident`/`ai_asked` AND the Layer-2 `ai_classifier`), do NOT pass the user's literal message in `open_phrase` / `close_phrase`; omit the field or send `null`. The regex layer stores its matched catalogue substring (hardcoded text, not free-form input); slash commands carry no phrase. The Layer-2 classifier sends the prompt to Anthropic for classification but the phrase is nulled in two places (call site + service-layer AI-set defense) before the DB write. Future contributors who re-add user text here will reintroduce a privacy regression.
+**Privacy rule (DWB-351).** User-typed text is never persisted in DWB. On AI-layer opens and closes (TL `ai_confident`/`ai_asked`), do NOT pass the user's literal message in `open_phrase` / `close_phrase`; omit the field or send `null`. The regex layer stores its matched catalogue substring (hardcoded text, not free-form input); slash commands carry no phrase. (The Layer-2 Haiku classifier that previously sent prompts to Anthropic for classification was retired in DWB-402.) Future contributors who re-add user text here will reintroduce a privacy regression.
 
 **Race between layers:** if any layer opens first, your AI-side attempt returns 409 with the active session's id, silently noop and read that id for any follow-up announcements. Same for close: a faster layer may beat you to it, in which case `close` returns 200 (idempotent), not an error.
 
@@ -385,7 +384,7 @@ GET /api/projects/{pid}/consolidation-status?sprint_id={sid}
 - If `gate_satisfied: true`, every participant acked. Safe to PATCH.
 - If `gate_satisfied: false`, do NOT close. Walk the `agents[]` list, name every `acked: false`, ping with their `owned_over_ceiling_files`.
 
-**What the gate counts (DWB-397/399):** only docs an agent authors and can edit — their memory files plus the docs their role owns. You (the TL) own the repo-root docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) AND all three `project_rules_*` files (you author them per role), so those are budgeted against you. Only DWB-shipped docs — playbooks and agent defs — are EXEMPT: keeping those lean is DWB's editorial job (advisory on the budget panel), never an ack/close blocker. Don't chase anyone to trim a playbook; do keep your own `project_rules` lean.
+**What the gate counts (DWB-397/399/401):** only the docs YOU (the TL) own — the repo-root docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) AND all three `project_rules_*` files. Everything else is EXEMPT: DWB-shipped playbooks + agent defs (DWB's editorial job), AND — as of DWB-401 — every agent's `memory.md` (it's bounded by a passive server-side trim, never counted). So the consolidation gate is effectively a TL-only check: workers' acks always pass clean. Don't chase anyone to trim memory or a playbook; do keep your own root docs + `project_rules` lean.
 
 **TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same root doc mean the cap is wrong, raise it in `TOKEN_CEILINGS` (in the shared `backend/app/config/token_budget.py`, which also holds the `max(len//4, words)` token estimator every gate uses).
 
@@ -403,7 +402,7 @@ Marking an agent inactive removes them from the gate. Use only when an agent has
 
 1. Workers land their wrap-ups (`session-complete` posts, final ticket transitions).
 2. Team disposition is settled and EXECUTED: if the team is shutting down, send the shutdown requests and confirm termination; if it stays parked, leave it alone.
-3. **Parallel doc compaction (hard gate).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while any gated doc is over its token ceiling — memory files, root continuity docs, and `project_rules` (TL-owned); only shipped playbooks + agent defs are exempt (DWB-397/399). This is autonomous and parallel: the moment you go to close, have **every agent compact their own memory files at the same time** — each rewrites its own `scratchpad`/`lessons`/`recent_sessions` leaner and submits via `POST /api/agents/{id}/memory/compact {file, content}` (a full-file replace; the server rejects 422 if still over, so a no-op can't satisfy it). You (the TL) compact the shared root docs (`HANDOFF`/`ARCHITECTURE`/`README`) + your own dir. Don't serialize this or ask permission — fan it out. The 422 body lists every owner and their over files; clear them all, then close.
+3. **Doc compaction (TL-only now, DWB-401).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while a *gated* doc is over its token ceiling. As of DWB-401 the only gated docs are the ones YOU own — root continuity docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) and `project_rules`. Agent `memory.md` files are EXEMPT (passive server-side trim keeps them bounded; they never block a close), and shipped playbooks + agent defs are exempt too. So you do NOT need to fan out a compaction pass to the team — there's nothing of theirs to compact. Just keep your own root docs under ceiling: if the close 422s, the body names the over file (it'll be one of yours), trim it, re-close. This whole step collapsed from a team-wide hard gate to a quick TL self-check.
 4. DWB session close fires (any layer) or you close it explicitly per § 4e.
 5. **Only then** update `HANDOFF.md`, recording the state as it now is, and exit.
 
