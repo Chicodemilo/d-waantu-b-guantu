@@ -1,12 +1,12 @@
 // Path: src/__tests__/SessionsPage.test.jsx
 // File: SessionsPage.test.jsx
 // Created: 2026-06-10
-// Purpose: Tests for SessionsPage after DWB-349 restructure — page renders breadcrumb + title, the SessionsTable is the primary content (every session, no slice), the live SessionPanel is NOT inlined here (moved to /sessions/current via a header link), the phrase-help footer block is always visible, and not-found state when the project is missing
+// Purpose: Tests for SessionsPage after DWB-349 restructure — page renders breadcrumb + title, the SessionsTable is the primary content (every session, no slice), the live SessionPanel is NOT inlined here (moved to /sessions/current via a header link), the phrase-help footer block is always visible, the de-ceremony detection model is described (regex + slash commands + idle sweeper, no AI layer), and not-found state when the project is missing
 // Caller: vitest test runner
 // Callees: ../pages/SessionsPage, ../api/sessions (mocked), ../store/useStore (mocked)
 // Data In: Mocked sessions API + store selectors
 // Data Out: Test assertions
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-19
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
@@ -95,6 +95,24 @@ describe('SessionsPage (post-DWB-349 restructure)', () => {
     // Top placement: phrase-help appears in DOM order BEFORE the first session row.
     const firstRow = screen.getAllByTestId('recent-session-row')[0];
     expect(help.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('phrase-help describes the post-de-ceremony detection model (regex + slash + idle; no AI layer)', async () => {
+    getProjectSessions.mockResolvedValue([]);
+    await act(async () => {
+      renderAt('/projects/1/sessions');
+    });
+
+    const help = await screen.findByTestId('phrase-help');
+    // Slash commands are surfaced as a deterministic open/close path.
+    expect(help.textContent).toMatch(/\/dwb-open/);
+    expect(help.textContent).toMatch(/\/dwb-close/);
+
+    const info = screen.getByTestId('phrase-info');
+    // Idle sweeper mentioned; retired AI/Haiku layer is gone.
+    expect(info.textContent).toMatch(/idle sweeper/i);
+    expect(info.textContent).not.toMatch(/AI layer/i);
+    expect(info.textContent).not.toMatch(/Haiku/i);
   });
 
   it('renders not-found state when project missing', async () => {

@@ -1,7 +1,7 @@
 # Path: app/models/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback)
+# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone])
 # Caller: app/services/dwb_session.py (DWB-337), app/routers/dwb_sessions.py (DWB-338)
 # Callees: app/database.Base
 # Data In: DB rows
@@ -38,12 +38,10 @@ class DwbOpenMethod(str, enum.Enum):
     # with open_method=slash. Independent of the regex + AI layers so the
     # user always has a guaranteed open path regardless of phrase matching.
     slash = "slash"
-    # DWB-382: async Haiku classifier fallback. Stamped when the
-    # UserPromptSubmit hook's match_open AND match_close both miss, and the
-    # fire-and-forget Anthropic classifier returns intent=open with
-    # confidence=high. Runs out-of-band, so the hook response is unaffected.
-    # AI-method (privacy: open_phrase nulled out before persist, per
-    # DWB-351).
+    # DWB-382 / DWB-402: async Haiku classifier fallback. RETIRED in DWB-402;
+    # no new sessions are stamped with this method. Kept as a legacy tombstone
+    # so historical rows (open_method=ai_classifier) still load. Was an
+    # AI-method (open_phrase nulled before persist, per DWB-351).
     ai_classifier = "ai_classifier"
 
 
@@ -57,12 +55,10 @@ class DwbCloseMethod(str, enum.Enum):
     # /api/sessions/{id}/close with close_method=slash. Mirrors the open
     # side of the escape hatch above.
     slash = "slash"
-    # DWB-382: async Haiku classifier fallback. Stamped when the
-    # UserPromptSubmit hook's match_open AND match_close both miss, and the
-    # fire-and-forget Anthropic classifier returns intent=close with
-    # confidence=high (and an active session exists). Mirrors ai_classifier
-    # on the open side; AI-method (privacy: close_phrase nulled out before
-    # persist, per DWB-351 ai_confident / ai_asked precedent).
+    # DWB-382 / DWB-402: async Haiku classifier fallback. RETIRED in DWB-402;
+    # no new sessions are stamped with this method. Kept as a legacy tombstone
+    # so historical rows still load. Was an AI-method (close_phrase nulled
+    # before persist, per DWB-351).
     ai_classifier = "ai_classifier"
 
 

@@ -919,6 +919,11 @@
   cursor: default;
 }
 
+.project-gate__cost {
+  font-size: 11px;
+  color: var(--yellow);
+}
+
 .sync-btn--danger {
   border-color: var(--red-dim);
   color: var(--red);

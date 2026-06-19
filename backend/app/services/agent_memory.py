@@ -1,12 +1,12 @@
 # Path: app/services/agent_memory.py
 # File: agent_memory.py
 # Created: 2026-06-03
-# Purpose: Scaffold an agent's memory directory - identity.md + empty scratchpad/lessons/recent_sessions
+# Purpose: Scaffold an agent's memory directory (DWB-401: .dwb/memory/<prefix>/<name>/) - identity.md + empty memory.md
 # Caller: app/services/agent.create_agent, app/services/project_agent.create_project_agent, manual endpoint
 # Callees: app/models/agent, app/models/project
 # Data In: db: Session, agent_id: int
 # Data Out: ScaffoldResult (paths created, paths preserved, paths skipped)
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-19
 
 import logging
 from dataclasses import dataclass, field
@@ -21,10 +21,14 @@ from app.models.project import Project
 logger = logging.getLogger(__name__)
 
 
-_MEMORY_SUBPATH = ".claude/agents/memory"
+# DWB-401: memory relocated out of the protected .claude/ tree into .dwb/
+# (subagent writes under .claude/ crash the CC renderer; .dwb is writable).
+_MEMORY_SUBPATH = ".dwb/memory"
 
-# Files that the agent writes to. Created empty if missing, never overwritten.
-_AGENT_OWNED_FILES = ("scratchpad.md", "lessons.md", "recent_sessions.md")
+# DWB-401: collapsed to a single free-form memory.md (scratchpad + lessons
+# merged; recent_sessions dropped - the DB is the session index). Created empty
+# if missing, never overwritten.
+_AGENT_OWNED_FILES = ("memory.md",)
 
 
 @dataclass
@@ -163,7 +167,7 @@ Before doing anything else, read these in order:
 3. **HANDOFF.md** - session continuity (current state, decisions). TL-owned.
 4. **ARCHITECTURE.md** - system design + operational reference.
 5. **README.md** - project overview, setup, API reference.
-6. **Your memory dir** (below) - `scratchpad` / `lessons` / `recent_sessions`.
+6. **Your memory dir** (below) - the single free-form `memory.md`.
 
 You (the team lead) are the ONLY agent that owns root-level project docs
 (HANDOFF / ARCHITECTURE / README). Do NOT create any other root-level doc -
@@ -176,7 +180,7 @@ Before doing anything else, read these in order:
 
 1. **Your playbook** - `{playbook}`
 2. **Your project rules** - `{project_rules}`
-3. **Your memory dir** (below) - `scratchpad` / `lessons` / `recent_sessions`.
+3. **Your memory dir** (below) - the single free-form `memory.md`.
    This is your memory; rely on it plus the brief the TL gives you.
 
 Root-level project docs (HANDOFF / ARCHITECTURE / README) belong to the team
@@ -208,29 +212,29 @@ Before doing anything else, read these files in order:
 
 This gives you full context without needing to ask the TL. If any of these files don't exist, proceed with what you have and flag it.
 
-## Memory files
+## Memory files (DWB-401)
 
-Three companion files live in this directory:
+One free-form file lives in this directory alongside this identity.md:
 
-- `scratchpad.md` - your in-flight working notes; one block per session, append-only
-- `lessons.md` - durable lessons learned across sessions; append a block when something is worth remembering
-- `recent_sessions.md` - one-line index of past sessions; append-only
+- `memory.md` - your single durable memory: in-flight working notes AND lessons worth keeping across sessions. Append-only via the API; the server prepends an ISO 8601 heading per entry. (The former scratchpad.md + lessons.md were merged into this file; recent_sessions.md was dropped - the DWB dashboard is the session index.)
 
-## How to write to them
+## How to write to it
 
-All memory writes go through the API; never Edit/Write these files directly (subagent writes to `.claude/` paths crash the CC ink renderer):
+Memory now lives under `.dwb/` (writable), not `.claude/`. Still write through the API so the server applies the ISO heading and the passive size-trim consistently:
 
-- **In-flight notes:** `POST /api/agents/{agent.id}/memory/append` with body `{{"file": "scratchpad" | "lessons" | "recent_sessions", "content": "..."}}`. Server prepends the ISO 8601 UTC heading. `identity.md` is not in the file enum and is refused at the validation layer.
-- **Session wrap-up:** `POST /api/agents/{agent.id}/session-complete` writes all three for you at session end with one payload.
+- **Append:** `POST /api/agents/{agent.id}/memory/append` with body `{{"file": "memory", "content": "..."}}`. Server prepends the ISO 8601 UTC heading. `identity.md` is system-generated and refused at the validation layer.
+- **Session wrap-up:** `POST /api/agents/{agent.id}/session-complete` writes the session block to memory.md for you with one payload.
+
+memory.md has a passive size ceiling: when it grows past the ceiling the server silently trims the OLDEST entries. This NEVER blocks a session or sprint close - it is a trim threshold, not a gate.
 
 ## ISO 8601 entry rule
 
-Both endpoints prepend the heading server-side, so you do not format the timestamp. Reference shape for what lands on disk:
+The append/session-complete endpoints prepend the heading server-side, so you do not format the timestamp. Reference shape for what lands on disk:
 
 ```
 ## 2026-06-03T20:48:42+00:00 - session <session_id>
 <entry body>
 ```
 
-Both endpoints are append-only and never clobber prior entries.
+Appends never clobber prior entries (until the passive trim drops the oldest to stay under ceiling).
 """

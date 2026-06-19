@@ -6,7 +6,7 @@
 // Callees: react (useState, useEffect, useMemo), config (API_BASE_URL), styles/dashboard.css
 // Data In: projectId prop
 // Data Out: default export TokenBudget component
-// Last Modified: 2026-06-18 (DWB-399)
+// Last Modified: 2026-06-19 (DWB-401)
 
 import { useState, useEffect, useMemo } from 'react';
 import { API_BASE_URL } from '../../config';
@@ -49,12 +49,12 @@ const SECTIONS = [
   {
     key: 'memory',
     label: 'Memory',
-    categories: ['memory_identity', 'memory_scratchpad', 'memory_lessons', 'memory_recent'],
+    categories: ['memory_identity', 'memory_main'],
     subgroupBy: 'agent_name',
     info: [
-      'Covers: per-agent personal memory — identity.md (who they are), scratchpad.md (in-flight notes), lessons.md (durable patterns), recent_sessions.md (session index).',
-      'Who edits: identity.md is system-generated. The owning agent writes scratchpad, lessons, recent_sessions.',
-      'When updated: throughout each session. The session-complete endpoint formalizes session-end entries with ISO 8601 timestamps.',
+      'Covers: per-agent personal memory. identity.md (who they are) plus memory.md (single free-form memory: in-flight notes and durable lessons; recent_sessions dropped, the DB is the session index).',
+      'Who edits: identity.md is system-generated; the owning agent writes memory.md.',
+      'When updated: throughout each session. The session-complete endpoint writes the session-end block to memory.md with an ISO 8601 timestamp.',
     ],
   },
 ];

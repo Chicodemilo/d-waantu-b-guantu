@@ -112,13 +112,15 @@ class TestDeployScaffoldsMemoryDirs:
             assert entry["agent_name"] == "Devon"
             assert entry["error"] is None
             assert entry["skipped"] is False
-            expected_dir = Path(tmpdir) / ".claude/agents/memory/MEM1/Devon"
+            expected_dir = Path(tmpdir) / ".dwb/memory/MEM1/Devon"
             assert expected_dir.is_dir()
             # identity.md is always (re-)written
             assert (expected_dir / "identity.md").is_file()
-            # Agent-owned files exist (created blank)
+            # DWB-401: 2-file model - the single agent-owned memory.md exists
+            # (created blank); the retired files are not scaffolded.
+            assert (expected_dir / "memory.md").is_file()
             for fname in ("scratchpad.md", "lessons.md", "recent_sessions.md"):
-                assert (expected_dir / fname).is_file()
+                assert not (expected_dir / fname).exists()
 
     def test_idempotent_preserves_agent_owned_files(
         self, client, make_project, make_agent
@@ -130,15 +132,15 @@ class TestDeployScaffoldsMemoryDirs:
             self._deploy_or_skip(client, project["id"])
 
             scratch = (
-                Path(tmpdir) / ".claude/agents/memory/MEM2/Petra/scratchpad.md"
+                Path(tmpdir) / ".dwb/memory/MEM2/Petra/memory.md"
             )
-            scratch.write_text("user notes — preserve me\n", encoding="utf-8")
+            scratch.write_text("user notes - preserve me\n", encoding="utf-8")
 
             # Second deploy must not clobber agent-owned content
             data = self._deploy_or_skip(client, project["id"])
             assert (
                 scratch.read_text(encoding="utf-8")
-                == "user notes — preserve me\n"
+                == "user notes - preserve me\n"
             )
             # identity.md is system-generated; should appear in refreshed
             entry = data["memory_dirs"][0]
@@ -158,7 +160,7 @@ class TestDeployScaffoldsMemoryDirs:
             names = {e["agent_name"] for e in data["memory_dirs"]}
             assert names == {"One", "Two", "Three"}
             for name in ("One", "Two", "Three"):
-                d = Path(tmpdir) / f".claude/agents/memory/MEM3/{name}"
+                d = Path(tmpdir) / f".dwb/memory/MEM3/{name}"
                 assert (d / "identity.md").is_file()
 
     def test_inactive_agents_not_scaffolded(
@@ -178,7 +180,7 @@ class TestDeployScaffoldsMemoryDirs:
             assert ids == {active["id"]}
             # Active agent's dir was (re)scaffolded by deploy-playbooks.
             assert (
-                Path(tmpdir) / ".claude/agents/memory/MEM4/Alive/identity.md"
+                Path(tmpdir) / ".dwb/memory/MEM4/Alive/identity.md"
             ).is_file()
             # Inactive agent should not appear in the deploy response; we don't
             # assert on disk state because the dir may already exist from the
@@ -200,10 +202,10 @@ class TestDeployScaffoldsMemoryDirs:
                 assert names == {"Anna"}
                 # Anna's dir lives under project A's repo, not under project B's.
                 assert (
-                    Path(tmpdir) / ".claude/agents/memory/MEMA/Anna/identity.md"
+                    Path(tmpdir) / ".dwb/memory/MEMA/Anna/identity.md"
                 ).is_file()
                 assert not (
-                    Path(other_tmpdir) / ".claude/agents/memory/MEMA"
+                    Path(other_tmpdir) / ".dwb/memory/MEMA"
                 ).exists()
                 # (Bobby's dir under project B's repo already exists from the
                 # auto-scaffold at agent-create time — that's not part of this

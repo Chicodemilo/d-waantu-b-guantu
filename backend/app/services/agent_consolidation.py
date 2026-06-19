@@ -86,14 +86,17 @@ def _gate_counts(f: dict) -> bool:
     """Whether a token-budget entry should be enforced by a close/ack gate.
 
     DWB-397: shipped governance docs (playbooks, project_rules, agent defs) are
-    advisory only — they never block a gate. They are exempt ONLY when they are
-    shared (non-agent) files: an entry carrying `agent_name` is a per-agent
-    memory file, which classify_file would mislabel as "agent_def" by name
-    alone. Those memory files MUST still gate, so the exemption is applied only
-    when `agent_name` is None.
+    advisory only — they never block a gate. They are exempt when they are
+    shared (non-agent) files.
+
+    DWB-401: per-agent memory (entries carrying `agent_name` - now identity.md +
+    the single free-form memory.md) NO LONGER gates a close. memory.md is bounded
+    by a PASSIVE server-side trim threshold, never a close-blocking ceiling, so
+    it must never appear in the consolidation/compaction gate. Memory therefore
+    never blocks a session or sprint close.
     """
     if f.get("agent_name"):
-        return True
+        return False
     return is_gate_enforced(f["name"])
 
 

@@ -9,6 +9,8 @@
 # Last Modified: 2026-06-10
 
 import json
+import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +24,8 @@ from app.models.instruction import Instruction, InstructionScope
 from app.models.project import Project
 from app.models.project_agent import ProjectAgent
 from app.schemas.agent import AgentCreate, AgentUpdate
+
+logger = logging.getLogger(__name__)
 
 
 def list_agents(
@@ -187,11 +191,16 @@ def _memory_dir(project: Project, agent: Agent) -> str:
     response stays well-formed; DWB-293 will create the actual directory.
     """
     base = project.repo_path or "."
-    return f"{base.rstrip('/')}/.claude/agents/memory/{project.prefix}/{agent.name}/"
+    # DWB-401: memory relocated out of the protected .claude/ tree into .dwb/
+    # (subagent writes under .claude/ crash the CC renderer; .dwb is writable).
+    return f"{base.rstrip('/')}/.dwb/memory/{project.prefix}/{agent.name}/"
 
 
 def _read_scratchpad(memory_dir: str) -> str:
-    path = Path(memory_dir) / "scratchpad.md"
+    # DWB-401: the single free-form file is now memory.md (scratchpad + lessons
+    # merged; recent_sessions dropped). Key name kept as scratchpad_excerpt for
+    # API stability; it now surfaces memory.md.
+    path = Path(memory_dir) / "memory.md"
     try:
         if path.is_file():
             data = path.read_text(encoding="utf-8", errors="replace")
@@ -402,49 +411,28 @@ def record_session_complete(
 
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    # Always-written files
-    writes: list[tuple[Path, str]] = [
-        (
-            memory_dir / "scratchpad.md",
-            _format_scratchpad_block(
-                timestamp=timestamp,
-                session_id=session_id,
-                summary=summary,
-                lessons=lessons,
-                tokens_used=tokens_used,
-            ),
-        ),
-        (
-            memory_dir / "recent_sessions.md",
-            _format_recent_session_line(
-                timestamp=timestamp,
-                session_id=session_id,
-                summary=summary,
-                tokens_used=tokens_used,
-            ),
-        ),
-    ]
-    # lessons.md is only touched when lessons[] is present.
-    if lessons:
-        writes.append(
-            (
-                memory_dir / "lessons.md",
-                _format_lessons_block(
-                    timestamp=timestamp,
-                    session_id=session_id,
-                    lessons=lessons,
-                ),
-            )
-        )
+    # DWB-401: single free-form memory.md. The session block carries summary +
+    # tokens + lessons (the scratchpad block already lists lessons). The former
+    # recent_sessions.md is dropped (the DWB database is the session index).
+    target = memory_dir / "memory.md"
+    payload = _format_scratchpad_block(
+        timestamp=timestamp,
+        session_id=session_id,
+        summary=summary,
+        lessons=lessons,
+        tokens_used=tokens_used,
+    )
 
     paths_written: list[str] = []
     bytes_written = 0
     try:
-        for path, payload in writes:
-            with path.open("a", encoding="utf-8") as f:
-                f.write(payload)
-            paths_written.append(str(path))
-            bytes_written += len(payload.encode("utf-8"))
+        with target.open("a", encoding="utf-8") as f:
+            f.write(payload)
+        paths_written.append(str(target))
+        bytes_written += len(payload.encode("utf-8"))
+        # Passive trim (DWB-401): keep memory.md under its ceiling by dropping
+        # oldest blocks. Never blocks a close; purely mechanical.
+        _passive_trim_memory(target)
     except OSError as e:
         raise SessionCompleteError(
             "memory_dir_unwritable",
@@ -481,29 +469,54 @@ def _format_scratchpad_block(
     return "".join(lines)
 
 
-def _format_recent_session_line(
-    *,
-    timestamp: str,
-    session_id: str,
-    summary: str,
-    tokens_used: int | None,
-) -> str:
-    tok = f" ({tokens_used} tok)" if tokens_used is not None else ""
-    summary_oneline = summary.replace("\n", " ").strip()
-    return f"- {timestamp} `{session_id}`{tok}: {summary_oneline}\n"
+def _read_text_safe(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
-def _format_lessons_block(
-    *,
-    timestamp: str,
-    session_id: str,
-    lessons: list[str],
-) -> str:
-    """Lessons.md entry per session — one block, one bullet per lesson."""
-    lines = [f"\n## {timestamp} — session {session_id}\n"]
-    for item in lessons:
-        lines.append(f"- {item}\n")
-    return "".join(lines)
+def _passive_trim_memory(path: Path) -> bool:
+    """DWB-401 passive trim for memory.md.
+
+    Keeps memory.md within its token ceiling by dropping the OLDEST blocks
+    (segments delimited by '## ' headings), always retaining the newest block
+    and any pre-heading preamble (the file title). This is purely mechanical,
+    server-side, and NEVER blocks a session or sprint close - the ceiling is a
+    trim threshold, not a gate (DWB-400/401). Best-effort: read/write errors
+    are swallowed so a trim hiccup never fails the caller's write.
+
+    Returns True if it trimmed.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    ceiling = ceiling_for_file("memory.md")
+    if estimate_tokens(text) <= ceiling:
+        return False
+    lines = text.splitlines(keepends=True)
+    starts = [i for i, ln in enumerate(lines) if ln.startswith("## ")]
+    if len(starts) <= 1:
+        return False  # zero or one block: nothing safe to drop
+    preamble = "".join(lines[: starts[0]])
+    blocks = [
+        "".join(lines[starts[k] : starts[k + 1]]) for k in range(len(starts) - 1)
+    ]
+    blocks.append("".join(lines[starts[-1] :]))
+    while len(blocks) > 1 and estimate_tokens(preamble + "".join(blocks)) > ceiling:
+        blocks.pop(0)  # drop oldest
+    new_text = preamble + "".join(blocks)
+    if new_text == text:
+        return False
+    try:
+        tmp = path.with_suffix(path.suffix + ".trim.tmp")
+        tmp.write_text(new_text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        return False
+    logger.info("DWB-401 passive trim: %s trimmed to <=%d tokens", path, ceiling)
+    return True
 
 
 # --- /{id}/memory/append (DWB-358) -------------------------------------------
@@ -514,7 +527,9 @@ def _format_lessons_block(
 # must not be touched by an in-flight append. The three allowed
 # basenames match the agent-owned files scaffold_agent_dir creates
 # alongside identity.md (see app.services.agent_memory._AGENT_OWNED_FILES).
-_APPENDABLE_FILES = {"scratchpad", "lessons", "recent_sessions"}
+# DWB-401: collapsed to the single free-form memory.md. identity.md remains
+# system-generated and protected.
+_APPENDABLE_FILES = {"memory"}
 _PROTECTED_FILES = {"identity"}
 
 
@@ -653,6 +668,8 @@ def append_memory(
     try:
         with target.open("a", encoding="utf-8") as f:
             f.write(block)
+        # DWB-401: passive trim keeps memory.md under ceiling; never gates.
+        _passive_trim_memory(target)
     except OSError as e:
         raise MemoryAppendError(
             "memory_file_unwritable",
@@ -728,17 +745,10 @@ def compact_memory(
         )
 
     fname = f"{file}.md"
-    tokens = estimate_tokens(content)
     ceiling = ceiling_for_file(fname)
-    if tokens > ceiling:
-        raise MemoryCompactError(
-            "still_over_ceiling",
-            f"compacted {fname} is ~{tokens} tokens but the ceiling is "
-            f"{ceiling}; trim further (dedupe, drop superseded entries, "
-            f"summarise) and resubmit",
-            tokens=tokens,
-            ceiling=ceiling,
-        )
+    # DWB-401: no over-ceiling REJECTION. memory.md's ceiling is a passive trim
+    # threshold, never a gate; if the submitted content is over, the server
+    # trims oldest blocks after writing rather than refusing.
 
     agent = db.get(Agent, agent_id)
     if agent is None:
@@ -773,18 +783,21 @@ def compact_memory(
     normalized = content.rstrip("\n") + "\n"
     try:
         target.write_text(normalized, encoding="utf-8")
+        # DWB-401: passive trim after replace; keeps memory.md under ceiling.
+        _passive_trim_memory(target)
     except OSError as e:
         raise MemoryCompactError(
             "memory_file_unwritable", f"could not write {target}: {e}"
         )
 
+    final_text = _read_text_safe(target)
     return {
         "agent_id": agent.id,
         "file": file,
         "path": str(target),
-        "tokens": tokens,
+        "tokens": estimate_tokens(final_text),
         "ceiling": ceiling,
-        "bytes_written": len(normalized.encode("utf-8")),
+        "bytes_written": len(final_text.encode("utf-8")),
     }
 
 

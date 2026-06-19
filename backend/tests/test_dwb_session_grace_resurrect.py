@@ -11,15 +11,15 @@
 
 """DWB-395: grace-window auto-resurrect.
 
-When tracking activity lands within 120s of a LOW-PRECISION close (regex or
-ai_classifier), the just-closed DWB session is reopened instead of a brand-new
-one being created - so a false close (e.g. TL prose tripping the Layer-1 close
-catalogue) doesn't fragment the rollup. Deliberate closes (slash, ai_confident,
-ai_asked, idle_timeout) are NEVER auto-undone.
+When tracking activity lands within 120s of a LOW-PRECISION close (regex), the
+just-closed DWB session is reopened instead of a brand-new one being created -
+so a false close (e.g. TL prose tripping the Layer-1 close catalogue) doesn't
+fragment the rollup. Deliberate closes (slash, ai_confident, ai_asked,
+idle_timeout) are NEVER auto-undone. (DWB-402 retired the Layer-2
+ai_classifier, which previously shared the regex grace treatment.)
 
 These tests pin:
   - resurrect on a regex close inside the window (service helper + end-to-end)
-  - resurrect on an ai_classifier close inside the window
   - NON-resurrect on slash / ai_confident / idle_timeout closes
   - NON-resurrect when the close is older than the grace window
   - NON-resurrect when a session is already open
@@ -71,7 +71,9 @@ def _open_and_close(
 class TestGraceResurrectServiceHelper:
     @pytest.mark.parametrize(
         "close_method",
-        [DwbCloseMethod.regex, DwbCloseMethod.ai_classifier],
+        # DWB-402: ai_classifier was retired; regex is the only low-precision
+        # close still eligible for grace resurrection.
+        [DwbCloseMethod.regex],
     )
     def test_resurrects_low_precision_close_inside_window(
         self, db_session, make_project, close_method

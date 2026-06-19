@@ -583,6 +583,38 @@ def _check_doc_gates(db: Session, project) -> list[dict]:
     return gates
 
 
+def _check_header_gate(db: Session, project) -> dict:
+    """Check the code-header gate (DWB-403) against the active sprint.
+
+    When force_headers is on, lists the sprint-touched .py files that are
+    missing the mandatory code-header block. Passes when the toggle is off or
+    nothing touched is missing it. No scan happens when the toggle is off.
+    """
+    from app.models.sprint import Sprint, SprintStatus
+    from app.services.sprint import sprint_touched_py_files_missing_header
+
+    enabled = bool(project.force_headers)
+    missing: list[str] = []
+    if enabled and project.repo_path:
+        active = db.scalars(
+            select(Sprint)
+            .where(Sprint.project_id == project.id)
+            .where(Sprint.status == SprintStatus.active)
+            .order_by(Sprint.id.desc())
+            .limit(1)
+        ).first()
+        start_date = active.start_date if active else None
+        missing = sprint_touched_py_files_missing_header(project.repo_path, start_date)
+
+    return {
+        "kind": "header",
+        "toggle": "force_headers",
+        "enabled": enabled,
+        "missing_files": missing,
+        "passing": not enabled or not missing,
+    }
+
+
 @router.get("/{project_id}/gate-status")
 def get_gate_status(project_id: int, db: Session = Depends(get_db)):
     project = svc.get_project(db, project_id)
@@ -590,6 +622,7 @@ def get_gate_status(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Project not found")
 
     gates = _check_doc_gates(db, project)
+    gates.append(_check_header_gate(db, project))
 
     return {
         "project_id": project_id,
@@ -884,10 +917,10 @@ def compute_token_budget(db: Session, project) -> dict:
                 })
                 file_token_map[filepath.name] = tokens
 
-    # Per-agent memory: .claude/agents/memory/{prefix}/{agent_name}/{file}
+    # Per-agent memory: .dwb/memory/{prefix}/{agent_name}/{file} (DWB-401).
     # Counts every file each active agent on this project loads at spawn.
     if project.prefix:
-        memory_root = repo / ".claude" / "agents" / "memory" / project.prefix
+        memory_root = repo / ".dwb" / "memory" / project.prefix
         active_agents = (
             db.query(Agent)
             .filter(Agent.project_id == project.id, Agent.is_active.is_(True))

@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-19
 
 import { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -223,11 +223,11 @@ function ProjectPage() {
             <div className="project-tools__section">
               <div className="project-tools__section-title">Sprint Gates</div>
               {[
-                { field: 'force_headers', label: 'Force Headers', tip: 'Require code headers on all source files. Not yet enforced automatically.' },
+                { field: 'force_headers', label: 'Force Headers', tip: 'When ON, sprint close is blocked (HTTP 400) if any source (.py) file added or changed during the sprint is missing the mandatory code-header block. Default OFF = no scan, no cost.', cost: 'Token cost: a code-header block is required on every new or changed source file.' },
                 { field: 'force_test_coverage', label: 'Force Coverage', tip: 'Every API router must have a corresponding test file before sprint close.' },
                 { field: 'force_test_run', label: 'Force Tests', tip: 'At least one test run must be recorded during the sprint before it can be closed.' },
-                { field: 'force_consolidation', label: 'Consolidation at sprint close', tip: 'Every project agent must acknowledge consolidation of their owned over-ceiling docs before the sprint can be closed. Agents POST to /api/agents/:id/consolidate-complete; gate status is shown in the Consolidation panel.' },
-              ].map(({ field, label, tip }) => (
+                { field: 'force_consolidation', label: 'Consolidation at sprint close', tip: 'Every project agent must acknowledge consolidation of their owned over-ceiling docs before the sprint can be closed. Agents POST to /api/agents/:id/consolidate-complete; gate status is shown in the Consolidation panel.', cost: 'Token cost: every project agent runs a consolidation pass at sprint close.' },
+              ].map(({ field, label, tip, cost }) => (
                 <div key={field} className="project-tools__row">
                   <button
                     className={`project-gate__toggle${project[field] ? ' project-gate__toggle--on' : ''}`}
@@ -240,6 +240,9 @@ function ProjectPage() {
                     ?
                     <span className="tooltip-content">{tip}</span>
                   </span>
+                  {cost && project[field] && (
+                    <span className="project-gate__cost">{cost}</span>
+                  )}
                 </div>
               ))}
             </div>

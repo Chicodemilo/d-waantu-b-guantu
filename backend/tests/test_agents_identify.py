@@ -35,7 +35,7 @@ class TestIdentifyHappyPath:
         assert body["role"] == "frontend-worker"
         assert body["project_id"] == project["id"]
         assert body["project_prefix"] == "IDP1"
-        assert body["memory_dir"].endswith("/.claude/agents/memory/IDP1/Pixel/")
+        assert body["memory_dir"].endswith("/.dwb/memory/IDP1/Pixel/")
         assert body["memory_dir"].startswith(str(tmp_path))
         assert body["scratchpad_excerpt"] == ""
         assert body["instructions"] == []
@@ -52,9 +52,10 @@ class TestIdentifyHappyPath:
             "role": "tester",
             "api_key": f"id-key-{project['id']}",
         })
-        memory_dir = tmp_path / ".claude/agents/memory/IDP2/Sage"
+        memory_dir = tmp_path / ".dwb/memory/IDP2/Sage"
         memory_dir.mkdir(parents=True, exist_ok=True)  # auto-scaffold may have created it
-        (memory_dir / "scratchpad.md").write_text("## 2026-06-03T12:00:00\nfound the bug.\n")
+        # DWB-401: the excerpt reads memory.md.
+        (memory_dir / "memory.md").write_text("## 2026-06-03T12:00:00\nfound the bug.\n")
 
         r = client.post("/api/agents/identify", json={
             "role": "tester",
@@ -157,7 +158,7 @@ class TestIdentifyLazyScaffold:
             "role": "frontend-worker", "api_key": "lz1-pixel",
         })
         # Simulate "agent created before DWB-293" by removing the scaffolded dir.
-        memory_dir = Path(tmp_path) / ".claude/agents/memory/LZ1/Pixel"
+        memory_dir = Path(tmp_path) / ".dwb/memory/LZ1/Pixel"
         assert memory_dir.is_dir()  # auto-scaffold ran on create
         rmtree(memory_dir)
         assert not memory_dir.exists()
@@ -171,8 +172,8 @@ class TestIdentifyLazyScaffold:
         assert (memory_dir / "identity.md").is_file()
         assert "**name:** Pixel" in (memory_dir / "identity.md").read_text()
 
-    def test_identify_does_not_clobber_existing_scratchpad(self, client, tmp_path):
-        """If scratchpad already has content, lazy scaffold must not overwrite."""
+    def test_identify_does_not_clobber_existing_memory(self, client, tmp_path):
+        """If memory.md already has content, lazy scaffold must not overwrite."""
         from pathlib import Path
 
         project = client.post("/api/projects", json={
@@ -182,9 +183,11 @@ class TestIdentifyLazyScaffold:
             "project_id": project["id"], "name": "Sage",
             "role": "tester", "api_key": "lz2-sage",
         })
-        memory_dir = Path(tmp_path) / ".claude/agents/memory/LZ2/Sage"
-        (memory_dir / "scratchpad.md").write_text("## 2026-06-03\n- precious note\n")
-        (memory_dir / "lessons.md").write_text("## 2026-06-03\n- precious lesson\n")
+        memory_dir = Path(tmp_path) / ".dwb/memory/LZ2/Sage"
+        # DWB-401: single memory.md holds both notes and lessons.
+        (memory_dir / "memory.md").write_text(
+            "## 2026-06-03\n- precious note\n- precious lesson\n"
+        )
         # Delete identity.md so identify has to refresh it
         (memory_dir / "identity.md").unlink()
 
@@ -192,12 +195,9 @@ class TestIdentifyLazyScaffold:
             "role": "tester", "name": "Sage", "project_prefix": "LZ2",
         })
         assert r.status_code == 200
-        # identity.md was re-created by the lazy scaffold path (note: in this
-        # test the dir already existed so the lazy branch didn't run; the
-        # session-complete or scaffold-memory endpoints would re-create it).
         # The critical assertion: precious content survived any side effect.
-        assert "precious note" in (memory_dir / "scratchpad.md").read_text()
-        assert "precious lesson" in (memory_dir / "lessons.md").read_text()
+        assert "precious note" in (memory_dir / "memory.md").read_text()
+        assert "precious lesson" in (memory_dir / "memory.md").read_text()
 
 
 class TestIdentifyErrors:
@@ -315,7 +315,7 @@ class TestIdentifyErrors:
             "project_id": project["id"], "name": "Long",
             "role": "tester", "api_key": "trun-long",
         })
-        memory_dir = tmp_path / ".claude/agents/memory/TRUN/Long"
+        memory_dir = tmp_path / ".dwb/memory/TRUN/Long"
         memory_dir.mkdir(parents=True, exist_ok=True)
         # Layout (each section is intentionally >cap bytes so the tail slice
         # lands inside the second section, not in the head sentinel zone):
@@ -325,7 +325,8 @@ class TestIdentifyErrors:
         # "TAIL"/"BOUNDARY"/"HEAD" sentinels are guaranteed to be sliced off.
         head = "HEAD" + ("h" * (cap + 500)) + "BOUNDARY"
         tail = "TAIL" + ("t" * (cap + 100)) + "ENDMARKER"
-        (memory_dir / "scratchpad.md").write_text(head + tail, encoding="utf-8")
+        # DWB-401: the excerpt reads memory.md.
+        (memory_dir / "memory.md").write_text(head + tail, encoding="utf-8")
         # Sanity: the combined file is well bigger than the cap.
         assert len(head + tail) > 2 * cap
 

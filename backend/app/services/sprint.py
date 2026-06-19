@@ -3,13 +3,15 @@
 # Created: 2026-03-29
 # Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), and post-close automation
 # Caller: app/routers/sprints.py
-# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc
+# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc, git
 # Data In: db: Session, SprintCreate/Update
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-06-09
+# Last Modified: 2026-06-19
 
 import logging
 import re
+import subprocess
+from datetime import date
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -231,6 +233,22 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                         f"Cannot complete sprint: {filename} not found at {path}",
                     )
 
+    # Code-header gate (DWB-403) — opt-in via force_headers, default OFF. When
+    # enabled, block close if any .py file touched during the sprint is missing
+    # the mandatory code-header block. Scope is sprint-touched files only, never
+    # repo-wide legacy. No scan, no token cost when the toggle is off.
+    if project.force_headers:
+        missing_headers = sprint_touched_py_files_missing_header(
+            project.repo_path, sprint.start_date
+        )
+        if missing_headers:
+            raise HTTPException(
+                400,
+                "Cannot complete sprint: force_headers is enabled but these "
+                "sprint-touched .py files are missing the code-header block: "
+                f"{', '.join(missing_headers)}",
+            )
+
     # Consolidation gate — every active agent who participated in the sprint
     # must have an ack row when force_consolidation is enabled (DWB-326).
     if project.force_consolidation:
@@ -280,6 +298,86 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                 f"Cannot complete sprint: unreviewed failure records on tickets: "
                 f"{', '.join(keys)}. PM must review and update failure_type/notes before closing.",
             )
+
+
+# DWB-403: code-header gate. The header marker is the canonical first-block
+# fields from .claude/rules/global/code-header-format.md. A touched .py file
+# must carry both to count as headered; empty files (no code) are exempt.
+_HEADER_MARKERS = ("# Path:", "# Purpose:")
+
+
+def _git_lines(repo_path: str, args: list[str]) -> list[str]:
+    """Run a git command in repo_path and return non-empty stdout lines.
+
+    Any failure (not a git repo, git missing, timeout) returns [] so the gate
+    degrades to "nothing to scan" rather than blocking a close on tooling.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", repo_path, *args],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode != 0:
+        return []
+    return [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
+
+
+def sprint_touched_py_files_missing_header(
+    repo_path: str | None, start_date: "date | None"
+) -> list[str]:
+    """Return repo-relative .py files touched in the sprint that lack a header.
+
+    "Touched in the sprint" = the union of (a) files added/modified/renamed in
+    commits since ``start_date`` and (b) currently staged, unstaged, and
+    untracked .py changes (in-flight work not yet committed). Scope is .py only:
+    project_rules mandates the header block on Python source; other languages
+    have no defined header convention here. Repo-wide legacy files are NOT
+    scanned, only sprint-touched ones. Empty files are exempt (no code).
+
+    Returns a sorted list of relative paths missing the header marker. A
+    non-git or unreadable repo yields [] (the gate passes rather than blocking
+    a close on tooling).
+    """
+    if not repo_path:
+        return []
+    repo = Path(repo_path)
+    if not repo.is_dir():
+        return []
+
+    rels: set[str] = set()
+    if start_date is not None:
+        rels.update(_git_lines(repo_path, [
+            "log", f"--since={start_date.isoformat()}",
+            "--diff-filter=AMR", "--name-only", "--pretty=format:", "--", "*.py",
+        ]))
+    rels.update(_git_lines(repo_path, [
+        "diff", "--cached", "--name-only", "--diff-filter=AMR", "--", "*.py",
+    ]))
+    rels.update(_git_lines(repo_path, [
+        "diff", "--name-only", "--diff-filter=AMR", "--", "*.py",
+    ]))
+    rels.update(_git_lines(repo_path, [
+        "ls-files", "--others", "--exclude-standard", "--", "*.py",
+    ]))
+
+    missing: list[str] = []
+    for rel in rels:
+        if not rel.endswith(".py"):
+            continue
+        fpath = repo / rel
+        if not fpath.is_file():
+            continue  # deleted/renamed-away path still listed by git
+        try:
+            text = fpath.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if not text.strip():
+            continue  # empty file: no code, no header required
+        if not all(marker in text for marker in _HEADER_MARKERS):
+            missing.append(rel)
+    return sorted(missing)
 
 
 def _get_uncovered_routers() -> list[str]:

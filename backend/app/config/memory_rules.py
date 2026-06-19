@@ -21,17 +21,17 @@ test run instead of silently bloating the response.
 """
 
 MEMORY_USAGE_RULES: str = (
-    "Memory dir: .claude/agents/memory/<prefix>/<name>/\n"
-    "Files: identity.md (system; NEVER edit), scratchpad.md, lessons.md, "
-    "recent_sessions.md.\n"
-    "NEVER Edit/Write any .claude/ path (crashes subagents). "
-    "ALL memory writes go through the API:\n"
-    "- In-flight: POST /api/agents/{agent_id}/memory/append "
-    "{file, content}. file=scratchpad|lessons|recent_sessions.\n"
-    "- Wrap-up: POST /api/agents/{agent_id}/session-complete writes "
-    "all three at session end.\n"
-    "Both endpoints prepend the ISO 8601 UTC heading "
-    "(## 2026-06-10T13:45:00+00:00) and are append-only."
+    "Memory dir: .dwb/memory/<prefix>/<name>/\n"
+    "Files: identity.md (system; NEVER edit) + memory.md (your single "
+    "free-form memory).\n"
+    "Write through the API so the server adds the ISO 8601 heading + passive "
+    "size-trim:\n"
+    "- Append: POST /api/agents/{agent_id}/memory/append {file, content}. "
+    "file=memory.\n"
+    "- Wrap-up: POST /api/agents/{agent_id}/session-complete writes the "
+    "session block to memory.md.\n"
+    "Append-only; memory.md auto-trims oldest entries past its ceiling "
+    "(a trim threshold, never a close gate)."
 )
 
 

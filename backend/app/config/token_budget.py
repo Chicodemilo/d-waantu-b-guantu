@@ -34,17 +34,19 @@ TOKEN_CEILINGS = {
     "readme": 3500,
     "initial": 2000,
     "memory_identity": 600,
-    "memory_scratchpad": 2000,
-    "memory_lessons": 1500,
-    "memory_recent": 1000,
+    # DWB-401: single free-form memory.md replaces scratchpad+lessons+recent.
+    # 4500 = 2000 + 1500 + 1000 (sum of the three it replaces) so the collapse
+    # never tightens an agent's budget. This is a PASSIVE TRIM threshold only
+    # (the server trims oldest blocks past it); it NEVER blocks a close/ack gate
+    # (see GATE_EXEMPT + _gate_counts in agent_consolidation.py).
+    "memory_main": 4500,
 }
 
-# Memory files scanned per active agent (filename -> category).
+# Memory files scanned per active agent (filename -> category). DWB-401: 2-file
+# model (identity.md + memory.md).
 MEMORY_FILES = {
     "identity.md": "memory_identity",
-    "scratchpad.md": "memory_scratchpad",
-    "lessons.md": "memory_lessons",
-    "recent_sessions.md": "memory_recent",
+    "memory.md": "memory_main",
 }
 
 # Fallback when a file classifies to a category not present in TOKEN_CEILINGS.

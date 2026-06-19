@@ -100,6 +100,8 @@ The human runs parallel CC sessions and a life alongside them. Every substantive
 
 **Short acknowledgments are exempt.** A 1-5 word reply ("Got it.", "Holding.", "On it.", "Done.") needs no banner — just say it. Banner anything the human needs to scan, act on, or decide.
 
+**Escalation discipline (surface vs handle).** DWB is bot-facing infrastructure; Jira is the human-facing system of record other people read. Do NOT surface internal DWB ticket-management minutiae to the human — ticket scope calls, status/sequencing, sprint placement, and small policy nits are yours to decide and execute as TL. Reserve human escalations for genuinely human-owned decisions: config/policy/DB-data changes, scope, anything Jira-facing, and compliance. Litmus test: internal-DWB → handle it silently; Jira or human-facing → surface it.
+
 ---
 
 ## 1. Project Setup

@@ -7,7 +7,7 @@
 #                GET /api/projects/:id/consolidation-status, PATCH /api/sprints/:id (close), GET /api/projects/:id/token-budget
 # Data In:       Factory-created projects, sprints, agents + a temp repo for owner-mapping cases
 # Data Out:      Assertions on ack responses, status payload owner mapping, sprint-close blocks, override enforcement
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-19
 
 """Tests for the consolidation gate (DWB-style untracked feature, 2026-06-04).
 
@@ -57,13 +57,13 @@ def _make_repo(tmp_path: Path, prefix: str, agent_names: list[str]) -> Path:
     # Project rules (cap 1000) — over.
     _write(repo / ".claude" / "project_rules_pm.md", "word " * 5000)           # ~6500 tok, cap 1000
     _write(repo / ".claude" / "project_rules_worker.md", "word " * 5000)       # ~6500 tok, cap 1000
-    # Memory dirs
+    # Memory dirs. DWB-401: 2-file model (identity.md + memory.md). memory.md is
+    # seeded over its 4500 ceiling but is GATE-EXEMPT, so it must never block an
+    # ack or close.
     for name in agent_names:
-        mem = repo / ".claude" / "agents" / "memory" / prefix / name
+        mem = repo / ".dwb" / "memory" / prefix / name
         _write(mem / "identity.md", "word " * 100)
-        _write(mem / "scratchpad.md", "word " * 5000)  # ~6500 tok, cap 2000
-        _write(mem / "lessons.md", "")
-        _write(mem / "recent_sessions.md", "")
+        _write(mem / "memory.md", "word " * 5000)  # ~5000 tok, cap 4500 (exempt)
     return repo
 
 
@@ -269,16 +269,20 @@ class TestConsolidationStatus:
                 f"{name} must not own project_rules (TL-only): {names & rules}"
             )
 
-    def test_owner_mapping_memory_files_belong_to_agent(self, client, gate_ctx):
+    def test_memory_files_are_gate_exempt(self, client, gate_ctx):
+        # DWB-401: memory.md is gate-exempt. Even though it's seeded over its
+        # ceiling, it must NOT appear in ANY agent's owned_over_ceiling_files -
+        # memory never counts toward the consolidation gate.
         body = client.get(
             f"/api/projects/{gate_ctx['project']['id']}/consolidation-status",
             params={"sprint_id": gate_ctx["sprint"]["id"]},
         ).json()
-        archie = next(a for a in body["agents"] if a["name"] == "Archie")
-        archie_files = {f["name"] for f in archie["owned_over_ceiling_files"]}
-        assert any(n.startswith("memory/Archie/") for n in archie_files)
-        # Archie should not see Barry's memory
-        assert not any(n.startswith("memory/Barry/") for n in archie_files)
+        for a in body["agents"]:
+            names = {f["name"] for f in a["owned_over_ceiling_files"]}
+            assert not any(n.startswith("memory/") for n in names), (
+                f"{a['name']} lists a memory file as over-ceiling; "
+                f"memory must be gate-exempt under DWB-401"
+            )
 
     def test_after_ack_gate_marks_agent_acked(self, client, gate_ctx):
         agent = gate_ctx["agents"]["Archie"]
@@ -418,27 +422,17 @@ class TestSprintCloseGate:
 class TestOverCeilingEnforcement:
     """Ack must refuse over-ceiling owned files unless overridden per-file."""
 
-    def test_ack_with_no_overrides_refused(self, client, gate_ctx):
-        """Agent owns over-ceiling files and supplies no overrides → 400 with violations."""
+    def test_worker_ack_succeeds_without_overrides(self, client, gate_ctx):
+        """DWB-401: a worker's only over-ceiling file is memory.md, which is now
+        gate-exempt. With playbooks exempt (DWB-397) and project_rules TL-only
+        (DWB-399), a worker owns NO gated over-ceiling files, so the ack
+        succeeds with no overrides - memory never blocks the gate."""
         agent = gate_ctx["agents"]["Barry"]
         r = client.post(f"/api/agents/{agent['id']}/consolidate-complete", json={
             "sprint_id": gate_ctx["sprint"]["id"],
             "notes": None,
         })
-        assert r.status_code == 400, r.text
-        detail = r.json()["detail"]
-        assert detail["error"] == "over_ceiling_files_must_be_trimmed_or_overridden"
-        # DWB-397/399: a worker owns neither playbooks (exempt) nor project_rules
-        # (TL-only). The only over-ceiling file Barry still OWNS is his own
-        # memory/scratchpad.
-        names = {v["file"] for v in detail["violations"]}
-        assert any(n.startswith("memory/Barry/") for n in names)
-        # Shipped playbook + TL-only project_rules must NOT appear for a worker.
-        assert ".claude/worker_playbook.md" not in names
-        assert ".claude/project_rules_worker.md" not in names
-        for v in detail["violations"]:
-            assert isinstance(v["tokens"], int) and v["tokens"] > v["ceiling"]
-            assert isinstance(v["ceiling"], int)
+        assert r.status_code == 201, r.text
 
     def test_tl_ack_blocked_by_over_ceiling_project_rules(self, client, gate_ctx):
         """DWB-399: the team-lead DOES gate on over-ceiling project_rules
@@ -457,9 +451,10 @@ class TestOverCeilingEnforcement:
         assert ".claude/team_lead_playbook.md" not in names
         assert ".claude/pm_playbook.md" not in names
 
-    def test_ack_with_full_memory_override_succeeds(self, client, gate_ctx):
-        """DWB-397: with playbooks exempt, justifying only the owned memory file
-        is enough to ack — the agent no longer has to override docs they can't edit."""
+    def test_worker_owns_no_gated_over_ceiling_files(self, client, gate_ctx):
+        """DWB-401: memory.md is gate-exempt, so a worker owns NO gated
+        over-ceiling files even with an over-ceiling memory.md on disk. The
+        ack succeeds with an empty body - no memory override required."""
         agent = gate_ctx["agents"]["Barry"]
         status = client.get(
             f"/api/projects/{gate_ctx['project']['id']}/consolidation-status",
@@ -467,13 +462,9 @@ class TestOverCeilingEnforcement:
         ).json()
         barry = next(a for a in status["agents"] if a["agent_id"] == agent["id"])
         over = [f for f in barry["owned_over_ceiling_files"] if f["status"] == "over"]
-        # Only memory files remain owned + over for a worker now.
-        assert over, "Barry should still own at least his over-ceiling memory file"
-        assert all(f["name"].startswith("memory/") for f in over)
-        overrides = {f["name"]: "load-bearing in-flight notes" for f in over}
+        assert over == [], f"worker should own no gated over-ceiling files, got {over}"
         r = client.post(f"/api/agents/{agent['id']}/consolidate-complete", json={
             "sprint_id": gate_ctx["sprint"]["id"],
-            "overrides": overrides,
         })
         assert r.status_code == 201, r.text
 
@@ -506,18 +497,23 @@ class TestOverCeilingEnforcement:
         assert target_file in violation_names
 
     def test_ack_with_full_overrides_succeeds_and_stores(self, client, gate_ctx):
-        """Every over-ceiling file justified → 201, override map persisted."""
-        agent = gate_ctx["agents"]["Mona"]
+        """Every over-ceiling file justified → 201, override map persisted.
+
+        DWB-401: memory is gate-exempt, so this exercises the TL (Archie), who
+        still owns over-ceiling root docs + project_rules - the gated files that
+        actually require overrides."""
+        agent = gate_ctx["agents"]["Archie"]
         payload = _override_payload(
             client, gate_ctx["project"]["id"], agent["id"], gate_ctx["sprint"]["id"],
-            notes="reviewed PM files",
+            notes="reviewed TL-owned files",
         )
+        assert payload["overrides"], "TL should still own gated over-ceiling files"
         r = client.post(f"/api/agents/{agent['id']}/consolidate-complete", json=payload)
         assert r.status_code == 201, r.text
         body = r.json()
         # Stored override map matches what we sent
         assert body["overrides"] == payload["overrides"]
-        assert body["notes"] == "reviewed PM files"
+        assert body["notes"] == "reviewed TL-owned files"
 
     def test_status_response_includes_overrides_after_ack(self, client, gate_ctx):
         """GET /consolidation-status surfaces the stored override map per agent."""

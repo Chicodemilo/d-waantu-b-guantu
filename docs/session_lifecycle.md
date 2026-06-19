@@ -21,7 +21,7 @@ At most one DWB session is open per project at any time. This is enforced at the
 
 ## Opening a session
 
-You open a session by saying something the TL recognizes as an open phrase. The detection runs in two main layers (plus an async AI classifier and the `/dwb-open` slash escape hatch, both shown in the method table below):
+You open a session by saying something the TL recognizes as an open phrase. The detection runs in two main layers (plus the `/dwb-open` slash escape hatch, shown in the method table below). A former Layer-2 async Haiku classifier was retired in DWB-402; its `ai_classifier` method survives only as a legacy value on historical rows.
 
 **Layer 1 - regex fast path.** A small catalogue of common phrases is matched directly on every user prompt. When one hits, the system opens the session before the TL has even read your message. Examples that fire the regex layer today:
 
@@ -48,7 +48,7 @@ Every open is tagged with an `open_method` so the dashboard can show which layer
 | `open_method` | Meaning |
 |---|---|
 | `regex` | Regex fast-path caught it on a hook (instant) |
-| `ai_classifier` | Async AI classifier (Haiku) caught it when the regex layer missed |
+| `ai_classifier` | Retired (DWB-402): legacy value on historical rows; no new opens use it |
 | `slash` | `/dwb-open` slash command (deterministic escape hatch) |
 | `ai_confident` | TL reasoning - acted without asking |
 | `ai_asked` | TL reasoning - confirmed with you first |
@@ -89,7 +89,7 @@ Same model as open, in reverse. You signal you want to stop, and the system clos
 | `close_method` | Meaning |
 |---|---|
 | `regex` | Regex phrase match on a hook |
-| `ai_classifier` | Async AI classifier caught the close intent |
+| `ai_classifier` | Retired (DWB-402): legacy value on historical rows; no new closes use it |
 | `slash` | `/dwb-close` slash command |
 | `ai_confident` | TL reasoning - acted without asking |
 | `ai_asked` | TL reasoning - confirmed with you first |

@@ -6,13 +6,13 @@
 # Callees:       GET /api/projects/:id/token-budget
 # Data In:       Temp repo dir with .claude/ + memory layout, factory-created project + agents
 # Data Out:      Assertions on category/agent_name fields and inclusion of new docs/memory files
-# Last Modified: 2026-06-18 (DWB-398)
+# Last Modified: 2026-06-19
 
 """Tests for the /api/projects/:id/token-budget endpoint.
 
 Covers the round-2 extension that adds:
   - ARCHITECTURE.md / README.md / INITIAL.md to the root-docs scan
-  - per-agent memory file scan under .claude/agents/memory/{prefix}/{name}/
+  - per-agent memory file scan under .dwb/memory/{prefix}/{name}/ (DWB-401)
   - `category` field on every entry
   - `agent_name` field (string for memory entries, null otherwise)
 """
@@ -38,13 +38,12 @@ def _setup_repo(tmp_path: Path, prefix: str, agent_names: list[str]) -> Path:
     # Playbook + project rules
     _write(repo / ".claude" / "worker_playbook.md", "# playbook\n" + "word " * 80)
     _write(repo / ".claude" / "project_rules_worker.md", "# rules\n" + "word " * 20)
-    # Memory dirs for each agent
+    # Memory dirs for each agent. DWB-401: .dwb/memory/<prefix>/<name>/ with the
+    # 2-file model (identity.md + the single free-form memory.md).
     for name in agent_names:
-        mem = repo / ".claude" / "agents" / "memory" / prefix / name
+        mem = repo / ".dwb" / "memory" / prefix / name
         _write(mem / "identity.md", f"# identity {name}\n" + "word " * 40)
-        _write(mem / "scratchpad.md", f"# scratch {name}\n" + "word " * 30)
-        _write(mem / "lessons.md", f"# lessons {name}\n")  # near-empty
-        _write(mem / "recent_sessions.md", f"# recent {name}\n")
+        _write(mem / "memory.md", f"# memory {name}\n" + "word " * 30)
     return repo
 
 
@@ -109,12 +108,13 @@ class TestTokenBudgetExtended:
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         names = {f["name"] for f in data["files"]}
 
-        # Each agent contributes 4 memory files
+        # DWB-401: each agent contributes 2 memory files (identity + memory.md).
         for agent in ("Barry", "Mona"):
             assert f"memory/{agent}/identity.md" in names
-            assert f"memory/{agent}/scratchpad.md" in names
-            assert f"memory/{agent}/lessons.md" in names
-            assert f"memory/{agent}/recent_sessions.md" in names
+            assert f"memory/{agent}/memory.md" in names
+            assert f"memory/{agent}/scratchpad.md" not in names
+            assert f"memory/{agent}/lessons.md" not in names
+            assert f"memory/{agent}/recent_sessions.md" not in names
 
     def test_memory_entries_carry_agent_name_and_category(
         self, client, make_project, make_agent, tmp_path
@@ -130,9 +130,7 @@ class TestTokenBudgetExtended:
 
         category_by_file = {
             "memory/Barry/identity.md": "memory_identity",
-            "memory/Barry/scratchpad.md": "memory_scratchpad",
-            "memory/Barry/lessons.md": "memory_lessons",
-            "memory/Barry/recent_sessions.md": "memory_recent",
+            "memory/Barry/memory.md": "memory_main",
         }
         by_name = {e["name"]: e for e in memory_entries}
         for name, expected_category in category_by_file.items():
@@ -267,10 +265,11 @@ class TestGateEnforcedHelper:
     def test_memory_file_names_classify_as_agent_def_by_name(self):
         # Memory files match no classify_file prefix, so they fall through to
         # 'agent_def' and is_gate_enforced returns False on the NAME alone.
-        # This is exactly why agent_consolidation guards them by agent_name.
+        # DWB-401: memory is now never gated regardless (agent_consolidation's
+        # _gate_counts returns False for any agent_name entry).
         from app.config.token_budget import is_gate_enforced
 
-        assert is_gate_enforced("memory/Barry/scratchpad.md") is False
+        assert is_gate_enforced("memory/Barry/memory.md") is False
 
 
 class TestExemptStatus:

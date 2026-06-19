@@ -46,9 +46,10 @@ class TestSpawnPrepareHappyPath:
             "project_id": project["id"], "name": "Sage",
             "role": "tester", "api_key": "sp2-sage",
         })
-        memory_dir = tmp_path / ".claude/agents/memory/SP2/Sage"
+        memory_dir = tmp_path / ".dwb/memory/SP2/Sage"
         memory_dir.mkdir(parents=True, exist_ok=True)  # auto-scaffold may have created it
-        (memory_dir / "scratchpad.md").write_text(
+        # DWB-401: the excerpt reads memory.md.
+        (memory_dir / "memory.md").write_text(
             "## 2026-06-03T12:00:00\nrepro confirmed via curl\n"
         )
 

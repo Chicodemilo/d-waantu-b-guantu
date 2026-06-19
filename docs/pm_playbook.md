@@ -55,7 +55,7 @@ If a TL asks you to close a Jira sprint, REFUSE and escalate to the human. This 
 
 ## On Startup
 
-**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker, read your memory dir (`identity.md`, `scratchpad.md`, `lessons.md`, `recent_sessions.md`). The dir + all four files are auto-scaffolded on spawn (DWB-341); HALT only if they're still missing after that. The identify response also carries `memory_usage_rules` (DWB-352): a condensed inline summary of the memory rules.
+**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker, read your memory dir (`identity.md` + `memory.md`). The dir + both files are auto-scaffolded on spawn (DWB-341); HALT only if they're still missing after that. The identify response also carries `memory_usage_rules` (DWB-352): a condensed inline summary of the memory rules.
 
 Then read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`. Fetch live roster from `GET /api/projects/{project_id}/team` (DB-authoritative).
 
@@ -67,7 +67,7 @@ The TL alone evaluates user intent and opens/closes DWB sessions; **the PM never
 
 ### Your Personal Memory Dir
 
-Lives at `.claude/agents/memory/<project_prefix>/Pam_<PREFIX>/`. File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. PM-flavored use: `scratchpad.md` for status observations, blocker flags, sprint notes; `lessons.md` for PM-specific patterns (escalations that worked, tool quirks).
+Lives at `.dwb/memory/<project_prefix>/Pam_<PREFIX>/` (DWB-401: moved out of `.claude/`). File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. PM-flavored use: `memory.md` (single free-form file) for status observations, blocker flags, sprint notes, and PM-specific patterns (escalations that worked, tool quirks).
 
 Session marker is TL-written (you can't create your own); see worker_playbook § On Spawn: Identity step 3.
 
@@ -92,14 +92,13 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
    │     _team_lead = TL's rules for himself · _pm = TL's rules for the PM
    │     _worker = TL's rules for all workers · stack, ports, ticket prefix…
    │     deploy never touches · authored by TL · BUDGETED (TL-owned)
-   ├─ agents/*.md            role agent-def stubs — shipped from DWB
-   │     overwritten on deploy · edit: DWB team · EXEMPT
-   └─ agents/memory/<prefix>/<name>/   per-agent personal memory
+   └─ agents/*.md            role agent-def stubs — shipped from DWB
+         overwritten on deploy · edit: DWB team · EXEMPT
+└─ .dwb/                     DWB-401: agent memory lives here (writable, outside .claude/)
+   └─ memory/<prefix>/<name>/   per-agent personal memory
       ├─ identity.md         system-generated · NEVER edit
-      ├─ scratchpad.md       in-flight notes
-      ├─ lessons.md          durable patterns
-      └─ recent_sessions.md  session index
-            owner writes via the memory API (never Edit) · BUDGETED (per-agent)
+      └─ memory.md           single free-form memory (scratchpad + lessons merged)
+            owner writes via the memory API · GATE-EXEMPT (passive trim, never blocks close)
 ```
 
 **Budgeted vs exempt:** a doc is *budgeted* (its size gated at close) only when an agent can actually edit it — your memory plus the root/project docs you own. DWB-shipped docs (playbooks, agent defs) are *exempt*: keeping those lean is the DWB team's editorial job, never a close-blocker. No agent can Edit a `.claude/` path directly (it crashes the session) — memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
@@ -367,11 +366,11 @@ Failure types: `context_degradation`, `spec_drift`, `sycophantic_confirmation`, 
 
 ## 12a. Sprint Close: Consolidation Gate (REQUIRED)
 
-DWB's `force_consolidation` gate blocks sprint close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): naked ack with over-ceiling files returns HTTP 400 with violations. **What counts (DWB-397/399):** an agent's own authored + editable docs — their memory files (and, for the TL, the root docs + all three `project_rules_*` files the TL owns). Playbooks + agent defs are exempt (the DWB team's job). `project_rules` are budgeted but TL-owned — never chase a worker (or yourself) to trim them; that's the TL's. Your own gated files are just your memory. The PM's role at sprint close:
+DWB's `force_consolidation` gate (opt-in per project, default OFF — DWB-400) blocks sprint close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): naked ack with over-ceiling files returns HTTP 400 with violations. **What counts (DWB-397/399/401):** ONLY the TL-owned docs (root docs + all three `project_rules_*` files). Playbooks + agent defs are exempt, and — as of DWB-401 — every agent's `memory.md` is exempt too (bounded by a passive server-side trim, never counted). So no worker or PM ever has an over-ceiling file: your own ack, and theirs, is a clean naked ack. The PM's role at sprint close:
 
-1. **Verify gate state.** `GET /api/projects/{pid}/consolidation-status?sprint_id={sid}` returns `agents[]` with `acked: true/false` + `owned_over_ceiling_files` per agent, and `gate_satisfied` overall.
-2. **Surface refusals proactively.** If any participant has over-ceiling files and hasn't acked yet, ping them BY NAME with their file list and the autonomy expectation: "refusal is the signal to trim, not idle." Don't let agents sit on a refused ack waiting for instructions.
-3. **Self-ack with the same discipline.** PM trims own over-ceiling files BEFORE acking. If you get 400, trim and retry; don't override unless the file is genuinely load-bearing.
+1. **Verify gate state.** `GET /api/projects/{pid}/consolidation-status?sprint_id={sid}` returns `agents[]` with `acked: true/false` + `owned_over_ceiling_files` per agent, and `gate_satisfied` overall. With memory exempt, `owned_over_ceiling_files` is empty for everyone except possibly the TL (their root/`project_rules` docs).
+2. **Chase missing acks, not trims.** If a participant hasn't acked, ping them to file the ack (it passes clean — nothing of theirs gates). Only the TL might have a real over-ceiling doc to trim; surface that to the TL.
+3. **Self-ack.** PM files a clean naked ack — your memory is exempt, so there's nothing to trim first.
 
 ```bash
 # PM's self-ack (clean files → naked ack passes 201; over-ceiling → 400 with violations)

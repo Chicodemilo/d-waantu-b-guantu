@@ -87,7 +87,7 @@ Agent (standalone)
 
 | Table | Key Columns | Notes |
 |-------|-------------|-------|
-| **projects** | prefix, name, status, repo_path, jira_base_url, jira_project_key, tl/pm_overhead_tokens, tl/pm_overhead_time_seconds, force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_handoff_md, force_consolidation, playbooks_deployed_at | 7 sprint gate flags. Status: active/paused/completed/archived |
+| **projects** | prefix, name, status, repo_path, jira_base_url, jira_project_key, tl/pm_overhead_tokens, tl/pm_overhead_time_seconds, force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_handoff_md, force_consolidation, playbooks_deployed_at | 7 sprint gate flags, all default OFF (opt-in). Status: active/paused/completed/archived |
 | **epics** | project_id, name, description, status | Status: open/in_progress/completed |
 | **sprints** | project_id, epic_id, name, goal, sprint_number, status, start/end_date | Name auto-generated from goal. Completion triggers gate validation + alerts |
 | **tickets** | project_id, epic_id, sprint_id, assigned_agent_id, ticket_number, ticket_key, jira_issue_key, title, description, ticket_type, status, tokens_used, time_spent_seconds, token_source, completed_at | Auto-assigns sprint/epic on create. Status change triggers history + tracking events |
@@ -147,8 +147,10 @@ Full interactive reference at http://localhost:8000/docs (OpenAPI): 112 endpoint
 - `GET /api/projects/{id}/team` (single-roundtrip roster) returns `{project_id, project_prefix, agents: [{agent_id, name, role, is_active, assigned_at, last_seen, presumed_live}]}`, active-only unless `?include_inactive=true`.
 - `GET /api/tracking/summary` `per_agent` rows aggregate `token_report` + `overhead_token_report` (a `tokens` total plus a separate `overhead_tokens`); `project_total.overhead_tokens` is the project-wide overhead figure.
 - `POST /api/agents/identify` + `/spawn-prepare` resolve `(role, name, project_prefix)`, accepting the short name or `<name>_<PREFIX>` form.
+- Agent memory (DWB-401) lives at `<repo>/.dwb/memory/<prefix>/<name>/`, relocated out of the protected `.claude/` tree so subagents write it directly. Two files: `identity.md` (system-generated) plus a single free-form `memory.md` (agent-written; merges the former scratchpad + lessons). `recent_sessions` is dropped because the DB sessions table is the session index. Writes via `POST /api/agents/{id}/memory/append` (`file=memory`) and `session-complete` (one block per session). `memory.md` has a 4500-token passive trim ceiling: a server-side mechanical drop-oldest, never a close gate, and gate-exempt so it never counts toward consolidation.
 - `GET /api/hooks/sessions?status=orphan&cutoff_minutes=60` returns stale active sessions for cleanup.
-- DWB session lifecycle: `POST /api/sessions/open` (omit `opened_at`, server-stamped), `POST /api/sessions/{id}/close` (headline required on ai_confident/ai_asked; compaction gate blocks until spawn-loaded docs are within ceiling), `POST /api/sessions/{id}/reopen` (undoes a false close; 409 if another session is open for the project).
+- DWB session lifecycle: `POST /api/sessions/open` (omit `opened_at`, server-stamped), `POST /api/sessions/{id}/close` (headline required on ai_confident/ai_asked; the consolidation/compaction gate is opt-in via `force_consolidation`, default OFF, and counts only TL-owned shipped docs, never agent memory), `POST /api/sessions/{id}/reopen` (undoes a false close; 409 if another session is open for the project).
+- DWB session detection (DWB-402, Layer-2 Haiku AI classifier retired): Layer-1 regex on open/close phrases, Layer-1b SessionEnd transcript scan, deterministic slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. The `ai_classifier` method enum is kept as a tombstone for historical rows. Full reference: `docs/session_lifecycle.md`.
 
 ---
 
@@ -392,7 +394,7 @@ alembic downgrade -1       # rollback one
 ## 8. Key Business Logic
 
 ### Sprint Completion Gates
-Projects enforce up to 7 gates via `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_headers`, `force_consolidation` flags, plus unreviewed failure records check. Sprint service validates these before allowing status -> completed.
+Projects enforce up to 7 gates via `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_headers`, `force_consolidation` flags, plus unreviewed failure records check. Sprint service validates these before allowing status -> completed. All gate flags default OFF (opt-in per project). `force_headers` enforces the standard code-header block on sprint-touched `.py` files only (surfaced in `GET /gate-status`, with a token-cost warning in the UI when ON). `force_consolidation` counts only TL-owned shipped docs toward the consolidation/compaction gate; agent memory is gate-exempt.
 
 ### Auto-Assignment
 - Ticket `sprint_id` auto-assigned to the project's active sprint on creation

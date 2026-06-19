@@ -1,21 +1,22 @@
 # Path: app/services/hook_tracking.py
 # File: hook_tracking.py
 # Created: 2026-04-09
-# Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path, DWB-353 ad_hoc routing + alert removal, DWB-373 hook_session.dwb_session_id linker, DWB-382 Layer-2 Haiku classifier fallback, DWB-390 agent-id-aware pending-marker claim, DWB-395 grace-window resurrect)
+# Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path, DWB-353 ad_hoc routing + alert removal, DWB-373 hook_session.dwb_session_id linker, DWB-390 agent-id-aware pending-marker claim, DWB-395 grace-window resurrect, DWB-402 Layer-2 Haiku classifier retired)
 # Caller: app/routers/hooks.py
-# Callees: app/models/hook_session.py, app/services/tracking.py, app/services/dwb_session.py, app/models/alert.py, app/config/session_phrases.py, anthropic SDK (lazy)
+# Callees: app/models/hook_session.py, app/services/tracking.py, app/services/dwb_session.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
-# Last Modified: 2026-06-17 (DWB-395)
+# Last Modified: 2026-06-19 (DWB-402)
 #
 # DWB-377 (2026-06-11): UserPromptSubmit close fast-path. Mirrors DWB-344 on
 # the close side - when match_open misses, try match_close and close the
 # active DWB session if one exists.
-# DWB-382 (2026-06-11): Layer-2 Haiku classifier fallback. When both
-# match_open AND match_close miss on UserPromptSubmit, schedule a
-# fire-and-forget Anthropic Haiku call to classify intent; on high-
-# confidence open/close it opens or closes a session stamped
-# `ai_classifier`. Env-gated on ANTHROPIC_API_KEY; silent noop when absent.
+# DWB-402 (2026-06-19): retired the Layer-2 Haiku AI classifier fallback
+# (DWB-382). When both match_open AND match_close miss on UserPromptSubmit the
+# handler returns a plain noop. Session lifecycle now rests on three paths: the
+# deterministic /dwb-open + /dwb-close slash commands, the passive Layer-1
+# regex, and the idle-timeout sweeper. The `ai_classifier` enum value is kept
+# as a legacy tombstone so historical rows still load.
 
 """Service layer for passive hook-based time and token tracking.
 
@@ -28,13 +29,10 @@ import json
 import logging
 import os
 import re
-import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
-from fastapi import BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -87,12 +85,12 @@ def _active_dwb_session_id(db: Session, project_id: int) -> int | None:
 
 # DWB-395: grace window for auto-resurrecting a just-closed DWB session.
 #
-# A low-precision close (Layer-1 regex catalogue hit, or Layer-2 ai_classifier)
-# can fire on text that wasn't really a close - e.g. TL prose like "shut down
-# cycle" tripping the catalogue. When real tracking activity (a hook_session or
-# tracking_log write) lands within this window of such a close, we treat the
-# close as false and reopen the same session, rather than opening a brand-new
-# one that splits the time/token rollup across two rows.
+# A low-precision close (a Layer-1 regex catalogue hit) can fire on text that
+# wasn't really a close - e.g. TL prose like "shut down cycle" tripping the
+# catalogue. When real tracking activity (a hook_session or tracking_log write)
+# lands within this window of such a close, we treat the close as false and
+# reopen the same session, rather than opening a brand-new one that splits the
+# time/token rollup across two rows.
 #
 # Deliberate closes are NEVER auto-undone:
 #   - slash        : the user explicitly typed /dwb-close
@@ -100,10 +98,11 @@ def _active_dwb_session_id(db: Session, project_id: int) -> int | None:
 #   - ai_asked     : the TL closed after confirming with the user
 #   - idle_timeout : the safety sweeper, which only fires when there was
 #                    genuinely no activity for the idle window
-# Only `regex` and `ai_classifier` - the two low-precision, no-human-in-loop
-# layers - are eligible.
+# Only `regex` - the single low-precision, no-human-in-loop layer - is
+# eligible. (DWB-402 retired the Layer-2 `ai_classifier`, which used to share
+# this grace treatment.)
 _GRACE_RESURRECT_SECONDS = 120
-_GRACE_RESURRECT_METHODS = (DwbCloseMethod.regex, DwbCloseMethod.ai_classifier)
+_GRACE_RESURRECT_METHODS = (DwbCloseMethod.regex,)
 
 
 def _maybe_grace_resurrect_dwb_session(
@@ -1527,9 +1526,8 @@ def try_close_dwb_session_from_transcript(
 def handle_user_prompt(
     db: Session,
     hook_data: dict,
-    background_tasks: Optional[BackgroundTasks] = None,
 ) -> dict:
-    """Handle a UserPromptSubmit hook event (DWB-344, DWB-377, DWB-382).
+    """Handle a UserPromptSubmit hook event (DWB-344, DWB-377).
 
     The fastest available path for phrase-driven session lifecycle: Claude Code
     fires UserPromptSubmit synchronously as the user submits a message and
@@ -1556,30 +1554,21 @@ def handle_user_prompt(
       4. ``match_close(prompt)`` hits:
          - no active session                      -> noop reason=no_active_session
          - else                                   -> close via close_session, return closed
-      5. neither matches                          -> schedule Layer-2 Haiku
-                                                    classifier (DWB-382) +
-                                                    return noop
-                                                    reason=no_phrase_match
+      5. neither matches                          -> noop reason=no_phrase_match
 
-    DWB-382 Layer-2 Haiku classifier (fire-and-forget): when both
-    ``match_open`` and ``match_close`` miss, ``background_tasks.add_task``
-    schedules ``_schedule_ai_classifier`` (which spawns a daemon thread
-    running ``_run_ai_classifier``). The synchronous hook response is
-    unaffected - HTTP 200 is returned to Claude Code immediately, the
-    classifier runs concurrently. If ``background_tasks`` is not provided
-    (in-process callers, tests that bypass the router) the classifier is
-    not scheduled; the layered noop is still returned.
+    DWB-402 (2026-06-19): the Layer-2 Haiku AI classifier fallback (DWB-382)
+    was retired. When both regex ladders miss, this returns a plain noop; the
+    deterministic ``/dwb-open`` / ``/dwb-close`` slash commands, the passive
+    regex layer, and the idle sweeper are the remaining lifecycle paths. The
+    ``ai_classifier`` open/close-method enum values are kept as legacy
+    tombstones so historical rows still load, but nothing produces new ones.
 
-    Privacy (DWB-351, DWB-382): both ``open_phrase`` and ``close_phrase``
-    on Layer-1 are the matched catalogued substrings from
-    ``app.config.session_phrases`` (hardcoded text), NOT free-form user
-    input. Persisting them is safe; the raw ``prompt`` is matched in-
-    memory and never logged or stored. On Layer-2 the raw prompt IS sent
-    to Anthropic as a network call (necessary for classification) but is
-    NEVER persisted in DWB - the ai_classifier opens / closes use
-    ``open_phrase=None`` / ``close_phrase=None``. The exception-path
-    scrub below redacts ``prompt`` from the raw_payload before forwarding
-    to log_failed_hook.
+    Privacy (DWB-351): both ``open_phrase`` and ``close_phrase`` on Layer-1
+    are the matched catalogued substrings from ``app.config.session_phrases``
+    (hardcoded text), NOT free-form user input. Persisting them is safe; the
+    raw ``prompt`` is matched in-memory and never logged or stored. The
+    exception-path scrub below redacts ``prompt`` from the raw_payload before
+    forwarding to log_failed_hook.
 
     Fire-and-forget: every exception is swallowed and logged to failed_hooks.
     Returns a small status dict either way; the router always returns 200.
@@ -1645,15 +1634,10 @@ def handle_user_prompt(
                 "close_phrase": close_phrase,
             }
 
-        # ---- Layer-2 fallback (DWB-382): schedule Haiku classifier ----
-        # Both ladders missed. Fire-and-forget the classifier via a daemon
-        # thread (wired through BackgroundTasks so production / TestClient
-        # see the same surface). The synchronous response is returned
-        # without waiting on the classifier.
-        if background_tasks is not None:
-            background_tasks.add_task(
-                _schedule_ai_classifier, project.id, prompt
-            )
+        # ---- Neither ladder matched ----
+        # DWB-402: the Layer-2 Haiku AI classifier fallback (DWB-382) was
+        # retired. A non-matching prompt is simply a noop; the deterministic
+        # slash commands, regex layer, and idle sweeper cover the rest.
         return {"status": "noop", "reason": "no_phrase_match"}
     except Exception as e:
         # DWB-351 privacy: the user's prompt is matched in-memory and must
@@ -1680,236 +1664,3 @@ def handle_user_prompt(
 # alert class is gone - worker-without-ticket tokens now flow into the
 # ad_hoc bucket (see DWB-353 in tracking.py); no-agent-at-all sessions
 # silently drop their tokens (rare; not worth paging on).
-
-
-# ---------------------------------------------------------------------------
-# DWB-382: Layer-2 Haiku classifier fallback for UserPromptSubmit
-# ---------------------------------------------------------------------------
-#
-# Wired from ``handle_user_prompt`` via FastAPI ``BackgroundTasks`` after
-# both ``match_open`` and ``match_close`` miss the catalogued phrase
-# regex (Layer-1, DWB-344 / DWB-377). The classifier is genuinely
-# fire-and-forget:
-#
-#   - ``_schedule_ai_classifier`` is what BackgroundTasks invokes; it
-#     spawns a daemon ``threading.Thread`` and returns immediately.
-#   - ``_run_ai_classifier`` does the actual Anthropic call + DB write
-#     in that thread.
-#
-# Why not just BackgroundTasks alone? Starlette/FastAPI's TestClient
-# blocks until the after-response BackgroundTasks queue drains. A 2s
-# Haiku call would block the test client's view of the response. The
-# daemon thread detaches the work from the request lifecycle so the
-# synchronous HTTP path stays <100ms regardless of classifier latency.
-#
-# Privacy (DWB-351): the prompt is sent to Anthropic's API for
-# classification but is NEVER persisted in DWB. Both ``open_phrase`` and
-# ``close_phrase`` are nulled when the classifier opens / closes a
-# session (also enforced server-side by ``dwb_session.open_session`` /
-# ``close_session`` for AI methods - belt and braces). The prompt
-# content is never written to logs either - errors log type + message
-# only.
-
-# Anthropic model used for classification. Cheap, fast; the prompt is
-# small (system + one user message, max_tokens 50). Pinned so a model
-# rename doesn't silently change the classifier's behaviour.
-_AI_CLASSIFIER_MODEL = "claude-haiku-4-5-20251001"
-_AI_CLASSIFIER_MAX_TOKENS = 50
-_AI_CLASSIFIER_SYSTEM_PROMPT = (
-    "Classify the user message as one of: open (signals start of a work "
-    "session), close (signals end of a work session), or neither. Respond "
-    'with a single JSON object: {"intent": "open|close|neither", '
-    '"confidence": "high|low"}.'
-)
-
-
-def _schedule_ai_classifier(project_id: int, prompt: str) -> None:
-    """BackgroundTasks entry point: spawn a daemon thread and return.
-
-    Detaches the classifier work from the request lifecycle so the test
-    client (and any sync caller of BackgroundTasks) doesn't block on
-    Anthropic latency. The thread is daemonised so it doesn't keep the
-    process alive past shutdown.
-    """
-    thread = threading.Thread(
-        target=_run_ai_classifier,
-        args=(project_id, prompt),
-        name=f"dwb-ai-classifier-{project_id}",
-        daemon=True,
-    )
-    thread.start()
-
-
-def _run_ai_classifier(project_id: int, prompt: str) -> None:
-    """Layer-2 Haiku classifier worker (DWB-382).
-
-    Lazy-imports anthropic, env-gates on ANTHROPIC_API_KEY (silent noop
-    when unset), sends the prompt to Haiku for intent classification,
-    and on high-confidence open/close opens or closes a DwbSession with
-    ``open_method`` / ``close_method = ai_classifier``. Any failure
-    (network, SDK error, JSON parse, DB) is logged and swallowed - the
-    classifier must never crash the host process or surface back to the
-    hook.
-
-    Privacy: the prompt is sent to Anthropic for the classification call
-    but never persisted in DWB and never written to a log. Errors log
-    type + message only; the prompt content is excluded.
-    """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        logger.info(
-            "DWB-382 ai_classifier: ANTHROPIC_API_KEY not set; skipping "
-            "classifier for project_id=%s",
-            project_id,
-        )
-        return
-
-    # Lazy-import so a clone without anthropic still boots cleanly. The
-    # dependency is in requirements.txt; the lazy-import is for tests
-    # that ALSO monkeypatch-delete the env var to simulate an unset key.
-    try:
-        import anthropic  # type: ignore
-    except Exception as e:
-        logger.warning(
-            "DWB-382 ai_classifier: anthropic SDK import failed (%s: %s)",
-            type(e).__name__,
-            e,
-        )
-        return
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model=_AI_CLASSIFIER_MODEL,
-            max_tokens=_AI_CLASSIFIER_MAX_TOKENS,
-            system=_AI_CLASSIFIER_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-    except Exception as e:
-        # Network errors, APIError, rate limits, anything from the SDK.
-        # Swallowed and logged without the prompt content.
-        logger.warning(
-            "DWB-382 ai_classifier: Anthropic call failed (%s: %s) for "
-            "project_id=%s",
-            type(e).__name__,
-            e,
-            project_id,
-        )
-        return
-
-    # Extract the JSON text body. SDK response shape: message.content is a
-    # list of content blocks; text classifier responses live in the first
-    # text block. Defensive: bail on any unexpected shape.
-    try:
-        content_blocks = getattr(message, "content", None) or []
-        text_payload = None
-        for block in content_blocks:
-            block_text = getattr(block, "text", None)
-            if block_text:
-                text_payload = block_text
-                break
-        if not text_payload:
-            logger.warning(
-                "DWB-382 ai_classifier: empty response content for "
-                "project_id=%s",
-                project_id,
-            )
-            return
-        parsed = json.loads(text_payload)
-    except Exception as e:
-        logger.warning(
-            "DWB-382 ai_classifier: response parse failed (%s: %s) for "
-            "project_id=%s",
-            type(e).__name__,
-            e,
-            project_id,
-        )
-        return
-
-    intent = parsed.get("intent")
-    confidence = parsed.get("confidence")
-    if confidence != "high":
-        # Low-confidence (or missing): defer to the user / regex / slash
-        # paths rather than risk a false open or close.
-        return
-    if intent not in ("open", "close"):
-        # neither, or unknown intent string. Noop.
-        return
-
-    # Need a fresh DB session: BackgroundTasks (and our daemon thread)
-    # run outside the request's get_db scope. Pattern mirrors
-    # idle_sweeper._run_one_sweep_sync.
-    from app import database  # local import to avoid circular at boot
-
-    db = database.SessionLocal()
-    try:
-        # Re-look-up the project for FK existence; the project_id arrived
-        # from the request resolver so it should still be valid, but the
-        # classifier survives if it isn't.
-        project = db.get(Project, project_id)
-        if project is None:
-            logger.warning(
-                "DWB-382 ai_classifier: project_id=%s vanished before "
-                "classify",
-                project_id,
-            )
-            return
-
-        if intent == "open":
-            if dwb_svc.get_active_session(db, project_id) is not None:
-                # Already open - the user re-opened in another channel
-                # while the classifier was running.
-                return
-            new_session, _existing = dwb_svc.open_session(
-                db,
-                project_id=project_id,
-                opened_at=datetime.now(UTC),
-                open_method=DwbOpenMethod.ai_classifier,
-                open_phrase=None,
-            )
-            if new_session is None:
-                # Lost the race; another caller opened concurrently.
-                return
-            db.commit()
-            logger.info(
-                "DWB-382 ai_classifier: opened session id=%s for "
-                "project_id=%s",
-                new_session.id,
-                project_id,
-            )
-            return
-
-        # intent == "close"
-        active = dwb_svc.get_active_session(db, project_id)
-        if active is None:
-            # Nothing to close. No-op.
-            return
-        dwb_svc.close_session(
-            db,
-            active,
-            close_method=DwbCloseMethod.ai_classifier,
-            close_reason=DwbCloseReason.explicit,
-            close_phrase=None,
-        )
-        db.commit()
-        logger.info(
-            "DWB-382 ai_classifier: closed session id=%s for project_id=%s",
-            active.id,
-            project_id,
-        )
-    except Exception as e:
-        # Any DB / service-layer crash is swallowed; classifier must not
-        # surface errors back to the host.
-        try:
-            db.rollback()
-        except Exception:
-            pass
-        logger.warning(
-            "DWB-382 ai_classifier: persistence failed (%s: %s) for "
-            "project_id=%s",
-            type(e).__name__,
-            e,
-            project_id,
-        )
-    finally:
-        db.close()

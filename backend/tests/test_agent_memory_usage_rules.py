@@ -6,7 +6,7 @@
 # Callees: POST /api/agents/identify, POST /api/agents/spawn-prepare, app.config.memory_rules
 # Data In: tmp_path filesystem, factory project + agent
 # Data Out: Assertions on response field presence, length cap, content invariants, single source of truth
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-19
 
 """DWB-352 coverage.
 
@@ -159,19 +159,18 @@ class TestMemoryUsageRulesContent:
     intent is the set of rules it covers. These assertions pin the
     important tokens so a future edit that trims too aggressively fails."""
 
-    def test_lists_all_four_memory_files(self, client, tmp_path):
+    def test_lists_memory_files(self, client, tmp_path):
+        # DWB-401: 2-file model. The rules must name identity.md + memory.md and
+        # must NOT reference the retired scratchpad/lessons/recent_sessions.
         proj = _make_project(client, tmp_path, "MURC1")
         _make_agent(client, proj["id"], "Files")
         rules = client.post("/api/agents/identify", json={
             "role": "backend-worker", "name": "Files", "project_prefix": "MURC1",
         }).json()["memory_usage_rules"]
-        for fname in (
-            "identity.md",
-            "scratchpad.md",
-            "lessons.md",
-            "recent_sessions.md",
-        ):
+        for fname in ("identity.md", "memory.md"):
             assert fname in rules, f"missing file mention: {fname}"
+        for retired in ("scratchpad.md", "lessons.md", "recent_sessions.md"):
+            assert retired not in rules, f"retired file still mentioned: {retired}"
 
     def test_mentions_iso_8601_timestamp_rule(self, client, tmp_path):
         proj = _make_project(client, tmp_path, "MURC2")

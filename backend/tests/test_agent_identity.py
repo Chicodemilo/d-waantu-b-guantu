@@ -7,7 +7,7 @@
 #                POST /api/agents/{id}/session-complete
 # Data In:       Factory-created projects/agents/instructions, tmp_path-backed repos
 # Data Out:      Assertions on HTTP status, response shape, on-disk side effects
-# Last Modified: 2026-06-03
+# Last Modified: 2026-06-19
 
 """Tests for the agent identity surface — identify, spawn-prepare, session-complete.
 
@@ -91,7 +91,7 @@ class TestIdentifyHappyPath:
             "role": "tester", "name": "Pixel", "project_prefix": "IDB",
         })
         memory_dir = r.json()["memory_dir"]
-        assert "/.claude/agents/memory/IDB/Pixel/" in memory_dir
+        assert "/.dwb/memory/IDB/Pixel/" in memory_dir
         assert memory_dir.startswith(str(tmp_path))
 
     def test_role_mismatch_is_non_fatal(self, client, tmp_path):
@@ -198,11 +198,11 @@ class TestIdentifyScratchpad:
     def test_reads_existing_scratchpad(self, client, tmp_path):
         project = _make_scoped_project(client, tmp_path, prefix="IDG")
         _make_scoped_agent(client, project["id"], name="Pixel")
-        # DWB-293 scaffolder pre-creates the dir + empty scratchpad on agent
-        # create, so just overwrite the file with marker content.
-        mem = tmp_path / ".claude" / "agents" / "memory" / "IDG" / "Pixel"
+        # DWB-401: the excerpt now reads memory.md (key name retained for API
+        # stability). Write marker content there.
+        mem = tmp_path / ".dwb" / "memory" / "IDG" / "Pixel"
         mem.mkdir(parents=True, exist_ok=True)
-        (mem / "scratchpad.md").write_text("scratchpad content marker\n")
+        (mem / "memory.md").write_text("scratchpad content marker\n")
 
         r = client.post("/api/agents/identify", json={
             "role": "tester", "name": "Pixel", "project_prefix": "IDG",
@@ -358,7 +358,9 @@ class TestSessionCompleteHappyPath:
         assert data["session_id"] == "sess-1"
         assert data["bytes_written"] > 0
 
-    def test_writes_scratchpad_and_recent_sessions(self, client, tmp_path):
+    def test_writes_session_block_to_memory(self, client, tmp_path):
+        # DWB-401: one block written to memory.md (summary + tokens). No
+        # separate recent_sessions.md / lessons.md.
         project = _make_scoped_project(client, tmp_path, prefix="SCB")
         agent = _make_scoped_agent(client, project["id"], name="Pixel")
         r = client.post(f"/api/agents/{agent['id']}/session-complete", json={
@@ -366,26 +368,25 @@ class TestSessionCompleteHappyPath:
             "summary": "investigation done",
             "tokens_used": 1234,
         })
-        mem = tmp_path / ".claude" / "agents" / "memory" / "SCB" / "Pixel"
+        mem = tmp_path / ".dwb" / "memory" / "SCB" / "Pixel"
         assert mem.is_dir()
-        scratchpad = (mem / "scratchpad.md").read_text()
-        assert "sess-2" in scratchpad
-        assert "investigation done" in scratchpad
-        assert "tokens_used: 1234" in scratchpad
-        recent = (mem / "recent_sessions.md").read_text()
-        assert "sess-2" in recent
-        assert "(1234 tok)" in recent
-        # lessons.md is pre-touched empty by the DWB-293 scaffolder, but the
-        # session-complete endpoint must NOT report it in paths_written when
-        # no lessons were supplied (i.e. it didn't append to it).
+        memory = (mem / "memory.md").read_text()
+        assert "sess-2" in memory
+        assert "investigation done" in memory
+        assert "tokens_used: 1234" in memory
+        # The retired files must not be created.
+        assert not (mem / "recent_sessions.md").exists()
+        assert not (mem / "scratchpad.md").exists()
         paths = r.json()["paths_written"]
-        assert not any(p.endswith("lessons.md") for p in paths)
-        assert (mem / "lessons.md").stat().st_size == 0
+        assert any(p.endswith("memory.md") for p in paths)
+        assert not any(p.endswith(("scratchpad.md", "recent_sessions.md", "lessons.md")) for p in paths)
 
 
 class TestSessionCompleteLessons:
 
-    def test_lessons_present_writes_lessons_md(self, client, tmp_path):
+    def test_lessons_present_fold_into_memory(self, client, tmp_path):
+        # DWB-401: lessons are written into the single memory.md session block,
+        # not a separate lessons.md.
         project = _make_scoped_project(client, tmp_path, prefix="SCC")
         agent = _make_scoped_agent(client, project["id"], name="Pixel")
         r = client.post(f"/api/agents/{agent['id']}/session-complete", json={
@@ -394,15 +395,19 @@ class TestSessionCompleteLessons:
             "lessons": ["always check the fixtures", "tmp_path is your friend"],
         })
         assert r.status_code == 200
-        mem = tmp_path / ".claude" / "agents" / "memory" / "SCC" / "Pixel"
-        lessons = (mem / "lessons.md").read_text()
-        assert "always check the fixtures" in lessons
-        assert "tmp_path is your friend" in lessons
-        assert "sess-3" in lessons
+        mem = tmp_path / ".dwb" / "memory" / "SCC" / "Pixel"
+        memory = (mem / "memory.md").read_text()
+        assert "always check the fixtures" in memory
+        assert "tmp_path is your friend" in memory
+        assert "sess-3" in memory
+        assert not (mem / "lessons.md").exists()
         paths = r.json()["paths_written"]
-        assert any(p.endswith("lessons.md") for p in paths)
+        assert any(p.endswith("memory.md") for p in paths)
+        assert not any(p.endswith("lessons.md") for p in paths)
 
-    def test_empty_lessons_list_skips_lessons_md(self, client, tmp_path):
+    def test_empty_lessons_list_still_writes_memory(self, client, tmp_path):
+        # DWB-401: with no lessons, the session block still lands in memory.md;
+        # no lessons.md is ever created.
         project = _make_scoped_project(client, tmp_path, prefix="SCD")
         agent = _make_scoped_agent(client, project["id"], name="Pixel")
         r = client.post(f"/api/agents/{agent['id']}/session-complete", json={
@@ -411,12 +416,10 @@ class TestSessionCompleteLessons:
             "lessons": [],
         })
         assert r.status_code == 200
-        # lessons.md exists as a 0-byte scaffolded placeholder; the endpoint
-        # must not have appended to it.
-        mem = tmp_path / ".claude" / "agents" / "memory" / "SCD" / "Pixel"
+        mem = tmp_path / ".dwb" / "memory" / "SCD" / "Pixel"
         paths = r.json()["paths_written"]
-        assert not any(p.endswith("lessons.md") for p in paths)
-        assert (mem / "lessons.md").stat().st_size == 0
+        assert any(p.endswith("memory.md") for p in paths)
+        assert not (mem / "lessons.md").exists()
 
 
 class TestSessionCompleteMemoryDirIdempotency:
@@ -430,7 +433,7 @@ class TestSessionCompleteMemoryDirIdempotency:
 
         project = _make_scoped_project(client, tmp_path, prefix="SCE")
         agent = _make_scoped_agent(client, project["id"], name="Pixel")
-        mem = tmp_path / ".claude" / "agents" / "memory" / "SCE" / "Pixel"
+        mem = tmp_path / ".dwb" / "memory" / "SCE" / "Pixel"
         if mem.exists():
             shutil.rmtree(mem)
         assert not mem.exists()
@@ -452,8 +455,8 @@ class TestSessionCompleteMemoryDirIdempotency:
             "session_id": "sess-6b",
             "summary": "second",
         })
-        mem = tmp_path / ".claude" / "agents" / "memory" / "SCF" / "Pixel"
-        content = (mem / "scratchpad.md").read_text()
+        mem = tmp_path / ".dwb" / "memory" / "SCF" / "Pixel"
+        content = (mem / "memory.md").read_text()
         assert "sess-6a" in content
         assert "sess-6b" in content
         assert content.count("## ") >= 2  # two timestamped blocks
@@ -461,14 +464,14 @@ class TestSessionCompleteMemoryDirIdempotency:
     def test_preexisting_memory_dir_not_clobbered(self, client, tmp_path):
         project = _make_scoped_project(client, tmp_path, prefix="SCG")
         agent = _make_scoped_agent(client, project["id"], name="Pixel")
-        mem = tmp_path / ".claude" / "agents" / "memory" / "SCG" / "Pixel"
+        mem = tmp_path / ".dwb" / "memory" / "SCG" / "Pixel"
         mem.mkdir(parents=True, exist_ok=True)
-        (mem / "scratchpad.md").write_text("preexisting content\n")
+        (mem / "memory.md").write_text("preexisting content\n")
         client.post(f"/api/agents/{agent['id']}/session-complete", json={
             "session_id": "sess-7",
             "summary": "after preexisting",
         })
-        content = (mem / "scratchpad.md").read_text()
+        content = (mem / "memory.md").read_text()
         assert content.startswith("preexisting content")
         assert "sess-7" in content
 
@@ -493,9 +496,8 @@ class TestSessionCompleteTimestamp:
             "summary": "timestamp in file",
         })
         timestamp = r.json()["timestamp"]
-        mem = tmp_path / ".claude" / "agents" / "memory" / "SCI" / "Pixel"
-        assert timestamp in (mem / "scratchpad.md").read_text()
-        assert timestamp in (mem / "recent_sessions.md").read_text()
+        mem = tmp_path / ".dwb" / "memory" / "SCI" / "Pixel"
+        assert timestamp in (mem / "memory.md").read_text()
 
 
 class TestSessionCompleteErrors:

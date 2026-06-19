@@ -42,7 +42,7 @@ from pathlib import Path
 
 
 def _memory_dir(repo_path, prefix, name):
-    return Path(repo_path) / ".claude" / "agents" / "memory" / prefix / name
+    return Path(repo_path) / ".dwb" / "memory" / prefix / name
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ class TestSpawnPrepareScaffold:
         assert "memory_dir" in body
         # Absolute path under the project's repo_path.
         assert body["memory_dir"].startswith(str(tmp_path))
-        assert body["memory_dir"].endswith("/.claude/agents/memory/SPDA/Atlas/")
+        assert body["memory_dir"].endswith("/.dwb/memory/SPDA/Atlas/")
 
     def test_spawn_prepare_scaffolds_when_dir_missing(self, client, tmp_path):
         """Agent exists but dir was wiped (cloned-to-fresh-checkout case).
@@ -91,12 +91,10 @@ class TestSpawnPrepareScaffold:
             "role": "tester", "name": "Vega", "project_prefix": "SPSC",
         })
         assert r.status_code == 200, r.text
-        # All four files back.
+        # DWB-401: 2-file model (identity.md + memory.md).
         assert d.is_dir()
         assert (d / "identity.md").is_file()
-        assert (d / "scratchpad.md").is_file()
-        assert (d / "lessons.md").is_file()
-        assert (d / "recent_sessions.md").is_file()
+        assert (d / "memory.md").is_file()
 
     def test_spawn_prepare_idempotent_on_existing_dir(self, client, tmp_path):
         """Calling spawn-prepare twice on the same agent is a clean no-op
@@ -187,9 +185,9 @@ class TestNoSuffixInvariant:
 
         # Identical path every time, no _1/_v2/_instanceN suffix.
         assert path1 == path2 == path3
-        assert path1.endswith("/.claude/agents/memory/NOSF/Pam/")
+        assert path1.endswith("/.dwb/memory/NOSF/Pam/")
         # And no sibling Pam_* dirs were created.
-        memory_root = Path(tmp_path) / ".claude" / "agents" / "memory" / "NOSF"
+        memory_root = Path(tmp_path) / ".dwb" / "memory" / "NOSF"
         siblings = [p.name for p in memory_root.iterdir() if p.is_dir()]
         assert siblings == ["Pam"], f"unexpected siblings: {siblings}"
 
@@ -298,8 +296,8 @@ class TestCrossProjectIsolation:
         assert (d_ci / "scratchpad.md").read_text() == "CI session log\n"
 
         # No cross-pollination: the DWB repo has no XPCI subtree, and vice versa.
-        assert not (dwb_repo / ".claude/agents/memory/XPCI").exists()
-        assert not (ci_repo / ".claude/agents/memory/XPDWB").exists()
+        assert not (dwb_repo / ".dwb/memory/XPCI").exists()
+        assert not (ci_repo / ".dwb/memory/XPDWB").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +318,7 @@ class TestProjectScaffoldAgentsEndpoint:
             })
         # Wipe the on-disk dirs to simulate a fresh repo clone.
         import shutil
-        memory_root = tmp_path / ".claude/agents/memory/PSCF"
+        memory_root = tmp_path / ".dwb/memory/PSCF"
         if memory_root.exists():
             shutil.rmtree(memory_root)
 
@@ -337,9 +335,7 @@ class TestProjectScaffoldAgentsEndpoint:
             d = _memory_dir(tmp_path, "PSCF", name)
             assert d.is_dir()
             assert (d / "identity.md").is_file()
-            assert (d / "scratchpad.md").is_file()
-            assert (d / "lessons.md").is_file()
-            assert (d / "recent_sessions.md").is_file()
+            assert (d / "memory.md").is_file()
 
     def test_scaffold_agents_preserves_existing_content(self, client, tmp_path):
         """Re-running scaffold-agents on a fully-populated project is a

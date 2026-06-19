@@ -1,7 +1,7 @@
 # Path: app/routers/hooks.py
 # File: hooks.py
 # Created: 2026-04-09
-# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit) + git post-commit hook auto-close (DWB-345); UserPromptSubmit forwards BackgroundTasks for DWB-382 Layer-2 classifier
+# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit) + git post-commit hook auto-close (DWB-345); DWB-402 retired the UserPromptSubmit Layer-2 Haiku classifier
 # Caller: app/main.py
 # Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/services/git_hook.py, app/models/hook_session.py
 # Data In: HTTP POST from curl hook commands
@@ -16,7 +16,7 @@ fire-and-forget — errors are logged as alerts but always return 200.
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -87,35 +87,31 @@ def hook_session_end(data: HookEventInput, db: Session = Depends(get_db)):
 @router.post("/user-prompt", status_code=200)
 def hook_user_prompt(
     data: HookEventInput,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Receive a UserPromptSubmit hook event from Claude Code (DWB-344,
-    DWB-377, DWB-382).
+    DWB-377).
 
     Fast-path open-phrase detection: CC fires this hook the instant the user
     submits a message and includes the raw prompt text in the payload, so we
     can open the DWB session synchronously without waiting for the next
     SessionEnd retry.
 
-    DWB-382: when the Layer-1 regex ladders both miss, the service uses the
-    provided ``BackgroundTasks`` to schedule an async Anthropic Haiku
-    classifier as a Layer-2 backstop. The classifier runs out-of-band so
-    the HTTP response is unaffected.
+    DWB-402: the Layer-2 Haiku AI classifier backstop (DWB-382) was retired. A
+    prompt that matches neither the open nor close regex is a plain noop;
+    deterministic /dwb-open + /dwb-close slash commands, the regex layer, and
+    the idle sweeper cover lifecycle from here.
 
     Like the other hook endpoints, this MUST NEVER return 5xx. Every failure
     swallows, logs to failed_hooks, and returns HTTP 200.
 
     DWB-351 privacy: the inbound ``prompt`` is matched in-memory by the
-    service and never persisted. The Layer-2 classifier sends the prompt
-    to Anthropic but does NOT persist it either. The exception-path
-    log_failed_hook call below scrubs ``prompt`` from the payload before
-    writing the failed_hooks row, mirroring the service-layer scrub.
+    service and never persisted. The exception-path log_failed_hook call below
+    scrubs ``prompt`` from the payload before writing the failed_hooks row,
+    mirroring the service-layer scrub.
     """
     try:
-        result = svc.handle_user_prompt(
-            db, data.model_dump(), background_tasks=background_tasks
-        )
+        result = svc.handle_user_prompt(db, data.model_dump())
         return result
     except Exception as e:
         # Belt-and-suspenders: the service already swallows, but if anything

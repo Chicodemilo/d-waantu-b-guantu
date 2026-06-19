@@ -5,8 +5,8 @@
 # Caller: pytest
 # Callees: POST /api/agents/{id}/session-complete
 # Data In: Factory projects/agents, tmp_path filesystem
-# Data Out: Assertions on scratchpad.md and recent_sessions.md contents
-# Last Modified: 2026-06-03
+# Data Out: Assertions on memory.md contents (DWB-401 2-file model)
+# Last Modified: 2026-06-19
 
 import re
 from pathlib import Path
@@ -29,11 +29,10 @@ def _setup_agent(client, tmp_path, prefix="SC1", name="Sage"):
 
 class TestSessionCompleteWriting:
     def test_creates_memory_dir_and_appends(self, client, tmp_path):
+        # DWB-401: session-complete writes ONE block to memory.md (summary +
+        # tokens + lessons inline). No recent_sessions.md / lessons.md.
         project, agent = _setup_agent(client, tmp_path)
-        memory_dir = Path(tmp_path) / ".claude/agents/memory/SC1/Sage"
-        # As of DWB-293, agent creation auto-scaffolds the memory_dir, so it
-        # already exists by the time we hit session-complete. The scratchpad
-        # is empty until the first append.
+        memory_dir = Path(tmp_path) / ".dwb/memory/SC1/Sage"
 
         r = client.post(f"/api/agents/{agent['id']}/session-complete", json={
             "session_id": "sess-abc-123",
@@ -47,28 +46,20 @@ class TestSessionCompleteWriting:
         assert body["session_id"] == "sess-abc-123"
         # ISO 8601 with UTC offset (e.g., 2026-06-03T20:55:00+00:00)
         assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+\d{2}:\d{2}", body["timestamp"])
-        assert any(p.endswith("/.claude/agents/memory/SC1/Sage/scratchpad.md") for p in body["paths_written"])
-        assert any(p.endswith("/.claude/agents/memory/SC1/Sage/recent_sessions.md") for p in body["paths_written"])
-        assert any(p.endswith("/.claude/agents/memory/SC1/Sage/lessons.md") for p in body["paths_written"])
+        assert any(p.endswith("/.dwb/memory/SC1/Sage/memory.md") for p in body["paths_written"])
+        assert all(not p.endswith(("scratchpad.md", "recent_sessions.md", "lessons.md")) for p in body["paths_written"])
         assert body["bytes_written"] > 0
 
-        scratchpad = (memory_dir / "scratchpad.md").read_text()
-        assert "session sess-abc-123" in scratchpad
-        assert "summary: ran the golden test suite" in scratchpad
-        assert "tokens_used: 12500" in scratchpad
-        # lessons appear in both scratchpad (inline) and lessons.md (separate)
-        assert "always reset DB between runs" in scratchpad
-        assert "use fresh tmp_path" in scratchpad
-
-        recent = (memory_dir / "recent_sessions.md").read_text()
-        assert "sess-abc-123" in recent
-        assert "(12500 tok)" in recent
-        assert "ran the golden test suite" in recent
-
-        lessons_md = (memory_dir / "lessons.md").read_text()
-        assert "session sess-abc-123" in lessons_md
-        assert "always reset DB between runs" in lessons_md
-        assert "use fresh tmp_path" in lessons_md
+        memory = (memory_dir / "memory.md").read_text()
+        assert "session sess-abc-123" in memory
+        assert "summary: ran the golden test suite" in memory
+        assert "tokens_used: 12500" in memory
+        # lessons fold into the single memory.md block
+        assert "always reset DB between runs" in memory
+        assert "use fresh tmp_path" in memory
+        # Retired files are not created
+        assert not (memory_dir / "recent_sessions.md").exists()
+        assert not (memory_dir / "lessons.md").exists()
 
     def test_appends_without_clobbering(self, client, tmp_path):
         project, agent = _setup_agent(client, tmp_path, prefix="SC2", name="Devin")
@@ -77,10 +68,8 @@ class TestSessionCompleteWriting:
                 "session_id": f"sess-{i}",
                 "summary": f"iteration {i}",
             })
-        scratchpad = (Path(tmp_path) / ".claude/agents/memory/SC2/Devin/scratchpad.md").read_text()
-        assert scratchpad.count("session sess-") == 3
-        recent = (Path(tmp_path) / ".claude/agents/memory/SC2/Devin/recent_sessions.md").read_text()
-        assert len([ln for ln in recent.splitlines() if "sess-" in ln]) == 3
+        memory = (Path(tmp_path) / ".dwb/memory/SC2/Devin/memory.md").read_text()
+        assert memory.count("session sess-") == 3
 
     def test_optional_fields_omitted_cleanly(self, client, tmp_path):
         project, agent = _setup_agent(client, tmp_path, prefix="SC3", name="Bolt")
@@ -89,34 +78,28 @@ class TestSessionCompleteWriting:
             "summary": "no lessons, no tokens",
         })
         assert r.status_code == 200
-        memory_dir = Path(tmp_path) / ".claude/agents/memory/SC3/Bolt"
-        scratchpad = (memory_dir / "scratchpad.md").read_text()
+        memory_dir = Path(tmp_path) / ".dwb/memory/SC3/Bolt"
+        memory = (memory_dir / "memory.md").read_text()
         # When tokens_used omitted, no tokens line should appear
-        assert "tokens_used" not in scratchpad
+        assert "tokens_used" not in memory
         # When lessons omitted, no lessons header
-        assert "- lessons" not in scratchpad
-
-        recent = (memory_dir / "recent_sessions.md").read_text()
-        # No "(N tok)" annotation when tokens_used omitted
-        assert " tok)" not in recent
-
-        # lessons.md exists as a 0-byte placeholder (DWB-293 scaffolder pre-touches
-        # all agent-owned files), but the endpoint must not have appended to it.
-        assert (memory_dir / "lessons.md").stat().st_size == 0
+        assert "- lessons" not in memory
+        # Retired files never created
+        assert not (memory_dir / "lessons.md").exists()
+        assert not (memory_dir / "recent_sessions.md").exists()
         body = r.json()
         assert all(not p.endswith("/lessons.md") for p in body["paths_written"])
 
-    def test_summary_with_newlines_collapsed_in_recent(self, client, tmp_path):
+    def test_summary_with_newlines_in_memory_block(self, client, tmp_path):
+        # DWB-401: the session block lands in memory.md (recent_sessions.md gone).
         project, agent = _setup_agent(client, tmp_path, prefix="SC4", name="Pam")
         client.post(f"/api/agents/{agent['id']}/session-complete", json={
             "session_id": "sess-multiline",
             "summary": "line one\nline two\nline three",
         })
-        recent = (Path(tmp_path) / ".claude/agents/memory/SC4/Pam/recent_sessions.md").read_text()
-        # recent_sessions.md should be one line per entry — newlines collapsed
-        lines = [ln for ln in recent.splitlines() if ln.startswith("- ")]
-        assert len(lines) == 1
-        assert "line one line two line three" in lines[0]
+        memory = (Path(tmp_path) / ".dwb/memory/SC4/Pam/memory.md").read_text()
+        assert "sess-multiline" in memory
+        assert "line one" in memory and "line three" in memory
 
 
 class TestSessionCompleteErrors:

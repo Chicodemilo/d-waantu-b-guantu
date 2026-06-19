@@ -172,8 +172,12 @@ def close_dwb_session(
     # own. The close is refused until all are within budget — the refusal IS
     # the gate. idle/regex/slash/classifier closes are exempt (no live team to
     # compact). Same method scoping as the headline gate above.
-    if needs_headline:  # i.e. ai_confident / ai_asked, not already closed
-        project = db.get(Project, row.project_id)
+    # DWB-400: the compaction gate is opt-in per project. It only blocks the
+    # close on a conscious-bot close (ai_confident / ai_asked) when the project
+    # has force_consolidation enabled. Default OFF means the close is never
+    # blocked on doc ceilings, matching the sprint-close consolidation gate.
+    project = db.get(Project, row.project_id) if needs_headline else None
+    if needs_headline and project and project.force_consolidation:
         over = consolidation_svc.over_ceiling_files_for_project(db, project)
         if over:
             by_owner: dict[str, list[str]] = {}

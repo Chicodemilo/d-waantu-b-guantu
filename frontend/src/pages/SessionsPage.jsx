@@ -1,12 +1,12 @@
 // Path: src/pages/SessionsPage.jsx
 // File: SessionsPage.jsx
 // Created: 2026-06-10
-// Purpose: Primary DWB sessions page for a project. Phrase-help teaching block sits at the top (under the page heading, before the table) and explains how to open/close a session, with an inline `(info)` affordance that expands a longer description via <details>. The SessionsTable is the dominant primary content (every session, scannable). A small `view current session ->` link in the header points at /projects/:id/sessions/current for the live SessionPanel drill-down.
+// Purpose: Primary DWB sessions page for a project. Phrase-help teaching block sits at the top (under the page heading, before the table) and explains how to open/close a session (regex phrases plus the /dwb-open and /dwb-close slash commands; idle sweeper auto-closes), with an inline `(info)` affordance that expands a longer description via <details>. The SessionsTable is the dominant primary content (every session, scannable). A small `view current session ->` link in the header points at /projects/:id/sessions/current for the live SessionPanel drill-down.
 // Caller: App.jsx (route: /projects/:id/sessions)
 // Callees: react-router-dom (useParams, Link), store/useStore, ../components/project/SessionsTable, ../styles/dashboard.css, ../styles/sessions.css
 // Data In: Route param id (project id), project from store
 // Data Out: Default export SessionsPage component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-19 (de-ceremony: session detection = regex + slash + idle sweeper; AI layer retired)
 
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
@@ -53,12 +53,20 @@ function SessionsPage() {
             "shut it down for the night" or "write docs and exit"
           </span>
         </div>
+        <div className="sessions-page__phrase-row">
+          <span className="sessions-page__phrase-label">Or use:</span>
+          <span className="sessions-page__phrase-list">
+            /dwb-open and /dwb-close for a deterministic open or close
+          </span>
+        </div>
         <details className="sessions-page__phrase-info" data-testid="phrase-info">
           <summary className="sessions-page__phrase-info-trigger">(info)</summary>
           <div className="sessions-page__phrase-info-body">
             These are phrases designed to trigger the start and close of a DWB session.
-            The regex layer matches them on the user's prompts directly; the AI layer
-            (TL reasoning) catches the rest. Full catalogue: backend/app/config/session_phrases.py
+            A regex layer matches them on the user's prompts directly. For a deterministic
+            open or close, use the slash commands /dwb-open and /dwb-close. An idle sweeper
+            auto-closes a session left open too long. Full catalogue:
+            backend/app/config/session_phrases.py
           </div>
         </details>
       </div>

@@ -110,13 +110,13 @@ Hooks handle backfill and recovery automatically; no separate scan script is nee
 
 ## DWB Sessions
 
-A DWB session is a user-bounded span of work: it opens when you signal the team to start, closes when you signal them to stop, and rolls up total tokens + wall-clock time across every CC session in between (TL, workers, subagents). One DWB session spans many CC sessions. Single-active per project, DB-enforced. Five detection layers: 1a regex fast path (UserPromptSubmit open/close), 1b regex retry (SessionEnd transcript scan), 2 async AI classifier (Haiku, env-gated, never persists user text), 3 deterministic slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. Each row's `open_method`/`close_method` records which layer caught it. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
+A DWB session is a user-bounded span of work: it opens when you signal the team to start, closes when you signal them to stop, and rolls up total tokens + wall-clock time across every CC session in between (TL, workers, subagents). One DWB session spans many CC sessions. Single-active per project, DB-enforced. Four detection layers (the Layer-2 Haiku AI classifier was retired in DWB-402): 1a regex fast path (UserPromptSubmit open/close), 1b regex retry (SessionEnd transcript scan), deterministic slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. Each row's `open_method`/`close_method` records which layer caught it (the `ai_classifier` value is kept as a tombstone for historical rows). Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
 
 ---
 
 ## Sprint Gates
 
-Boolean toggles that gate sprint completion:
+Boolean toggles that gate sprint completion. All default OFF (opt-in per project); existing projects were flipped OFF:
 
 | Toggle | Check |
 |--------|-------|
@@ -125,8 +125,8 @@ Boolean toggles that gate sprint completion:
 | `force_initial_md` | `INITIAL.md` exists at repo root |
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
 | `force_handoff_md` | `HANDOFF.md` exists at repo root |
-| `force_consolidation` | Every participating agent acked consolidation; all owned spawn-loaded docs within token ceiling (DWB-328) |
-| `force_headers` | Source files carry the standard header block |
+| `force_consolidation` | Every participating agent acked consolidation; all TL-owned shipped docs within token ceiling. Agent memory is gate-exempt (DWB-328, 400) |
+| `force_headers` | Sprint-touched `.py` files carry the standard code-header block; blocks close (HTTP 400) listing any missing. UI shows a token-cost warning when ON (DWB-403) |
 | Failure records | Unreviewed stubs always block close |
 
 Check gates: `GET /api/projects/{id}/gate-status`
@@ -220,15 +220,15 @@ Standard CRUD exists for all resources. Below are the non-obvious and automation
 | POST | `/api/hooks/session-end` | Receive SessionEnd/SubagentStop hook |
 | GET | `/api/hooks/sessions` | List hook sessions (filter by `status=orphan` for cleanup) |
 | POST | `/api/sessions/open` | Open a DWB session — OMIT `opened_at` (server-stamped; AI methods ignore any supplied value) |
-| POST | `/api/sessions/{id}/close` | Close a DWB session — `headline` required on `ai_confident`/`ai_asked` (422 otherwise); compaction gate blocks the close until every spawn-loaded doc is within ceiling |
+| POST | `/api/sessions/{id}/close` | Close a DWB session — `headline` required on `ai_confident`/`ai_asked` (422 otherwise); the consolidation/compaction gate is opt-in via `force_consolidation` (default OFF) and counts only TL-owned shipped docs, never agent memory |
 | GET | `/api/projects/{id}/sessions` | List DWB sessions, most recent first |
 | GET | `/api/sessions/{id}` | DWB session detail rollup (by_role / by_ticket / overhead) |
 | POST | `/api/agents/identify` | Resolve identity from `(role, name, project_prefix)` — accepts short or `<name>_<PREFIX>` form (DWB-289, 315) |
 | POST | `/api/agents/spawn-prepare` | Identify + return ready-to-paste markdown for the spawn brief |
-| POST | `/api/agents/{id}/session-complete` | Append session entry to scratchpad / lessons / recent_sessions (DWB-293) |
-| POST | `/api/agents/{id}/memory/append` | Append to one memory file (append-only, DWB-358) |
-| POST | `/api/agents/{id}/memory/compact` | Replace a memory file with a compacted version; rejects 422 if still over ceiling |
-| POST | `/api/agents/{id}/scaffold-memory` | Idempotently scaffold the agent's memory dir |
+| POST | `/api/agents/{id}/session-complete` | Append the session-end block to `memory.md` (DWB-293, 401) |
+| POST | `/api/agents/{id}/memory/append` | Append to `memory.md` (`file=memory`; append-only, DWB-358, 401) |
+| POST | `/api/agents/{id}/memory/compact` | Replace `memory.md` with a compacted version; over-ceiling triggers a passive server-side trim (no 422; DWB-401) |
+| POST | `/api/agents/{id}/scaffold-memory` | Idempotently scaffold the agent's `.dwb/memory/` dir (2-file model: identity.md + memory.md; DWB-401) |
 | GET | `/api/projects/{id}/team` | Single-roundtrip team roster |
 | POST | `/api/alerts/dismiss-all` | Bulk dismiss open alerts |
 | POST | `/api/alerts/send-to-team` | Write alerts to ALERTS_PENDING.md |

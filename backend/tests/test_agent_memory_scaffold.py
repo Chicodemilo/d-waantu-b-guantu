@@ -6,13 +6,13 @@
 # Callees: app.services.agent_memory, POST /api/agents, POST /api/project-agents, POST /api/agents/{id}/scaffold-memory
 # Data In: tmp_path filesystem, factory projects + agents
 # Data Out: Assertions on directory layout, identity.md content, idempotency
-# Last Modified: 2026-06-03
+# Last Modified: 2026-06-19
 
 from pathlib import Path
 
 
 def _memory_dir(repo_path, prefix, name):
-    return Path(repo_path) / ".claude" / "agents" / "memory" / prefix / name
+    return Path(repo_path) / ".dwb" / "memory" / prefix / name
 
 
 class TestScaffoldOnCreate:
@@ -27,10 +27,12 @@ class TestScaffoldOnCreate:
 
         d = _memory_dir(tmp_path, "SCF1", "Pixel")
         assert d.is_dir()
+        # DWB-401: 2-file model.
         assert (d / "identity.md").is_file()
-        assert (d / "scratchpad.md").is_file()
-        assert (d / "lessons.md").is_file()
-        assert (d / "recent_sessions.md").is_file()
+        assert (d / "memory.md").is_file()
+        assert not (d / "scratchpad.md").exists()
+        assert not (d / "lessons.md").exists()
+        assert not (d / "recent_sessions.md").exists()
 
     def test_identity_md_carries_agent_facts(self, client, tmp_path):
         project = client.post("/api/projects", json={
@@ -54,7 +56,9 @@ class TestScaffoldOnCreate:
 
 
 class TestScaffoldIdempotency:
-    def test_scratchpad_and_lessons_preserved_on_re_scaffold(self, client, tmp_path):
+    def test_memory_preserved_on_re_scaffold(self, client, tmp_path):
+        # DWB-401: the single agent-owned memory.md is preserved on re-scaffold;
+        # only identity.md is regenerated.
         project = client.post("/api/projects", json={
             "prefix": "SCF3", "name": "Scaffold Three", "repo_path": str(tmp_path),
         }).json()
@@ -65,8 +69,7 @@ class TestScaffoldIdempotency:
 
         d = _memory_dir(tmp_path, "SCF3", "Sage")
         # Agent-written content
-        (d / "scratchpad.md").write_text("## 2026-06-03 — session foo\n- did stuff\n")
-        (d / "lessons.md").write_text("## 2026-06-03 — session foo\n- learned X\n")
+        (d / "memory.md").write_text("## 2026-06-03 - session foo\n- did stuff\n- learned X\n")
 
         # Manual re-scaffold via the endpoint
         r = client.post(f"/api/agents/{agent['id']}/scaffold-memory")
@@ -74,13 +77,12 @@ class TestScaffoldIdempotency:
         body = r.json()
         # identity.md regenerated (refreshed)
         assert any(p.endswith("/identity.md") for p in body["refreshed"])
-        # scratchpad + lessons preserved
-        assert any(p.endswith("/scratchpad.md") for p in body["preserved"])
-        assert any(p.endswith("/lessons.md") for p in body["preserved"])
+        # memory.md preserved
+        assert any(p.endswith("/memory.md") for p in body["preserved"])
 
         # Content verified untouched
-        assert "did stuff" in (d / "scratchpad.md").read_text()
-        assert "learned X" in (d / "lessons.md").read_text()
+        assert "did stuff" in (d / "memory.md").read_text()
+        assert "learned X" in (d / "memory.md").read_text()
 
     def test_identity_md_regenerated_on_re_scaffold(self, client, tmp_path):
         project = client.post("/api/projects", json={

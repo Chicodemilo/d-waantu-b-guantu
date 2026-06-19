@@ -174,7 +174,7 @@ class MemoryAppendRequest(BaseModel):
                 session. Omit when the append isn't session-scoped.
     """
 
-    file: Literal["scratchpad", "lessons", "recent_sessions"]
+    file: Literal["memory"]
     content: str
     session_id: str | None = None
 
@@ -200,7 +200,7 @@ class MemoryCompactRequest(BaseModel):
              estimated token count still exceeds the file's ceiling.
     """
 
-    file: Literal["scratchpad", "lessons", "recent_sessions"]
+    file: Literal["memory"]
     content: str
 
 

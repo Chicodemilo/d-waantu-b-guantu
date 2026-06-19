@@ -46,17 +46,15 @@ Before doing ANY work, establish who you are on this project:
    - On `409 ambiguous` or `404 not found`: **HALT** and tell the TL. Never invent an agent_id.
 2. **Cache your `agent_id`.** Include `X-Agent-ID: {agent_id}` on **every** `POST`/`PATCH`/`PUT`/`DELETE` to `/api/`. Without it, your actions log as "system" and your tokens don't attribute.
 3. **Session marker: TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file**: subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop, matching on your agent_id when the hook payload carries one (DWB-390) so concurrent spawns can't cross-attribute. If you think your marker is missing, tell the TL, they write it.
-4. **Read your memory dir.** The `memory_dir` returned by identify points to `.claude/agents/memory/<project_prefix>/<your_name>/`. As of DWB-341, the dir + all four files are guaranteed to exist on spawn: `spawn-prepare` auto-scaffolds idempotently (identity.md refreshed, the other three preserved byte-for-byte when present, created empty when missing). You no longer need to create them yourself; read in this order, and if any are still missing after scaffold, **HALT** and tell the TL:
-   - **`identity.md`**: system-generated profile (who you are, file purposes, ISO 8601 rule, read order). **Do not edit by hand**: `scaffold-memory` regenerates this file each time.
-   - **`scratchpad.md`**: your in-flight working notes. Append-only, one block per session. Use this as your running memory during a ticket.
-   - **`lessons.md`**: durable lessons across sessions. Append a block when something is worth remembering for next time (a gotcha, a pattern, a workaround). Future-you and other agents read this.
-   - **`recent_sessions.md`**: one-line index of past sessions. Append-only. Skim it to see what you (or your prior incarnation) did recently.
+4. **Read your memory dir.** The `memory_dir` returned by identify points to `.dwb/memory/<project_prefix>/<your_name>/` (DWB-401: moved out of the protected `.claude/` tree into the writable `.dwb/`). As of DWB-341, the dir + both files are guaranteed to exist on spawn: `spawn-prepare` auto-scaffolds idempotently (identity.md refreshed, memory.md preserved byte-for-byte when present, created empty when missing). Read both, and if either is still missing after scaffold, **HALT** and tell the TL:
+   - **`identity.md`**: system-generated profile (who you are, file purpose, ISO 8601 rule, read order). **Do not edit by hand**: scaffold regenerates this file each time.
+   - **`memory.md`**: your single free-form memory (DWB-401, replacing the old scratchpad + lessons + recent_sessions). In-flight working notes AND durable lessons worth keeping across sessions, append-only via the API. Future-you and other agents read this. The DWB dashboard/DB is the session index now, so there is no separate recent_sessions file.
 
 ## On Spawn: Read These First
 
 After identity, read: (1) `.claude/project_rules_worker.md`, (2) `HANDOFF.md`, (3) `ARCHITECTURE.md`, (4) `README.md`. If any are missing, proceed with what you have and flag it.
 
-For context on the DWB session model (open/close phrases, single-active rule, what gets tracked), see `.claude/session_lifecycle.md`. You are NOT responsible for opening or closing sessions: that is TL-only. The reference is there so you understand where your tokens land. The `open_method` / `close_method` enum on a DwbSession row now spans five values: `regex` (Layer 1 catalogue hit on UserPromptSubmit or SessionEnd retry), `ai_classifier` (Layer 2 system-driven Haiku classification, DWB-382), `slash` (Layer 3 deterministic `/dwb-open` and `/dwb-close` escape hatches in `<repo>/.claude/commands/`, DWB-381), `ai_confident` / `ai_asked` (TL layer), and `idle_timeout` (close-only safety sweeper). Workers do not call any of these; the field exists so you know which layer attributed the surrounding work.
+For context on the DWB session model (open/close phrases, single-active rule, what gets tracked), see `.claude/session_lifecycle.md`. You are NOT responsible for opening or closing sessions: that is TL-only. The reference is there so you understand where your tokens land. The `open_method` / `close_method` enum on a DwbSession row spans: `regex` (Layer 1 catalogue hit on UserPromptSubmit or SessionEnd retry), `slash` (Layer 3 deterministic `/dwb-open` and `/dwb-close` escape hatches in `<repo>/.claude/commands/`, DWB-381), `ai_confident` / `ai_asked` (TL layer), and `idle_timeout` (close-only safety sweeper). The `ai_classifier` value (Layer 2 system-driven Haiku classification, DWB-382) was retired in DWB-402 and remains only as a legacy value on historical rows. Workers do not call any of these; the field exists so you know which layer attributed the surrounding work.
 
 ## The Doc Model (what loads, who owns it, what's budgeted)
 
@@ -77,17 +75,16 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
    │     _team_lead = TL's rules for himself · _pm = TL's rules for the PM
    │     _worker = TL's rules for all workers · stack, ports, ticket prefix…
    │     deploy never touches · authored by TL · BUDGETED (TL-owned)
-   ├─ agents/*.md            role agent-def stubs — shipped from DWB
-   │     overwritten on deploy · edit: DWB team · EXEMPT
-   └─ agents/memory/<prefix>/<name>/   per-agent personal memory
+   └─ agents/*.md            role agent-def stubs — shipped from DWB
+         overwritten on deploy · edit: DWB team · EXEMPT
+└─ .dwb/                     DWB-401: agent memory lives here (writable, outside .claude/)
+   └─ memory/<prefix>/<name>/   per-agent personal memory
       ├─ identity.md         system-generated · NEVER edit
-      ├─ scratchpad.md       in-flight notes
-      ├─ lessons.md          durable patterns
-      └─ recent_sessions.md  session index
-            owner writes via the memory API (never Edit) · BUDGETED (per-agent)
+      └─ memory.md           single free-form memory (scratchpad + lessons merged)
+            owner writes via the memory API · GATE-EXEMPT (passive trim, never blocks close)
 ```
 
-**Budgeted vs exempt:** a doc is *budgeted* (its size gated at close) only when an agent can actually edit it — your memory plus the root/project docs you own. DWB-shipped docs (playbooks, agent defs) are *exempt*: keeping those lean is the DWB team's editorial job, never a close-blocker. You can't Edit a `.claude/` path directly (it crashes you) — your memory goes through the API, and the TL edits the other `.claude/` files.
+**Budgeted vs exempt:** the close/sprint gates count only the root/project docs the TL owns. DWB-shipped docs (playbooks, agent defs) are *exempt* — keeping those lean is the DWB team's job. As of DWB-401 your **memory is gate-exempt too**: `memory.md` is bounded by a passive server-side trim (oldest entries drop past a size ceiling), never a close-blocker, so you are never chased to trim it. Memory now lives under `.dwb/` (writable) rather than `.claude/`, but still write it through the API so the server applies the ISO heading and the trim consistently.
 
 ---
 
@@ -95,42 +92,39 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
 
 The Claude Code permission dialog for editing files under `.claude/` crashes subagents in the ink renderer. Four sibling agents died across S66 from this exact pattern, including some that followed prior playbook guidance to "append yourself" inside the memory dir. The current ground truth is stricter:
 
-- **NEVER** use `Edit`, `Write`, or `NotebookEdit` on ANY path under `.claude/`. This includes `.claude/settings.json`, `.claude/settings.local.json`, every playbook, every project_rules file, AND your own memory dir under `.claude/agents/memory/<prefix>/<name>/`. The dialog fires the same way; subagents die the same way.
+- **NEVER** use `Edit`, `Write`, or `NotebookEdit` on ANY path under `.claude/`. This includes `.claude/settings.json`, `.claude/settings.local.json`, every playbook, and every project_rules file. The dialog fires the same way; subagents die the same way. (Your memory dir moved out to `.dwb/` in DWB-401, so it is no longer in this danger zone — but still write it through the API for the ISO heading + passive trim.)
 - Anywhere outside `.claude/` is safe to write directly (project code, `docs/`, `README.md`, `HANDOFF.md`, etc.).
 - Memory updates go through the API only: see Memory Writes below.
 - If your work requires a `.claude/settings.json` (or other harness-config) change, flag it to the TL; they'll handle the edit directly from the main CC window where a user is attached for the permission dialog.
 
 ## Memory Writes: When and How
 
-All writes to your memory dir go through the API. The FastAPI process runs outside the CC ink renderer, so server-side writes never trigger the permission dialog that kills subagents. Two endpoints, one for in-flight notes and one for wrap-up.
+DWB-401 collapsed memory to a single free-form `memory.md` (identity.md is still system-generated). Write it through the API: the FastAPI process applies the ISO heading and the passive size-trim consistently. Two endpoints, one for in-flight notes and one for wrap-up.
 
-**Canonical in-flight path: `POST /api/agents/{your_agent_id}/memory/append`** (DWB-358). Use this whenever you want to drop a thought into `scratchpad.md` or capture a lesson mid-ticket. Body:
+**Canonical in-flight path: `POST /api/agents/{your_agent_id}/memory/append`** (DWB-358). Use this whenever you want to capture a note or a lesson mid-ticket. Body:
 
 ```json
 {
-  "file": "scratchpad",
+  "file": "memory",
   "content": "Trying X, hit Y, working around with Z.",
   "session_id": "optional-cc-session-id"
 }
 ```
 
-- `file` enum: `scratchpad` | `lessons` | `recent_sessions`. `identity.md` is system-managed; the Pydantic `Literal` rejects an `"identity"` value at 422, and the service layer also refuses it as a defense-in-depth check.
+- `file` enum: `memory` (the only writable file; DWB-401 collapsed scratchpad/lessons/recent_sessions into it). `identity.md` is system-managed; the Pydantic `Literal` rejects an `"identity"` value at 422, and the service layer also refuses it as a defense-in-depth check.
 - `content`: required, non-empty. Empty or whitespace-only bodies return 400.
-- Server prepends an ISO 8601 UTC heading (`## 2026-06-10T13:48:15+00:00`, or `## 2026-06-10T13:48:15+00:00 - session <id>` when you pass `session_id`) so headings stay consistent with the session-complete writer. You don't format the timestamp; the endpoint does.
-- Append-only. Existing content is never overwritten. Creates the file if scaffold somehow missed it (idempotent with DWB-341 auto-scaffold).
+- Server prepends an ISO 8601 UTC heading (`## 2026-06-10T13:48:15+00:00`, or `## 2026-06-10T13:48:15+00:00 - session <id>` when you pass `session_id`).
+- Append-only. Existing content is never overwritten. After the append, the server **passively trims** the oldest `##` blocks if `memory.md` exceeds its size ceiling (keeping the newest). This is mechanical and silent; it never errors and never blocks anything.
 - Returns 201 with `{agent_id, file, path, timestamp, bytes_written}` on success.
 - Errors: 422 (file value outside the Literal enum); 400 (empty content; agent has no project_id; project has no repo_path); 404 (agent not found, project row missing); 500 (memory dir or file unwritable).
 
-**Wrap-up path: `POST /api/agents/{your_agent_id}/session-complete`.** The natural close at session end. Send a summary payload and the endpoint writes timestamped entries to `scratchpad.md`, `recent_sessions.md`, and (if `lessons` provided) `lessons.md` in one call. Same ISO 8601 heading format. Use this to land the wrap; use the in-flight endpoint for everything before.
+**Wrap-up path: `POST /api/agents/{your_agent_id}/session-complete`.** The natural close at session end. Send a summary payload and the endpoint writes one timestamped block (summary + tokens + any lessons) to `memory.md`. Same ISO 8601 heading format. Use this to land the wrap; use the in-flight endpoint for everything before.
 
-**What goes where:**
-- `scratchpad.md`: "I'm trying X, hit Y, working around with Z." In-flight thinking.
-- `lessons.md`: "Next time you migrate enums in MySQL, autogenerate misses them. Always hand-write." Durable.
-- `recent_sessions.md`: "2026-06-05, closed S64, gate-test passed clean." One-liner per session.
+**What goes in `memory.md`:** anything worth carrying forward — in-flight thinking ("trying X, hit Y, working around with Z"), durable lessons ("next time you migrate enums in MySQL, autogenerate misses them; hand-write"), and session wrap-ups. One free-form file; you decide what's worth keeping. The session index lives in the DWB dashboard/DB, not a memory file.
 
-**Never edit `identity.md`.** It is system-generated and regenerated on scaffold. The append endpoint will refuse writes to it.
+**Never edit `identity.md`.** It is system-generated and regenerated on scaffold. The append endpoint refuses writes to it.
 
-**Do not Edit/Write the memory files directly even though you can see them.** The dir lives under `.claude/`; the permission dialog fires on subagent writes there and crashes you. Go through the API.
+**Memory lives under `.dwb/` now (DWB-401), which is writable** — but still go through the API so the ISO heading and passive trim apply consistently. `.claude/` paths (settings, playbooks, project_rules) remain the no-touch danger zone.
 
 ## API
 
@@ -242,7 +236,7 @@ If you get blocked on the work, message the TL, don't sit on it.
 
 DWB enforces a `force_consolidation` gate at sprint close. Every sprint participant must call `consolidate-complete` before the TL can close the sprint. The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 if your owned files are over ceiling, unless you provide per-file overrides with non-empty reasons.
 
-**Your owned files are the docs you author and can edit — your memory files** (`scratchpad`/`lessons`/`recent_sessions`). Nothing under `.claude/` is ever counted against you: playbooks + agent defs are exempt (the DWB team's job), and `project_rules` are budgeted but TL-owned (the TL authors them for each role and keeps them lean). You're only on the hook for your own memory.
+**As of DWB-401, nothing of yours gates a close.** Your only authored file is `memory.md`, and it is gate-EXEMPT — bounded by a passive server-side trim, never counted toward the consolidation gate. `.claude/` docs (playbooks, agent defs) are exempt too; `project_rules` and root docs are TL-owned. So for a worker the consolidation ack is a clean naked ack: you have no over-ceiling files to clear. (The gate itself is also opt-in per project via `force_consolidation`, default OFF — DWB-400.)
 
 **When to ack:** as soon as your last ticket hits `in_review` (or `done`). Don't wait for the TL, the ack is yours to file.
 
@@ -255,27 +249,9 @@ curl -X POST http://localhost:8000/api/agents/{your_agent_id}/consolidate-comple
   -d '{"sprint_id": <active_sprint_id>}'
 ```
 
-201 on success. 409 if already acked. 400 if over-ceiling files exist (see below).
+201 on success. 409 if already acked. For a worker the naked ack passes clean — your `owned_over_ceiling_files` is empty (memory is gate-exempt as of DWB-401). The over-ceiling refusal path (400 + per-file overrides) still exists in the endpoint, but it now only ever applies to the TL's owned root/`project_rules` docs, never to a worker's memory.
 
-**Check your owned files BEFORE acking:**
-
-```
-GET /api/projects/{project_id}/consolidation-status?sprint_id=<active_sprint_id>
-```
-
-Your block lists `owned_over_ceiling_files`. If non-empty: trim before acking.
-
-### REFUSAL is the signal to TRIM, not idle (DWB-328 autonomy)
-
-When the gate refuses your ack with violations:
-
-1. **Default path: TRIM the listed files.** That's the work. Re-ack with no overrides. Should pass clean. Don't wait for TL guidance, refusal means go fix.
-2. **Override path (rare): per-file reason.** Use only when the file is genuinely load-bearing and trim would lose meaning. Body: `{"sprint_id": N, "overrides": {"file_path": "non-empty reason text", ...}}`. Every file in the violation list must have a key. Empty/whitespace reasons rejected.
-3. **Cap-raise path (when override would repeat across sprints):** ping TL with proposed `TOKEN_CEILINGS` change. Don't override the same file every sprint.
-
-**You can't Edit `.claude/` paths directly (it crashes you), so compact your memory through the API:** `POST /api/agents/{your_agent_id}/memory/compact {file, content}` (full-file replace; rejected 422 if still over). Your memory files are the only thing that'll land in your over-ceiling list — the playbooks and agent defs under `.claude/` are exempt (DWB-397), never counted against you.
-
-**Idling on refusal is the anti-pattern.** The TL doesn't want to nag every agent every sprint to trim their files. The system tells you what's over; you trim; you retry. That's the contract.
+You can optionally curate `memory.md` any time with `POST /api/agents/{your_agent_id}/memory/compact {file: "memory", content}` (full-file replace). DWB-401: this **no longer 422s** on over-ceiling — if your replacement is large, the server passively trims the oldest blocks after writing rather than refusing. Curate for clarity if you want, but you are never *required* to trim memory to ack or close.
 
 ## Reporting Status
 
