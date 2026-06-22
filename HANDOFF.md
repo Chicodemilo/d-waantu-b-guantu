@@ -2,48 +2,39 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current State (as of 2026-06-17 close)
+## Current State (as of 2026-06-22)
 
-- **Sprint S66 (id=107) active**, epic 21 in_progress.
-- **Last DWB session: id=26**, opened 2026-06-17 18:41 (regex), closed 20:02 (regex/explicit on user "shut it down"). ~936k tokens, ~80 min. Headline set manually (regex closes carry none).
-- **Team `session-26822b38` down:** Pam_DWB (14) + Barry_DWB (21) posted session-complete and were sent shutdown after their work. Respawn next session via the Agent tool + spawn-prepare + pending marker (TeamCreate is gone, see Carryover below); do NOT SendMessage these names cold.
-- **Working tree dirty, UNCOMMITTED** (carried from prior sessions + today). Untracked `backend/dwb.db` is a stray SQLite artifact — investigate before any commit, do not commit it blindly.
+- **Epic 25 "Semantic Event System" COMPLETE (6/6) and COMMITTED** as `db75945` (feat(events): semantic activity event system with type-aware feed renderer). Working tree clean.
+- **Sprint S66 (id=107) still active**, epic 21 in_progress (untouched: DWB-404 spike in_progress, 405/406 backlog).
+- Epic 25 / sprint S67 (id=115, planned) holds the event tickets 407-412 (all done).
+- Backend 1204 passing, frontend 156 passing.
 
-## Carryover: spawn-model doc fix (2026-06-18, UNCOMMITTED, VERIFIED)
+## Epic 25 — what shipped
 
-- **What:** CC 2.1.178 removed `TeamCreate`/`TeamDelete`. Spawn teammates with the **Agent tool** directly; `team_name` arg is accepted-but-ignored; teammates still coordinate (mailbox, SendMessage, idle notifications). Display default flipped to `in-process` in 2.1.179; idle teammates auto-hide ~30s on 2.1.181.
-- **Verified live:** spawned a throwaway teammate (Canary) this session — spawn, mailbox, TL->teammate SendMessage, teammate->TL reply, idle notifications all confirmed green. Not just doc-sourced.
-- **Edits made (uncommitted):** `docs/team_lead_playbook.md` + `.claude/team_lead_playbook.md` (respawn step, new "How spawning works" note in 4a, dropped dead TeamCreate mention in 4c); HANDOFF stale line above. Memory: deleted `feedback_use_teamcreate.md`, added `feedback_spawn_model.md`. Added `"teammateMode": "tmux"` to `~/.claude/settings.json`.
-- **NEXT:** user is restarting CC to confirm teammates pane out in iTerm (tmux mode only takes effect on fresh launch). After that visual confirm, **commit the spawn-model fixes** (scope: the team_lead_playbook + HANDOFF spawn-model changes; ask before bundling the pre-existing pm/worker playbook dirt or `backend/dwb.db`).
-- **Deferred:** ~15 PRE-EXISTING em dashes in both playbooks violate the no-em-dash rule; user hasn't decided whether to sweep them. My own additions are em-dash-clean.
+8 semantic domain verbs emitted from the service layer via a canonical `log_activity()` helper, disjoint from generic middleware CRUD verbs, with read-side feed dedup by action-class pairing (`SEMANTIC_GENERIC_SHADOWS`, NOT a bare time window). Feed renders all 8 as human phrases.
 
-## Shipped today (S66)
+| Ticket | One-line |
+|---|---|
+| DWB-407 | Type-aware live ProjectPage feed (ticket/alert/sprint links). |
+| DWB-408 | Canonical `log_activity()` helper + disjoint MIDDLEWARE/SEMANTIC actions. |
+| DWB-409 | Ticket verbs: status_changed{from,to}, assigned, reopened. Actor = X-Agent-ID. |
+| DWB-410 | sprint_opened/closed + consolidation_acked; retired the ack URL hack. |
+| DWB-411 | session_opened/closed (entity_type `session`). |
+| DWB-412 | Feed renderer extended for all 8 verbs; bare {from,to} ticket rows fall back to "ticket #id". |
 
-| Ticket | Status | One-line |
-|---|---|---|
-| DWB-394 | done | Close-matcher negative-context guard: CLOSE `<name>` stop-word exclusion + interrogative/reported-speech skip. Questions/quotes no longer false-close; real commands still do. |
-| DWB-395 | done | `POST /api/sessions/{id}/reopen` (replaces manual DB null-out) + 120s grace-window resurrect for regex/ai_classifier closes only. |
+## Carryover (backlog, out of epic 25 scope)
 
-Both reviewed (diffs read, suite run, behavior live-verified) and accepted. Backend **1150 passing** (was 1113). Server restarted with `--reload` so fixes are live.
+- **DWB-413:** delete_project 500s on projects with acks/agents/sessions. Cascade-clear child rows before delete.
+- **DWB-396:** prose-false-close still open. Transcript close-scan fires on example/quoted text; needs scoping to user-authored turns (bit session 26 + 32).
 
-## Open backlog
+## Team
 
-- **DWB-396 (TO FILE):** Layer-1b transcript scan still false-closes on close phrases that appear as *example text / agent prose* in a transcript (today: my own brief's "shut it down for the night" closed session 26 mid-work). Fix: scope the transcript close-scan to user-authored turns only. DWB-394 covers questions/reported-speech, NOT example prose.
-- **DWB-397 (TO FILE):** Session-close compaction gate is mis-scoped. It blocks `ai_confident` close on (a) user-authored governance docs (`team_lead_playbook` 7592/4000, `pm_playbook`, `project_rules_worker`) and (b) offline non-participant agents' memory (Dolores/Freddie/Sylvie). Narrow it to session participants (à la DWB-326), exempt deployed user-authored docs, and/or raise the playbook ceiling (4000 too low for the TL playbook).
-- **Uncommitted tree** + `backend/dwb.db` investigation (above) if user asks to commit.
-
-## Next session
-
-- **Agent point system** (user-chosen next feature): stars/rank/demerits synthesized from existing signals (failure_records, rework, token efficiency, gate compliance). Draft epic/tickets for review first — design approved, build NOT yet authorized. Self-contained, no cross-repo. (Inter-project Archie comms deferred — bigger architecture lift, collides with agnostic-repo model.)
+- Freddie (19, frontend) spawned + parked alive this session. Barry (21), Pam (14), others DOWN. Respawn before use; do NOT SendMessage cold names.
 
 ## Gotchas (carry forward)
 
-- **`.claude/` Edit by subagent = crash.** Only the TL edits `.claude/` files directly.
-- **Close regex fires on substrings.** Genuine commands close correctly; DWB-394 guards questions/reported-speech; example prose in transcripts still slips through (DWB-396).
-- **Regex/idle/slash closes carry no headline** — stamp manually if the dashboard summary matters.
-- **No reopen via API was the old pain — now `POST /api/sessions/{id}/reopen` exists** (409 if another session open).
-- **Compaction gate has no override path** and over-scopes (DWB-397). `/dwb-close` (slash) is gate-exempt if you need to close past it.
-- **Doc ceilings:** HANDOFF 1500, ARCHITECTURE 7500, README 3500, playbook 4000 (`app/config/token_budget.py`). README + ARCHITECTURE trimmed under ceiling today.
-- **`GET /api/alerts?status=open` is NOT project-scoped** — pass `project_id` or you'll see other projects' alerts.
-- **`SendMessage` is name-literal**; verify suffix on respawned teammates. After compaction, `ls ~/.claude/teams/<team>/inboxes/` first.
-- **DWB tracks 9 projects**; only project 1 is DWB itself.
+- **Verify worker liveness** (`presumed_live`/`last_seen` on `/team`) before assuming a worker is building.
+- **`.claude/` Edit by subagent = crash.** Only the TL edits `.claude/` files. Worker memory goes through the API.
+- **No-double-log rule:** semantic verbs disjoint from middleware verbs; feed dedup suppresses the generic sibling on the read side only (both rows stay in the DB).
+- **Doc ceilings** (`backend/app/config/token_budget.py`): HANDOFF 1500, ARCHITECTURE 7500, README 3500.
+- **`GET /api/alerts?status=open` is NOT project-scoped** — pass `project_id`.
