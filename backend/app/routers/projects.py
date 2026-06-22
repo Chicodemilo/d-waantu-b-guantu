@@ -31,6 +31,11 @@ from app.schemas.test_result import TestResultRead
 from app.services import project as svc
 from app.services import project_agent as pa_svc
 from app.services import test_result as test_svc
+from app.services.activity_log import (
+    MIDDLEWARE_ACTIONS,
+    SEMANTIC_ACTIONS,
+    SEMANTIC_GENERIC_SHADOWS,
+)
 from app.services.seed_demo import seed_demo_project
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -753,8 +758,40 @@ def get_project_activity_feed(
         .limit(limit)
     ).all()
 
+    # DWB-409: read-side dedup. A semantic event (e.g. status_changed) and the
+    # middleware's generic CRUD row (updated) are BOTH written for one mutation.
+    # Suppress the generic sibling from the feed when a semantic row that
+    # SHADOWS that generic verb exists for the same (entity_type, entity_id)
+    # within a short window, so the feed shows one line per event. Both rows
+    # remain in the table for audit completeness; this is purely a presentation
+    # filter. Consumers (DWB-412 renderer) can assume the feed is pre-deduped.
+    #
+    # Action-class pairing (SEMANTIC_GENERIC_SHADOWS) is what makes this safe: a
+    # ticket `created` row is not shadowed by `status_changed`, so creation
+    # always surfaces even when a status change lands within the window.
+    _DEDUP_WINDOW_SECONDS = 5
+    semantic_rows = [r for r in rows if r.action in SEMANTIC_ACTIONS]
+
+    def _is_shadowed_generic(row) -> bool:
+        if row.action not in MIDDLEWARE_ACTIONS:
+            return False
+        for s in semantic_rows:
+            if (
+                s.entity_type == row.entity_type
+                and s.entity_id == row.entity_id
+                and row.action in SEMANTIC_GENERIC_SHADOWS.get(s.action, frozenset())
+                and row.created_at is not None
+                and s.created_at is not None
+                and abs((s.created_at - row.created_at).total_seconds())
+                <= _DEDUP_WINDOW_SECONDS
+            ):
+                return True
+        return False
+
+    visible_rows = [row for row in rows if not _is_shadowed_generic(row)]
+
     feed = []
-    for row in rows:
+    for row in visible_rows:
         details = row.details
         if isinstance(details, str):
             try:

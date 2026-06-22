@@ -268,6 +268,19 @@ def create_ack(
         db.rollback()
         return None, "already_acked", None
     db.refresh(ack)
+
+    # DWB-410: explicit consolidation_acked event (replaces the retired
+    # middleware agent_consolidation_ack URL special-case). entity_type='agent'
+    # (the acking agent), so participants_for_sprint must exclude
+    # action='consolidation_acked' to keep ack-only agents out of the
+    # participation signal (DWB-329 invariant).
+    from app.services.activity_log import log_activity
+    log_activity(
+        db, sprint.project_id, agent_id, "agent", agent_id,
+        "consolidation_acked", {"sprint_id": sprint_id},
+    )
+    db.commit()
+
     return ack, None, None
 
 
@@ -433,12 +446,14 @@ def participants_for_sprint(db: Session, sprint: Sprint) -> set[int]:
 
     # 5. activity_log within the sprint window
     #
-    # DWB-329: exclude entity_type='agent_consolidation_ack' rows. The TL
-    # rubber-stamping a consolidate-complete ack on behalf of an agent
-    # creates an activity_log row attributed to that agent, which would
-    # otherwise pull non-working agents into the participant set of any
-    # sprint whose window covers the ack timestamp. The other four
-    # participation signals (tickets, comments, tracking_log,
+    # DWB-329 / DWB-410: exclude consolidation-ack rows. A consolidate-complete
+    # ack attributed to an agent would otherwise pull non-working agents into
+    # the participant set of any sprint whose window covers the ack timestamp.
+    # Two exclusions cover both eras:
+    #   - action='consolidation_acked'   the explicit DWB-410 event (current)
+    #   - entity_type='agent_consolidation_ack'  legacy rows from the retired
+    #     middleware URL special-case (kept for backward-compat on old DBs)
+    # The other four participation signals (tickets, comments, tracking_log,
     # hook_sessions) catch agents doing real sprint work, so dropping the
     # ack-only signal is safe.
     if sprint.start_date:
@@ -447,6 +462,7 @@ def participants_for_sprint(db: Session, sprint: Sprint) -> set[int]:
             select(ActivityLog.agent_id)
             .where(ActivityLog.project_id == sprint.project_id)
             .where(ActivityLog.agent_id.is_not(None))
+            .where(ActivityLog.action != "consolidation_acked")
             .where(ActivityLog.entity_type != "agent_consolidation_ack")
             .where(ActivityLog.created_at >= start_dt)
         )

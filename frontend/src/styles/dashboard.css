@@ -626,6 +626,16 @@
   font-size: 10px;
 }
 
+.activity-feed__ticket-link {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.activity-feed__ticket-link:hover {
+  color: var(--green-bright);
+  text-decoration: underline;
+}
+
 .activity-feed__empty {
   padding: 12px;
   color: var(--gray);

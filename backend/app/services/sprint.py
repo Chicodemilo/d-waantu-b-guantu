@@ -1,12 +1,12 @@
 # Path: app/services/sprint.py
 # File: sprint.py
 # Created: 2026-03-29
-# Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), and post-close automation
+# Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), post-close automation, semantic activity events (DWB-410)
 # Caller: app/routers/sprints.py
-# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc, git
-# Data In: db: Session, SprintCreate/Update
+# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc, git, services/activity_log
+# Data In: db: Session, SprintCreate/Update, acting_agent_id
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-06-19
+# Last Modified: 2026-06-19 (DWB-410)
 
 import logging
 import re
@@ -28,6 +28,26 @@ from app.models.sprint import Sprint, SprintStatus
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket, TicketStatus, TicketType
 from app.schemas.sprint import SprintCreate, SprintUpdate
+from app.services.activity_log import log_activity
+
+
+def _sprint_event_details(sprint: Sprint) -> dict:
+    """details payload shared by sprint_opened / sprint_closed events (DWB-410)."""
+    details: dict = {"sprint_number": sprint.sprint_number}
+    if sprint.goal:
+        details["goal"] = sprint.goal
+    return details
+
+
+def _emit_sprint_event(
+    db: Session, sprint: Sprint, action: str, acting_agent_id: int | None
+) -> None:
+    """Emit a semantic sprint activity event and commit it (DWB-410)."""
+    log_activity(
+        db, sprint.project_id, acting_agent_id, "sprint", sprint.id, action,
+        _sprint_event_details(sprint),
+    )
+    db.commit()
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 logger = logging.getLogger(__name__)
@@ -105,7 +125,7 @@ def _raise_conflict_if_active_exists(
         )
 
 
-def create_sprint(db: Session, data: SprintCreate) -> Sprint:
+def create_sprint(db: Session, data: SprintCreate, acting_agent_id: int | None = None) -> Sprint:
     values = data.model_dump()
 
     # Validate project exists
@@ -149,10 +169,17 @@ def create_sprint(db: Session, data: SprintCreate) -> Sprint:
     db.add(sprint)
     db.commit()
     db.refresh(sprint)
+
+    # DWB-410: a sprint created directly into `active` is opened on creation.
+    if sprint.status == SprintStatus.active:
+        _emit_sprint_event(db, sprint, "sprint_opened", acting_agent_id)
+
     return sprint
 
 
-def update_sprint(db: Session, sprint: Sprint, data: SprintUpdate) -> Sprint:
+def update_sprint(
+    db: Session, sprint: Sprint, data: SprintUpdate, acting_agent_id: int | None = None
+) -> Sprint:
     old_status = sprint.status
     updates = data.model_dump(exclude_unset=True)
 
@@ -182,6 +209,13 @@ def update_sprint(db: Session, sprint: Sprint, data: SprintUpdate) -> Sprint:
 
     if transitioning_to_completed:
         _on_sprint_completed(db, sprint)
+
+    # DWB-410: semantic open/close events on top of the middleware's generic
+    # `updated` row (distinct verbs per the no-double-log rule).
+    if transitioning_to_active:
+        _emit_sprint_event(db, sprint, "sprint_opened", acting_agent_id)
+    if transitioning_to_completed:
+        _emit_sprint_event(db, sprint, "sprint_closed", acting_agent_id)
 
     return sprint
 

@@ -1,12 +1,12 @@
 # Path: app/services/ticket.py
 # File: ticket.py
 # Created: 2026-03-29
-# Purpose: Ticket CRUD, status history, rework detection, time computation, tracking events
+# Purpose: Ticket CRUD, status history, rework detection, time computation, tracking events, semantic activity events (DWB-409)
 # Caller: app/routers/tickets.py
-# Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking
-# Data In: db: Session, TicketCreate/Update
+# Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking, services/activity_log
+# Data In: db: Session, TicketCreate/Update, acting_agent_id
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-06-12
+# Last Modified: 2026-06-19 (DWB-409)
 
 import logging
 from datetime import datetime
@@ -25,6 +25,7 @@ from app.models.sprint import Sprint, SprintStatus
 from app.models.ticket import Ticket, TicketStatus, TicketType
 from app.schemas.ticket import TicketCreate, TicketUpdate
 from app.services import tracking as tracking_svc
+from app.services.activity_log import log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -122,9 +123,12 @@ def create_ticket(db: Session, data: TicketCreate) -> Ticket:
     return ticket
 
 
-def update_ticket(db: Session, ticket: Ticket, data: TicketUpdate) -> Ticket:
+def update_ticket(
+    db: Session, ticket: Ticket, data: TicketUpdate, acting_agent_id: int | None = None
+) -> Ticket:
     updates = data.model_dump(exclude_unset=True)
     old_status = ticket.status
+    old_assigned = ticket.assigned_agent_id
 
     # DWB-333: sprint_id is NOT NULL in the model — every ticket must belong
     # to a sprint per the hierarchy rule. The TicketUpdate schema declares
@@ -214,7 +218,67 @@ def update_ticket(db: Session, ticket: Ticket, data: TicketUpdate) -> Ticket:
     # -> tracking_log -> by_ticket rollup) made ticket.tokens_used dead
     # for hook-attributed work. The alert fired on every close and was
     # pure noise.
+
+    # DWB-409: emit semantic activity events on top of the middleware's
+    # generic `updated` row. Distinct verbs per the no-double-log rule
+    # (see services/activity_log.py). Actor = the X-Agent-ID-resolved
+    # acting agent, falling back to the (now-current) assignee.
+    _emit_ticket_events(db, ticket, old_status, old_assigned, updates, acting_agent_id)
+
     return ticket
+
+
+def _emit_ticket_events(
+    db: Session,
+    ticket: Ticket,
+    old_status: TicketStatus,
+    old_assigned: int | None,
+    updates: dict,
+    acting_agent_id: int | None,
+) -> None:
+    """Emit semantic activity_log events for a ticket update (DWB-409).
+
+    Verbs (all distinct from the middleware's created/updated/deleted):
+    - status_changed: any status transition EXCEPT a rework reopen, details {from, to}
+    - reopened: a done -> in_progress rework transition, details {from, to}. This
+      REPLACES status_changed for that transition (one semantic row per event;
+      reopened carries {from, to} so nothing is lost). Read-side dedup only
+      collapses generic-vs-semantic, so emitting both semantic verbs would
+      re-create the double-line problem (DWB-409 TL decision).
+    - assigned: assigned_agent_id changed to a non-null agent,
+      details {agent: <name>, agent_id: <id>}
+    """
+    actor_id = acting_agent_id or ticket.assigned_agent_id
+    events: list[tuple[str, dict]] = []
+
+    status_changed = "status" in updates and updates["status"] != old_status
+    if status_changed:
+        new_status = updates["status"]
+        old_val = old_status.value if hasattr(old_status, "value") else str(old_status)
+        new_val = new_status.value if hasattr(new_status, "value") else str(new_status)
+        if old_status == TicketStatus.done and new_status == TicketStatus.in_progress:
+            events.append(("reopened", {"from": old_val, "to": new_val}))
+        else:
+            events.append(("status_changed", {"from": old_val, "to": new_val}))
+
+    new_assigned = updates.get("assigned_agent_id")
+    if (
+        "assigned_agent_id" in updates
+        and new_assigned is not None
+        and new_assigned != old_assigned
+    ):
+        assignee = db.get(Agent, new_assigned)
+        events.append((
+            "assigned",
+            {"agent": assignee.name if assignee else None, "agent_id": new_assigned},
+        ))
+
+    if not events:
+        return
+
+    for action, details in events:
+        log_activity(db, ticket.project_id, actor_id, "ticket", ticket.id, action, details)
+    db.commit()
 
 
 def _check_rework(db: Session, ticket: Ticket) -> None:

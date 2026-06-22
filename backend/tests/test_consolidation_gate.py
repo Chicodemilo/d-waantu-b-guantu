@@ -765,33 +765,19 @@ class TestParticipantScoping:
         else:
             assert r.status_code == 200
 
-    def test_consolidate_complete_path_maps_to_dedicated_entity_type(self):
-        """DWB-329 middleware leg: _parse_entity_type must return
-        'agent_consolidation_ack' for the consolidate-complete subpaths so
-        participants_for_sprint can filter ack-only signals out. Direct unit
-        test on the path-parsing function because the consolidate-complete
-        response schema lacks project_id, so the middleware short-circuits
-        before emitting a row today - the tagging is still load-bearing for
-        any future path (audit subscription, manual log insert) that takes
-        the same URL through the parser.
+    def test_consolidate_complete_path_no_longer_special_cased(self):
+        """DWB-410: the DWB-329 consolidate-complete URL special-case is RETIRED.
+        _parse_entity_type now resolves the consolidate-complete subpaths to the
+        generic 'agent' type like every other /api/agents subpath. The ack is
+        recorded by an explicit 'consolidation_acked' event instead, and
+        participants_for_sprint excludes that action directly (covered below).
         """
         from app.middleware.activity_logger import _parse_entity_type
 
-        # POST /api/agents/{id}/consolidate-complete
-        assert (
-            _parse_entity_type("/api/agents/14/consolidate-complete")
-            == "agent_consolidation_ack"
-        )
-        # DELETE /api/agents/{id}/consolidate-complete/{sprint_id}
-        assert (
-            _parse_entity_type("/api/agents/14/consolidate-complete/27")
-            == "agent_consolidation_ack"
-        )
-        # Trailing slash variant
-        assert (
-            _parse_entity_type("/api/agents/14/consolidate-complete/")
-            == "agent_consolidation_ack"
-        )
+        # Consolidate-complete subpaths now resolve to the generic 'agent' type.
+        assert _parse_entity_type("/api/agents/14/consolidate-complete") == "agent"
+        assert _parse_entity_type("/api/agents/14/consolidate-complete/27") == "agent"
+        assert _parse_entity_type("/api/agents/14/consolidate-complete/") == "agent"
         # POST /api/agents itself stays as the generic 'agent' type so agent
         # create/update activity is still attributable.
         assert _parse_entity_type("/api/agents") == "agent"
@@ -869,10 +855,26 @@ class TestParticipantScoping:
         ))
         db_session.commit()
 
+        # DWB-410: the current explicit consolidation_acked event carries
+        # entity_type='agent' (NOT the retired 'agent_consolidation_ack'), so
+        # the legacy entity_type exclusion alone would let it through. The
+        # action-level exclusion must catch it.
+        db_session.add(ActivityLog(
+            project_id=project["id"],
+            agent_id=pamlike["id"],
+            entity_type="agent",
+            entity_id=pamlike["id"],
+            action="consolidation_acked",
+            details=None,
+            created_at=window_ts + timedelta(hours=1),
+        ))
+        db_session.commit()
+
         participants = participants_for_sprint(db_session, sprint_row)
         assert worker["id"] in participants
         assert pamlike["id"] not in participants, (
-            "agent_consolidation_ack rows must not be counted as "
+            "consolidation ack rows (legacy entity_type OR explicit "
+            "consolidation_acked action) must not be counted as "
             "sprint-participation activity"
         )
 

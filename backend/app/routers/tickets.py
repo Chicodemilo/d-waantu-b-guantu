@@ -6,9 +6,9 @@
 # Callees: app/services/ticket.py
 # Data In: HTTP requests
 # Data Out: JSON responses (TicketRead, StatusHistoryRead, attribution dict, StaleCheckResponse)
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-19 (DWB-409: thread X-Agent-ID as acting_agent_id into update_ticket)
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -68,12 +68,17 @@ def create_ticket(data: TicketCreate, db: Session = Depends(get_db)):
 
 @router.patch("/{ticket_id}", response_model=TicketRead)
 def update_ticket(
-    ticket_id: int, data: TicketUpdate, db: Session = Depends(get_db)
+    ticket_id: int,
+    data: TicketUpdate,
+    db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None),
 ):
     ticket = svc.get_ticket(db, ticket_id)
     if not ticket:
         raise HTTPException(404, "Ticket not found")
-    return svc.update_ticket(db, ticket, data)
+    # DWB-409: thread the acting agent (X-Agent-ID) so semantic activity
+    # events attribute to whoever performed the change, not the assignee.
+    return svc.update_ticket(db, ticket, data, acting_agent_id=x_agent_id)
 
 
 @router.get("/{ticket_id}/history", response_model=list[StatusHistoryRead])

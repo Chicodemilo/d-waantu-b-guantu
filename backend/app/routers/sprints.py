@@ -6,9 +6,9 @@
 # Callees: app/services/sprint.py
 # Data In: HTTP requests
 # Data Out: JSON responses (SprintRead)
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-19 (DWB-410: thread X-Agent-ID as acting_agent_id for sprint_opened/closed events)
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -40,18 +40,25 @@ def get_sprint(sprint_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=SprintRead, status_code=201)
-def create_sprint(data: SprintCreate, db: Session = Depends(get_db)):
-    return svc.create_sprint(db, data)
+def create_sprint(
+    data: SprintCreate,
+    db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None),
+):
+    return svc.create_sprint(db, data, acting_agent_id=x_agent_id)
 
 
 @router.patch("/{sprint_id}", response_model=SprintRead)
 def update_sprint(
-    sprint_id: int, data: SprintUpdate, db: Session = Depends(get_db)
+    sprint_id: int,
+    data: SprintUpdate,
+    db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None),
 ):
     sprint = svc.get_sprint(db, sprint_id)
     if not sprint:
         raise HTTPException(404, "Sprint not found")
-    return svc.update_sprint(db, sprint, data)
+    return svc.update_sprint(db, sprint, data, acting_agent_id=x_agent_id)
 
 
 @router.delete("/{sprint_id}", status_code=204)

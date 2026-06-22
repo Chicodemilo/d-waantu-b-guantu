@@ -1,12 +1,12 @@
 # Path: app/middleware/activity_logger.py
 # File: activity_logger.py
 # Created: 2026-03-29
-# Purpose: Middleware to auto-log POST/PATCH/DELETE activity to activity_log (DWB-329: subpath-aware entity_type for consolidate-complete)
+# Purpose: Middleware to auto-log generic CRUD activity (created/updated/deleted) to activity_log; semantic domain events are emitted explicitly via services.activity_log.log_activity (DWB-410)
 # Caller: app/main.py
 # Callees: app/database.SessionLocal, app/models/activity_log.ActivityLog
 # Data In: HTTP request/response, X-Agent-ID header
 # Data Out: activity_log rows (side effect)
-# Last Modified: 2026-06-12 (DWB-329)
+# Last Modified: 2026-06-19 (DWB-410: retired the consolidate-complete URL special-case)
 
 """FastAPI middleware that auto-inserts activity_log rows for mutating requests."""
 
@@ -37,26 +37,18 @@ _METHOD_ACTION = {
 # Pattern: /api/<entity_type> or /api/<entity_type>/<id>/...
 _PATH_RE = re.compile(r"^/api/([a-z][a-z0-9_-]+)")
 
-# DWB-329 subpath-aware overrides. Some /api/agents/{id}/<subpath> endpoints
-# are administrative acks rather than agent-create work; tagging them with a
-# more specific entity_type lets participants_for_sprint exclude them from
-# the sprint-participation activity_log signal. Add more entries here when
-# new admin/gate subpaths emerge (e.g. dismiss-all, reopen-sprint).
-_CONSOLIDATE_COMPLETE_RE = re.compile(
-    r"^/api/agents/\d+/consolidate-complete(?:/\d+)?/?$"
-)
-
 
 def _parse_entity_type(path: str) -> str | None:
     """Extract entity type from URL path, e.g. /api/tickets/5 → 'ticket'.
 
-    DWB-329: /api/agents/{id}/consolidate-complete (POST + DELETE) maps to
-    the dedicated entity_type 'agent_consolidation_ack' so participation
-    signals can exclude it. All other /api/agents subpaths still resolve to
-    'agent'.
+    DWB-410: the DWB-329 consolidate-complete special-case (which tagged the
+    ack with entity_type 'agent_consolidation_ack' so participation signals
+    could exclude it) is retired. The ack is now recorded by an explicit
+    'consolidation_acked' event via services.activity_log.log_activity, and
+    participants_for_sprint excludes that action directly. The middleware
+    never logged the ack anyway (the ack response carries no project_id, so
+    _log_activity short-circuits), so this is pure cleanup.
     """
-    if _CONSOLIDATE_COMPLETE_RE.match(path):
-        return "agent_consolidation_ack"
     m = _PATH_RE.match(path)
     if not m:
         return None

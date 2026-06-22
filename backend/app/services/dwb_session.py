@@ -6,7 +6,7 @@
 # Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-06-17
+# Last Modified: 2026-06-19 (DWB-411: emit session_opened / session_closed activity events)
 
 """DWB session business logic.
 
@@ -57,6 +57,7 @@ from app.models.dwb_session import (
 )
 from app.models.hook_session import HookSession
 from app.models.tracking_log import TrackingLog
+from app.services.activity_log import log_activity
 
 
 def _utcnow() -> datetime:
@@ -174,6 +175,17 @@ def open_session(
     db.add(row)
     db.flush()
     db.refresh(row)
+
+    # DWB-411: semantic session_opened event. flush-only, like the row above —
+    # the caller owns the commit. agent_id is None: a DWB session is a
+    # project-level construct opened by the TL/hooks, not an individual agent.
+    # entity_type='session' matches the middleware's URL-derived type for
+    # /api/sessions so the read-side feed dedup (DWB-409) collapses the generic
+    # sibling row.
+    log_activity(
+        db, project_id, None, "session", row.id, "session_opened",
+        {"open_method": open_method.value},
+    )
     return row, None
 
 
@@ -299,6 +311,20 @@ def close_session(
         0, int((closed_at - session.opened_at).total_seconds())
     )
     db.flush()
+
+    # DWB-411: semantic session_closed event. Emitted only on a real close
+    # (the already-closed early-return above skips it, so no double-emit on an
+    # idempotent re-close). flush-only; the caller owns the commit.
+    # entity_type='session' (see open_session) so feed dedup collapses the
+    # generic middleware row.
+    log_activity(
+        db, session.project_id, None, "session", session.id, "session_closed",
+        {
+            "close_method": close_method.value,
+            "headline": session.headline,
+            "total_tokens": session.total_tokens,
+        },
+    )
     return session
 
 
