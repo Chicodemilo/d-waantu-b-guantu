@@ -3,10 +3,22 @@
 # Created: 2026-04-09
 # Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path, DWB-353 ad_hoc routing + alert removal, DWB-373 hook_session.dwb_session_id linker, DWB-390 agent-id-aware pending-marker claim, DWB-395 grace-window resurrect, DWB-402 Layer-2 Haiku classifier retired)
 # Caller: app/routers/hooks.py
-# Callees: app/models/hook_session.py, app/services/tracking.py, app/services/dwb_session.py, app/models/alert.py, app/config/session_phrases.py
+# Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
-# Data Out: HookSession records, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
-# Last Modified: 2026-06-22 (DWB-414)
+# Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
+# Last Modified: 2026-06-22 (DWB-418..421)
+#
+# DWB-417 (2026-06-22): handle_tool_use ingests the PostToolUse hook and
+# persists one tool_actions row per tool call, resolving agent/dwb_session/
+# ticket context from session_id the same way handle_session_end does (existing
+# hook_session -> authoritative marker -> _resolve_ticket / _active_dwb_session_id).
+# Foundation for the agent-scoring epic; stored the generic event only.
+# DWB-418..421 (2026-06-22): per-tool classification on top of that foundation -
+# file_written (Write/Edit/MultiEdit/NotebookEdit), message_sent (SendMessage,
+# recipient only - no body), agent_spawned (Task), plus the Notification /
+# PreCompact lifecycle events via handle_lifecycle_event. Classified events emit
+# a semantic activity-feed verb (entity_type="tool_action"); the generic
+# 'tool_use' fallback does not (feed-noise control).
 #
 # DWB-414 (2026-06-22): scope session phrase detection to genuine user-authored
 # turns. _extract_user_message_texts now drops non-human user-role entries
@@ -58,8 +70,10 @@ from app.models.project import Project
 from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
 from app.models.ticket import Ticket, TicketStatus
+from app.models.tool_action import ToolAction
 from app.services import dwb_session as dwb_svc
 from app.services import tracking
+from app.services.activity_log import log_activity
 from app.services.failed_hook import log_failed_hook
 
 logger = logging.getLogger(__name__)
@@ -1727,6 +1741,316 @@ def handle_user_prompt(
             error=f"{type(e).__name__}: {e}",
         )
         return {"status": "error", "detail": f"{type(e).__name__}: {e}"}
+
+
+# ---------------------------------------------------------------------------
+# DWB-417..421: agent tool-action + lifecycle capture (agent scoring).
+#
+# Claude Code fires PostToolUse after every tool call and lifecycle hooks
+# (Notification, PreCompact) at other moments. We persist one tool_actions row
+# per event, resolving agent / dwb_session / ticket context from the hook
+# session_id the SAME way handle_session_end resolves attribution: first an
+# existing hook_session row keyed on session_id (which already carries the
+# resolved agent/ticket/dwb_session), then the authoritative marker
+# (resolve_agent_from_marker), then _resolve_ticket / _active_dwb_session_id to
+# fill the gaps. Every FK is nullable: an unresolvable session_id still persists
+# a row with null context rather than erroring (delivery-gap tolerance - the
+# hooks are fire-and-forget via curl -sf).
+#
+# DWB-417 laid the foundation (generic event_type='tool_use'). DWB-418..421 add
+# per-tool classification on top of the same row shape + resolution path:
+#   Write/Edit/MultiEdit/NotebookEdit -> file_written   (target=file path)
+#   SendMessage                       -> message_sent    (target=recipient)
+#   Task                              -> agent_spawned   (target=child identity)
+#   Notification (lifecycle)          -> notification    (target=message)
+#   PreCompact (lifecycle)            -> context_compaction (target=trigger)
+#   anything else                     -> tool_use        (generic fallback)
+# Each classified (non-fallback) event also emits a matching semantic verb into
+# the activity feed via log_activity (entity_type="tool_action"). The generic
+# 'tool_use' fallback does NOT emit a feed verb - it would flood the feed with
+# every Read/Bash/Grep. The inbound message BODY of a SendMessage is never
+# persisted (no-user-text-in-DB rule); only the recipient + optional short
+# agent-authored subject are kept.
+# ---------------------------------------------------------------------------
+
+# Tools whose invocation means "an agent wrote a file".
+_FILE_WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+
+# event_type values that warrant a semantic activity-feed verb. The generic
+# 'tool_use' fallback is intentionally excluded (feed-noise control).
+_FEED_VERB_EVENTS = frozenset({
+    "file_written",
+    "message_sent",
+    "agent_spawned",
+    "notification",
+    "context_compaction",
+})
+
+# Max chars persisted to the target column (matches the VARCHAR(1024) width)
+# and to short JSON metadata fields.
+_TARGET_MAX = 1024
+_META_TEXT_MAX = 200
+
+
+def _truncate(value, length: int) -> str | None:
+    """Coerce to str and cap length; None passes through as None."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    return value[:length]
+
+
+def _classify_tool_action(
+    tool_name: str, tool_input: dict | None
+) -> tuple[str, str | None, dict | None]:
+    """Map a PostToolUse (tool_name, tool_input) to (event_type, target,
+    metadata) per DWB-418..420.
+
+    Returns the generic ('tool_use', None, None) for any tool that isn't one of
+    the classified verbs, so unmatched tools still persist a row (DWB-417
+    foundation contract) without emitting a feed verb.
+    """
+    ti = tool_input if isinstance(tool_input, dict) else {}
+
+    # DWB-418: file writes.
+    if tool_name in _FILE_WRITE_TOOLS:
+        target = ti.get("file_path") or ti.get("notebook_path")
+        return "file_written", _truncate(target, _TARGET_MAX), None
+
+    # DWB-419: agent-to-agent messages. Persist recipient + optional short
+    # subject; NEVER the message body (no-user-text-in-DB rule).
+    if tool_name == "SendMessage":
+        target = ti.get("to")
+        metadata = None
+        subject = ti.get("summary")
+        if isinstance(subject, str) and subject.strip():
+            metadata = {"subject": _truncate(subject.strip(), _META_TEXT_MAX)}
+        return "message_sent", _truncate(target, _TARGET_MAX), metadata
+
+    # DWB-420: spawns. Target is the most identifying child handle; keep the
+    # description (when distinct) in metadata for context.
+    if tool_name == "Task":
+        target = ti.get("subagent_type") or ti.get("name") or ti.get("description")
+        metadata = None
+        desc = ti.get("description")
+        if isinstance(desc, str) and desc.strip():
+            metadata = {"description": _truncate(desc.strip(), _META_TEXT_MAX)}
+        return "agent_spawned", _truncate(target, _TARGET_MAX), metadata
+
+    # Generic fallback (DWB-417): unmatched tool, no feed verb.
+    return "tool_use", None, None
+
+
+def _resolve_tool_action_context(
+    db: Session,
+    *,
+    session_id: str | None,
+    cwd: str,
+    hook_event: str,
+    hook_data: dict,
+) -> tuple[Project | None, int | None, int | None, int | None]:
+    """Resolve (project, agent_id, ticket_id, dwb_session_id) for a tool_actions
+    row from a hook session_id, mirroring handle_session_end's order:
+
+      1. Resolve project from cwd.
+      2. Existing hook_session for session_id -> inherit agent/ticket/dwb_session.
+      3. No agent yet + project known -> authoritative marker resolve, then
+         _resolve_ticket for a worker.
+      4. dwb_session_id still null + project known -> _active_dwb_session_id.
+
+    Any unresolved piece stays None (delivery-gap tolerance). Shared by both
+    handle_tool_use (PostToolUse) and handle_lifecycle_event (Notification /
+    PreCompact).
+    """
+    agent_id: int | None = None
+    ticket_id: int | None = None
+    dwb_session_id: int | None = None
+
+    project = _resolve_project(db, cwd) if cwd else None
+
+    if session_id:
+        existing = db.scalar(
+            select(HookSession).where(HookSession.session_id == session_id)
+        )
+        if existing is not None:
+            agent_id = existing.agent_id
+            ticket_id = existing.ticket_id
+            dwb_session_id = existing.dwb_session_id
+            if project is None and existing.project_id:
+                project = db.get(Project, existing.project_id)
+
+    if agent_id is None and project is not None and session_id:
+        agent = resolve_agent_from_marker(
+            db, project, session_id,
+            hook_event=hook_event,
+            hook_data=hook_data,
+        )
+        if agent is not None:
+            agent_id = agent.id
+            if agent.role not in OVERHEAD_ROLES:
+                ticket = _resolve_ticket(db, agent, project.id)
+                if ticket is not None:
+                    ticket_id = ticket.id
+
+    if dwb_session_id is None and project is not None:
+        dwb_session_id = _active_dwb_session_id(db, project.id)
+
+    return project, agent_id, ticket_id, dwb_session_id
+
+
+def _persist_tool_action(
+    db: Session,
+    *,
+    project: Project | None,
+    agent_id: int | None,
+    ticket_id: int | None,
+    dwb_session_id: int | None,
+    session_id: str | None,
+    tool_name: str,
+    event_type: str,
+    target: str | None,
+    metadata: dict | None,
+) -> ToolAction:
+    """Persist one tool_actions row and, for classified (non-fallback) events,
+    emit a matching semantic activity-feed verb.
+
+    The row is committed first so it survives even if the (best-effort) feed
+    emission fails. The feed emission is wrapped so a feed failure never breaks
+    the hook's 200-always contract and never loses the captured row.
+    """
+    action = ToolAction(
+        agent_id=agent_id,
+        session_id=session_id,
+        dwb_session_id=dwb_session_id,
+        ticket_id=ticket_id,
+        tool_name=tool_name,
+        target=target,
+        event_type=event_type,
+        tool_metadata=metadata,
+    )
+    db.add(action)
+    db.commit()
+    db.refresh(action)
+
+    # Semantic feed verb (DWB-418..421). Only for classified events, and only
+    # when a project resolved (activity_log.project_id is NOT NULL).
+    if event_type in _FEED_VERB_EVENTS and project is not None:
+        try:
+            feed_details: dict = {"tool_name": tool_name, "target": target}
+            if metadata:
+                feed_details.update(metadata)
+            log_activity(
+                db,
+                project.id,
+                agent_id,
+                "tool_action",
+                action.id,
+                event_type,
+                feed_details,
+            )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.exception(
+                "tool_action feed verb failed (event_type=%s, id=%s)",
+                event_type, action.id,
+            )
+            log_failed_hook(
+                hook_event=event_type,
+                status_code=None,
+                raw_payload={"tool_action_id": action.id, "event_type": event_type},
+                error=f"{type(e).__name__}: {e}",
+            )
+
+    return action
+
+
+def handle_tool_use(db: Session, hook_data: dict) -> ToolAction:
+    """Persist one tool_actions row for a PostToolUse hook event (DWB-417..420).
+
+    Classifies the tool into a semantic event_type + target (file path,
+    recipient, child agent), persists the row, and emits a matching activity-
+    feed verb for classified events. Unmatched tools fall back to the generic
+    'tool_use' event with no feed verb.
+
+    Never raises for an unknown/missing session_id; the caller (router)
+    additionally swallows + 200s on error.
+    """
+    session_id = (hook_data.get("session_id") or "").strip() or None
+    tool_name = (hook_data.get("tool_name") or "").strip()
+    tool_input = hook_data.get("tool_input")
+    cwd = hook_data.get("cwd", "")
+    hook_event = hook_data.get("hook_event_name") or "PostToolUse"
+
+    project, agent_id, ticket_id, dwb_session_id = _resolve_tool_action_context(
+        db, session_id=session_id, cwd=cwd, hook_event=hook_event, hook_data=hook_data,
+    )
+
+    event_type, target, metadata = _classify_tool_action(tool_name, tool_input)
+
+    return _persist_tool_action(
+        db,
+        project=project,
+        agent_id=agent_id,
+        ticket_id=ticket_id,
+        dwb_session_id=dwb_session_id,
+        session_id=session_id,
+        tool_name=tool_name,
+        event_type=event_type,
+        target=target,
+        metadata=metadata,
+    )
+
+
+def handle_lifecycle_event(db: Session, hook_data: dict) -> ToolAction:
+    """Persist one tool_actions row for a Notification or PreCompact lifecycle
+    hook (DWB-421). These are NOT tool calls, so they reuse the tool_actions
+    table with a lifecycle event_type:
+
+      Notification -> event_type='notification',       target=the message
+      PreCompact   -> event_type='context_compaction', target=the trigger
+
+    tool_name is set to the hook event name (Notification / PreCompact) so the
+    row is self-describing. Context resolution + the 200-always, never-raise
+    contract match handle_tool_use. An unrecognized hook_event_name falls back
+    to the generic 'tool_use' event (no feed verb) rather than erroring.
+    """
+    session_id = (hook_data.get("session_id") or "").strip() or None
+    cwd = hook_data.get("cwd", "")
+    hook_event = (hook_data.get("hook_event_name") or "").strip()
+
+    if hook_event == "Notification":
+        event_type = "notification"
+        target = _truncate(hook_data.get("message"), _TARGET_MAX)
+        tool_name = "Notification"
+    elif hook_event == "PreCompact":
+        event_type = "context_compaction"
+        target = _truncate(hook_data.get("trigger"), _TARGET_MAX)
+        tool_name = "PreCompact"
+    else:
+        # Unknown lifecycle event - persist a generic row, no feed verb.
+        event_type = "tool_use"
+        target = None
+        tool_name = hook_event or "lifecycle"
+
+    project, agent_id, ticket_id, dwb_session_id = _resolve_tool_action_context(
+        db, session_id=session_id, cwd=cwd,
+        hook_event=hook_event or "lifecycle", hook_data=hook_data,
+    )
+
+    return _persist_tool_action(
+        db,
+        project=project,
+        agent_id=agent_id,
+        ticket_id=ticket_id,
+        dwb_session_id=dwb_session_id,
+        session_id=session_id,
+        tool_name=tool_name,
+        event_type=event_type,
+        target=target,
+        metadata=None,
+    )
 
 
 # DWB-353: _create_unattributed_alert was deleted along with its two call

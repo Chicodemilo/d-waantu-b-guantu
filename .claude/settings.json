@@ -54,6 +54,40 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Task|SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -X POST http://localhost:8000/api/hooks/tool-use -H 'Content-Type: application/json' -d \"$(cat)\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -X POST http://localhost:8000/api/hooks/lifecycle-event -H 'Content-Type: application/json' -d \"$(cat)\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -X POST http://localhost:8000/api/hooks/lifecycle-event -H 'Content-Type: application/json' -d \"$(cat)\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

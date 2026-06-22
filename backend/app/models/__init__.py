@@ -34,6 +34,7 @@ from app.models.dwb_session import (
     DwbCloseReason,
 )
 from app.models.jira_ticket_snapshot import JiraTicketSnapshot
+from app.models.tool_action import ToolAction
 
 __all__ = [
     "Project", "ProjectStatus", "JiraSyncStatus",
@@ -57,4 +58,5 @@ __all__ = [
     "AgentConsolidationAck",
     "DwbSession", "DwbOpenMethod", "DwbCloseMethod", "DwbCloseReason",
     "JiraTicketSnapshot",
+    "ToolAction",
 ]

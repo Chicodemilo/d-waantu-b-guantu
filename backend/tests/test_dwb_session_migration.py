@@ -6,7 +6,7 @@
 # Callees: alembic.command, sqlalchemy.inspect, sqlalchemy.schema.AddColumn
 # Data In: lat_test (already at head via conftest create_all)
 # Data Out: Assertions on schema after up/down round-trip
-# Last Modified: 2026-06-11
+# Last Modified: 2026-06-22 (DWB-417: drop+rebuild dwb_sessions referrers around the round-trip)
 
 """Round-trips the DWB-335 migration against the test database to verify the
 hand-written upgrade + downgrade both succeed and produce the expected
@@ -36,10 +36,31 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.schema import CreateColumn
 
 from app.config import settings
+from app.database import Base
 from app.models.dwb_session import DwbCloseMethod, DwbOpenMethod, DwbSession
 
 PRIOR_REVISION = "dwb328e7a91b"
 THIS_REVISION = "dwb335a7b3c91"
+
+
+def _orm_tables_referencing_dwb_sessions():
+    """ORM tables (besides hook_sessions, whose FK the DWB-335 migration manages
+    itself) that carry a foreign key to dwb_sessions.
+
+    The create_all baseline is the full head schema, so any later table that
+    references dwb_sessions (e.g. DWB-417 tool_actions) blocks dropping
+    dwb_sessions on the single-step downgrade below. The round-trip drops these
+    first and rebuilds them from the ORM after the re-upgrade. Discovered from
+    Base.metadata so future referrers are picked up automatically - no sibling
+    line per ticket, matching the column/enum forward-roll already in finally.
+    """
+    out = []
+    for table in Base.metadata.sorted_tables:
+        if table.name in ("dwb_sessions", "hook_sessions"):
+            continue
+        if any(fk.column.table.name == "dwb_sessions" for fk in table.foreign_keys):
+            out.append(table)
+    return out
 
 
 @pytest.fixture(scope="module")
@@ -78,6 +99,14 @@ def test_migration_round_trip(alembic_cfg):
                 text("INSERT INTO alembic_version (version_num) VALUES (:v)"),
                 {"v": THIS_REVISION},
             )
+
+        # Later tables that FK-reference dwb_sessions (e.g. DWB-417
+        # tool_actions) would block dropping dwb_sessions on the downgrade.
+        # Drop them first; the finally block rebuilds them from the ORM.
+        dependent_tables = _orm_tables_referencing_dwb_sessions()
+        with engine.begin() as conn:
+            for table in dependent_tables:
+                conn.execute(text(f"DROP TABLE IF EXISTS {table.name}"))
 
         # Downgrade one step.
         command.downgrade(alembic_cfg, PRIOR_REVISION)
@@ -194,6 +223,12 @@ def test_migration_round_trip(alembic_cfg):
                     f"ENUM({close_values}) NULL"
                 )
             )
+        # Rebuild any tables we dropped before the downgrade (referrers of
+        # dwb_sessions). dwb_sessions is back at this point, so the FKs resolve.
+        # create_all is a no-op for tables that already exist.
+        dependent_tables = _orm_tables_referencing_dwb_sessions()
+        if dependent_tables:
+            Base.metadata.create_all(bind=engine, tables=dependent_tables)
         # Leave alembic_version table behind but cleared so subsequent
         # test runs don't trip on a stale revision pointer.
         with engine.begin() as conn:

@@ -6,7 +6,7 @@
 # Callees: app/models/activity_log.py
 # Data In: db: Session, filters, semantic-event fields
 # Data Out: list[ActivityLog], ActivityLog
-# Last Modified: 2026-06-19 (DWB-408)
+# Last Modified: 2026-06-22 (DWB-418..421: register tool-action semantic verbs)
 
 import json
 
@@ -59,6 +59,16 @@ SEMANTIC_ACTIONS = frozenset({
     # DWB session events (DWB-411)
     "session_opened",
     "session_closed",
+    # agent tool-action events (DWB-418..421). Emitted from the PostToolUse /
+    # lifecycle hook handlers in hook_tracking.py, entity_type="tool_action".
+    # The hook endpoints are not logged by ActivityLoggerMiddleware (their
+    # responses carry no id/project_id), so these never shadow a generic row -
+    # no SEMANTIC_GENERIC_SHADOWS entry is needed (the .get default is empty).
+    "file_written",
+    "message_sent",
+    "agent_spawned",
+    "notification",
+    "context_compaction",
 })
 
 # Read-side feed dedup (DWB-409). Maps each semantic event to the generic

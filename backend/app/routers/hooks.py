@@ -1,12 +1,12 @@
 # Path: app/routers/hooks.py
 # File: hooks.py
 # Created: 2026-04-09
-# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit) + git post-commit hook auto-close (DWB-345); DWB-402 retired the UserPromptSubmit Layer-2 Haiku classifier
+# Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit, PostToolUse, Notification/PreCompact) + git post-commit hook auto-close (DWB-345); DWB-402 retired the UserPromptSubmit Layer-2 Haiku classifier; DWB-417 added the PostToolUse tool-action capture endpoint; DWB-421 added the lifecycle-event endpoint
 # Caller: app/main.py
-# Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/services/git_hook.py, app/models/hook_session.py
+# Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/services/git_hook.py, app/models/hook_session.py, app/schemas/tool_action.py
 # Data In: HTTP POST from curl hook commands
-# Data Out: JSON responses (HookSession data, post-commit close result)
-# Last Modified: 2026-06-11
+# Data Out: JSON responses (HookSession data, tool-action + lifecycle capture result, post-commit close result)
+# Last Modified: 2026-06-22 (DWB-418..421)
 
 """Hook endpoints for passive tracking.
 
@@ -25,6 +25,11 @@ from app.schemas.git_hook import PostCommitRequest, PostCommitResponse
 from app.schemas.hook_session import (
     HookEventInput,
     HookSessionRead,
+)
+from app.schemas.tool_action import (
+    LifecycleEventInput,
+    ToolActionRead,
+    ToolUseInput,
 )
 from app.services import git_hook as git_hook_svc
 from app.services import hook_tracking as svc
@@ -126,6 +131,82 @@ def hook_user_prompt(
             hook_event=data.hook_event_name or "UserPromptSubmit",
             status_code=200,
             raw_payload=payload,
+            error=f"{type(e).__name__}: {e}",
+        )
+        return {
+            "status": "error",
+            "detail": str(e),
+        }
+
+
+@router.post("/tool-use", status_code=200)
+def hook_tool_use(data: ToolUseInput, db: Session = Depends(get_db)):
+    """Receive a PostToolUse hook event from Claude Code (DWB-417).
+
+    Persists one tool_actions row per tool call, resolving agent / dwb_session
+    / ticket context from session_id the same way the session-end hook does.
+
+    Foundation endpoint for the agent-scoring epic: stores the generic event
+    (event_type='tool_use', target/metadata null); siblings classify per tool.
+
+    Same fire-and-forget contract as the other hook endpoints: MUST NEVER
+    return 5xx. The hook is fired via ``curl -sf`` and silently drops on the
+    client, so an unknown/missing session_id still returns 200 - the service
+    persists a row with null context rather than erroring, and any leaked
+    exception is swallowed + logged here and returned as 200.
+    """
+    try:
+        action = svc.handle_tool_use(db, data.model_dump())
+        return {
+            "status": "ok",
+            "tool_action_id": action.id,
+            "event_type": action.event_type,
+            "target": action.target,
+            "agent_id": action.agent_id,
+            "ticket_id": action.ticket_id,
+            "dwb_session_id": action.dwb_session_id,
+        }
+    except Exception as e:
+        logger.exception("hook_tool_use error")
+        log_failed_hook(
+            hook_event=data.hook_event_name or "PostToolUse",
+            status_code=200,
+            raw_payload=data.model_dump(),
+            error=f"{type(e).__name__}: {e}",
+        )
+        return {
+            "status": "error",
+            "detail": str(e),
+        }
+
+
+@router.post("/lifecycle-event", status_code=200)
+def hook_lifecycle_event(data: LifecycleEventInput, db: Session = Depends(get_db)):
+    """Receive a Notification or PreCompact lifecycle hook from Claude Code
+    (DWB-421).
+
+    These are not tool calls, so they reuse the tool_actions table with a
+    lifecycle event_type (notification / context_compaction). Same
+    fire-and-forget contract as the other hook endpoints: MUST NEVER return
+    5xx. The handler persists a row with null context on an unresolvable
+    session_id; any leaked exception is swallowed + logged here and 200'd.
+    """
+    try:
+        action = svc.handle_lifecycle_event(db, data.model_dump())
+        return {
+            "status": "ok",
+            "tool_action_id": action.id,
+            "event_type": action.event_type,
+            "agent_id": action.agent_id,
+            "ticket_id": action.ticket_id,
+            "dwb_session_id": action.dwb_session_id,
+        }
+    except Exception as e:
+        logger.exception("hook_lifecycle_event error")
+        log_failed_hook(
+            hook_event=data.hook_event_name or "LifecycleEvent",
+            status_code=200,
+            raw_payload=data.model_dump(),
             error=f"{type(e).__name__}: {e}",
         )
         return {
