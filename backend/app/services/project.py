@@ -6,16 +6,20 @@
 # Callees: app/models/project.py and all related models
 # Data In: db: Session, ProjectCreate/Update
 # Data Out: list[Project], Project
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-22
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.models.activity_log import ActivityLog
+from app.models.agent import Agent
+from app.models.agent_consolidation_ack import AgentConsolidationAck
 from app.models.alert import Alert
 from app.models.comment import Comment
+from app.models.dwb_session import DwbSession
 from app.models.epic import Epic
 from app.models.failure_record import FailureRecord
+from app.models.hook_session import HookSession
 from app.models.instruction import Instruction
 from app.models.project import Project, ProjectStatus
 from app.models.project_agent import ProjectAgent
@@ -73,6 +77,10 @@ def delete_project(db: Session, project: Project) -> None:
     ticket_ids = list(
         db.scalars(select(Ticket.id).where(Ticket.project_id == pid)).all()
     )
+    # Get all sprint IDs to clear sprint-scoped child rows (consolidation acks)
+    sprint_ids = list(
+        db.scalars(select(Sprint.id).where(Sprint.project_id == pid)).all()
+    )
     if ticket_ids:
         # Delete comments on project tickets
         db.execute(delete(Comment).where(Comment.ticket_id.in_(ticket_ids)))
@@ -94,10 +102,26 @@ def delete_project(db: Session, project: Project) -> None:
     db.execute(delete(ActivityLog).where(ActivityLog.project_id == pid))
     # Delete instructions
     db.execute(delete(Instruction).where(Instruction.project_id == pid))
+    # Delete hook sessions (FK to project, sprints, dwb_sessions, tickets) before
+    # those parents go away.
+    db.execute(delete(HookSession).where(HookSession.project_id == pid))
+    # Delete DWB sessions on this project
+    db.execute(delete(DwbSession).where(DwbSession.project_id == pid))
+    # Delete consolidation acks tied to this project's sprints before the sprints
+    if sprint_ids:
+        db.execute(
+            delete(AgentConsolidationAck).where(
+                AgentConsolidationAck.sprint_id.in_(sprint_ids)
+            )
+        )
     # Delete tickets
     db.execute(delete(Ticket).where(Ticket.project_id == pid))
-    # Delete project agents
+    # Delete project agents (the membership join)
     db.execute(delete(ProjectAgent).where(ProjectAgent.project_id == pid))
+    # Detach agents homed on this project. Agents are global identities (name is
+    # unique system-wide and they may carry history on OTHER projects), so we
+    # null their home project_id rather than delete them.
+    db.execute(update(Agent).where(Agent.project_id == pid).values(project_id=None))
     # Delete sprints
     db.execute(delete(Sprint).where(Sprint.project_id == pid))
     # Delete epics

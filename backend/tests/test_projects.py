@@ -236,6 +236,58 @@ class TestDeleteProject:
         r = client.get(f"/api/alerts/{alert_id}")
         assert r.status_code == 404
 
+    def test_delete_clears_consolidation_acks_hook_and_dwb_sessions(
+        self, client, db_session, make_project, make_agent, make_sprint
+    ):
+        """DWB-413: a project with consolidation acks, hook sessions, and dwb
+        sessions must delete cleanly instead of 500ing on FK violations."""
+        from app.models.agent import Agent
+        from app.models.agent_consolidation_ack import AgentConsolidationAck
+        from app.models.dwb_session import DwbOpenMethod, DwbSession
+
+        project = make_project()
+        pid = project["id"]
+        agent = make_agent()
+        sprint = make_sprint(project_id=pid)
+
+        # An agent homed on this project (FK agents.project_id, no ON DELETE).
+        homed = db_session.get(Agent, agent["id"])
+        homed.project_id = pid
+        db_session.flush()
+
+        # Consolidation ack references the sprint (FK, no ON DELETE).
+        db_session.add(AgentConsolidationAck(agent_id=agent["id"], sprint_id=sprint["id"]))
+        # DWB session references the project (FK, no ON DELETE).
+        dwb = DwbSession(
+            project_id=pid,
+            opened_at=datetime(2026, 6, 22, 12, 0, 0),
+            open_method=DwbOpenMethod.slash,
+        )
+        db_session.add(dwb)
+        db_session.flush()
+        # Hook session references project, sprint, and the dwb session (FKs).
+        db_session.add(
+            HookSession(
+                session_id="repro-413-session",
+                project_id=pid,
+                agent_id=agent["id"],
+                sprint_id=sprint["id"],
+                dwb_session_id=dwb.id,
+                status=HookSessionStatus.completed,
+                session_type=HookSessionType.subagent,
+            )
+        )
+        db_session.flush()
+
+        r = client.delete(f"/api/projects/{pid}")
+        assert r.status_code == 204
+        assert client.get(f"/api/projects/{pid}").status_code == 404
+        # The agent survives as a global identity, detached from the project.
+        db_session.expire_all()
+        survivor = db_session.get(Agent, agent["id"])
+        assert survivor is not None
+        assert survivor.project_id is None
+
 
 class TestProjectTeam:
     """DWB-313 — GET /api/projects/{id}/team single-roundtrip team listing."""
