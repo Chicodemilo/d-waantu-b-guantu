@@ -6,8 +6,15 @@
 # Callees: app/models/hook_session.py, app/services/tracking.py, app/services/dwb_session.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
-# Last Modified: 2026-06-19 (DWB-402)
+# Last Modified: 2026-06-22 (DWB-414)
 #
+# DWB-414 (2026-06-22): scope session phrase detection to genuine user-authored
+# turns. _extract_user_message_texts now drops non-human user-role entries
+# (isMeta, tool-result echoes, and string content beginning with a synthetic
+# wrapper tag: teammate-message, command echo/stdout, task-notification,
+# system-reminder, ...) and handle_user_prompt skips a synthetic-wrapped prompt.
+# Fixes false closes from close phrases quoted in injected/example text
+# (DWB-396). Matched in-memory only; no user text persisted (DWB-351).
 # DWB-377 (2026-06-11): UserPromptSubmit close fast-path. Mirrors DWB-344 on
 # the close side - when match_open misses, try match_close and close the
 # active DWB session if one exists.
@@ -1349,6 +1356,42 @@ def _resolve_ticket(db: Session, agent: Agent, project_id: int) -> Ticket | None
 _PHRASE_SCAN_LIMIT = 50
 
 
+# DWB-414: synthetic (non-human-authored) user-role content. Claude Code
+# records many entries with role/type "user" that the human never typed:
+# tool results, teammate-message relays, slash-command echoes + their stdout,
+# task notifications, injected system reminders, and meta entries. Session
+# open/close phrase detection must only fire on GENUINE user-authored turns,
+# otherwise a close phrase quoted inside a tool result, a relayed teammate
+# message, or an example block falsely closes the session (DWB-396). A
+# string-content turn is treated as synthetic when it begins with one of
+# these wrapper tags; isMeta and tool-result entries are skipped outright.
+_SYNTHETIC_USER_TAGS: tuple[str, ...] = (
+    "<teammate-message",
+    "<command-name>",
+    "<command-message>",
+    "<command-args>",
+    "<command-contents>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<local-command-caveat>",
+    "<task-notification>",
+    "<system-reminder>",
+    "<user-prompt-submit-hook>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "<user-memory-input>",
+)
+
+
+def _is_synthetic_user_text(text: str) -> bool:
+    """DWB-414: True when a user-role string is Claude-Code-injected rather
+    than typed by the human (teammate relay, command echo/stdout, task
+    notification, system reminder, etc.). Such text must not drive session
+    open/close phrase detection."""
+    return text.lstrip().startswith(_SYNTHETIC_USER_TAGS)
+
+
 def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
     """Return user-side message texts from a Claude Code JSONL transcript.
 
@@ -1366,6 +1409,14 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
     as user messages (used for open-phrase detection on SessionStart).
     ``head=False`` returns the last ``_PHRASE_SCAN_LIMIT`` (used for close
     detection on SessionEnd). Both bound I/O.
+
+    DWB-414: only GENUINE human-authored turns are returned. Claude Code
+    records tool results, teammate-message relays, slash-command echoes +
+    stdout, task notifications, injected system reminders, and meta entries
+    all with role/type "user". Those are filtered out (``isMeta`` entries,
+    ``toolUseResult`` entries, and string content beginning with a synthetic
+    wrapper tag) so a close phrase quoted in non-human text can no longer
+    trip a false open/close.
 
     Returns an empty list on any read/parse error.
     """
@@ -1403,6 +1454,14 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
         if not is_user:
             continue
 
+        # DWB-414: skip non-human-authored user-role entries. Meta entries and
+        # tool-result echoes are never user prose; excluding them keeps quoted
+        # close phrases inside tool output / injected content from firing.
+        if entry.get("isMeta"):
+            continue
+        if "toolUseResult" in entry:
+            continue
+
         content = msg.get("content") or entry.get("content")
         text: str | None = None
         if isinstance(content, str):
@@ -1418,7 +1477,10 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
             if parts:
                 text = "\n".join(parts)
 
-        if text:
+        # DWB-414: drop synthetic string content (teammate relays, command
+        # echoes/stdout, task notifications, system reminders) that carries a
+        # user role but was injected by the harness, not typed by the human.
+        if text and not _is_synthetic_user_text(text):
             out.append(text)
         if len(out) >= _PHRASE_SCAN_LIMIT:
             break
@@ -1577,6 +1639,14 @@ def handle_user_prompt(
         prompt = hook_data.get("prompt")
         if not prompt:
             return {"status": "noop", "reason": "no_prompt"}
+
+        # DWB-414: scope phrase detection to genuine user-authored turns. If
+        # the submitted prompt is itself harness-injected synthetic content
+        # (a relayed teammate message, a slash-command echo, a re-injected
+        # hook block), it is not the human commanding a close/open and must
+        # not trip the regex ladders. Matched in-memory; nothing persisted.
+        if _is_synthetic_user_text(prompt):
+            return {"status": "noop", "reason": "synthetic_prompt"}
 
         cwd = hook_data.get("cwd", "")
         project = _resolve_project(db, cwd)
