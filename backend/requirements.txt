@@ -7,8 +7,3 @@ pydantic-settings>=2.1,<3.0
 python-dotenv>=1.0,<2.0
 pytest-json-report>=1.5,<2.0
 requests>=2.31,<3.0
-# DWB-382: Anthropic SDK for the Layer-2 Haiku classifier fallback in
-# handle_user_prompt. Optional at runtime - the classifier no-ops cleanly
-# when ANTHROPIC_API_KEY is not set in env, so CI / clones without the key
-# still pass the full backend suite.
-anthropic>=0.40.0,<1.0
