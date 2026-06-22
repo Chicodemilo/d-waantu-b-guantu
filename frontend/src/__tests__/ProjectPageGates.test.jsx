@@ -1,12 +1,12 @@
 // Path: src/__tests__/ProjectPageGates.test.jsx
 // File: ProjectPageGates.test.jsx
 // Created: 2026-06-19
-// Purpose: Tests for DWB-400 force_consolidation gate toggle on ProjectPage. Covers: toggle renders with ON/OFF state, persists via updateProject PATCH on click, and the token-cost warning shows only when the gate is ON.
+// Purpose: Tests for DWB-400 force_consolidation, DWB-403 force_headers gate toggles, and DWB-405 force_headers missing_files[] list on ProjectPage. Covers: toggle ON/OFF state, persists via updateProject PATCH on click, token-cost warning visibility, and the missing-header file list (shown only when force_headers is ON and failing).
 // Caller: vitest test runner
-// Callees: ../pages/ProjectPage, ../store/useStore (mocked), ../api/projects (mocked), ../api/alerts (mocked), child components (mocked), react-router-dom (MemoryRouter)
+// Callees: ../pages/ProjectPage, ../store/useStore (mocked), ../api/projects (mocked, incl. getGateStatus), ../api/alerts (mocked), child components (mocked), react-router-dom (MemoryRouter)
 // Data In: Mocked store project + mocked api modules
 // Data Out: Test assertions
-// Last Modified: 2026-06-19
+// Last Modified: 2026-06-22
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
@@ -16,6 +16,7 @@ vi.mock('../api/projects', () => ({
   updateProject: vi.fn(),
   deleteProject: vi.fn(),
   disableJira: vi.fn(),
+  getGateStatus: vi.fn(),
 }));
 
 vi.mock('../api/alerts', () => ({
@@ -42,7 +43,7 @@ vi.mock('../store/useStore', () => ({
 }));
 
 import ProjectPage from '../pages/ProjectPage';
-import { updateProject } from '../api/projects';
+import { updateProject, getGateStatus } from '../api/projects';
 
 const COST_TEXT = /Token cost: every project agent runs a consolidation pass at sprint close\./i;
 
@@ -141,6 +142,8 @@ describe('ProjectPage force_headers gate (DWB-403)', () => {
   beforeEach(() => {
     updateProject.mockReset();
     updateProject.mockResolvedValue({});
+    getGateStatus.mockReset();
+    getGateStatus.mockResolvedValue({ gates: [] });
   });
 
   afterEach(() => {
@@ -182,5 +185,65 @@ describe('ProjectPage force_headers gate (DWB-403)', () => {
     await waitFor(() => {
       expect(updateProject).toHaveBeenCalledWith('1', { force_headers: true });
     });
+  });
+});
+
+describe('ProjectPage force_headers missing_files list (DWB-405)', () => {
+  beforeEach(() => {
+    updateProject.mockReset();
+    updateProject.mockResolvedValue({});
+    getGateStatus.mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('lists the missing-header files when the gate is ON and failing', async () => {
+    getGateStatus.mockResolvedValue({
+      gates: [
+        {
+          kind: 'header',
+          toggle: 'force_headers',
+          enabled: true,
+          passing: false,
+          missing_files: ['backend/app/foo.py', 'backend/app/bar.py'],
+        },
+      ],
+    });
+    seed(project({ force_headers: true }));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('backend/app/foo.py')).toBeInTheDocument();
+    });
+    expect(screen.getByText('backend/app/bar.py')).toBeInTheDocument();
+    expect(screen.getByText(/Missing code-header \(2\):/i)).toBeInTheDocument();
+  });
+
+  it('shows nothing when the gate is ON but passing (no missing files)', async () => {
+    getGateStatus.mockResolvedValue({
+      gates: [
+        {
+          kind: 'header',
+          toggle: 'force_headers',
+          enabled: true,
+          passing: true,
+          missing_files: [],
+        },
+      ],
+    });
+    seed(project({ force_headers: true }));
+    renderPage();
+    await waitFor(() => {
+      expect(getGateStatus).toHaveBeenCalledWith('1');
+    });
+    expect(screen.queryByText(/Missing code-header/i)).not.toBeInTheDocument();
+  });
+
+  it('does not fetch gate-status or list files when the gate is OFF', () => {
+    seed(project({ force_headers: false }));
+    renderPage();
+    expect(getGateStatus).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Missing code-header/i)).not.toBeInTheDocument();
   });
 });

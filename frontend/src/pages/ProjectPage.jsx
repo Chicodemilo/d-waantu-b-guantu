@@ -6,13 +6,13 @@
 // Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-06-19
+// Last Modified: 2026-06-22
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
 import ProjectHeader from '../components/project/ProjectHeader';
-import { updateProject, deleteProject, disableJira } from '../api/projects';
+import { updateProject, deleteProject, disableJira, getGateStatus } from '../api/projects';
 import { dismissAllAlerts, getAlerts, sendAlertsToTeam } from '../api/alerts';
 import SprintProgress from '../components/project/SprintProgress';
 import TimeTokens from '../components/dashboard/TimeTokens';
@@ -50,6 +50,32 @@ function ProjectPage() {
   const [jiraSaving, setJiraSaving] = useState(false);
   const [jiraDisabling, setJiraDisabling] = useState(false);
   const [jiraConfirmDisable, setJiraConfirmDisable] = useState(false);
+  const [gateStatus, setGateStatus] = useState(null);
+
+  // Pull live gate-status only while force_headers is ON so the panel can list
+  // the sprint-touched .py files still missing a code-header block. Re-fetch on
+  // each poll tick (lastPolled) to stay current with the master data loader.
+  const headersOn = !!project?.force_headers;
+  useEffect(() => {
+    if (!headersOn) {
+      setGateStatus(null);
+      return;
+    }
+    let cancelled = false;
+    getGateStatus(id)
+      .then((data) => {
+        if (!cancelled) setGateStatus(data);
+      })
+      .catch(() => {
+        // next poll tick will retry
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, headersOn, lastPolled]);
+
+  const headerGate = gateStatus?.gates?.find((g) => g.toggle === 'force_headers');
+  const headerMissingFiles = headerGate?.missing_files || [];
 
   const handleArchiveToggle = async () => {
     setArchiving(true);
@@ -228,21 +254,39 @@ function ProjectPage() {
                 { field: 'force_test_run', label: 'Force Tests', tip: 'At least one test run must be recorded during the sprint before it can be closed.' },
                 { field: 'force_consolidation', label: 'Consolidation at sprint close', tip: 'Every project agent must acknowledge consolidation of their owned over-ceiling docs before the sprint can be closed. Agents POST to /api/agents/:id/consolidate-complete; gate status is shown in the Consolidation panel.', cost: 'Token cost: every project agent runs a consolidation pass at sprint close.' },
               ].map(({ field, label, tip, cost }) => (
-                <div key={field} className="project-tools__row">
-                  <button
-                    className={`project-gate__toggle${project[field] ? ' project-gate__toggle--on' : ''}`}
-                    onClick={() => handleToggleGate(field)}
-                    disabled={toggling[field]}
-                  >
-                    {label} [{project[field] ? 'ON' : 'OFF'}]
-                  </button>
-                  <span className="tooltip-trigger">
-                    ?
-                    <span className="tooltip-content">{tip}</span>
-                  </span>
-                  {cost && project[field] && (
-                    <span className="project-gate__cost">{cost}</span>
-                  )}
+                <div key={field}>
+                  <div className="project-tools__row">
+                    <button
+                      className={`project-gate__toggle${project[field] ? ' project-gate__toggle--on' : ''}`}
+                      onClick={() => handleToggleGate(field)}
+                      disabled={toggling[field]}
+                    >
+                      {label} [{project[field] ? 'ON' : 'OFF'}]
+                    </button>
+                    <span className="tooltip-trigger">
+                      ?
+                      <span className="tooltip-content">{tip}</span>
+                    </span>
+                    {cost && project[field] && (
+                      <span className="project-gate__cost">{cost}</span>
+                    )}
+                  </div>
+                  {field === 'force_headers' &&
+                    project[field] &&
+                    headerMissingFiles.length > 0 && (
+                      <div className="project-gate__missing">
+                        <div className="project-gate__missing-title">
+                          Missing code-header ({headerMissingFiles.length}):
+                        </div>
+                        <ul className="project-gate__missing-list">
+                          {headerMissingFiles.map((f) => (
+                            <li key={f} className="project-gate__missing-file">
+                              {f}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                 </div>
               ))}
             </div>

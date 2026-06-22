@@ -924,6 +924,33 @@
   color: var(--yellow);
 }
 
+.project-gate__missing {
+  margin-left: 25px;
+  padding: 6px 0 2px;
+}
+
+.project-gate__missing-title {
+  font-size: 11px;
+  color: var(--red);
+  margin-bottom: 4px;
+}
+
+.project-gate__missing-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-gate__missing-file {
+  font-size: 11px;
+  color: var(--gray);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
 .sync-btn--danger {
   border-color: var(--red-dim);
   color: var(--red);

@@ -6,7 +6,7 @@
 // Callees: ./client (get, post, patch, del)
 // Data In: Project ID for fetch/update/delete/actions; project data for create/update; repo path for create-from-repo
 // Data Out: Project objects/arrays, action responses from /projects endpoint
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-22
 
 import { get, post, patch, del } from './client';
 
@@ -48,4 +48,8 @@ export function disableJira(id) {
 
 export function getPlaybookFiles(id) {
   return get(`/projects/${id}/playbook-files`);
+}
+
+export function getGateStatus(id) {
+  return get(`/projects/${id}/gate-status`);
 }
