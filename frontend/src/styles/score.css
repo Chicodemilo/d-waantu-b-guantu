@@ -1,0 +1,142 @@
+/* Path: src/styles/score.css */
+/* File: score.css */
+/* Created: 2026-06-22 */
+/* Purpose: Styles for the per-agent score ledger panel on AgentPage (DWB-428) — score summary tiles and the append-only score_event history rows, matching the terminal aesthetic. */
+/* Last Modified: 2026-06-22 */
+
+.score-summary {
+  display: flex;
+  gap: 24px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+  margin-bottom: 12px;
+}
+
+.score-summary__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.score-summary__label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+}
+
+.score-summary__value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--orange);
+  font-variant-numeric: tabular-nums;
+}
+
+.score-summary__value.score-ledger__delta--up {
+  color: var(--green);
+}
+
+.score-summary__value.score-ledger__delta--down {
+  color: var(--red);
+}
+
+.score-ledger {
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.score-ledger__header,
+.score-ledger__row {
+  display: grid;
+  grid-template-columns: 56px 160px 1fr 150px;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+
+.score-ledger__row:last-child {
+  border-bottom: none;
+}
+
+.score-ledger__header {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+}
+
+.score-ledger__row--reverted {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.score-ledger__col-delta {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--gray-light);
+}
+
+.score-ledger__delta--up {
+  color: var(--green);
+}
+
+.score-ledger__delta--down {
+  color: var(--red);
+}
+
+.score-ledger__col-trigger {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--green);
+}
+
+.score-ledger__source {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--gray);
+}
+
+.score-ledger__reverted-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--red);
+}
+
+.score-ledger__col-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--gray-light);
+  word-break: break-word;
+}
+
+.score-ledger__actor {
+  font-size: 11px;
+  color: var(--blue);
+}
+
+.score-ledger__col-time {
+  text-align: right;
+  color: var(--gray);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.score-ledger__empty {
+  color: var(--gray);
+  font-size: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}

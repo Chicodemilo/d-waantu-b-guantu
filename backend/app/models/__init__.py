@@ -35,6 +35,8 @@ from app.models.dwb_session import (
 )
 from app.models.jira_ticket_snapshot import JiraTicketSnapshot
 from app.models.tool_action import ToolAction
+from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
+from app.models.agent_score import AgentScore
 
 __all__ = [
     "Project", "ProjectStatus", "JiraSyncStatus",
@@ -59,4 +61,6 @@ __all__ = [
     "DwbSession", "DwbOpenMethod", "DwbCloseMethod", "DwbCloseReason",
     "JiraTicketSnapshot",
     "ToolAction",
+    "ScoreEvent", "ScoreSource", "ScoreTriggerType",
+    "AgentScore",
 ]

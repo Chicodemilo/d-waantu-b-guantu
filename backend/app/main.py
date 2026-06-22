@@ -35,6 +35,7 @@ from app.routers import (
     playbooks,
     project_agents,
     projects,
+    scores,
     server_logs,
     sprints,
     status,
@@ -124,3 +125,4 @@ app.include_router(dwb_sessions.router)
 app.include_router(dwb_sessions.project_sessions_router)
 app.include_router(client_logs.router)
 app.include_router(server_logs.router)
+app.include_router(scores.router)

@@ -1,8 +1,8 @@
 /* Path: src/styles/hooks.css */
 /* File: hooks.css */
 /* Created: 2026-04-09 */
-/* Purpose: Styles for Team Status panel — agent roster with live/offline indicators, elapsed time, current ticket */
-/* Last Modified: 2026-04-16 */
+/* Purpose: Styles for Team Status panel — agent roster with live/offline indicators, elapsed time, current ticket, and scoring leaderboard columns (reputation, sprint delta, influence) */
+/* Last Modified: 2026-06-22 */
 
 .live-sessions {
   border: 1px solid var(--border);
@@ -43,10 +43,31 @@
   background-color: rgba(74, 222, 128, 0.03);
 }
 
+/* Scoring leaderboard variant: adds Rep / Sprint / Infl columns between Type
+   and Last Seen. Grid widths kept tight so the row stays on one line. */
+.live-sessions--scored .live-sessions__header,
+.live-sessions--scored .live-sessions__row {
+  grid-template-columns: 36px 110px 52px 44px 52px 44px 84px 1fr;
+}
+
 .live-sessions__col-status {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.live-sessions__col-num {
+  text-align: right;
+  color: var(--gray-light);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-sessions__col-delta--up {
+  color: var(--green);
+}
+
+.live-sessions__col-delta--down {
+  color: var(--red);
 }
 
 .live-sessions__col-name {

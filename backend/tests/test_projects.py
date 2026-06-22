@@ -14,6 +14,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from app.models.hook_session import HookSession, HookSessionStatus, HookSessionType
 
@@ -287,6 +288,51 @@ class TestDeleteProject:
         survivor = db_session.get(Agent, agent["id"])
         assert survivor is not None
         assert survivor.project_id is None
+
+    def test_delete_clears_scoring_and_tool_actions(
+        self, client, db_session, make_project, make_agent, make_sprint
+    ):
+        """DWB-424/425 + DWB-417: a project with score_event, agent_score, and
+        dwb-session-linked tool_action rows must delete cleanly (no FK 500)."""
+        from app.models.agent_score import AgentScore
+        from app.models.dwb_session import DwbOpenMethod, DwbSession
+        from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
+        from app.models.tool_action import ToolAction
+
+        project = make_project()
+        pid = project["id"]
+        agent = make_agent()
+        sprint = make_sprint(project_id=pid)
+
+        db_session.add(ScoreEvent(
+            project_id=pid, sprint_id=sprint["id"], subject_agent_id=agent["id"],
+            delta=5, source=ScoreSource.auto,
+            trigger_type=ScoreTriggerType.ticket_closed, reason="x",
+        ))
+        db_session.add(AgentScore(
+            agent_id=agent["id"], project_id=pid, reputation=5, influence=20,
+        ))
+        dwb = DwbSession(
+            project_id=pid,
+            opened_at=datetime(2026, 6, 22, 12, 0, 0),
+            open_method=DwbOpenMethod.slash,
+        )
+        db_session.add(dwb)
+        db_session.flush()
+        db_session.add(ToolAction(
+            session_id="del-scoring", dwb_session_id=dwb.id,
+            tool_name="Write", event_type="file_written", target="/x.py",
+        ))
+        db_session.flush()
+
+        r = client.delete(f"/api/projects/{pid}")
+        assert r.status_code == 204
+        assert client.get(f"/api/projects/{pid}").status_code == 404
+        db_session.expire_all()
+        assert db_session.scalars(
+            select(ScoreEvent).where(ScoreEvent.project_id == pid)
+        ).first() is None
+        assert db_session.get(AgentScore, (agent["id"], pid)) is None
 
 
 class TestProjectTeam:

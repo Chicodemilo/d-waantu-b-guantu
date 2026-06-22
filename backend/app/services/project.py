@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.activity_log import ActivityLog
 from app.models.agent import Agent
 from app.models.agent_consolidation_ack import AgentConsolidationAck
+from app.models.agent_score import AgentScore
 from app.models.alert import Alert
 from app.models.comment import Comment
 from app.models.dwb_session import DwbSession
@@ -23,10 +24,12 @@ from app.models.hook_session import HookSession
 from app.models.instruction import Instruction
 from app.models.project import Project, ProjectStatus
 from app.models.project_agent import ProjectAgent
+from app.models.score_event import ScoreEvent
 from app.models.sprint import Sprint
 from app.models.status_history import StatusHistory
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket
+from app.models.tool_action import ToolAction
 from app.models.tracking_log import TrackingLog
 from app.schemas.project import ProjectCreate, ProjectUpdate
 
@@ -102,6 +105,21 @@ def delete_project(db: Session, project: Project) -> None:
     db.execute(delete(ActivityLog).where(ActivityLog.project_id == pid))
     # Delete instructions
     db.execute(delete(Instruction).where(Instruction.project_id == pid))
+    # DWB-424/425: clear the scoring ledger + derived cache before the sprints
+    # and project they reference are deleted (no ON DELETE CASCADE on these FKs).
+    db.execute(delete(ScoreEvent).where(ScoreEvent.project_id == pid))
+    db.execute(delete(AgentScore).where(AgentScore.project_id == pid))
+    # DWB-417/421: tool_actions linked to this project's DWB sessions must go
+    # before those sessions (the dwb_session_id FK has no cascade). Ticket-linked
+    # tool_actions cascade with their tickets below; agent-linked-only rows have
+    # no project FK and are left (agents are global, not deleted).
+    dwb_session_ids = list(
+        db.scalars(select(DwbSession.id).where(DwbSession.project_id == pid)).all()
+    )
+    if dwb_session_ids:
+        db.execute(
+            delete(ToolAction).where(ToolAction.dwb_session_id.in_(dwb_session_ids))
+        )
     # Delete hook sessions (FK to project, sprints, dwb_sessions, tickets) before
     # those parents go away.
     db.execute(delete(HookSession).where(HookSession.project_id == pid))

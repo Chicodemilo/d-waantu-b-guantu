@@ -1,12 +1,12 @@
 # Path: app/services/test_result.py
 # File: test_result.py
 # Created: 2026-03-29
-# Purpose: Test result CRUD with auto-failure-record creation
+# Purpose: Test result CRUD with auto-failure-record creation + auto-scoring of test failures (DWB-425)
 # Caller: app/routers/test_results.py
-# Callees: app/models (test_result, failure_record, agent, sprint)
+# Callees: app/models (test_result, failure_record, agent, sprint), services/scoring_triggers
 # Data In: db: Session, TestResultCreate
 # Data Out: list[TestResult], TestResult
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-22 (DWB-425)
 
 import json
 
@@ -19,6 +19,7 @@ from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
 from app.models.test_result import TestResult
 from app.schemas.test_result import TestResultCreate
+from app.services import scoring_triggers
 
 
 def list_test_results(
@@ -107,6 +108,7 @@ def _create_failure_records_for_failed_tests(db: Session, result: TestResult) ->
     if not sprint_id:
         return
 
+    created: list[FailureRecord] = []
     for t in failed_tests:
         nodeid = t.get("nodeid", "unknown test")
         # Build notes from nodeid + error message
@@ -115,7 +117,7 @@ def _create_failure_records_for_failed_tests(db: Session, result: TestResult) ->
         if message:
             notes += f"\n{message[:500]}"
 
-        db.add(FailureRecord(
+        fr = FailureRecord(
             project_id=result.project_id,
             sprint_id=sprint_id,
             agent_id=tester_agent_id,
@@ -125,6 +127,21 @@ def _create_failure_records_for_failed_tests(db: Session, result: TestResult) ->
             attempt_number=1,
             notes=notes,
             resolved=False,
-        ))
+        )
+        db.add(fr)
+        created.append(fr)
+
+    db.flush()  # populate ids for the scoring refs
+
+    # DWB-425: penalize test failures, attributed to the owning ticket's
+    # assignee. These auto-records carry no ticket_id, so score_failure_record
+    # currently skips them (it will not penalize the tester who logged them);
+    # the call is wired so per-ticket test-failure records score correctly.
+    # Side-effect only - never let scoring break test-result ingestion.
+    try:
+        for fr in created:
+            scoring_triggers.score_failure_record(db, fr, commit=False)
+    except Exception:
+        pass
 
     db.commit()

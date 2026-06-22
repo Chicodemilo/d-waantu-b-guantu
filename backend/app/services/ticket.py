@@ -1,12 +1,12 @@
 # Path: app/services/ticket.py
 # File: ticket.py
 # Created: 2026-03-29
-# Purpose: Ticket CRUD, status history, rework detection, time computation, tracking events, semantic activity events (DWB-409)
+# Purpose: Ticket CRUD, status history, rework detection, time computation, tracking events, semantic activity events (DWB-409), auto-scoring triggers (DWB-425)
 # Caller: app/routers/tickets.py
-# Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking, services/activity_log
+# Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking, services/activity_log, services/scoring_triggers
 # Data In: db: Session, TicketCreate/Update, acting_agent_id
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-06-19 (DWB-409)
+# Last Modified: 2026-06-22 (DWB-425: ticket_closed/rework/stale/zero_token/forgot scoring)
 
 import logging
 from datetime import datetime
@@ -24,6 +24,7 @@ from app.models.status_history import StatusHistory
 from app.models.sprint import Sprint, SprintStatus
 from app.models.ticket import Ticket, TicketStatus, TicketType
 from app.schemas.ticket import TicketCreate, TicketUpdate
+from app.services import scoring_triggers
 from app.services import tracking as tracking_svc
 from app.services.activity_log import log_activity
 
@@ -225,6 +226,18 @@ def update_ticket(
     # acting agent, falling back to the (now-current) assignee.
     _emit_ticket_events(db, ticket, old_status, old_assigned, updates, acting_agent_id)
 
+    # DWB-425: auto-score the close (ticket_closed + no-rework bonus,
+    # zero_token_close, forgot). Folded with commit=False then one commit.
+    # Scoring is a side-effect: a failure here must never break the ticket
+    # PATCH, so swallow + rollback the score writes only.
+    if status_changed and updates.get("status") == TicketStatus.done:
+        try:
+            scoring_triggers.score_ticket_closed(db, ticket, commit=False)
+            db.commit()
+        except Exception as exc:
+            logger.warning("Scoring on ticket close failed for %s: %s", ticket.id, exc)
+            db.rollback()
+
     return ticket
 
 
@@ -305,7 +318,7 @@ def _check_rework(db: Session, ticket: Ticket) -> None:
 
     agent_id = ticket.assigned_agent_id or pm_agent_id
 
-    db.add(FailureRecord(
+    rework_record = FailureRecord(
         project_id=ticket.project_id,
         ticket_id=ticket.id,
         sprint_id=ticket.sprint_id,
@@ -316,7 +329,9 @@ def _check_rework(db: Session, ticket: Ticket) -> None:
         attempt_number=1,
         notes=f"Auto-detected rework: {ticket.ticket_key} moved back to in_progress after being done.",
         resolved=False,
-    ))
+    )
+    db.add(rework_record)
+    db.flush()  # populate rework_record.id for the scoring ref
 
     db.add(Alert(
         project_id=ticket.project_id,
@@ -327,6 +342,14 @@ def _check_rework(db: Session, ticket: Ticket) -> None:
         severity=AlertSeverity.info,
         status=AlertStatus.open,
     ))
+
+    # DWB-425: penalize the rework, folded into this transaction. Side-effect
+    # only - never let a scoring failure break rework detection.
+    try:
+        scoring_triggers.score_failure_record(db, rework_record, commit=False)
+    except Exception as exc:
+        logger.warning("Scoring rework failed for ticket %s: %s", ticket.id, exc)
+
     db.commit()
 
 
@@ -439,6 +462,15 @@ def stale_check(db: Session, ticket: Ticket, project_id: int, minutes_stale: int
     db.add(alert)
     db.commit()
     db.refresh(alert)
+
+    # DWB-425: penalize the stale ticket once (idempotent per ticket). Side-
+    # effect only - a scoring failure must not break stale alerting.
+    try:
+        scoring_triggers.score_stale(db, ticket, commit=True)
+    except Exception as exc:
+        logger.warning("Scoring stale failed for ticket %s: %s", ticket.id, exc)
+        db.rollback()
+
     return {"alert_created": True, "alert_id": alert.id}
 
 

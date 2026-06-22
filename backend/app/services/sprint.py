@@ -1,7 +1,7 @@
 # Path: app/services/sprint.py
 # File: sprint.py
 # Created: 2026-03-29
-# Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), post-close automation, semantic activity events (DWB-410)
+# Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), post-close automation, semantic activity events (DWB-410), gate_miss auto-scoring on blocked close (DWB-425)
 # Caller: app/routers/sprints.py
 # Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc, git, services/activity_log
 # Data In: db: Session, SprintCreate/Update, acting_agent_id
@@ -28,6 +28,7 @@ from app.models.sprint import Sprint, SprintStatus
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket, TicketStatus, TicketType
 from app.schemas.sprint import SprintCreate, SprintUpdate
+from app.services import scoring_triggers
 from app.services.activity_log import log_activity
 
 
@@ -194,7 +195,24 @@ def update_sprint(
 
     # Validate completion gates before applying changes
     if transitioning_to_completed:
-        _check_completion_gates(db, sprint)
+        try:
+            _check_completion_gates(db, sprint)
+        except HTTPException as gate_exc:
+            # DWB-425: a blocked close is a gate_miss. Record the penalty
+            # (commit=True, since this HTTPException rolls back the request
+            # transaction) before re-raising. Attributed to the closing agent,
+            # falling back to the project team-lead. Side-effect only - a
+            # scoring failure must not mask the original gate error.
+            if gate_exc.status_code == 400:
+                try:
+                    detail = gate_exc.detail if isinstance(gate_exc.detail, str) else None
+                    scoring_triggers.score_gate_miss(
+                        db, sprint, acting_agent_id=acting_agent_id,
+                        detail=detail, commit=True,
+                    )
+                except Exception:
+                    db.rollback()
+            raise
     # DWB-331: refuse a second active sprint per project on PATCH transitions
     # too (e.g. flipping planned -> active when another active sprint exists).
     if transitioning_to_active:

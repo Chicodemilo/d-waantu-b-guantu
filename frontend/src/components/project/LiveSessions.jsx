@@ -1,17 +1,18 @@
 // Path: src/components/project/LiveSessions.jsx
 // File: LiveSessions.jsx
 // Created: 2026-04-09
-// Purpose: Team status panel - per-project agent roster. Liveness is driven by the DB-authoritative GET /api/projects/{id}/team endpoint (presumed_live + last_seen, shipped in DWB-387), replacing the prior ticket-derived heuristic. Columns: status dot from presumed_live, name, role-bucket, last_seen ("3m ago"), current ticket (still from store tickets where status === 'in_progress'). The stale-ticket POST to /api/tickets/stale-check remains here (10/20/30 min thresholds) since it's tightly coupled to this view's agent/ticket join.
+// Purpose: Team status panel - per-project agent roster rendered as a scoring leaderboard (DWB-428). Liveness is driven by the DB-authoritative GET /api/projects/{id}/team endpoint (presumed_live + last_seen, shipped in DWB-387). Scoring (reputation, this-sprint delta, influence remaining) is joined in from GET /api/projects/{id}/scores (DWB-424), which already returns the full roster sorted top-first; rows are reordered to preserve that leaderboard order. Columns: status dot from presumed_live, name, role-bucket, reputation, sprint delta, influence, last_seen ("3m ago"), current ticket (from store tickets where status === 'in_progress'). The stale-ticket POST to /api/tickets/stale-check remains here (10/20/30 min thresholds) since it's tightly coupled to this view's agent/ticket join.
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect, useRef), react-router-dom (Link), store/useStore, api/projectAgents (getProjectTeam), config (API_BASE_URL), styles/hooks.css
+// Callees: react (useState, useEffect, useRef), react-router-dom (Link), store/useStore, api/projectAgents (getProjectTeam), api/scores (getProjectScores), config (API_BASE_URL), styles/hooks.css
 // Data In: projectId prop
 // Data Out: Default export LiveSessions component
-// Last Modified: 2026-06-12
+// Last Modified: 2026-06-22
 
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import { getProjectTeam } from '../../api/projectAgents';
+import { getProjectScores } from '../../api/scores';
 import { API_BASE_URL } from '../../config';
 import '../../styles/hooks.css';
 
@@ -41,9 +42,23 @@ function roleBucket(role) {
   return 'Worker';
 }
 
+function formatDelta(delta) {
+  const n = Number(delta) || 0;
+  if (n > 0) return `+${n}`;
+  return `${n}`;
+}
+
+function deltaClass(delta) {
+  const n = Number(delta) || 0;
+  if (n > 0) return ' live-sessions__col-delta--up';
+  if (n < 0) return ' live-sessions__col-delta--down';
+  return '';
+}
+
 function LiveSessions({ projectId }) {
   const tickets = useStore((s) => s.tickets);
   const [team, setTeam] = useState([]);
+  const [scores, setScores] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [, setTick] = useState(0);
   const staleAlertedRef = useRef({});
@@ -64,9 +79,13 @@ function LiveSessions({ projectId }) {
     let cancelled = false;
     async function refresh() {
       try {
-        const data = await getProjectTeam(projectId);
+        const [data, scoreRows] = await Promise.all([
+          getProjectTeam(projectId),
+          getProjectScores(projectId).catch(() => []),
+        ]);
         if (cancelled) return;
         setTeam(Array.isArray(data?.agents) ? data.agents : []);
+        setScores(Array.isArray(scoreRows) ? scoreRows : []);
       } catch {
         if (!cancelled) setTeam([]);
       } finally {
@@ -136,16 +155,33 @@ function LiveSessions({ projectId }) {
     );
   }
 
+  // Join scores to the roster and reorder rows to preserve the leaderboard
+  // order returned by the API (already sorted top-first). Agents missing from
+  // the scores payload fall to the bottom; defaults match an unscored agent.
+  const scoreByAgent = {};
+  scores.forEach((s, i) => {
+    scoreByAgent[s.agent_id] = { ...s, rank: i };
+  });
+  const orderedTeam = [...team].sort((a, b) => {
+    const ra = scoreByAgent[a.agent_id]?.rank ?? Number.MAX_SAFE_INTEGER;
+    const rb = scoreByAgent[b.agent_id]?.rank ?? Number.MAX_SAFE_INTEGER;
+    return ra - rb;
+  });
+
   return (
-    <div className="live-sessions">
+    <div className="live-sessions live-sessions--scored">
       <div className="live-sessions__header">
         <span className="live-sessions__col-status">Status</span>
         <span className="live-sessions__col-name">Name</span>
         <span className="live-sessions__col-type">Type</span>
+        <span className="live-sessions__col-num">Rep</span>
+        <span className="live-sessions__col-num">Sprint</span>
+        <span className="live-sessions__col-num">Infl</span>
         <span className="live-sessions__col-time">Last Seen</span>
         <span className="live-sessions__col-ticket">Current Ticket</span>
       </div>
-      {team.map((agent) => {
+      {orderedTeam.map((agent) => {
+        const score = scoreByAgent[agent.agent_id] || { reputation: 0, sprint_delta: 0, influence: 20 };
         const agentTickets = projectTickets
           .filter((t) => t.assigned_agent_id === agent.agent_id)
           .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
@@ -159,6 +195,11 @@ function LiveSessions({ projectId }) {
             </span>
             <span className="live-sessions__col-name">{agent.name}</span>
             <span className="live-sessions__col-type">{roleBucket(agent.role)}</span>
+            <span className="live-sessions__col-num">{score.reputation}</span>
+            <span className={`live-sessions__col-num live-sessions__col-delta${deltaClass(score.sprint_delta)}`}>
+              {formatDelta(score.sprint_delta)}
+            </span>
+            <span className="live-sessions__col-num">{score.influence}</span>
             <span className="live-sessions__col-time">{formatLastSeen(agent.last_seen)}</span>
             <span className="live-sessions__col-ticket">
               {currentTicket ? (
