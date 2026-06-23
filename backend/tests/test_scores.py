@@ -694,3 +694,70 @@ class TestRankAndTier:
         data = client.get(f"/api/agents/{a1}/score", params={"project_id": pid}).json()
         assert data["rank"] == 1
         assert data["tier"] == "best"
+
+
+class TestHumanCarrotPileOnCTA:
+    """DWB-442: a human CARROT turns the non-subject (peer) alert into a
+    pile-on call-to-action carrying the reason. Human sticks and all
+    peer-sourced events stay notify-only; the subject's own row is unchanged."""
+
+    def _peer_alert(self, db_session, pid, recipient_id):
+        return db_session.scalars(
+            select(Alert).where(Alert.recipient_agent_id == recipient_id)
+            .where(Alert.project_id == pid)
+        ).first()
+
+    def test_human_carrot_peer_body_is_cta_with_name_and_reason(
+        self, client, db_session, scored_project
+    ):
+        pid, a2 = scored_project["project_id"], scored_project["a2"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": "ScoreAlpha", "delta": 10, "reason": "great work"})
+        assert r.status_code == 201
+        peer = self._peer_alert(db_session, pid, a2)
+        assert peer.body == "The human gave ScoreAlpha +10 for great work. Pile on: /carrot ScoreAlpha"
+
+    def test_human_carrot_cta_omits_for_clause_without_reason(
+        self, client, db_session, scored_project
+    ):
+        pid, a2 = scored_project["project_id"], scored_project["a2"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": "ScoreAlpha", "delta": 7})
+        assert r.status_code == 201
+        peer = self._peer_alert(db_session, pid, a2)
+        assert peer.body == "The human gave ScoreAlpha +7. Pile on: /carrot ScoreAlpha"
+
+    def test_human_carrot_subject_own_row_unchanged(
+        self, client, db_session, scored_project
+    ):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": "ScoreAlpha", "delta": 10, "reason": "great work"})
+        subj = self._peer_alert(db_session, pid, a1)  # a1 is the subject
+        assert subj.body == "You received +10 reputation from the human: great work."
+        assert "Pile on" not in subj.body
+
+    def test_human_stick_peer_body_unchanged(
+        self, client, db_session, scored_project
+    ):
+        pid, a2 = scored_project["project_id"], scored_project["a2"]
+        client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": "ScoreAlpha", "delta": -5, "reason": "regression"})
+        peer = self._peer_alert(db_session, pid, a2)
+        assert peer.body == "ScoreAlpha received -5 reputation from the human: regression."
+        assert "Pile on" not in peer.body
+
+    def test_peer_source_carrot_stays_notify_only(
+        self, client, db_session, scored_project
+    ):
+        pid, a1, a2 = (scored_project["project_id"], scored_project["a1"],
+                       scored_project["a2"])
+        # a1 peer-carrots a2; a1 (non-subject actor) must get the notify-only
+        # third-person body, NOT the human CTA.
+        r = client.post(f"/api/projects/{pid}/scores/peer",
+                        json={"subject": str(a2), "delta": 3, "reason": "nice"},
+                        headers={"X-Agent-ID": str(a1)})
+        assert r.status_code == 201
+        actor_alert = self._peer_alert(db_session, pid, a1)
+        assert actor_alert.body == "ScoreBeta received +3 reputation from ScoreAlpha: nice."
+        assert "Pile on" not in actor_alert.body

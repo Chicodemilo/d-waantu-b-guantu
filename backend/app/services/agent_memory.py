@@ -1,12 +1,12 @@
 # Path: app/services/agent_memory.py
 # File: agent_memory.py
 # Created: 2026-06-03
-# Purpose: Scaffold an agent's memory directory (DWB-401: .dwb/memory/<prefix>/<name>/) - identity.md + empty memory.md; DWB-431 prepends a live scoring-standing block to identity.md
+# Purpose: Scaffold an agent's memory directory (DWB-401: .dwb/memory/<prefix>/<name>/) - identity.md + empty memory.md; DWB-431 prepends a live scoring-standing block; DWB-438 prepends a TL-channel unread block for team-leads
 # Caller: app/services/agent.create_agent, app/services/project_agent.create_project_agent, manual endpoint
-# Callees: app/models/agent, app/models/project, app/services/scoring (get_standing)
+# Callees: app/models/agent, app/models/project, app/services/scoring (get_standing), app/services/tl_channel (unread_for_agent, mark_read)
 # Data In: db: Session, agent_id: int
 # Data Out: ScaffoldResult (paths created, paths preserved, paths skipped)
-# Last Modified: 2026-06-23 (DWB-431: standing block at top of identity.md)
+# Last Modified: 2026-06-23 (DWB-438: TL-channel unread block for team-leads)
 
 import logging
 from dataclasses import dataclass, field
@@ -43,6 +43,35 @@ _STANDING_TIER_LINES = {
     "dead_last": "Dead last. You are the lowest-rated agent on this team, and the human sees it every time they open the board. Bottom-ranked agents are the ones that stop getting spawned. Change it before the sprint ends. Prove you are worth keeping.",
     "unscored": "No score yet. Your first clean closes set your reputation. Start strong.",
 }
+
+
+# DWB-438: roles that get the TL-channel block (either spelling).
+_TEAM_LEAD_ROLES = ("team-lead", "team_lead")
+
+# Chars of each message body echoed into the identity.md TL-channel block.
+_TL_CHANNEL_BODY_MAX = 120
+
+
+def _render_tl_channel_block(unread: list[dict]) -> str:
+    """Render the Archie-channel unread block for the TOP of a team-lead's
+    identity.md (DWB-438). One line per unread message, tagged direct/broadcast,
+    with sender name + home-project prefix. Returns '' when there is nothing
+    unread so the block is simply omitted."""
+    if not unread:
+        return ""
+    n = len(unread)
+    lines = [f">> ARCHIE CHANNEL: {n} unread message{'s' if n != 1 else ''}"]
+    for m in unread:
+        kind = "broadcast" if m.get("is_broadcast") else "direct"
+        sender = m.get("from_agent_name") or f"agent {m.get('from_agent_id')}"
+        prefix = m.get("from_project_prefix")
+        who = f"{sender} ({prefix})" if prefix else sender
+        body = (m.get("body") or "").strip().replace("\n", " ")
+        if len(body) > _TL_CHANNEL_BODY_MAX:
+            body = body[:_TL_CHANNEL_BODY_MAX].rstrip() + "..."
+        lines.append(f"- [{kind}] {who}: {body}")
+    lines.append("Reply with the /tl command. Full channel on the dashboard.")
+    return "\n".join(lines) + "\n\n"
 
 
 def _render_standing_block(standing: dict | None, prefix: str) -> str:
@@ -142,11 +171,32 @@ def scaffold_agent_dir(db: Session, agent_id: int) -> ScaffoldResult:
         logger.warning("standing block failed for agent %s; omitting", agent.id, exc_info=True)
         standing_block = ""
 
+    # DWB-438: cross-project Archie-channel unread block, TEAM-LEADS ONLY,
+    # rendered right below the standing block. Wrapped so any channel error
+    # never breaks identity generation (omit the block on error). The surfaced
+    # messages are marked read AFTER identity.md is written (below) so an
+    # archie sees each unread message exactly once.
+    tl_channel_block = ""
+    surfaced_message_ids: list[int] = []
+    if agent.role in _TEAM_LEAD_ROLES:
+        try:
+            from app.services import tl_channel as tl_channel_svc  # local: avoid cycle
+            unread = tl_channel_svc.unread_for_agent(db, agent.id)
+            tl_channel_block = _render_tl_channel_block(unread)
+            surfaced_message_ids = [m["id"] for m in unread]
+        except Exception:
+            logger.warning(
+                "tl-channel block failed for agent %s; omitting", agent.id, exc_info=True
+            )
+            tl_channel_block = ""
+            surfaced_message_ids = []
+
     # identity.md - always regenerate (system-generated)
     identity_path = memory_dir / "identity.md"
     try:
         identity_path.write_text(
-            standing_block + _build_identity_md(agent, project), encoding="utf-8"
+            standing_block + tl_channel_block + _build_identity_md(agent, project),
+            encoding="utf-8",
         )
         result.refreshed.append(str(identity_path))
     except OSError as e:
@@ -154,6 +204,24 @@ def scaffold_agent_dir(db: Session, agent_id: int) -> ScaffoldResult:
             "memory_dir_unwritable",
             f"could not write {identity_path}: {e}",
         )
+
+    # DWB-438: mark the surfaced channel messages read for this archie so the
+    # next spawn does not re-surface them. Guarded with its own commit (mirrors
+    # scoring._emit_score_feed_event): a failure here never affects the
+    # already-written identity.md. If the commit fails the messages simply stay
+    # unread and re-surface, which is a safe degradation.
+    if surfaced_message_ids:
+        try:
+            from app.services import tl_channel as tl_channel_svc  # local: avoid cycle
+            for mid in surfaced_message_ids:
+                tl_channel_svc.mark_read(db, agent_id=agent.id, message_id=mid)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning(
+                "tl-channel mark-read failed for agent %s; messages will re-surface",
+                agent.id, exc_info=True,
+            )
 
     # Agent-owned files - touch only if missing
     for fname in _AGENT_OWNED_FILES:

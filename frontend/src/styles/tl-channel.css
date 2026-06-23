@@ -1,0 +1,122 @@
+/* Path: src/styles/tl-channel.css */
+/* File: tl-channel.css */
+/* Created: 2026-06-23 */
+/* Purpose: Styles for the cross-project Archie Channel view (DWB-440). Columnar message table with a left-edge accent distinguishing DIRECT from BROADCAST messages, terminal aesthetic. */
+/* Last Modified: 2026-06-23 */
+
+.tl-channel__subtitle {
+  color: var(--gray-light);
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+
+.tl-channel {
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}
+
+.tl-channel__header,
+.tl-channel__row {
+  display: grid;
+  grid-template-columns: 160px 160px 1fr 150px 200px;
+  gap: 12px;
+  padding: 8px 12px;
+  align-items: start;
+}
+
+.tl-channel__header {
+  border-bottom: 1px solid var(--border);
+  color: var(--gray-light);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  position: sticky;
+  top: 0;
+  background-color: var(--bg-alt);
+  z-index: 1;
+}
+
+.tl-channel__scroll {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.tl-channel__row {
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  font-size: 13px;
+}
+
+.tl-channel__row:last-child {
+  border-bottom: none;
+}
+
+/* Direct messages: green left accent. Broadcast: orange left accent + tint. */
+.tl-channel__row--direct {
+  border-left-color: var(--green-dim);
+}
+
+.tl-channel__row--broadcast {
+  border-left-color: var(--orange);
+  background-color: rgba(251, 146, 60, 0.05);
+}
+
+.tl-channel__col-from,
+.tl-channel__col-to {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tl-channel__sender,
+.tl-channel__recipient {
+  color: var(--green);
+}
+
+.tl-channel__project {
+  color: var(--gray-light);
+  font-size: 11px;
+}
+
+.tl-channel__broadcast-tag {
+  color: var(--orange-bright);
+  font-weight: bold;
+  letter-spacing: 0.1em;
+}
+
+.tl-channel__col-body {
+  color: var(--green-bright);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tl-channel__col-created {
+  color: var(--gray-light);
+  font-size: 12px;
+}
+
+.tl-channel__col-read {
+  font-size: 12px;
+}
+
+.tl-channel__readers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.tl-channel__reader {
+  color: var(--blue);
+}
+
+.tl-channel__unread {
+  color: var(--gray);
+  font-style: italic;
+}
+
+.tl-channel__empty {
+  color: var(--gray-light);
+  padding: 24px 12px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}

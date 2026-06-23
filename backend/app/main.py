@@ -41,6 +41,7 @@ from app.routers import (
     status,
     test_results,
     tickets,
+    tl_channel,
     tokens,
     tracking,
 )
@@ -126,3 +127,4 @@ app.include_router(dwb_sessions.project_sessions_router)
 app.include_router(client_logs.router)
 app.include_router(server_logs.router)
 app.include_router(scores.router)
+app.include_router(tl_channel.router)

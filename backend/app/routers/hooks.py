@@ -215,6 +215,31 @@ def hook_lifecycle_event(data: LifecycleEventInput, db: Session = Depends(get_db
         }
 
 
+@router.post("/channel-poke", status_code=200)
+def hook_channel_poke(data: HookEventInput, db: Session = Depends(get_db)):
+    """Stop-hook Archie-channel poke (DWB-443).
+
+    Resolves the stopping agent and, if it is a team-lead with unread channel
+    messages, returns a Stop ``block`` decision (`{"decision":"block","reason":
+    ...}`) listing them and marks them read; otherwise returns ``{}``. CC reads
+    the JSON on stdout as the Stop decision.
+
+    Same fire-and-forget contract as the other hooks: MUST NEVER 5xx and MUST
+    stay under the Stop timeout. The service already swallows every exception
+    into ``{}``; this handler double-guards and 200s on anything that leaks."""
+    try:
+        return svc.handle_channel_poke(db, data.model_dump())
+    except Exception as e:
+        logger.exception("hook_channel_poke error")
+        log_failed_hook(
+            hook_event=data.hook_event_name or "Stop",
+            status_code=200,
+            raw_payload=data.model_dump(),
+            error=f"{type(e).__name__}: {e}",
+        )
+        return {}
+
+
 @router.post("/post-commit", response_model=PostCommitResponse, status_code=200)
 def hook_post_commit(data: PostCommitRequest, db: Session = Depends(get_db)):
     """Parse commit message for <PREFIX>-NNN tokens and auto-close any

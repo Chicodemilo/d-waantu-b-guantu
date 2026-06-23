@@ -209,3 +209,98 @@ class TestIdentityStandingBlock:
         assert ">> YOUR STANDING" not in identity
         assert "# Identity - BotSTB3" in identity
         assert "## On Spawn - Read These First" in identity
+
+
+class TestIdentityTlChannelBlock:
+    """DWB-438: a team-lead's identity.md surfaces unread Archie-channel
+    messages near the standing block; non-TL agents get no block; surfaced
+    messages are marked read so they don't re-surface."""
+
+    def _tl(self, client, prefix, repo_path, name):
+        project = client.post("/api/projects", json={
+            "prefix": prefix, "name": f"Chan {prefix}", "repo_path": str(repo_path),
+        }).json()
+        agent = client.post("/api/agents", json={
+            "project_id": project["id"], "name": name,
+            "role": "team-lead", "api_key": f"{prefix}-key",
+        }).json()
+        return project, agent
+
+    def test_tl_identity_shows_unread_block(self, client, tmp_path):
+        _, recv = self._tl(client, "TCA", tmp_path / "a", "ArchieTCA")
+        _, send = self._tl(client, "TCB", tmp_path / "b", "ArchieTCB")
+        # A direct message to recv + a broadcast from send.
+        client.post("/api/tl-channel", json={
+            "from_agent_id": send["id"], "to_agent_id": recv["id"],
+            "body": "can you take the shared migration?"})
+        client.post("/api/tl-channel", json={
+            "from_agent_id": send["id"], "body": "anyone free to review auth?"})
+
+        r = client.post(f"/api/agents/{recv['id']}/scaffold-memory")
+        assert r.status_code == 200
+        identity = (_memory_dir(tmp_path / "a", "TCA", "ArchieTCA") / "identity.md").read_text()
+        assert ">> ARCHIE CHANNEL: 2 unread messages" in identity
+        assert "[direct] ArchieTCB (TCB): can you take the shared migration?" in identity
+        assert "[broadcast] ArchieTCB (TCB): anyone free to review auth?" in identity
+        assert "/tl command" in identity
+        assert "# Identity - ArchieTCA" in identity  # body intact
+
+    def test_surfaced_messages_marked_read_not_resurfaced(self, client, tmp_path):
+        _, recv = self._tl(client, "TCC", tmp_path / "c", "ArchieTCC")
+        _, send = self._tl(client, "TCD", tmp_path / "d", "ArchieTCD")
+        client.post("/api/tl-channel", json={
+            "from_agent_id": send["id"], "to_agent_id": recv["id"], "body": "ping one"})
+
+        # First scaffold surfaces + marks read.
+        client.post(f"/api/agents/{recv['id']}/scaffold-memory")
+        assert client.get(f"/api/tl-channel/unread?agent_id={recv['id']}").json() == []
+        # Second scaffold: nothing unread -> block omitted.
+        client.post(f"/api/agents/{recv['id']}/scaffold-memory")
+        identity = (_memory_dir(tmp_path / "c", "TCC", "ArchieTCC") / "identity.md").read_text()
+        assert ">> ARCHIE CHANNEL" not in identity
+
+    def test_singular_count_phrasing(self, client, tmp_path):
+        _, recv = self._tl(client, "TCE", tmp_path / "e", "ArchieTCE")
+        _, send = self._tl(client, "TCF", tmp_path / "f", "ArchieTCF")
+        client.post("/api/tl-channel", json={
+            "from_agent_id": send["id"], "to_agent_id": recv["id"], "body": "solo"})
+        client.post(f"/api/agents/{recv['id']}/scaffold-memory")
+        identity = (_memory_dir(tmp_path / "e", "TCE", "ArchieTCE") / "identity.md").read_text()
+        assert ">> ARCHIE CHANNEL: 1 unread message" in identity
+        assert "1 unread messages" not in identity  # singular, no trailing s
+
+    def test_non_team_lead_gets_no_block(self, client, tmp_path):
+        # A broadcast is visible to every agent via the unread query, but the
+        # identity block is role-gated: a worker must get NO block even when it
+        # has channel-visible unread.
+        project = client.post("/api/projects", json={
+            "prefix": "TCG", "name": "Chan TCG", "repo_path": str(tmp_path / "g"),
+        }).json()
+        worker = client.post("/api/agents", json={
+            "project_id": project["id"], "name": "WkrTCG",
+            "role": "backend-worker", "api_key": "tcg-key",
+        }).json()
+        _, send = self._tl(client, "TCH", tmp_path / "h", "ArchieTCH")
+        client.post("/api/tl-channel", json={
+            "from_agent_id": send["id"], "body": "broadcast everyone sees"})
+        # The broadcast IS in the worker's unread set...
+        assert len(client.get(f"/api/tl-channel/unread?agent_id={worker['id']}").json()) == 1
+        # ...but the identity block is role-gated, so the worker gets nothing.
+        r = client.post(f"/api/agents/{worker['id']}/scaffold-memory")
+        assert r.status_code == 200
+        identity = (_memory_dir(tmp_path / "g", "TCG", "WkrTCG") / "identity.md").read_text()
+        assert ">> ARCHIE CHANNEL" not in identity
+
+    def test_identity_still_generates_when_channel_raises(self, client, tmp_path, monkeypatch):
+        _, recv = self._tl(client, "TCI", tmp_path / "i", "ArchieTCI")
+
+        def _boom(*a, **k):
+            raise RuntimeError("channel exploded")
+
+        monkeypatch.setattr("app.services.tl_channel.unread_for_agent", _boom)
+        r = client.post(f"/api/agents/{recv['id']}/scaffold-memory")
+        assert r.status_code == 200
+        identity = (_memory_dir(tmp_path / "i", "TCI", "ArchieTCI") / "identity.md").read_text()
+        assert ">> ARCHIE CHANNEL" not in identity
+        assert "# Identity - ArchieTCI" in identity
+        assert "## On Spawn - Read These First" in identity

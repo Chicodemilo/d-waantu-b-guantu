@@ -6,7 +6,7 @@
 # Callees: app/models/score_event.py, app/models/agent_score.py, app/models/alert.py, app/models/sprint.py, app/models/agent.py, app/models/project_agent.py, app/config/scoring.py
 # Data In: db: Session, score event fields
 # Data Out: ScoreEvent, AgentScore, Alert (broadcast), leaderboard / ledger dicts
-# Last Modified: 2026-06-23 (DWB-431: get_standing rank/tier for identity.md)
+# Last Modified: 2026-06-23 (DWB-442: human-carrot peer alerts become a pile-on CTA)
 
 """Agent scoring (DWB-424).
 
@@ -610,11 +610,21 @@ def broadcast_score_change(
     ).all())
     recipient_ids.add(subject_agent_id)
 
+    # DWB-442: a human CARROT (source=human, delta>0) turns the non-subject
+    # (peer) alert into a pile-on call-to-action carrying the reason. Human
+    # sticks (delta<0) and all peer-sourced events stay notify-only, and the
+    # subject's own "You received ..." row is never a CTA.
+    human_carrot = source == "human" and delta > 0
+    cta_reason = f" for {reason}" if reason else ""
+
     count = 0
     for aid in recipient_ids:
         if aid == subject_agent_id:
             title = f"You received {sign} from {origin}"
             body = f"You received {sign} reputation from {origin}{suffix}."
+        elif human_carrot:
+            title = f"{name} received {sign} from {origin}"
+            body = f"The human gave {name} {sign}{cta_reason}. Pile on: /carrot {name}"
         else:
             title = f"{name} received {sign} from {origin}"
             body = f"{name} received {sign} reputation from {origin}{suffix}."

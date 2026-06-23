@@ -2053,6 +2053,77 @@ def handle_lifecycle_event(db: Session, hook_data: dict) -> ToolAction:
     )
 
 
+# DWB-443: chars of each message body echoed into a Stop-hook channel poke.
+_POKE_BODY_MAX = 100
+
+
+def handle_channel_poke(db: Session, hook_data: dict) -> dict:
+    """Stop-hook Archie-channel poke (DWB-443).
+
+    Resolves the stopping agent from the hook payload (same marker/session
+    resolution as the tool-use + session-end hooks). If that agent is a
+    team-lead with UNREAD channel messages, returns a Stop ``block`` decision
+    listing them and marks them read (the same surfaced-read path DWB-438 uses
+    for identity.md), so an archie is nudged to read the channel before the
+    session ends and never sees the same message twice.
+
+    Returns ``{}`` (no block) when the agent can't be resolved, is not a
+    team-lead, or has nothing unread. NEVER raises - any exception yields ``{}``
+    so the Stop hook can never break or stall the session.
+    """
+    try:
+        session_id = (hook_data.get("session_id") or "").strip() or None
+        cwd = hook_data.get("cwd", "") or ""
+        hook_event = (
+            hook_data.get("hook_event_name") or hook_data.get("hook_event") or "Stop"
+        )
+        _project, agent_id, _ticket_id, _dwb = _resolve_tool_action_context(
+            db, session_id=session_id, cwd=cwd, hook_event=hook_event, hook_data=hook_data,
+        )
+        if agent_id is None:
+            return {}
+
+        from app.services import tl_channel as tl_channel_svc  # local: avoid cycle
+
+        agent = db.get(Agent, agent_id)
+        # Channel is team-lead-only (matches DWB-438 identity surfacing); a
+        # non-TL never gets poked even though broadcasts are technically visible.
+        if agent is None or not tl_channel_svc.is_team_lead(agent):
+            return {}
+
+        unread = tl_channel_svc.unread_for_agent(db, agent_id)
+        if not unread:
+            return {}
+
+        parts = []
+        for m in unread:
+            kind = "broadcast" if m.get("is_broadcast") else "direct"
+            sender = m.get("from_agent_name") or f"agent {m.get('from_agent_id')}"
+            prefix = m.get("from_project_prefix")
+            who = f"{sender}({prefix})" if prefix else sender
+            body = (m.get("body") or "").strip().replace("\n", " ")
+            if len(body) > _POKE_BODY_MAX:
+                body = body[:_POKE_BODY_MAX].rstrip() + "..."
+            parts.append(f"[{kind}] from {who}: {body}")
+        n = len(unread)
+        reason = (
+            f"You have {n} Archie Channel message{'s' if n != 1 else ''}: "
+            + " ; ".join(parts)
+            + ". Reply via /tl or POST /api/tl-channel."
+        )
+
+        # Mark the surfaced messages read (same path DWB-438 uses), then commit.
+        for m in unread:
+            tl_channel_svc.mark_read(db, agent_id=agent_id, message_id=m["id"])
+        db.commit()
+
+        return {"decision": "block", "reason": reason}
+    except Exception:
+        db.rollback()
+        logger.warning("channel-poke failed; returning no-block", exc_info=True)
+        return {}
+
+
 # DWB-353: _create_unattributed_alert was deleted along with its two call
 # sites in handle_session_end and handle_subagent_stop. The "unattributed"
 # alert class is gone - worker-without-ticket tokens now flow into the

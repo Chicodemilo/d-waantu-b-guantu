@@ -37,6 +37,7 @@ from app.models.jira_ticket_snapshot import JiraTicketSnapshot
 from app.models.tool_action import ToolAction
 from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
 from app.models.agent_score import AgentScore
+from app.models.tl_message import TlMessage, TlMessageRead
 
 __all__ = [
     "Project", "ProjectStatus", "JiraSyncStatus",
@@ -63,4 +64,5 @@ __all__ = [
     "ToolAction",
     "ScoreEvent", "ScoreSource", "ScoreTriggerType",
     "AgentScore",
+    "TlMessage", "TlMessageRead",
 ]

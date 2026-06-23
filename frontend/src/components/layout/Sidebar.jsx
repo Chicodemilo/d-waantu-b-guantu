@@ -1,12 +1,12 @@
 // Path: src/components/layout/Sidebar.jsx
 // File: Sidebar.jsx
 // Created: 2026-03-29
-// Purpose: Navigation sidebar with links to dashboard, instructions, system tests, and per-project sub-nav; collapses on mobile
+// Purpose: Navigation sidebar with links to dashboard, instructions, system tests, the cross-project archie channel, and per-project sub-nav; collapses on mobile
 // Caller: AppShell.jsx
 // Callees: react (useState), react-router-dom (NavLink, useLocation), useStore
 // Data In: projects from store, current location pathname, open prop, onNavClick callback
 // Data Out: default export Sidebar component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-23
 
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -85,6 +85,7 @@ function Sidebar({ open, onNavClick }) {
   const isSystemTestsActive = location.pathname.startsWith('/tests');
   const isSystemDocsActive = location.pathname === '/docs';
   const isErrorLogActive = location.pathname === '/errors';
+  const isArchieChannelActive = location.pathname === '/archie-channel';
 
   return (
     <aside className={`sidebar${open ? ' sidebar--open' : ''}`}>
@@ -114,6 +115,12 @@ function Sidebar({ open, onNavClick }) {
             <NavLink to="/errors" className={caretLinkClass(isErrorLogActive)} onClick={onNavClick}>
               error_log
             </NavLink>
+          </li>
+          <li className="sidebar__link-with-info">
+            <NavLink to="/archie-channel" className={caretLinkClass(isArchieChannelActive)} onClick={onNavClick}>
+              archie_channel
+            </NavLink>
+            <span className="tooltip-trigger">?<span className="tooltip-content">Cross-project team-lead messaging channel. Spans all projects.</span></span>
           </li>
 
           <li className="sidebar__section-label">

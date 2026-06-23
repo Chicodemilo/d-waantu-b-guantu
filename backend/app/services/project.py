@@ -29,6 +29,7 @@ from app.models.sprint import Sprint
 from app.models.status_history import StatusHistory
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket
+from app.models.tl_message import TlMessage
 from app.models.tool_action import ToolAction
 from app.models.tracking_log import TrackingLog
 from app.schemas.project import ProjectCreate, ProjectUpdate
@@ -109,6 +110,13 @@ def delete_project(db: Session, project: Project) -> None:
     # and project they reference are deleted (no ON DELETE CASCADE on these FKs).
     db.execute(delete(ScoreEvent).where(ScoreEvent.project_id == pid))
     db.execute(delete(AgentScore).where(AgentScore.project_id == pid))
+    # DWB-436: the cross-project team-lead channel. from_project_id is a NOT
+    # NULL FK to projects, so messages SENT FROM this project must be deleted
+    # before the project row goes (their read receipts cascade via the
+    # message_id ON DELETE CASCADE). Messages sent TO this project's team-lead
+    # from OTHER projects persist - their from_project_id points elsewhere and
+    # the agent rows are only detached (NULLed project_id), never deleted.
+    db.execute(delete(TlMessage).where(TlMessage.from_project_id == pid))
     # DWB-417/421: tool_actions linked to this project's DWB sessions must go
     # before those sessions (the dwb_session_id FK has no cascade). Ticket-linked
     # tool_actions cascade with their tickets below; agent-linked-only rows have

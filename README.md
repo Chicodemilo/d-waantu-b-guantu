@@ -2,9 +2,9 @@
 
 A multi-agent workflow dashboard that makes Claude Code teams **cheaper, clearer, and smarter**.
 
-- **Token efficiency** — structured playbooks and slim API responses mean agents spend context on work, not re-reading docs. Token budget monitoring warns before bloat creeps in.
-- **Team visibility** — real-time insight into what every agent is doing, which tickets are moving, and where things are stuck.
-- **Session continuity** — HANDOFF.md, playbooks, and project rules carry knowledge between sessions. New sessions pick up where the last one left off.
+- **Token efficiency** — structured playbooks + slim API responses keep agents on work, not re-reading docs; budget monitoring warns before bloat.
+- **Team visibility** — real-time insight into what every agent is doing and where things are stuck.
+- **Session continuity** — HANDOFF.md, playbooks, and project rules carry knowledge between sessions.
 
 **Contributing** — DWB is open source. If something's broken, inefficient, or could be better, open a PR. No process ceremony — just make it better.
 
@@ -27,7 +27,7 @@ track our projects. Do the quick start setup and report back when it's
 running.
 ```
 
-Archie reads the repo, runs the setup, creates your first project, and reports back ready for work. See [QUICKSTART.md](QUICKSTART.md) for manual setup and agent onboarding.
+Archie reads the repo, runs setup, creates your first project, and reports back. See [QUICKSTART.md](QUICKSTART.md) for manual setup and onboarding.
 
 ---
 
@@ -37,7 +37,7 @@ Archie reads the repo, runs the setup, creates your first project, and reports b
 React UI (Vite/5173) ──▶ FastAPI (:8000) ──▶ MySQL 8 (:23847)
 ```
 
-- **Backend** — FastAPI, SQLAlchemy 2.0, Pydantic v2. Three-layer: routers → services → models. 23 router files, 138 endpoints, 24 tables. Alembic migrations.
+- **Backend** — FastAPI, SQLAlchemy 2.0, Pydantic v2. Three-layer: routers → services → models. Alembic migrations.
 - **Frontend** — React 18, Vite, Zustand, React Router. Plain CSS with dark terminal aesthetic (JetBrains Mono). Adaptive polling: 2s active, 10s idle.
 - **Database** — MySQL 8.0 via Docker. PyMySQL driver.
 
@@ -53,7 +53,7 @@ Project → Epic → Sprint → Ticket
 
 Enforced at the API level — every ticket needs a sprint, every sprint an epic, every epic a project. Missing parents return 400.
 
-**Auto-assignment:** Tickets without `sprint_id` get the active sprint. Tickets without `epic_id` inherit from the sprint. Sprints without `epic_id` get the latest open epic.
+**Auto-assignment:** Tickets without `sprint_id` get the active sprint and inherit its epic; sprints without `epic_id` get the latest open epic.
 
 ### Agents & Teams
 
@@ -61,19 +61,19 @@ Agent definitions in `.claude/agents/` auto-load when spawning teammates. Minimu
 
 Agents are assigned to projects via `project_agents`. The `X-Agent-ID` header on mutating requests attributes actions in the activity feed.
 
-**Per-project rows + system-wide unique names** (DWB-287, DWB-315). Every agent row carries a single `project_id`, and `agents.name` is `UNIQUE` system-wide. Fixed-role agents that recur on every project (TL, PM) get a `_<PROJECT_PREFIX>` suffix to avoid collisions: `Archie_DWB`, `Pam_DWB`. Worker names stay plain until a real collision forces a rename. The identify endpoint accepts either form.
+**Per-project rows + system-wide unique names** (DWB-287, 315). Each agent row carries one `project_id`; `agents.name` is `UNIQUE` system-wide. Fixed-role agents recurring on every project (TL, PM) get a `_<PREFIX>` suffix (`Archie_DWB`, `Pam_DWB`); worker names stay plain until a collision. Identify accepts either form.
 
-**Spawn-time identity flow.** A teammate calls `POST /api/agents/identify` for its `agent_id` and memory dir. Token attribution to subagents relies on a pending-marker scheme the TL writes at spawn time; mechanics in [ARCHITECTURE.md](ARCHITECTURE.md) § 5.
+**Spawn-time identity flow.** A teammate calls `POST /api/agents/identify` for its `agent_id` and memory dir. Subagent token attribution uses a pending-marker scheme the TL writes at spawn time; mechanics in [ARCHITECTURE.md](ARCHITECTURE.md) § 5.
 
 ### Team Status
 
-The LiveSessions panel on each project page shows all assigned agents with real-time status (active when they hold an `in_progress` ticket) and a leaderboard of scores (see Agent Scoring). Elapsed time ticks from the ticket's `updated_at`.
+The LiveSessions panel on each project page shows assigned agents with real-time status (active when holding an `in_progress` ticket) and a score leaderboard (see Agent Scoring). Elapsed time ticks from the ticket's `updated_at`.
 
-**Stale ticket detection:** A frontend timer fires `POST /api/tickets/stale-check` each time an in_progress ticket crosses a 10-minute boundary, raising a deduped alert.
+**Stale detection:** A frontend timer fires `POST /api/tickets/stale-check` when an in_progress ticket crosses a 10-min boundary, raising a deduped alert.
 
 ### Deployable Playbooks
 
-Master playbooks in `docs/` deploy to other project repos via `POST /api/projects/{id}/deploy-playbooks`. The project page shows the last deploy time from `playbooks_deployed_at`.
+Master playbooks in `docs/` deploy to other repos via `POST /api/projects/{id}/deploy-playbooks`. The project page shows last deploy time (`playbooks_deployed_at`).
 
 | Playbook | File |
 |----------|------|
@@ -98,21 +98,21 @@ The `tracking_log` table is the source of truth. It records discrete events: `st
 
 Hook config lives in `.claude/settings.json`. Zero manual intervention needed.
 
-**Overhead** — TL/PM coordination tracks at the project level via `overhead_start`/`overhead_stop` events, landing in per-role buckets (`tl_overhead_tokens`, `pm_overhead_tokens`). `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total plus a separate `overhead_tokens` field, so PM/TL show a correct headline with the breakdown visible.
+**Overhead** — TL/PM coordination tracks at project level via `overhead_start`/`overhead_stop` into the per-role overhead buckets. `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total plus a separate `overhead_tokens`.
 
-Hooks handle backfill and recovery automatically (including the SubagentStop synthetic-transcript fallback, detailed in ARCHITECTURE.md); no separate scan script is needed.
+Hooks handle backfill and recovery automatically (including the SubagentStop synthetic-transcript fallback); no separate scan script is needed.
 
 ---
 
 ## DWB Sessions
 
-A DWB session is a user-bounded span of work: it opens when you signal the team to start, closes when you signal stop, and rolls up tokens + wall-clock time across every CC session in between (TL, workers, subagents). One DWB session spans many CC sessions. Single-active per project, DB-enforced. Four detection layers (the Layer-2 Haiku classifier was retired in DWB-402): regex fast path on open/close phrases, a SessionEnd transcript retry, slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
+A DWB session is a user-bounded span of work: it opens when you signal start, closes when you signal stop, and rolls up tokens + wall-clock time across every CC session in between (TL, workers, subagents). One DWB session spans many CC sessions. Single-active per project, DB-enforced. Four detection layers (Layer-2 Haiku retired in DWB-402): regex on open/close phrases, a SessionEnd transcript retry, slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
 
 ---
 
 ## Sprint Gates
 
-Boolean toggles that gate sprint completion. All default OFF (opt-in per project); existing projects were flipped OFF:
+Boolean toggles gating sprint completion. All default OFF (opt-in per project):
 
 | Toggle | Check |
 |--------|-------|
@@ -121,7 +121,7 @@ Boolean toggles that gate sprint completion. All default OFF (opt-in per project
 | `force_initial_md` | `INITIAL.md` exists at repo root |
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
 | `force_handoff_md` | `HANDOFF.md` exists at repo root |
-| `force_consolidation` | TL-owned shipped docs within token ceiling; agent memory is gate-exempt (DWB-328, 400) |
+| `force_consolidation` | TL-owned docs within token ceiling; agent memory exempt (DWB-328, 400) |
 | `force_headers` | Sprint-touched `.py` files carry the code-header block; missing ones block close (HTTP 400) |
 | Failure records | Unreviewed stubs always block close |
 
@@ -133,7 +133,7 @@ On sprint completion: alerts fire to TL/PM/tester, test ticket auto-created for 
 
 ## Failure Analysis
 
-**Auto-detected:** Ticket moves back to `in_progress` after `done` → rework failure record + PM alert. Failed test result → one failure record per failed test.
+**Auto-detected:** Ticket back to `in_progress` after `done` → rework record + PM alert. Failed test → one record per failed test.
 
 **Manual taxonomy:** Types A–G for categorization by the PM.
 
@@ -152,7 +152,13 @@ An append-only `score_event` ledger is the source of truth; `agent_score` is a r
 
 **Human tools** (free): `/carrot`, `/stick`, `/score`, `/leaderboard`.
 
-**Peer economy** is flat: any agent can carrot or stick any other regardless of role; only self-scoring is barred (anti-gaming caps in `config/scoring.py`). Every human and peer carrot/stick broadcasts to all project agents (human at critical severity); auto-triggers do not. The per-agent ledger lives on the AgentPage.
+**Peer economy** is flat: any agent can carrot/stick any other; only self-scoring is barred (caps in `config/scoring.py`). Human and peer carrot/sticks broadcast to all project agents (human at critical severity); auto-triggers do not. The per-agent ledger is on the AgentPage.
+
+---
+
+## Archie Channel
+
+A cross-project channel for team-leads (one per project) to message each other, direct (to one TL) or broadcast (to all). Every TL sees every message; addressing drives the ping only: a direct send alerts the target, a broadcast alerts the other TLs. Unread messages surface atop a TL's `identity.md` on spawn and are marked read once shown. Reply via the `/tl` slash command. Tables: `tl_messages` + `tl_message_reads` (not project-scoped).
 
 ---
 
@@ -170,7 +176,7 @@ Alerts are flags raised by agents or automation that need human attention. Sever
 
 ## Jira Integration
 
-Projects can optionally link to Jira. One DWB ticket = one Jira issue (1:1 via `jira_issue_key`). Enable/disable via the Tools panel. Disabling clears all Jira links from project tickets (Jira data is never modified).
+Projects can optionally link to Jira: one DWB ticket = one Jira issue (1:1 via `jira_issue_key`). Enable/disable via the Tools panel; disabling clears all Jira links (Jira data is never modified).
 
 - Enable: `PATCH /api/projects/{id}` with `jira_project_key` and `jira_base_url`
 - Disable: `POST /api/projects/{id}/disable-jira`
@@ -179,7 +185,7 @@ Projects can optionally link to Jira. One DWB ticket = one Jira issue (1:1 via `
 
 ## Error Logging
 
-The frontend reports errors to the backend via `POST /api/errors`; the API client auto-captures failed requests (endpoint, status, message, stack trace). View via `GET /api/errors`.
+The frontend reports errors via `POST /api/errors`; the API client auto-captures failed requests (endpoint, status, message, stack). View via `GET /api/errors`.
 
 ---
 
@@ -199,11 +205,11 @@ Run history: `GET /api/test-results/performance`
 
 ## Adding a Project
 
-**Demo project:** `POST /api/projects/seed-demo` — creates a fully-populated demo project (prefix `DMO`) with agents, epics, sprints, tickets, and test results. Idempotent.
+**Demo project:** `POST /api/projects/seed-demo` — fully-populated demo (prefix `DMO`) with agents, epics, sprints, tickets, test results. Idempotent.
 
-**From repo:** `POST /api/projects/from-repo` with `{"repo_path": "/path/to/repo"}` — auto-detects name, prefix, description.
+**From repo:** `POST /api/projects/from-repo` with `{"repo_path": "..."}` — auto-detects name, prefix, description.
 
-**Then:** assign agents, create epic, create sprint with a goal, deploy playbooks, create tickets.
+**Then:** assign agents, create epic, create sprint (with a goal), deploy playbooks, tickets.
 
 ---
 
@@ -234,17 +240,21 @@ Standard CRUD exists for all resources; below are the non-obvious and automation
 | GET | `/api/projects/{id}/scores` | Scoring leaderboard |
 | POST | `/api/projects/{id}/scores/award` | Human carrot/stick |
 | POST | `/api/projects/{id}/scores/peer` | Peer carrot/stick (`X-Agent-ID` header) |
+| GET | `/api/tl-channel` | Cross-project team-lead channel, newest first; each message carries a `read_by` roster |
+| GET | `/api/tl-channel/unread` | A team-lead's unread channel messages (`?agent_id`) |
+| POST | `/api/tl-channel` | Send a channel message, direct or broadcast (team-leads only) |
+| POST | `/api/tl-channel/mark-read` | Mark channel messages read (one or all) |
 | GET | `/api/hooks/sessions` | List hook sessions (filter by `status=orphan` for cleanup) |
 | POST | `/api/sessions/open` | Open a DWB session — OMIT `opened_at` (server-stamped; AI methods ignore any supplied value) |
-| POST | `/api/sessions/{id}/close` | Close a DWB session — `headline` required on `ai_confident`/`ai_asked` (422 otherwise); the consolidation/compaction gate is opt-in via `force_consolidation` (default OFF) and counts only TL-owned shipped docs, never agent memory |
+| POST | `/api/sessions/{id}/close` | Close a DWB session — `headline` required on `ai_confident`/`ai_asked` (422 otherwise); consolidation gate opt-in via `force_consolidation` (default OFF), TL-owned docs only |
 | GET | `/api/projects/{id}/sessions` | List DWB sessions, most recent first |
 | GET | `/api/sessions/{id}` | DWB session detail rollup (by_role / by_ticket / overhead) |
-| POST | `/api/agents/identify` | Resolve identity from `(role, name, project_prefix)` — accepts short or `<name>_<PREFIX>` form (DWB-289, 315) |
+| POST | `/api/agents/identify` | Resolve identity from `(role, name, project_prefix)`; accepts short or `_<PREFIX>` form |
 | POST | `/api/agents/spawn-prepare` | Identify + return ready-to-paste markdown for the spawn brief |
 | POST | `/api/agents/{id}/session-complete` | Append the session-end block to `memory.md` (DWB-293, 401) |
 | POST | `/api/agents/{id}/memory/append` | Append to `memory.md` (`file=memory`; append-only, DWB-358, 401) |
-| POST | `/api/agents/{id}/memory/compact` | Replace `memory.md` with a compacted version; over-ceiling triggers a passive server-side trim (no 422; DWB-401) |
-| POST | `/api/agents/{id}/scaffold-memory` | Idempotently scaffold the agent's `.dwb/memory/` dir (2-file model: identity.md + memory.md; DWB-401) |
+| POST | `/api/agents/{id}/memory/compact` | Replace `memory.md` (compacted); over-ceiling triggers a passive trim (DWB-401) |
+| POST | `/api/agents/{id}/scaffold-memory` | Idempotently scaffold `.dwb/memory/` (identity.md + memory.md; DWB-401) |
 | GET | `/api/projects/{id}/team` | Single-roundtrip team roster |
 | POST | `/api/alerts/dismiss-all` | Bulk dismiss open alerts |
 | POST | `/api/alerts/send-to-team` | Write alerts to ALERTS_PENDING.md |

@@ -101,6 +101,8 @@ Agent (standalone)
 | **tool_actions** | agent_id, session_id, dwb_session_id, ticket_id, tool_name, target, event_type, tool_metadata, created_at | DWB-417: one row per captured agent action (PostToolUse / lifecycle hook). Context resolved from `session_id` like session-end attribution; all FKs nullable (delivery-gap tolerant). event_type: file_written/message_sent/agent_spawned/notification/context_compaction |
 | **score_event** | project_id, sprint_id, subject_agent_id, delta, source, trigger_type, actor_agent_id, actor_cost, reason, ref_type/ref_id, reverted_by, created_at | DWB-424 append-only scoring ledger (source of truth). source: auto/human/peer. Corrections append a reverting row; rows are never deleted |
 | **agent_score** | (agent_id, project_id) PK, reputation, influence, updated_at | DWB-424 derived cache, rebuildable from score_event. `reputation` = all-time rank; `influence` = per-sprint peer budget (ledger-derived, auto-resets) |
+| **tl_messages** | from_agent_id, to_agent_id (NULL=broadcast), from_project_id, body, created_at | DWB-436 cross-project team-lead channel. NOT project-scoped; from_project_id only records the sender's home project |
+| **tl_message_reads** | (message_id, agent_id) PK, read_at | DWB-436 per-(message, agent) read receipt; message_id FK ON DELETE CASCADE |
 | **instructions** | scope, project_id, agent_id, title, body | Scope: global/project/agent |
 | **activity_log** | project_id, agent_id, entity_type, entity_id, action, details, created_at | Auto-populated by middleware |
 | **test_results** | project_id, sprint_id, ticket_id, run_at, suite, total_tests, passed, failed, skipped, duration_seconds, status, details, triggered_by, triggered_context | Failed results auto-create failure_records |
@@ -134,12 +136,7 @@ Request -> ActivityLoggerMiddleware -> Router -> Service -> Model -> DB
 
 Intercepts all POST/PATCH/PUT/DELETE requests with 2xx responses and inserts an `activity_log` row.
 
-Agent ID resolution priority:
-1. `X-Agent-ID` header (highest priority)
-2. Response body entity-specific fields (`raised_by_agent_id` for alerts, `assigned_agent_id` for tickets)
-3. Generic body fields (`agent_id`, `author_agent_id`)
-4. Project PM/TL fallback for sprint/epic creation
-5. null (shows as "system")
+Agent ID resolution priority: (1) `X-Agent-ID` header, (2) entity fields (`raised_by_agent_id`, `assigned_agent_id`), (3) generic body (`agent_id`, `author_agent_id`), (4) project PM/TL fallback for sprint/epic creation, (5) null (shows as "system").
 
 Disabled during testing (`TESTING=1` env var).
 
@@ -150,12 +147,13 @@ Full interactive reference at http://localhost:8000/docs (OpenAPI): 138 endpoint
 - `GET /api/projects/{id}/team` (single-roundtrip roster) returns `{project_id, project_prefix, agents: [{agent_id, name, role, is_active, assigned_at, last_seen, presumed_live}]}`, active-only unless `?include_inactive=true`.
 - `GET /api/tracking/summary` `per_agent` rows aggregate `token_report` + `overhead_token_report` (a `tokens` total plus a separate `overhead_tokens`); `project_total.overhead_tokens` is the project-wide overhead figure.
 - `POST /api/agents/identify` + `/spawn-prepare` resolve `(role, name, project_prefix)`, accepting the short name or `<name>_<PREFIX>` form.
-- Agent memory (DWB-401) lives at `<repo>/.dwb/memory/<prefix>/<name>/`, relocated out of the protected `.claude/` tree so subagents write it directly. Two files: `identity.md` (system-generated) plus a single free-form `memory.md` (agent-written; merges the former scratchpad + lessons). `recent_sessions` is dropped because the DB sessions table is the session index. Writes via `POST /api/agents/{id}/memory/append` (`file=memory`) and `session-complete` (one block per session). `memory.md` has a 4500-token passive trim ceiling: a server-side mechanical drop-oldest, never a close gate, and gate-exempt so it never counts toward consolidation.
+- Agent memory (DWB-401) lives at `<repo>/.dwb/memory/<prefix>/<name>/` (outside the protected `.claude/` tree so subagents write it directly): `identity.md` (system-generated) + a free-form `memory.md` (agent-written, merges the old scratchpad + lessons; `recent_sessions` dropped, the DB is the session index). Writes via `memory/append` (`file=memory`) + `session-complete`. `memory.md` has a 4500-token passive trim ceiling (drop-oldest, never a close gate).
 - `GET /api/hooks/sessions?status=orphan&cutoff_minutes=60` returns stale active sessions for cleanup.
-- DWB session lifecycle: `POST /api/sessions/open` (omit `opened_at`, server-stamped), `POST /api/sessions/{id}/close` (headline required on ai_confident/ai_asked; the consolidation/compaction gate is opt-in via `force_consolidation`, default OFF, and counts only TL-owned shipped docs, never agent memory), `POST /api/sessions/{id}/reopen` (undoes a false close; 409 if another session is open for the project).
-- DWB session detection (DWB-402, Layer-2 Haiku AI classifier retired): Layer-1 regex on open/close phrases, Layer-1b SessionEnd transcript scan, deterministic slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. The `ai_classifier` method enum is kept as a tombstone for historical rows. Full reference: `docs/session_lifecycle.md`.
+- DWB session lifecycle: `POST /api/sessions/open` (omit `opened_at`), `.../close` (headline required on ai_confident/ai_asked; consolidation gate opt-in via `force_consolidation`, default OFF, TL-owned docs only), `.../reopen` (undoes a false close; 409 if another is open).
+- DWB session detection (DWB-402, Layer-2 Haiku retired): Layer-1 regex on open/close phrases, a SessionEnd transcript scan, slash commands (`/dwb-open`, `/dwb-close`), a 60-min idle sweeper. `ai_classifier` enum kept as a tombstone. Full reference: `docs/session_lifecycle.md`.
 - Action capture (DWB-417/421): `POST /api/hooks/tool-use` (matcher-scoped PostToolUse) and `POST /api/hooks/lifecycle-event` (Notification / PreCompact) are fire-and-forget, always return 200, and write `tool_actions` rows.
 - Scoring (epic 28): `GET /api/projects/{id}/scores` (leaderboard), `GET /api/agents/{id}/score` and `GET .../scores/agent?agent=NAME` (detail + reasoned ledger), `POST .../scores/award` (human), `POST .../scores/peer` (peer, `X-Agent-ID` header), `POST .../scores/rebuild`. See § 8.
+- Team-lead channel (DWB-436/437): `GET /api/tl-channel` (whole channel, cross-project; each message carries a `read_by` roster), `GET /api/tl-channel/unread?agent_id=`, `POST /api/tl-channel` (send, role-guarded), `POST /api/tl-channel/mark-read`. See § 8.
 
 ---
 
@@ -304,13 +302,9 @@ The capture endpoints are fire-and-forget (always 200). Hook config lives in `.c
 
 SubagentStop creates a separate HookSession keyed on `agent_id` (not the parent `session_id`). Unmatched agent types (e.g. "Explore" subagent) fall back to TL as overhead.
 
-**SubagentStop transcript fallback (DWB-311, 2026-06-05).** CC's SubagentStop hook sends `agent_transcript_path` pointing at a synthetic `subagents/agent-<sid>.jsonl` path that doesn't exist on disk; the real subagent transcript is interleaved in the parent session's top-level `.jsonl`, each line tagged with `agentName`. When `parse_transcript()` returns 0, `_handle_subagent_stop()` falls back to `_parse_subagent_from_projects_dir`: walk every `*.jsonl` in the CC projects dir and sum usage from lines where `agentName == agent.name`. It runs only when the primary parse misses AND the synthetic file is absent AND the marker resolved a named agent; on any failure it returns zero (same observable as pre-fix), so it never makes attribution worse.
+**SubagentStop transcript fallback (DWB-311).** CC's SubagentStop sends a synthetic `agent_transcript_path` that doesn't exist on disk; the real transcript is interleaved in the parent session's `.jsonl`, each line tagged `agentName`. When `parse_transcript()` returns 0, `_handle_subagent_stop()` falls back to `_parse_subagent_from_projects_dir`: sum usage from lines where `agentName == agent.name`. It runs only when the primary parse misses, the synthetic file is absent, and the marker resolved a named agent; on failure it returns zero, never worsening attribution.
 
-**Marker-based attribution (DWB-294 + DWB-304).** SubagentStop session_ids are generated by Claude Code internally and can't be pre-computed by the TL. The marker scheme bridges that gap:
-
-- TL writes a **pending marker** at spawn time: `.claude/agents/active/pending-<agent_id>-<unix_ms>-<rand4hex>` (file content = JSON dict, see below).
-- When `_handle_subagent_stop` fires, `resolve_agent_from_marker` first tries a literal lookup at `.claude/agents/active/<session_id>`; if missing, it **atomically renames** the oldest unconsumed `pending-*` marker for the project to `<session_id>` (consumed, never re-used).
-- Failures (missing marker, unparseable JSON, unresolved agent_id) write a `failed_hooks` row with a specific `reason` so the diagnostic isn't silent.
+**Marker-based attribution (DWB-294, 304).** SubagentStop session_ids are CC-internal and can't be pre-computed. The TL writes a **pending marker** at spawn: `.claude/agents/active/pending-<agent_id>-<unix_ms>-<rand4hex>` (JSON dict). On `_handle_subagent_stop`, `resolve_agent_from_marker` tries a literal `.claude/agents/active/<session_id>` lookup, else **atomically renames** the oldest unconsumed `pending-*` marker for the project to `<session_id>` (consumed once). Failures (missing/unparseable marker, unresolved agent_id) write a `failed_hooks` row with a specific `reason`.
 
 **Marker file format** (all marker files, both literal and pending, are JSON dicts):
 
@@ -320,11 +314,7 @@ SubagentStop creates a separate HookSession keyed on `agent_id` (not the parent 
 
 `agent_id` is the only authoritative field for attribution; the others are convenience/diagnostic.
 
-Workers get tokens attributed to their active ticket (in_progress, in_review, or recently done within ~5min). TL/PM get project overhead split across `tl_overhead_tokens` / `pm_overhead_tokens` buckets (DWB-305). Key files:
-- `app/services/hook_tracking.py` — all business logic, including marker resolution + `_parse_subagent_from_projects_dir` fallback
-- `app/routers/hooks.py` — 4 endpoints (never return 5xx; failures land in `failed_hooks` + `error_logs`)
-- `app/models/hook_session.py` — session state model
-- `app/models/failed_hook.py` — marker-resolution failure audit table
+Workers get tokens on their active ticket (in_progress/in_review/recently-done ~5min); TL/PM get project overhead (`tl_overhead_tokens`/`pm_overhead_tokens`, DWB-305). Key files: `hook_tracking.py` (logic incl marker resolution + projects-dir fallback), `routers/hooks.py` (4 endpoints, never 5xx; failures -> `failed_hooks` + `error_logs`), `models/hook_session.py`, `models/failed_hook.py`.
 
 ---
 
@@ -418,7 +408,7 @@ Projects enforce up to 7 gates via `force_test_run`, `force_test_coverage`, `for
 - Rework detection: in_progress after done creates failure_record + PM alert
 
 ### Token Tracking
-- **Primary (passive):** Claude Code lifecycle hooks automatically capture tokens and time via `POST /api/hooks/session-start` and `POST /api/hooks/session-end`. Workers get tokens on their active ticket (`in_progress` > `todo` > `in_review` > recently `done` within 5 min); TL/PM get overhead. Hooks increment `ticket.tokens_used` directly and project overhead fields (`tl_overhead_tokens`, `pm_overhead_tokens`).
+- **Primary (passive):** lifecycle hooks capture tokens/time (§5); they increment `ticket.tokens_used` and the project overhead fields directly. Worker priority: `in_progress` > `todo` > `in_review` > recently `done` (5 min).
 - **Per-ticket via tracking API:** `POST /api/tracking/tokens` inserts event + increments ticket
 - **Per-ticket legacy:** `POST /api/tickets/{id}/tokens` increments directly (also inserts tracking event)
 - **Per-project overhead:** `POST /api/projects/{id}/overhead` increments `tl_overhead_tokens` or `pm_overhead_tokens`
@@ -427,14 +417,17 @@ Projects enforce up to 7 gates via `force_test_run`, `force_test_coverage`, `for
 - **Project summary:** `GET /api/tracking/summary` — per-ticket, per-agent, per-sprint rollups
 
 ### Deterministic Action Capture
-CC hooks capture agent actions passively (DWB-417..421). `PostToolUse` POSTs to `/api/hooks/tool-use`; `Notification` and `PreCompact` POST to `/api/hooks/lifecycle-event`. Each `tool_actions` row classifies an `event_type` (see the table) and emits a semantic activity-feed verb; `message_sent` records the recipient only, never the body. Context (agent / ticket / dwb_session) resolves from `session_id` like session-end attribution; all FKs are nullable so a delivery gap never drops the row.
+CC hooks capture actions passively (DWB-417..421): `PostToolUse` -> `/api/hooks/tool-use`, `Notification`/`PreCompact` -> `/api/hooks/lifecycle-event`. Each `tool_actions` row classifies an `event_type` and emits a feed verb; `message_sent` records the recipient only, never the body. Context resolves from `session_id` like session-end; all FKs nullable so a delivery gap never drops the row.
 
 ### Agent Scoring
-Per-agent-per-project scoring (epic 28, DWB-424..428). The append-only `score_event` ledger is the source of truth; `agent_score` is a rebuildable cache. Two currencies: **reputation** (all-time, the leaderboard rank) and **influence** (per-sprint peer budget, default 20, ledger-derived so it auto-resets). Point values and caps live in `app/config/scoring.py`.
-- **Auto-triggers** (no agent action): ticket_closed (plus a no-rework bonus), rework, test_failure, stale, zero_token_close, gate_miss, forgot. Attributed via `ticket.assigned_agent_id` / `failure_record.logged_by`, not the capture-layer session attribution, so the right worker is credited.
-- **Human tools** (free, no influence cost): `/carrot` `/stick` `/score` `/leaderboard` slash commands -> `POST .../scores/award`.
-- **Peer economy:** `POST .../scores/peer` with an `X-Agent-ID` header. Flat - any agent may carrot/stick any other regardless of role; only self-scoring is barred. Anti-gaming caps and the 20 influence/sprint budget live in `config/scoring.py`.
-- **Broadcast:** every human and peer carrot/stick notifies all project agents via per-agent alerts (`alert.recipient_agent_id`); human events are critical severity, peer info. Auto-triggers do not broadcast.
+Per-agent-per-project scoring (epic 28, DWB-424..428). Append-only `score_event` ledger = source of truth; `agent_score` = rebuildable cache. Two currencies: **reputation** (all-time rank) and **influence** (per-sprint peer budget, default 20, ledger-derived, auto-resets). Values + caps in `app/config/scoring.py`.
+- **Auto-triggers** (no agent action): ticket_closed (+ no-rework bonus), rework, test_failure, stale, zero_token_close, gate_miss, forgot. Attributed via `ticket.assigned_agent_id` / `failure_record.logged_by`, not session attribution, so the right worker is credited.
+- **Human tools** (free): `/carrot` `/stick` `/score` `/leaderboard` -> `POST .../scores/award`.
+- **Peer economy:** `POST .../scores/peer` (`X-Agent-ID` header). Flat - any agent may carrot/stick any other; only self-scoring is barred. Caps + the 20 influence/sprint budget in `config/scoring.py`.
+- **Broadcast:** human + peer carrot/sticks notify all project agents via per-agent alerts (`alert.recipient_agent_id`); human critical, peer info. Auto-triggers do not broadcast.
+
+### Archie Channel (Cross-Project TL Messaging)
+`tl_messages` (DWB-436/437) is a cross-project channel for team-leads. A message is direct (`to_agent_id` set) or broadcast (`to_agent_id` NULL = all other TLs); every TL can read every message, and `tl_message_reads` tracks per-(message, agent) read state. Role guard: the sender and any named recipient must be `role=team-lead`, else 400. Ping: a direct send writes one alert to the target, a broadcast one per OTHER active team-lead (reusing `alert.recipient_agent_id`), each landing on the recipient's project board. On spawn, an archie's unread messages render atop its `identity.md` (in `scaffold_agent_dir`, beside the scoring standing block) and are marked read once shown; `/tl` is the reply path. The table is NOT project-scoped; `delete_project` clears messages sent from the deleted project.
 
 ### Alert Auto-Creation
 - Ticket marked done with 0 tokens -> info alert

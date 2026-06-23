@@ -199,15 +199,30 @@ _HOOKS_SETTINGS_BLOCK: dict = {
             "timeout": 30,
         }],
     }],
+    # Stop fires when the main agent finishes a turn. Two commands run with the
+    # same payload on stdin: (1) the session-end token POST, body discarded
+    # (-o /dev/null) so only (2) the DWB-443 channel-poke speaks - its stdout
+    # JSON is the Stop decision ({"decision":"block",...} when a team-lead has
+    # unread Archie Channel messages, else {}).
     "Stop": [{
-        "hooks": [{
-            "type": "command",
-            "command": (
-                "curl -sf -X POST http://localhost:8000/api/hooks/session-end "
-                "-H 'Content-Type: application/json' -d \"$(cat)\""
-            ),
-            "timeout": 30,
-        }],
+        "hooks": [
+            {
+                "type": "command",
+                "command": (
+                    "curl -sf -o /dev/null -X POST http://localhost:8000/api/hooks/session-end "
+                    "-H 'Content-Type: application/json' -d \"$(cat)\""
+                ),
+                "timeout": 30,
+            },
+            {
+                "type": "command",
+                "command": (
+                    "curl -sf -X POST http://localhost:8000/api/hooks/channel-poke "
+                    "-H 'Content-Type: application/json' -d \"$(cat)\""
+                ),
+                "timeout": 5,
+            },
+        ],
     }],
     "SubagentStop": [{
         "hooks": [{

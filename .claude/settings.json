@@ -38,8 +38,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -sf -X POST http://localhost:8000/api/hooks/session-end -H 'Content-Type: application/json' -d \"$(cat)\"",
+            "command": "curl -sf -o /dev/null -X POST http://localhost:8000/api/hooks/session-end -H 'Content-Type: application/json' -d \"$(cat)\"",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "curl -sf -X POST http://localhost:8000/api/hooks/channel-poke -H 'Content-Type: application/json' -d \"$(cat)\"",
+            "timeout": 5
           }
         ]
       }
