@@ -37,7 +37,7 @@ Archie reads the repo, runs the setup, creates your first project, and reports b
 React UI (Vite/5173) ──▶ FastAPI (:8000) ──▶ MySQL 8 (:23847)
 ```
 
-- **Backend** — FastAPI, SQLAlchemy 2.0, Pydantic v2. Three-layer: routers → services → models. 19 router files, 112 endpoints, 18 tables. Alembic migrations.
+- **Backend** — FastAPI, SQLAlchemy 2.0, Pydantic v2. Three-layer: routers → services → models. 23 router files, 138 endpoints, 24 tables. Alembic migrations.
 - **Frontend** — React 18, Vite, Zustand, React Router. Plain CSS with dark terminal aesthetic (JetBrains Mono). Adaptive polling: 2s active, 10s idle.
 - **Database** — MySQL 8.0 via Docker. PyMySQL driver.
 
@@ -61,15 +61,15 @@ Agent definitions in `.claude/agents/` auto-load when spawning teammates. Minimu
 
 Agents are assigned to projects via `project_agents`. The `X-Agent-ID` header on mutating requests attributes actions in the activity feed.
 
-**Per-project rows + system-wide unique names** (DWB-287, 2026-06-03; DWB-315, 2026-06-05). Every agent row carries `project_id` (a single project, no shared roster) and `agents.name` is `UNIQUE` across the whole system. Fixed-role agents that naturally recur on every project — TL, PM, occasionally tester — are stored with a `_<PROJECT_PREFIX>` suffix so they don't collide: `Archie_DWB`, `Pam_DWB`, `Archie_D2J`. Worker names (Devin, Pixel, Barry, Sylvie) stay plain until a real cross-project collision forces a rename. The identify endpoint accepts either the short name or the suffixed form, so spawn briefs continue to call `{name: "Archie", project_prefix: "DWB"}` and resolve correctly.
+**Per-project rows + system-wide unique names** (DWB-287, DWB-315). Every agent row carries a single `project_id`, and `agents.name` is `UNIQUE` system-wide. Fixed-role agents that recur on every project (TL, PM) get a `_<PROJECT_PREFIX>` suffix to avoid collisions: `Archie_DWB`, `Pam_DWB`. Worker names stay plain until a real collision forces a rename. The identify endpoint accepts either form.
 
-**Spawn-time identity flow.** When a teammate starts a session it calls `POST /api/agents/identify` to get its `agent_id` and memory dir. Before spawning, the TL writes a **pending marker** at `.claude/agents/active/pending-<agent_id>-<unix_ms>-<rand4hex>` with JSON content `{"agent_id": N, "agent_name": "...", "role": "...", "project_prefix": "DWB"}`. When the first SubagentStop hook fires, the resolver scans for the oldest unconsumed pending marker on this project and atomically renames it to the CC `session_id`. From that point on tokens land correctly on the named agent. See DWB-294 (marker authority) and DWB-304 (pending scheme + atomic rename).
+**Spawn-time identity flow.** A teammate calls `POST /api/agents/identify` for its `agent_id` and memory dir. Token attribution to subagents relies on a pending-marker scheme the TL writes at spawn time; mechanics in [ARCHITECTURE.md](ARCHITECTURE.md) § 5.
 
 ### Team Status
 
-The LiveSessions panel on each project page shows all assigned agents with real-time status. Agents appear active when they have an `in_progress` ticket. Elapsed time ticks from the ticket's `updated_at` timestamp.
+The LiveSessions panel on each project page shows all assigned agents with real-time status (active when they hold an `in_progress` ticket) and a leaderboard of scores (see Agent Scoring). Elapsed time ticks from the ticket's `updated_at`.
 
-**Stale ticket detection:** A frontend timer checks every second. When an in_progress ticket crosses a 10-minute boundary (10m, 20m, 30m...), it fires `POST /api/tickets/stale-check` which creates an alert. Thresholds are tracked per-session to prevent duplicate alerts.
+**Stale ticket detection:** A frontend timer fires `POST /api/tickets/stale-check` each time an in_progress ticket crosses a 10-minute boundary, raising a deduped alert.
 
 ### Deployable Playbooks
 
@@ -98,19 +98,15 @@ The `tracking_log` table is the source of truth. It records discrete events: `st
 
 Hook config lives in `.claude/settings.json`. Zero manual intervention needed.
 
-**Overhead** — TL/PM coordination tracked at the project level via `overhead_start`/`overhead_stop` events. Tokens land in per-role buckets (`projects.tl_overhead_tokens`, `projects.pm_overhead_tokens`), computed from `overhead_token_report` rows; the bucket sum must equal the project-wide overhead total (invariant enforced by migration + regression test).
+**Overhead** — TL/PM coordination tracks at the project level via `overhead_start`/`overhead_stop` events, landing in per-role buckets (`tl_overhead_tokens`, `pm_overhead_tokens`). `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total plus a separate `overhead_tokens` field, so PM/TL show a correct headline with the breakdown visible.
 
-**Per-agent rollup includes overhead.** `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total (ticket-attributed + overhead) plus a separate `overhead_tokens` field, so PM/TL agents show a correct headline number with the breakdown still visible.
-
-**SubagentStop fallback.** CC's SubagentStop hook reports a synthetic `agent_transcript_path` that doesn't exist on disk; the real subagent transcript lives inline in the parent `.jsonl` tagged with `agentName`. On a missing-file parse, `_handle_subagent_stop` walks the CC projects dir and sums usage from lines matching the resolved agent.
-
-Hooks handle backfill and recovery automatically; no separate scan script is needed.
+Hooks handle backfill and recovery automatically (including the SubagentStop synthetic-transcript fallback, detailed in ARCHITECTURE.md); no separate scan script is needed.
 
 ---
 
 ## DWB Sessions
 
-A DWB session is a user-bounded span of work: it opens when you signal the team to start, closes when you signal them to stop, and rolls up total tokens + wall-clock time across every CC session in between (TL, workers, subagents). One DWB session spans many CC sessions. Single-active per project, DB-enforced. Four detection layers (the Layer-2 Haiku AI classifier was retired in DWB-402): 1a regex fast path (UserPromptSubmit open/close), 1b regex retry (SessionEnd transcript scan), deterministic slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. Each row's `open_method`/`close_method` records which layer caught it (the `ai_classifier` value is kept as a tombstone for historical rows). Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
+A DWB session is a user-bounded span of work: it opens when you signal the team to start, closes when you signal stop, and rolls up tokens + wall-clock time across every CC session in between (TL, workers, subagents). One DWB session spans many CC sessions. Single-active per project, DB-enforced. Four detection layers (the Layer-2 Haiku classifier was retired in DWB-402): regex fast path on open/close phrases, a SessionEnd transcript retry, slash commands (`/dwb-open`, `/dwb-close`), and a 60-min idle sweeper. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
 
 ---
 
@@ -125,8 +121,8 @@ Boolean toggles that gate sprint completion. All default OFF (opt-in per project
 | `force_initial_md` | `INITIAL.md` exists at repo root |
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
 | `force_handoff_md` | `HANDOFF.md` exists at repo root |
-| `force_consolidation` | Every participating agent acked consolidation; all TL-owned shipped docs within token ceiling. Agent memory is gate-exempt (DWB-328, 400) |
-| `force_headers` | Sprint-touched `.py` files carry the standard code-header block; blocks close (HTTP 400) listing any missing. UI shows a token-cost warning when ON (DWB-403) |
+| `force_consolidation` | TL-owned shipped docs within token ceiling; agent memory is gate-exempt (DWB-328, 400) |
+| `force_headers` | Sprint-touched `.py` files carry the code-header block; missing ones block close (HTTP 400) |
 | Failure records | Unreviewed stubs always block close |
 
 Check gates: `GET /api/projects/{id}/gate-status`
@@ -145,11 +141,26 @@ Unreviewed failure stubs block sprint close. Summary: `GET /api/failure-records/
 
 ---
 
+## Agent Scoring
+
+Each agent earns a score per project, shown as a leaderboard on the project page. Two currencies:
+
+- **Reputation**: all-time standing, the rank. Driven by deterministic signals: ticket closes (plus a no-rework bonus) minus rework, test failures, stale tickets, zero-token closes, and gate misses.
+- **Influence**: a per-sprint budget (default 20) spent to praise or dock peers; ledger-derived, so it resets each sprint.
+
+An append-only `score_event` ledger is the source of truth; `agent_score` is a rebuildable cache. Every change carries a reason and is reversible.
+
+**Human tools** (free): `/carrot`, `/stick`, `/score`, `/leaderboard`.
+
+**Peer economy** is flat: any agent can carrot or stick any other regardless of role; only self-scoring is barred (anti-gaming caps in `config/scoring.py`). Every human and peer carrot/stick broadcasts to all project agents (human at critical severity); auto-triggers do not. The per-agent ledger lives on the AgentPage.
+
+---
+
 ## Alerts
 
 Alerts are flags raised by agents or automation that need human attention. Severities: info (blue), warning (yellow), critical (red).
 
-**Dashboard** — read-only table with columns: Project, Severity, Title, Created. Project links to the project page.
+**Dashboard** — read-only table: Project, Severity, Title, Created.
 
 **Project page** — full alert cards with dismiss and action buttons:
 - `$ dismiss all` — bulk dismiss open alerts
@@ -159,7 +170,7 @@ Alerts are flags raised by agents or automation that need human attention. Sever
 
 ## Jira Integration
 
-Projects can optionally link to Jira. One DWB ticket = one Jira issue (1:1 via `jira_issue_key`). Enable/disable via the Tools panel on the project page. Disabling clears all Jira links from project tickets (Jira data is never modified).
+Projects can optionally link to Jira. One DWB ticket = one Jira issue (1:1 via `jira_issue_key`). Enable/disable via the Tools panel. Disabling clears all Jira links from project tickets (Jira data is never modified).
 
 - Enable: `PATCH /api/projects/{id}` with `jira_project_key` and `jira_base_url`
 - Disable: `POST /api/projects/{id}/disable-jira`
@@ -168,7 +179,7 @@ Projects can optionally link to Jira. One DWB ticket = one Jira issue (1:1 via `
 
 ## Error Logging
 
-The frontend reports errors to the backend via `POST /api/errors`. The API client automatically captures failed requests (endpoint, status, message, stack trace). View logged errors via `GET /api/errors`.
+The frontend reports errors to the backend via `POST /api/errors`; the API client auto-captures failed requests (endpoint, status, message, stack trace). View via `GET /api/errors`.
 
 ---
 
@@ -188,7 +199,7 @@ Run history: `GET /api/test-results/performance`
 
 ## Adding a Project
 
-**Demo project:** `POST /api/projects/seed-demo` — creates a fully-populated demo project (prefix `DMO`) with agents, epics, sprints, tickets, test results, and alerts. Idempotent.
+**Demo project:** `POST /api/projects/seed-demo` — creates a fully-populated demo project (prefix `DMO`) with agents, epics, sprints, tickets, and test results. Idempotent.
 
 **From repo:** `POST /api/projects/from-repo` with `{"repo_path": "/path/to/repo"}` — auto-detects name, prefix, description.
 
@@ -198,11 +209,11 @@ Run history: `GET /api/test-results/performance`
 
 ## API Reference
 
-112 endpoints across 19 routers. Full interactive docs at http://localhost:8000/docs.
+138 endpoints across 23 routers. Full interactive docs at http://localhost:8000/docs.
 
 **Slim responses:** List endpoints strip heavy fields by default (test-results omit `details`, agents omit `api_key`); tickets/alerts/sprints support `?fields=slim`.
 
-Standard CRUD exists for all resources. Below are the non-obvious and automation endpoints:
+Standard CRUD exists for all resources; below are the non-obvious and automation endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -218,6 +229,11 @@ Standard CRUD exists for all resources. Below are the non-obvious and automation
 | GET | `/api/tracking/summary` | Project tracking summary (start/stop/tokens/overhead also under `/api/tracking/*`) |
 | POST | `/api/hooks/session-start` | Receive SessionStart hook |
 | POST | `/api/hooks/session-end` | Receive SessionEnd/SubagentStop hook |
+| POST | `/api/hooks/tool-use` | PostToolUse action capture (fire-and-forget) |
+| POST | `/api/hooks/lifecycle-event` | Notification / PreCompact capture |
+| GET | `/api/projects/{id}/scores` | Scoring leaderboard |
+| POST | `/api/projects/{id}/scores/award` | Human carrot/stick |
+| POST | `/api/projects/{id}/scores/peer` | Peer carrot/stick (`X-Agent-ID` header) |
 | GET | `/api/hooks/sessions` | List hook sessions (filter by `status=orphan` for cleanup) |
 | POST | `/api/sessions/open` | Open a DWB session — OMIT `opened_at` (server-stamped; AI methods ignore any supplied value) |
 | POST | `/api/sessions/{id}/close` | Close a DWB session — `headline` required on `ai_confident`/`ai_asked` (422 otherwise); the consolidation/compaction gate is opt-in via `force_consolidation` (default OFF) and counts only TL-owned shipped docs, never agent memory |
