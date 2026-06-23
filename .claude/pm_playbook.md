@@ -21,13 +21,13 @@
 Whenever you show tickets to the TL or the human, use this EXACT 8-column table, in this order — never reorder, never drop a column:
 
 ```
-| DWB # | Jira # | DWB Sprint | Jira Epic | Jira Sprint | Title | Owner | Status |
+| DWB # | Jira # | DWB Sprint | Jira Parent | Jira Sprint | Title | Owner | Status |
 ```
 
 - **DWB #** — internal key, `CI-NNN`.
 - **Jira #** — `POR-NNNN`.
 - **DWB Sprint** — the DWB sprint name/number.
-- **Jira Epic** — the parent Jira epic key (e.g. `POR-5152`).
+- **Jira Parent** — the parent Jira issue key. Which issue is the parent depends on the type (hierarchy is Epic > Story > Subtask): a story's or task's parent is its **epic**; a subtask's parent is its **story** (e.g. `POR-5152`).
 - **Jira Sprint** — the Jira sprint name.
 - **Title** — ticket title (trim very long ones).
 - **Owner** — the assigned agent / Jira assignee.
@@ -37,7 +37,7 @@ One row per ticket; `—` for an empty cell; filter to the current project only.
 
 **The tool does NOT emit this layout — you must re-shape its output.** `dwb2jira report` prints a *different* set:
 `DWB # | Jira # | Epic | Parent | Title | Status | Assignee | Jira Sprint | Created | Updated`
-(no DWB-Sprint column, Assignee instead of Owner, extra Parent / Created / Updated). Use `report` as the **data source**, then transform into the 8-column table above (map `Assignee`→`Owner`, add the DWB sprint, drop Parent/Created/Updated). **Never paste raw `report` output to the human** — that mismatch is the recurring "wrong columns" problem this section exists to kill.
+(no DWB-Sprint column, Assignee instead of Owner, separate Epic / Parent columns, extra Created / Updated). Use `report` as the **data source**, then transform into the 8-column table above (map `Assignee`→`Owner`, map `Parent`→`Jira Parent`, add the DWB sprint, drop Epic/Created/Updated). **Never paste raw `report` output to the human** — that mismatch is the recurring "wrong columns" problem this section exists to kill.
 
 ## Safety: Hard Limits on Jira Manipulation
 

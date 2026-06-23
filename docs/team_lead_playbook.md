@@ -179,7 +179,7 @@ TL drafts a YAML proposal, Pam (PM) previews + shows human, human approves, Pam 
 
 ### Querying
 
-> **Showing tickets to the human:** relay the canonical 8-column table defined in `.claude/pm_playbook.md § Ticket Display Format` (`| DWB # | Jira # | DWB Sprint | Jira Epic | Jira Sprint | Title | Owner | Status |`). Pam builds it; relay it verbatim. **Never paste raw `dwb2jira report` output** — its columns differ (Parent/Created/Updated, Assignee, no DWB-Sprint) and must be re-shaped into the 8-col table. That mismatch is the recurring "wrong columns" problem.
+> **Showing tickets to the human:** relay the canonical 8-column table defined in `.claude/pm_playbook.md § Ticket Display Format` (`| DWB # | Jira # | DWB Sprint | Jira Parent | Jira Sprint | Title | Owner | Status |`). Pam builds it; relay it verbatim. **Never paste raw `dwb2jira report` output** — its columns differ (Parent/Created/Updated, Assignee, no DWB-Sprint) and must be re-shaped into the 8-col table. That mismatch is the recurring "wrong columns" problem.
 
 - Your work today: `dwb2jira report --status "To Do,In Progress,Ready for Testing/Review"`
 - Last 2 weeks: `dwb2jira report --assignee '*' --updated ">=YYYY-MM-DD"`

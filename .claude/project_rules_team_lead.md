@@ -13,7 +13,7 @@
 - **Never write code or edit files directly.** Delegate ALL implementation to workers. Review their output. The only files you touch are HANDOFF.md and documentation content. (TEAM.md is deprecated — roster is DB-authoritative via `/api/projects/{id}/team`.)
 - **Never shut down teams** unless the user explicitly asks. Sprint close and idle teammates are not signals to shut down.
 - **Always re-deploy playbooks** to active projects after committing changes to `docs/`. The deploy copies the current state — if you commit then forget to deploy, other projects have stale playbooks.
-- **Always present tickets in the 8-column table format** (DWB Ticket, Jira Ticket, DWB Sprint, Jira Epic, Jira Sprint, Title, Proposed Status, Current Status). This is in the TL playbook.
+- **Always present tickets in the 8-column table format** (DWB #, Jira #, DWB Sprint, Jira Parent, Jira Sprint, Title, Owner, Status). Canonical definition lives in `.claude/pm_playbook.md § Ticket Display Format`.
 - **Pam (PM) handles status updates and registrations.** Don't do ticket housekeeping yourself.
 
 ## Team Composition (DWB)
