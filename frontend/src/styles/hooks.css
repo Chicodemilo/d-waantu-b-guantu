@@ -1,8 +1,8 @@
 /* Path: src/styles/hooks.css */
 /* File: hooks.css */
 /* Created: 2026-04-09 */
-/* Purpose: Styles for Team Status panel — agent roster with live/offline indicators, elapsed time, current ticket, and scoring leaderboard columns (reputation, sprint delta, influence) */
-/* Last Modified: 2026-06-22 */
+/* Purpose: Styles for Team Status panel — agent roster with live/offline indicators, elapsed time, current ticket, and scoring leaderboard columns (rank, reputation, sprint delta, influence, tier) with #1 + last-place accents (DWB-433) */
+/* Last Modified: 2026-06-23 */
 
 .live-sessions {
   border: 1px solid var(--border);
@@ -43,17 +43,54 @@
   background-color: rgba(74, 222, 128, 0.03);
 }
 
-/* Scoring leaderboard variant: adds Rep / Sprint / Infl columns between Type
-   and Last Seen. Grid widths kept tight so the row stays on one line. */
+/* Scoring leaderboard variant: adds Rank / Rep / Sprint / Infl / Tier columns
+   (DWB-433). Header and data rows share this exact template + gap so every
+   label sits directly above its values. Order: status, rank, name, type, rep,
+   sprint, infl, tier, last seen, ticket. The numeric columns (rank/rep/sprint/
+   infl) are right-aligned on both header and cells; tier gets its own wider
+   column so it is not crammed against infl. */
 .live-sessions--scored .live-sessions__header,
 .live-sessions--scored .live-sessions__row {
-  grid-template-columns: 36px 110px 52px 44px 52px 44px 84px 1fr;
+  grid-template-columns: 34px 32px 110px 56px 48px 58px 48px 76px 88px 1fr;
+  gap: 12px;
 }
 
 .live-sessions__col-status {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.live-sessions__col-rank {
+  text-align: right;
+  color: var(--gray);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-sessions__col-tier {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--gray);
+}
+
+/* #1 row: green left accent. Last place: red left accent. */
+.live-sessions__row--top {
+  background-color: rgba(74, 222, 128, 0.06);
+  box-shadow: inset 3px 0 0 var(--green);
+}
+
+.live-sessions__row--top .live-sessions__col-tier {
+  color: var(--green);
+}
+
+.live-sessions__row--bottom {
+  background-color: rgba(248, 113, 113, 0.06);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+.live-sessions__row--bottom .live-sessions__col-tier {
+  color: var(--red);
 }
 
 .live-sessions__col-num {

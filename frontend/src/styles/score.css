@@ -1,8 +1,8 @@
 /* Path: src/styles/score.css */
 /* File: score.css */
 /* Created: 2026-06-22 */
-/* Purpose: Styles for the per-agent score ledger panel on AgentPage (DWB-428) — score summary tiles and the append-only score_event history rows, matching the terminal aesthetic. */
-/* Last Modified: 2026-06-22 */
+/* Purpose: Styles for the per-agent score ledger panel on AgentPage (DWB-428) and the full per-project Scoreboard leaderboard on ProjectAgentsPage (DWB-433) — score summary tiles, the append-only score_event history rows, and the ranked scoreboard grid (rank/name/tier/rep/sprint/infl) with top + bottom-place accents, all matching the terminal aesthetic. */
+/* Last Modified: 2026-06-23 */
 
 .score-summary {
   display: flex;
@@ -32,6 +32,12 @@
   font-weight: 600;
   color: var(--orange);
   font-variant-numeric: tabular-nums;
+}
+
+.score-summary__value--tier {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 14px;
 }
 
 .score-summary__value.score-ledger__delta--up {
@@ -134,6 +140,217 @@
 }
 
 .score-ledger__empty {
+  color: var(--gray);
+  font-size: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}
+
+/* Scoreboard leaderboard (DWB-433) — full per-project ranking under the
+   Scoreboard tab on the team page. */
+.scoreboard {
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.scoreboard__header,
+.scoreboard__row {
+  display: grid;
+  grid-template-columns: 40px 1fr 72px 48px 58px 48px 188px;
+  gap: 8px;
+  padding: 7px 12px;
+  align-items: center;
+}
+
+.scoreboard__header,
+.scoreboard__group {
+  border-bottom: 1px solid var(--border);
+}
+
+.scoreboard__group:last-child {
+  border-bottom: none;
+}
+
+.scoreboard__header {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+}
+
+.scoreboard__row {
+  color: var(--gray-light);
+}
+
+.scoreboard__col-rank {
+  text-align: right;
+  color: var(--gray);
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreboard__col-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scoreboard__col-name a {
+  color: var(--orange);
+  text-decoration: none;
+}
+
+.scoreboard__col-name a:hover {
+  color: var(--orange-bright);
+  text-decoration: underline;
+}
+
+.scoreboard__col-tier {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--gray);
+}
+
+.scoreboard__col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreboard__delta--up {
+  color: var(--green);
+}
+
+.scoreboard__delta--down {
+  color: var(--red);
+}
+
+.scoreboard__delta--flat {
+  color: var(--gray-light);
+}
+
+/* #1 row: green left accent. Last place: red left accent. */
+.scoreboard__row--top {
+  background-color: rgba(74, 222, 128, 0.06);
+  box-shadow: inset 3px 0 0 var(--green);
+}
+
+.scoreboard__row--top:hover {
+  background-color: rgba(74, 222, 128, 0.1);
+}
+
+.scoreboard__row--top .scoreboard__col-tier {
+  color: var(--green);
+}
+
+.scoreboard__row--bottom {
+  background-color: rgba(248, 113, 113, 0.06);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+.scoreboard__row--bottom:hover {
+  background-color: rgba(248, 113, 113, 0.1);
+}
+
+.scoreboard__row--bottom .scoreboard__col-tier {
+  color: var(--red);
+}
+
+/* Inline carrot/stick controls (DWB-434). */
+.scoreboard__col-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.scoreboard__btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--gray-light);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.scoreboard__btn:hover:not(:disabled) {
+  border-color: var(--gray-light);
+}
+
+.scoreboard__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.scoreboard__btn--carrot:hover:not(:disabled),
+.scoreboard__btn--confirm {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.scoreboard__btn--stick:hover:not(:disabled) {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.scoreboard__btn--cancel {
+  color: var(--gray);
+}
+
+/* Expanded in-place confirm strip under the row. */
+.scoreboard__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 10px 48px;
+  background-color: var(--bg-hover);
+  font-size: 11px;
+}
+
+.scoreboard__reason {
+  flex: 1 1 220px;
+  min-width: 160px;
+  background-color: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
+.scoreboard__reason:focus {
+  outline: none;
+  border-color: var(--green);
+}
+
+.scoreboard__confirm-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gray-light);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.scoreboard__sep {
+  color: var(--gray);
+}
+
+.scoreboard__error {
+  color: var(--red);
+  flex-basis: 100%;
+}
+
+.scoreboard__empty {
   color: var(--gray);
   font-size: 12px;
   padding: 12px;

@@ -1,12 +1,12 @@
 // Path: src/components/project/ActivityFeed.jsx
 // File: ActivityFeed.jsx
 // Created: 2026-03-29
-// Purpose: Live-polling activity feed showing recent project events with columnar layout, semantic-verb-aware rendering, and relative timestamps
+// Purpose: Live-polling activity feed showing recent project events with columnar layout, semantic-verb-aware rendering (incl. scoring events score_awarded/score_docked/lead_change, DWB-433 part 4), and relative timestamps
 // Caller: ProjectPage.jsx
 // Callees: react (useState, useEffect, useRef), react-router-dom (Link), api/activityFeed (getActivityFeed)
 // Data In: projectId prop
 // Data Out: default export ActivityFeed component
-// Last Modified: 2026-06-22
+// Last Modified: 2026-06-23
 
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
@@ -99,6 +99,22 @@ function renderActivity(entry, projectId) {
   if (type === 'agent') {
     if (action === 'consolidation_acked') {
       return <>acked consolidation (sprint {details.sprint_id})</>;
+    }
+    // Scoring feed events (DWB-432 backend, DWB-433 part 4). The subject agent
+    // is in details.agent; the actor (who awarded) renders in the Worker column.
+    if (action === 'score_awarded' || action === 'score_docked') {
+      const who = details.agent || (entry.entity_id ? `agent #${entry.entity_id}` : 'agent');
+      const n = Number(details.delta) || 0;
+      const sign = n > 0 ? `+${n}` : `${n}`;
+      const cls = n > 0 ? 'activity-feed__score--up' : 'activity-feed__score--down';
+      const reason = details.reason ? ` ${truncate(details.reason, 50)}` : '';
+      return <>{who} <span className={cls}>{sign}</span>{reason}</>;
+    }
+    if (action === 'lead_change') {
+      const newLeader = details.new_leader || 'someone';
+      return details.previous_leader
+        ? <>{newLeader} overtook {details.previous_leader} for #1</>
+        : <>{newLeader} took #1</>;
     }
   }
 

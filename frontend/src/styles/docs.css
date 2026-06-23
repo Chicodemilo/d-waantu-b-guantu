@@ -1,8 +1,45 @@
 /* Path: src/styles/docs.css */
 /* File: docs.css */
 /* Created: 2026-03-29 */
-/* Purpose: Styles for project and system docs pages — doc cards, expand/collapse, content display */
-/* Last Modified: 2026-06-05 */
+/* Purpose: Styles for project and system docs pages — doc cards, expand/collapse, content display; plus the team page Roster | Scoreboard tab bar (DWB-433) */
+/* Last Modified: 2026-06-23 */
+
+/* Team page tab bar (DWB-433) — Roster | Scoreboard. */
+.team-tab-bar {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.team-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--gray);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.team-tab:hover {
+  color: var(--green);
+}
+
+.team-tab--active {
+  color: var(--green-bright);
+  border-bottom-color: var(--green);
+}
+
+/* Roster table reputation Score column (DWB-435). */
+.agents-table__score {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 .docs-list {
   display: flex;

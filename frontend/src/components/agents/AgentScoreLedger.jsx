@@ -1,15 +1,16 @@
 // Path: src/components/agents/AgentScoreLedger.jsx
 // File: AgentScoreLedger.jsx
 // Created: 2026-06-22
-// Purpose: Per-agent score ledger panel (DWB-428). Shows the agent's current reputation / influence / this-sprint delta, then the append-only score_event history (newest first): signed delta colored up/down, trigger_type, reason, and for peer events the actor name + influence cost. Reverted rows are visually marked. Data from GET /api/agents/:id/score?project_id= (DWB-424).
+// Purpose: Per-agent score ledger panel (DWB-428). Shows the agent's current rank + tier (DWB-434 part 2, from DWB-432 fields), reputation / influence / this-sprint delta, then the append-only score_event history (newest first): signed delta colored up/down, trigger_type, reason, and for peer events the actor name + influence cost. Reverted rows are visually marked. Data from GET /api/agents/:id/score?project_id= (DWB-424).
 // Caller: pages/AgentPage.jsx
-// Callees: react (useState, useEffect), api/scores (getAgentScore), styles/score.css
+// Callees: react (useState, useEffect), api/scores (getAgentScore), utils/scoring (tierLabel), styles/score.css
 // Data In: agentId, projectId props
 // Data Out: Default export AgentScoreLedger component
-// Last Modified: 2026-06-22
+// Last Modified: 2026-06-23
 
 import { useState, useEffect } from 'react';
 import { getAgentScore } from '../../api/scores';
+import { tierLabel } from '../../utils/scoring';
 import '../../styles/score.css';
 
 function formatDelta(delta) {
@@ -87,6 +88,18 @@ function AgentScoreLedger({ agentId, projectId }) {
       <div className="agent-detail__section-title">Score Ledger</div>
 
       <div className="score-summary">
+        <div className="score-summary__item">
+          <span className="score-summary__label">Rank</span>
+          <span className="score-summary__value">
+            {score.rank != null ? `#${score.rank}` : '-'}
+          </span>
+        </div>
+        <div className="score-summary__item">
+          <span className="score-summary__label">Tier</span>
+          <span className="score-summary__value score-summary__value--tier">
+            {tierLabel(score.tier) || '-'}
+          </span>
+        </div>
         <div className="score-summary__item">
           <span className="score-summary__label">Reputation</span>
           <span className="score-summary__value">{score.reputation}</span>

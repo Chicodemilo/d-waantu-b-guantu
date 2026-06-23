@@ -41,6 +41,17 @@
   letter-spacing: 1px;
 }
 
+/* Per-project reputation badge (DWB-435). */
+.agent-card__rep {
+  font-size: 11px;
+  color: var(--gray-light);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
 .agent-card__desc {
   font-size: 12px;
   color: var(--gray-light);

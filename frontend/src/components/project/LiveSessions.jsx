@@ -1,18 +1,19 @@
 // Path: src/components/project/LiveSessions.jsx
 // File: LiveSessions.jsx
 // Created: 2026-04-09
-// Purpose: Team status panel - per-project agent roster rendered as a scoring leaderboard (DWB-428). Liveness is driven by the DB-authoritative GET /api/projects/{id}/team endpoint (presumed_live + last_seen, shipped in DWB-387). Scoring (reputation, this-sprint delta, influence remaining) is joined in from GET /api/projects/{id}/scores (DWB-424), which already returns the full roster sorted top-first; rows are reordered to preserve that leaderboard order. Columns: status dot from presumed_live, name, role-bucket, reputation, sprint delta, influence, last_seen ("3m ago"), current ticket (from store tickets where status === 'in_progress'). The stale-ticket POST to /api/tickets/stale-check remains here (10/20/30 min thresholds) since it's tightly coupled to this view's agent/ticket join.
+// Purpose: Team status panel - per-project agent roster rendered as a scoring leaderboard (DWB-428, ranking columns DWB-433). Liveness is driven by the DB-authoritative GET /api/projects/{id}/team endpoint (presumed_live + last_seen, shipped in DWB-387). Scoring (rank, reputation, this-sprint delta, influence remaining, tier) is joined in from GET /api/projects/{id}/scores (DWB-424), which already returns the full roster sorted top-first; rows are reordered to preserve that leaderboard order. Columns: status dot from presumed_live, rank #, name, role-bucket, reputation, sprint delta, influence, tier label, last_seen ("3m ago"), current ticket (from store tickets where status === 'in_progress'). The #1 and last-place rows are visually accented. The stale-ticket POST to /api/tickets/stale-check remains here (10/20/30 min thresholds) since it's tightly coupled to this view's agent/ticket join.
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect, useRef), react-router-dom (Link), store/useStore, api/projectAgents (getProjectTeam), api/scores (getProjectScores), config (API_BASE_URL), styles/hooks.css
+// Callees: react (useState, useEffect, useRef), react-router-dom (Link), store/useStore, api/projectAgents (getProjectTeam), api/scores (getProjectScores), utils/scoring, config (API_BASE_URL), styles/hooks.css
 // Data In: projectId prop
 // Data Out: Default export LiveSessions component
-// Last Modified: 2026-06-22
+// Last Modified: 2026-06-23
 
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import { getProjectTeam } from '../../api/projectAgents';
 import { getProjectScores } from '../../api/scores';
+import { tierLabel, rowRank, isTopRow, isBottomRow } from '../../utils/scoring';
 import { API_BASE_URL } from '../../config';
 import '../../styles/hooks.css';
 
@@ -160,39 +161,51 @@ function LiveSessions({ projectId }) {
   // the scores payload fall to the bottom; defaults match an unscored agent.
   const scoreByAgent = {};
   scores.forEach((s, i) => {
-    scoreByAgent[s.agent_id] = { ...s, rank: i };
+    scoreByAgent[s.agent_id] = { ...s, _order: i };
   });
   const orderedTeam = [...team].sort((a, b) => {
-    const ra = scoreByAgent[a.agent_id]?.rank ?? Number.MAX_SAFE_INTEGER;
-    const rb = scoreByAgent[b.agent_id]?.rank ?? Number.MAX_SAFE_INTEGER;
+    const ra = scoreByAgent[a.agent_id]?._order ?? Number.MAX_SAFE_INTEGER;
+    const rb = scoreByAgent[b.agent_id]?._order ?? Number.MAX_SAFE_INTEGER;
     return ra - rb;
   });
+  const total = orderedTeam.length;
 
   return (
     <div className="live-sessions live-sessions--scored">
       <div className="live-sessions__header">
         <span className="live-sessions__col-status">Status</span>
+        <span className="live-sessions__col-rank">#</span>
         <span className="live-sessions__col-name">Name</span>
         <span className="live-sessions__col-type">Type</span>
         <span className="live-sessions__col-num">Rep</span>
         <span className="live-sessions__col-num">Sprint</span>
         <span className="live-sessions__col-num">Infl</span>
+        <span className="live-sessions__col-tier">Tier</span>
         <span className="live-sessions__col-time">Last Seen</span>
         <span className="live-sessions__col-ticket">Current Ticket</span>
       </div>
-      {orderedTeam.map((agent) => {
+      {orderedTeam.map((agent, i) => {
         const score = scoreByAgent[agent.agent_id] || { reputation: 0, sprint_delta: 0, influence: 20 };
         const agentTickets = projectTickets
           .filter((t) => t.assigned_agent_id === agent.agent_id)
           .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
         const currentTicket = agentTickets[0] || null;
         const live = !!agent.presumed_live;
+        const top = isTopRow(score, i, total);
+        const bottom = isBottomRow(score, i, total);
+        const rankClass = top
+          ? ' live-sessions__row--top'
+          : bottom
+            ? ' live-sessions__row--bottom'
+            : '';
+        const label = tierLabel(score.tier);
 
         return (
-          <div key={agent.agent_id} className={`live-sessions__row${live ? ' live-sessions__row--active' : ''}`}>
+          <div key={agent.agent_id} className={`live-sessions__row${live ? ' live-sessions__row--active' : ''}${rankClass}`}>
             <span className="live-sessions__col-status">
               <span className={`live-sessions__dot${live ? '' : ' live-sessions__dot--inactive'}`} />
             </span>
+            <span className="live-sessions__col-rank">{rowRank(score, i)}</span>
             <span className="live-sessions__col-name">{agent.name}</span>
             <span className="live-sessions__col-type">{roleBucket(agent.role)}</span>
             <span className="live-sessions__col-num">{score.reputation}</span>
@@ -200,6 +213,7 @@ function LiveSessions({ projectId }) {
               {formatDelta(score.sprint_delta)}
             </span>
             <span className="live-sessions__col-num">{score.influence}</span>
+            <span className="live-sessions__col-tier">{label || '-'}</span>
             <span className="live-sessions__col-time">{formatLastSeen(agent.last_seen)}</span>
             <span className="live-sessions__col-ticket">
               {currentTicket ? (

@@ -1,19 +1,21 @@
 // Path: src/pages/ProjectAgentsPage.jsx
 // File: ProjectAgentsPage.jsx
 // Created: 2026-03-29
-// Purpose: Team page — deploy playbooks button, agent roster table, and playbook inspector
+// Purpose: Team page — tabbed Roster | Scoreboard. Roster tab: deploy playbooks button, agent roster table (with a per-agent reputation Score column, DWB-435), and playbook inspector. Scoreboard tab (DWB-433): full per-project scoring leaderboard.
 // Caller: App.jsx (route: /projects/:id/agents)
-// Callees: react, react-router-dom, ../store/useStore, ../api/projects (deployPlaybooks), ../components/common/StatusBadge, ../components/project/PlaybookInspector, ../styles/docs.css
+// Callees: react, react-router-dom, ../store/useStore, ../api/projects (deployPlaybooks), ../api/scores (getProjectScores), ../components/common/StatusBadge, ../components/project/PlaybookInspector, ../components/project/Scoreboard, ../styles/docs.css
 // Data In: Route param (id), project and agents from Zustand store
 // Data Out: Default export ProjectAgentsPage component
-// Last Modified: 2026-06-05
+// Last Modified: 2026-06-23
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { deployPlaybooks } from '../api/projects';
+import { getProjectScores } from '../api/scores';
 import StatusBadge from '../components/common/StatusBadge';
 import PlaybookInspector from '../components/project/PlaybookInspector';
+import Scoreboard from '../components/project/Scoreboard';
 import '../styles/docs.css';
 
 function ProjectAgentsPage() {
@@ -22,6 +24,21 @@ function ProjectAgentsPage() {
   const agents = useStore((s) => s.getAgentsByProject(id));
   const [deploying, setDeploying] = useState(false);
   const [deployResult, setDeployResult] = useState(null);
+  const [activeTab, setActiveTab] = useState('roster');
+  const [repByAgent, setRepByAgent] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    getProjectScores(id)
+      .then((rows) => {
+        if (cancelled) return;
+        const map = {};
+        (Array.isArray(rows) ? rows : []).forEach((r) => { map[r.agent_id] = r.reputation; });
+        setRepByAgent(map);
+      })
+      .catch(() => { if (!cancelled) setRepByAgent({}); });
+    return () => { cancelled = true; };
+  }, [id]);
 
   const handleDeploy = async () => {
     setDeploying(true);
@@ -42,6 +59,23 @@ function ProjectAgentsPage() {
         <Link to={`/projects/${id}`}>&larr; Back to project</Link>
         <span>{project ? `${project.prefix} Team` : 'Team'}</span>
       </div>
+      <div className="team-tab-bar">
+        <button
+          className={`team-tab${activeTab === 'roster' ? ' team-tab--active' : ''}`}
+          onClick={() => setActiveTab('roster')}
+        >
+          Roster
+        </button>
+        <button
+          className={`team-tab${activeTab === 'scoreboard' ? ' team-tab--active' : ''}`}
+          onClick={() => setActiveTab('scoreboard')}
+        >
+          Scoreboard
+        </button>
+      </div>
+      {activeTab === 'scoreboard' && <Scoreboard projectId={id} />}
+      {activeTab === 'roster' && (
+      <>
       {project?.repo_path && (
         <div className="team-deploy">
           <button
@@ -79,6 +113,7 @@ function ProjectAgentsPage() {
         <thead>
           <tr>
             <th>Name</th>
+            <th className="agents-table__score">Score</th>
             <th>Type</th>
             <th>Role</th>
             <th>Description</th>
@@ -97,6 +132,7 @@ function ProjectAgentsPage() {
                   {agent.name}
                 </Link>
               </td>
+              <td className="agents-table__score">{repByAgent[agent.id] ?? 0}</td>
               <td>{type}</td>
               <td>{agent.role}</td>
               <td>{agent.description}</td>
@@ -115,6 +151,8 @@ function ProjectAgentsPage() {
         <div className="playbook-inspector__wrapper">
           <PlaybookInspector projectId={id} />
         </div>
+      )}
+      </>
       )}
     </div>
   );

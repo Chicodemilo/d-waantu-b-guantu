@@ -310,3 +310,70 @@ describe('ActivityFeed (semantic verbs, DWB-412)', () => {
     await screen.findByText(/closed DWB session #36: Shipped semantic feed/);
   });
 });
+
+describe('ActivityFeed (scoring events, DWB-433 part 4)', () => {
+  it('renders score_awarded as subject + signed positive delta + reason', async () => {
+    getActivityFeed.mockResolvedValue([
+      {
+        id: 20,
+        action: 'score_awarded',
+        entity_type: 'agent',
+        entity_id: 21,
+        details: { agent: 'Barry_DWB', delta: 10, source: 'human', reason: 'great catch' },
+        agent_name: 'Archie_DWB',
+        agent_role: 'team-lead',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    const { container } = renderFeed(1);
+
+    const delta = await screen.findByText('+10');
+    expect(delta.className).toContain('activity-feed__score--up');
+    const activity = container.querySelector('.activity-feed__entry .activity-feed__col-activity');
+    expect(activity.textContent.replace(/\s+/g, ' ').trim()).toBe('Barry_DWB +10 great catch');
+  });
+
+  it('renders score_docked with a signed negative delta', async () => {
+    getActivityFeed.mockResolvedValue([
+      {
+        id: 21,
+        action: 'score_docked',
+        entity_type: 'agent',
+        entity_id: 19,
+        details: { agent: 'Freddie', delta: -5, source: 'peer', reason: 'flaky test' },
+        agent_name: 'Sage',
+        agent_role: 'tester',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    const { container } = renderFeed(1);
+
+    const delta = await screen.findByText('-5');
+    expect(delta.className).toContain('activity-feed__score--down');
+    const activity = container.querySelector('.activity-feed__entry .activity-feed__col-activity');
+    expect(activity.textContent.replace(/\s+/g, ' ').trim()).toBe('Freddie -5 flaky test');
+  });
+
+  it('renders lead_change as a leader handoff', async () => {
+    getActivityFeed.mockResolvedValue([
+      {
+        id: 22,
+        action: 'lead_change',
+        entity_type: 'agent',
+        entity_id: 21,
+        details: { new_leader: 'Barry_DWB', previous_leader: 'Sage' },
+        agent_name: null,
+        agent_role: null,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    const { container } = renderFeed(1);
+
+    await waitFor(() => expect(
+      container.querySelector('.activity-feed__entry .activity-feed__col-activity').textContent.replace(/\s+/g, ' ').trim()
+    ).toBe('Barry_DWB overtook Sage for #1'));
+  });
+});

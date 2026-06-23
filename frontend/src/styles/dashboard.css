@@ -642,6 +642,17 @@
   font-size: 11px;
 }
 
+/* Scoring feed event delta (DWB-433 part 4): carrot green, stick red. */
+.activity-feed__score--up {
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-feed__score--down {
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 768px) {
   .project-sprint-row {
     grid-template-columns: 1fr;
