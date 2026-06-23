@@ -150,3 +150,62 @@ class TestScaffoldErrors:
         body = r.json()
         assert body["skipped"] is True
         assert "repo_path" in body["skip_reason"]
+
+
+class TestIdentityStandingBlock:
+    """DWB-431: identity.md opens with the agent's live scoring standing."""
+
+    def _setup(self, client, tmp_path, prefix):
+        project = client.post("/api/projects", json={
+            "prefix": prefix, "name": f"Stand {prefix}", "repo_path": str(tmp_path),
+        }).json()
+        agent = client.post("/api/agents", json={
+            "project_id": project["id"], "name": f"Bot{prefix}",
+            "role": "backend-worker", "api_key": f"{prefix}-bot",
+        }).json()
+        client.post("/api/project-agents", json={
+            "project_id": project["id"], "agent_id": agent["id"],
+        })
+        return project, agent
+
+    def test_identity_opens_with_best_standing(self, client, db_session, tmp_path):
+        from app.models.score_event import ScoreSource, ScoreTriggerType
+        from app.services import scoring as scoring_svc
+
+        project, agent = self._setup(client, tmp_path, "STB1")
+        scoring_svc.apply_score_event(
+            db_session, project_id=project["id"], subject_agent_id=agent["id"],
+            trigger_type=ScoreTriggerType.ticket_closed, delta=9,
+            source=ScoreSource.auto, reason="x",
+        )
+        r = client.post(f"/api/agents/{agent['id']}/scaffold-memory")
+        assert r.status_code == 200
+        identity = (_memory_dir(tmp_path, "STB1", "BotSTB1") / "identity.md").read_text()
+        # The block is at the very TOP, before the Identity header.
+        assert identity.startswith(">> YOUR STANDING: #1 of 1 on STB1  |  reputation 9")
+        assert "The best agent on this team" in identity
+        assert "# Identity - BotSTB1" in identity  # existing content intact
+
+    def test_identity_unscored_line(self, client, tmp_path):
+        project, agent = self._setup(client, tmp_path, "STB2")
+        # no score events -> unscored
+        r = client.post(f"/api/agents/{agent['id']}/scaffold-memory")
+        assert r.status_code == 200
+        identity = (_memory_dir(tmp_path, "STB2", "BotSTB2") / "identity.md").read_text()
+        assert identity.startswith(">> YOUR STANDING: #1 of 1 on STB2  |  reputation 0")
+        assert "No score yet. Your first clean closes set your reputation." in identity
+
+    def test_identity_still_generates_when_scoring_raises(self, client, tmp_path, monkeypatch):
+        project, agent = self._setup(client, tmp_path, "STB3")
+
+        def _boom(*a, **k):
+            raise RuntimeError("scoring exploded")
+
+        monkeypatch.setattr("app.services.scoring.get_standing", _boom)
+        r = client.post(f"/api/agents/{agent['id']}/scaffold-memory")
+        assert r.status_code == 200
+        identity = (_memory_dir(tmp_path, "STB3", "BotSTB3") / "identity.md").read_text()
+        # Block omitted, but identity.md still fully generated.
+        assert ">> YOUR STANDING" not in identity
+        assert "# Identity - BotSTB3" in identity
+        assert "## On Spawn - Read These First" in identity

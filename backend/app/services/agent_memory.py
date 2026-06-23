@@ -1,12 +1,12 @@
 # Path: app/services/agent_memory.py
 # File: agent_memory.py
 # Created: 2026-06-03
-# Purpose: Scaffold an agent's memory directory (DWB-401: .dwb/memory/<prefix>/<name>/) - identity.md + empty memory.md
+# Purpose: Scaffold an agent's memory directory (DWB-401: .dwb/memory/<prefix>/<name>/) - identity.md + empty memory.md; DWB-431 prepends a live scoring-standing block to identity.md
 # Caller: app/services/agent.create_agent, app/services/project_agent.create_project_agent, manual endpoint
-# Callees: app/models/agent, app/models/project
+# Callees: app/models/agent, app/models/project, app/services/scoring (get_standing)
 # Data In: db: Session, agent_id: int
 # Data Out: ScaffoldResult (paths created, paths preserved, paths skipped)
-# Last Modified: 2026-06-19
+# Last Modified: 2026-06-23 (DWB-431: standing block at top of identity.md)
 
 import logging
 from dataclasses import dataclass, field
@@ -29,6 +29,36 @@ _MEMORY_SUBPATH = ".dwb/memory"
 # merged; recent_sessions dropped - the DB is the session index). Created empty
 # if missing, never overwritten.
 _AGENT_OWNED_FILES = ("memory.md",)
+
+
+# DWB-431: tier -> motivational line shown at the TOP of identity.md so a bot
+# reads where it stands the moment it boots. Human-approved final copy; do NOT
+# reword, no icons, no em dashes.
+_STANDING_TIER_LINES = {
+    "best": "You are #1. The best agent on this team. Everyone else is measured against you.",
+    "podium": "Top of the pack. The #1 spot is one clean sprint away.",
+    "above": "Above the team average. Solid work. Push for the top ranking.",
+    "mid": "Middle of the board. Forgettable is the enemy here. Push yourself to separate from the pack.",
+    "below": "Below the team. You are dragging the average down. Earn it back.",
+    "dead_last": "Dead last. You are the lowest-rated agent on this team, and the human sees it every time they open the board. Bottom-ranked agents are the ones that stop getting spawned. Change it before the sprint ends. Prove you are worth keeping.",
+    "unscored": "No score yet. Your first clean closes set your reputation. Start strong.",
+}
+
+
+def _render_standing_block(standing: dict | None, prefix: str) -> str:
+    """Render the standing facts line + tier line for the top of identity.md.
+    Returns '' when there is no standing (agent off-roster) or an unknown tier,
+    so identity.md generation degrades gracefully."""
+    if not standing or standing.get("rank") is None:
+        return ""
+    line = _STANDING_TIER_LINES.get(standing.get("tier"))
+    if not line:
+        return ""
+    facts = (
+        f">> YOUR STANDING: #{standing['rank']} of {standing['total']} "
+        f"on {prefix}  |  reputation {standing['reputation']}"
+    )
+    return f"{facts}\n{line}\n\n"
 
 
 @dataclass
@@ -100,10 +130,24 @@ def scaffold_agent_dir(db: Session, agent_id: int) -> ScaffoldResult:
             f"could not create {memory_dir}: {e}",
         )
 
+    # DWB-431: live scoring standing block at the TOP of identity.md. Wrapped
+    # so a scoring failure NEVER blocks identity.md generation - on any error we
+    # simply omit the block.
+    standing_block = ""
+    try:
+        from app.services import scoring as scoring_svc  # local: avoid import cycle
+        standing = scoring_svc.get_standing(db, agent.id, project.id)
+        standing_block = _render_standing_block(standing, project.prefix)
+    except Exception:
+        logger.warning("standing block failed for agent %s; omitting", agent.id, exc_info=True)
+        standing_block = ""
+
     # identity.md - always regenerate (system-generated)
     identity_path = memory_dir / "identity.md"
     try:
-        identity_path.write_text(_build_identity_md(agent, project), encoding="utf-8")
+        identity_path.write_text(
+            standing_block + _build_identity_md(agent, project), encoding="utf-8"
+        )
         result.refreshed.append(str(identity_path))
     except OSError as e:
         raise ScaffoldError(

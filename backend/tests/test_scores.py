@@ -342,6 +342,67 @@ class TestAgentLookupByName:
         assert r.status_code == 404
 
 
+class TestStanding:
+    def _board(self, client, db_session, make_project, make_agent, reps):
+        """Build a project with len(reps) rostered agents; agent i gets
+        reputation reps[i] via a ticket_closed event (so it has score events).
+        Returns (project_id, [agent_ids in creation order])."""
+        project = make_project()
+        pid = project["id"]
+        ids = []
+        for i, rep in enumerate(reps):
+            a = make_agent(project_id=pid, name=f"Stand{i}_{pid}",
+                           role="backend-worker", api_key=f"stand-{pid}-{i}")
+            client.post("/api/project-agents", json={"project_id": pid, "agent_id": a["id"]})
+            ids.append(a["id"])
+            if rep != 0:
+                svc.apply_score_event(db_session, project_id=pid, subject_agent_id=a["id"],
+                                      trigger_type=ScoreTriggerType.ticket_closed, delta=rep,
+                                      source=ScoreSource.auto, reason="seed")
+        return pid, ids
+
+    def test_full_tier_ladder_eight_agents(self, client, db_session, make_project, make_agent):
+        # descending reputations -> ranks 1..8
+        reps = [80, 70, 60, 50, 40, 30, 20, 10]
+        pid, ids = self._board(client, db_session, make_project, make_agent, reps)
+        expected = ["best", "podium", "above", "above", "mid", "mid", "below", "dead_last"]
+        for idx, agent_id in enumerate(ids):
+            st = svc.get_standing(db_session, agent_id, pid)
+            assert st["rank"] == idx + 1, (idx, st)
+            assert st["total"] == 8
+            assert st["tier"] == expected[idx], (idx, st)
+        # #1 facts
+        top = svc.get_standing(db_session, ids[0], pid)
+        assert top["reputation"] == 80 and top["tier"] == "best"
+
+    def test_unscored_tier(self, client, db_session, make_project, make_agent):
+        project = make_project()
+        pid = project["id"]
+        scored = make_agent(project_id=pid, name=f"Scored_{pid}", role="backend-worker",
+                            api_key=f"sc-{pid}")
+        unscored = make_agent(project_id=pid, name=f"Unscored_{pid}", role="backend-worker",
+                              api_key=f"un-{pid}")
+        for a in (scored, unscored):
+            client.post("/api/project-agents", json={"project_id": pid, "agent_id": a["id"]})
+        svc.apply_score_event(db_session, project_id=pid, subject_agent_id=scored["id"],
+                              trigger_type=ScoreTriggerType.ticket_closed, delta=5,
+                              source=ScoreSource.auto, reason="x")
+        st = svc.get_standing(db_session, unscored["id"], pid)
+        assert st["tier"] == "unscored"
+        assert st["reputation"] == 0
+
+    def test_tiny_roster_two_agents(self, client, db_session, make_project, make_agent):
+        pid, ids = self._board(client, db_session, make_project, make_agent, [5, 2])
+        assert svc.get_standing(db_session, ids[0], pid)["tier"] == "best"
+        assert svc.get_standing(db_session, ids[1], pid)["tier"] == "dead_last"
+
+    def test_off_roster_agent_returns_none(self, client, db_session, scored_project, make_agent):
+        pid = scored_project["project_id"]
+        outsider = make_agent(name=f"OffRoster_{pid}", role="backend-worker",
+                              api_key=f"off-{pid}")
+        assert svc.get_standing(db_session, outsider["id"], pid) is None
+
+
 class TestProjectMembershipGuard:
     """DWB-430: scores can only be written against agents on the project."""
 

@@ -6,7 +6,7 @@
 # Callees: app/models/score_event.py, app/models/agent_score.py, app/models/alert.py, app/models/sprint.py, app/models/agent.py, app/models/project_agent.py, app/config/scoring.py
 # Data In: db: Session, score event fields
 # Data Out: ScoreEvent, AgentScore, Alert (broadcast), leaderboard / ledger dicts
-# Last Modified: 2026-06-23 (DWB-427: peer economy + ledger-derived per-sprint influence)
+# Last Modified: 2026-06-23 (DWB-431: get_standing rank/tier for identity.md)
 
 """Agent scoring (DWB-424).
 
@@ -17,6 +17,8 @@ ledger so the cache can always be regenerated. Corrections never mutate or
 delete a row: ``revert_score_event`` appends a reverting row (delta = -original)
 and stamps the original's ``reverted_by``.
 """
+
+import math
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -569,6 +571,77 @@ def human_score(
     db.commit()
     db.refresh(event)
     return event, count
+
+
+def _standing_tier(rank: int, total: int, has_events: bool) -> str:
+    """Tier name for rank r of N (DWB-431).
+
+    unscored (no score events) > best (#1) > dead_last (#N) > quartile.
+    Quartile q = ceil(r / N * 4): q1 podium, q2 above, q3 mid, q4 below.
+    dead_last always wins over the quartile so the last agent is never softened.
+    """
+    if not has_events:
+        return "unscored"
+    if rank <= 1:
+        return "best"
+    if rank >= total:
+        return "dead_last"
+    q = math.ceil(rank / total * 4)
+    return {1: "podium", 2: "above", 3: "mid", 4: "below"}.get(q, "mid")
+
+
+def get_standing(db: Session, agent_id: int, project_id: int) -> dict | None:
+    """Where an agent stands on its project (DWB-431).
+
+    Returns {rank, total, reputation, tier} ranking the project ROSTER
+    (project_agents, same set as the leaderboard) by reputation DESC, ties
+    broken by agent name (deterministic). reputation is the cached value (0 if
+    none). tier per _standing_tier; 'unscored' when the agent has no score
+    events on this project. Returns None when the agent is not on the roster
+    (nothing meaningful to rank), so the caller can omit the block.
+    """
+    roster = db.execute(
+        select(Agent.id, Agent.name)
+        .join(ProjectAgent, ProjectAgent.agent_id == Agent.id)
+        .where(ProjectAgent.project_id == project_id)
+    ).all()
+    if not roster:
+        return None
+
+    rep_map = {
+        aid: rep for aid, rep in db.execute(
+            select(AgentScore.agent_id, AgentScore.reputation)
+            .where(AgentScore.project_id == project_id)
+        ).all()
+    }
+
+    entries = [(aid, name, rep_map.get(aid, 0)) for aid, name in roster]
+    # reputation DESC, then name ASC for a stable, deterministic rank.
+    entries.sort(key=lambda e: (-e[2], e[1] or ""))
+
+    rank = None
+    reputation = 0
+    for i, (aid, _name, rep) in enumerate(entries, start=1):
+        if aid == agent_id:
+            rank = i
+            reputation = rep
+            break
+    if rank is None:
+        return None  # agent not on this project's roster
+
+    has_events = db.scalar(
+        select(ScoreEvent.id)
+        .where(ScoreEvent.project_id == project_id)
+        .where(ScoreEvent.subject_agent_id == agent_id)
+        .limit(1)
+    ) is not None
+
+    return {
+        "rank": rank,
+        "total": len(entries),
+        "reputation": reputation,
+        "tier": _standing_tier(rank, len(entries), has_events),
+    }
 
 
 def get_agent_summary(db: Session, agent_id: int, project_id: int) -> dict:
