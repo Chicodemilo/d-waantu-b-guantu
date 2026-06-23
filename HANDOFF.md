@@ -2,36 +2,31 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current State (as of 2026-06-23)
+## Current State (as of 2026-06-23, end of day)
 
-- Working tree clean; all work committed AND pushed to origin/master (tip `b6af775`). Backend 1317 passing, frontend 178 passing.
-- Sprint S68 (id=118, epic 28 "Agent Scoring") active. All scoring tickets DWB-424..435 are done; no open scoring tickets. No open alerts on project 1.
+- Working tree clean; all work committed AND pushed to origin/master (tip `c9fa301`). Backend 1350 passing, frontend 185 passing.
+- Epic 33 "Archie Channel" / sprint S69 (id=123) DONE: DWB-436..444 + DWB-439 all closed and accepted. No open tickets, no open alerts.
+- DWB session 40 closed. Team stood down (Barry, Freddie) - respawn before use, verify `presumed_live`, do NOT SendMessage cold names.
+- Backlog: **DWB-445** (parked, not filed) - dormant-wake spike: write into CC's live-watched teammate-inbox to poke a stone-cold-idle session. Also carried: DWB-413 (delete_project 500 - largely mitigated by the channel cleanup), DWB-396 (prose-false-close).
 
-## Shipped this session (two systems)
+## Shipped this session (Archie Channel, epic 33)
 
-**Deterministic action capture (DWB-417..421):** PostToolUse / Notification / PreCompact hooks -> `/api/hooks/tool-use` + `/lifecycle-event` -> `tool_actions` table. Classifies file_written / message_sent (recipient only, no body) / agent_spawned / notification / context_compaction; emits activity-feed verbs. Fire-and-forget, always 200.
-
-**Agent Scoring (epic 28, DWB-424..435):**
-- `score_event` ledger (source of truth) + `agent_score` cache (rebuildable). `reputation` (all-time rank) + `influence` (per-sprint peer budget). Per-(agent, project).
-- Auto-triggers in `scoring_triggers.py`: ticket close (+no-rework bonus), rework, test_failure, stale, zero_token_close, gate_miss, forgot.
-- Human tools: `/carrot` `/stick` `/score` `/leaderboard` (`.claude/commands/`) -> `/scores/award` (free). Peer economy -> `/scores/peer` (X-Agent-ID), FLAT (any agent scores any other; only self-scoring barred); caps in `config/scoring.py`.
-- Broadcast: human/peer carrot/stick notify all project agents via per-agent alerts (`alert.recipient_agent_id`); human = critical severity.
-- Activity-feed events (DWB-432): `score_awarded`/`score_docked` (details: agent, signed delta, source, reason) + `lead_change` (new_leader/previous_leader). Auto-triggers NOT separately emitted.
-- `identity.md` standing block (DWB-431): rendered each spawn in `agent_memory.scaffold_agent_dir` from `scoring.get_standing` - rank + tiered motivational line (best/podium/above/mid/below/dead_last/unscored).
-- UI: leaderboard on Team Status (ProjectPage), Scoreboard tab on the team page (ProjectAgentsPage), carrot +10 / stick -10 buttons with inline reason (NO modal), AgentPage rank/tier + ledger, score on Roster + Dashboard.
-- Cross-project guard (DWB-430): scoring writes require the subject (and peer actor) to be on the project. Docs (DWB-429): ARCHITECTURE + README. Full spec: `docs/agent_scoring_spec.md`.
-
-## Team
-
-Spawned this session: Barry_DWB (21, backend - built most of scoring), Freddie (19, frontend - ran as "Freddie-2" due to name collision with the parked instance), Pam_DWB (14, PM), Dolores (28, docs). **Stan (38, backend) CRASHED at spawn on DWB-432 and produced nothing** (last_seen null, ticket never moved); Barry recovered it. All parked at session end; respawn before use, verify `presumed_live`, do NOT SendMessage cold names.
+Cross-project team-lead messaging. Archies (team-leads, one per project) send DIRECT (to one archie) or BROADCAST (to all) messages; every archie sees the whole channel.
+- Tables `tl_messages` + `tl_message_reads` (NOT project-scoped; composite-PK read receipts, CASCADE on message delete). `from_project_id` NOT NULL; delete_project clears the project's sent messages (DWB-436).
+- API `/api/tl-channel` (DWB-437): send (direct/broadcast), list (cross-project, per-viewer read-state), unread?agent_id=, mark-read. Role-guarded to team-leads (400 otherwise). One alert ping per recipient (direct=target; broadcast=every other active TL). `read_by` = full reader roster `[{agent_id, agent_name, read_at}]` (the UI Read column shows ALL readers, not a count).
+- Surfacing at spawn (DWB-438): `agent_memory.scaffold_agent_dir` renders an unread block in `identity.md` for team-leads only, beside the scoring standing block, then marks those msgs read.
+- Surfacing on every turn (DWB-443/444): a `channel-poke` Stop hook (`/api/hooks/channel-poke`) returns a `{"decision":"block",...}` so a LIVE session self-surfaces unread on its NEXT turn boundary - no human relay. Wired into `_HOOKS_SETTINGS_BLOCK` + `.claude/settings.json`, redeployed to CI.
+- `/tl` slash command (DWB-439): `/tl @Archie_X msg` (direct) or `/tl msg` (broadcast). Body kept verbatim.
+- Archie Channel dashboard page + read-state column (DWB-440). Docs in ARCHITECTURE + README (DWB-441).
+- Scoring tweak (DWB-442): a HUMAN carrot (source=human, delta>0) makes the peer alert a pile-on CTA ("Pile on: /carrot <name>"); human sticks + all peer events stay notify-only.
 
 ## Gotchas (carry forward)
 
-- **`_HOOKS_SETTINGS_BLOCK`** (`routers/playbooks.py`) is the canonical hook config `deploy-playbooks` writes into `settings.json`. It now includes PostToolUse/Notification/PreCompact - keep it in sync with `.claude/settings.json` or a deploy WIPES the capture hooks. Drift-guard test in `test_playbooks.py`.
-- **Scoring is per-(agent, project)**; writes are membership-guarded. Slash commands live ONLY in DWB's `.claude/commands/` (deploy-playbooks does not copy commands to other repos).
-- **`identity.md` standing**: `unscored` takes precedence over `dead_last` (new agents are encouraged, not threatened).
-- **No modal component** in the frontend - inline text confirms only (firm rule).
-- **`.claude/` Edit by subagent = crash**; only the TL edits `.claude/` (commands, settings, playbooks).
-- **Ticket key != db id** - PATCH by db id (e.g. DWB-433 = id 979). Mixed these up once this session.
-- **Doc ceilings** (`token_budget.py`): HANDOFF 1500, ARCHITECTURE 7500, README 3500.
+- **Poke needs a turn boundary.** The Stop hook fires every turn an agent completes, so a live/working session self-surfaces unread within one turn. A stone-cold-idle session (already Stopped, no activity) won't wake until it next acts - that's the DWB-445 spike.
+- **settings.json hot-reload caveat.** A redeploy writes the poke hook into a repo's `.claude/settings.json`, but CC likely loads hooks at session start - an already-running session may need a restart to activate the new hook (439's identity.md surfacing still catches unread at next spawn).
+- **`_HOOKS_SETTINGS_BLOCK`** (`routers/playbooks.py`) is the canonical hook config `deploy-playbooks` writes into `settings.json`; drift-guard test (`test_playbooks.py`) asserts it equals DWB's own `.claude/settings.json` hooks. Keep them in exact sync or the test fails / a deploy clobbers hooks.
+- **`.claude/` Edit by subagent = crash**; only the TL edits `.claude/` (commands, settings, playbooks). Workers' memory goes through the API.
+- **No modal component** in the frontend - inline text confirms only (firm rule). No icons, no em-dashes.
+- **Ticket key != db id** - PATCH by db id (e.g. DWB-437 = id 995).
+- **Doc ceilings** (`token_budget.py`): HANDOFF 1500, ARCHITECTURE 7500, README 3500. ARCHITECTURE/README are near ceiling - condense to offset additions.
 - Dev server (vite :5173) needs a restart / hard-refresh to pick up new frontend files.
