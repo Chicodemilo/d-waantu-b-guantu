@@ -6,7 +6,7 @@
 # Callees: app/services/scoring.py, app/models/project.py, app/models/agent.py
 # Data In: HTTP GET/POST
 # Data Out: LeaderboardRow[], AgentScoreDetail, HumanScoreResponse, rebuild result
-# Last Modified: 2026-06-23 (DWB-427: peer economy endpoint)
+# Last Modified: 2026-06-23 (DWB-430: project-membership guard on write paths)
 
 """Agent scoring read API (DWB-424)."""
 
@@ -96,13 +96,19 @@ def award_human_score(
     """Human carrot/stick (DWB-426): award (delta>0) or dock (delta<0) an
     agent's reputation, free of influence cost, and broadcast it to the whole
     team at elevated severity. Subject is resolved by name or id."""
-    if db.get(Project, project_id) is None:
+    project = db.get(Project, project_id)
+    if project is None:
         raise HTTPException(404, "Project not found")
     if data.delta == 0:
         raise HTTPException(400, "delta must be non-zero (positive carrot / negative stick)")
     subject = svc.resolve_agent_ref(db, data.agent)
     if subject is None:
         raise HTTPException(404, f"Agent not found: {data.agent!r}")
+    # DWB-430: scores are per-project; the subject must be on this project.
+    if not svc.is_project_member(db, subject.id, project_id):
+        raise HTTPException(
+            404, f"Agent {subject.name!r} is not on project {project.prefix}"
+        )
 
     event, broadcast_count = svc.human_score(
         db, project_id=project_id, subject=subject,
@@ -138,16 +144,26 @@ def peer_score(
     Anti-gaming caps (no self-scoring, influence budget, per-action and
     per-target-per-sprint limits) are enforced in the service and surface as
     HTTP 400 with a clear message."""
-    if db.get(Project, project_id) is None:
+    project = db.get(Project, project_id)
+    if project is None:
         raise HTTPException(404, "Project not found")
     if x_agent_id is None:
         raise HTTPException(400, "X-Agent-ID header is required to identify the acting agent")
     actor = db.get(Agent, x_agent_id)
     if actor is None:
         raise HTTPException(404, f"Acting agent not found: {x_agent_id}")
+    # DWB-430: both actor and subject must belong to this project.
+    if not svc.is_project_member(db, actor.id, project_id):
+        raise HTTPException(
+            404, f"Agent {actor.name!r} is not on project {project.prefix}"
+        )
     subject = svc.resolve_agent_ref(db, data.subject)
     if subject is None:
         raise HTTPException(404, f"Subject agent not found: {data.subject!r}")
+    if not svc.is_project_member(db, subject.id, project_id):
+        raise HTTPException(
+            404, f"Agent {subject.name!r} is not on project {project.prefix}"
+        )
 
     event, broadcast_count = svc.peer_score(
         db, project_id=project_id, actor=actor, subject=subject,

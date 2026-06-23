@@ -453,6 +453,19 @@ def get_leaderboard(db: Session, project_id: int) -> list[dict]:
     return out
 
 
+def is_project_member(db: Session, agent_id: int, project_id: int) -> bool:
+    """True when the agent is on the project roster (project_agents). The
+    scoring WRITE paths (DWB-430) use this so a score can only be recorded
+    against an agent who actually belongs to the project, even though
+    resolve_agent_ref looks agents up globally by name/id."""
+    return db.scalar(
+        select(ProjectAgent.agent_id)
+        .where(ProjectAgent.project_id == project_id)
+        .where(ProjectAgent.agent_id == agent_id)
+        .limit(1)
+    ) is not None
+
+
 def resolve_agent_ref(db: Session, ref: str | int) -> Agent | None:
     """Resolve an agent by database id (all-digit ref) or by name
     (case-insensitive). Agent names are globally unique, so a name match is

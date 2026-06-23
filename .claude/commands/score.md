@@ -29,7 +29,20 @@ try:
     with request.urlopen(url, timeout=3) as r:
         d = json.load(r)
 except error.HTTPError as e:
-    print(f"HTTP {e.code}: {e.read().decode()}")
+    try:
+        detail = (json.loads(e.read().decode() or "{}") or {}).get("detail") or ""
+    except Exception:
+        detail = ""
+    msg = detail or f"request failed (HTTP {e.code})"
+    if e.code == 404 and "agent" in msg.lower():
+        try:
+            with request.urlopen(f"http://localhost:8000/api/projects/{project['id']}/scores", timeout=3) as r2:
+                names = sorted(n for n in (row.get("agent_name") for row in json.load(r2)) if n)
+            if names:
+                msg += f"\nAgents on {project.get('prefix','this project')}: " + ", ".join(names)
+        except Exception:
+            pass
+    print(msg)
     sys.exit(0)
 
 print(f"{agent}: reputation {d['reputation']}  sprint {d['sprint_delta']:+d}  influence {d['influence']}")

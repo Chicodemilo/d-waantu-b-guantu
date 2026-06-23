@@ -342,6 +342,64 @@ class TestAgentLookupByName:
         assert r.status_code == 404
 
 
+class TestProjectMembershipGuard:
+    """DWB-430: scores can only be written against agents on the project."""
+
+    def test_award_rejects_non_member_subject(self, client, scored_project, make_agent):
+        pid = scored_project["project_id"]
+        outsider = make_agent(name="Outsider430A", role="backend-worker",
+                              api_key="outsider-430a")  # own project, not on pid
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": "Outsider430A", "delta": 5,
+        })
+        assert r.status_code == 404
+        assert "not on project" in r.json()["detail"].lower()
+
+    def test_award_unknown_name_distinct_message(self, client, scored_project):
+        pid = scored_project["project_id"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": "NoSuchAgent430", "delta": 5,
+        })
+        assert r.status_code == 404
+        detail = r.json()["detail"].lower()
+        assert "not found" in detail
+        assert "not on project" not in detail  # distinct from the membership msg
+
+    def test_award_member_still_succeeds(self, client, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": str(a1), "delta": 5,
+        })
+        assert r.status_code == 201
+
+    def test_peer_rejects_non_member_subject(self, client, scored_project, make_agent):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        outsider = make_agent(name="Outsider430B", role="backend-worker",
+                              api_key="outsider-430b")
+        r = client.post(f"/api/projects/{pid}/scores/peer",
+                        json={"subject": "Outsider430B", "delta": 5},
+                        headers={"X-Agent-ID": str(a1)})
+        assert r.status_code == 404
+        assert "not on project" in r.json()["detail"].lower()
+
+    def test_peer_rejects_non_member_actor(self, client, scored_project, make_agent):
+        pid, a2 = scored_project["project_id"], scored_project["a2"]
+        outsider = make_agent(name="Outsider430C", role="backend-worker",
+                              api_key="outsider-430c")
+        r = client.post(f"/api/projects/{pid}/scores/peer",
+                        json={"subject": str(a2), "delta": 5},
+                        headers={"X-Agent-ID": str(outsider["id"])})
+        assert r.status_code == 404
+        assert "not on project" in r.json()["detail"].lower()
+
+    def test_peer_member_to_member_still_succeeds(self, client, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        r = client.post(f"/api/projects/{pid}/scores/peer",
+                        json={"subject": str(a2), "delta": 5},
+                        headers={"X-Agent-ID": str(a1)})
+        assert r.status_code == 201
+
+
 class TestPeerEconomy:
     def _peer(self, client, pid, actor_id, subject, delta, reason=None):
         body = {"subject": str(subject), "delta": delta}
