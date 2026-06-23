@@ -47,6 +47,8 @@ class Agent(Base):
     project_agents: Mapped[list["ProjectAgent"]] = relationship(back_populates="agent")  # noqa: F821
     assigned_tickets: Mapped[list["Ticket"]] = relationship(back_populates="assigned_agent")  # noqa: F821
     comments: Mapped[list["Comment"]] = relationship(back_populates="author_agent")  # noqa: F821
-    raised_alerts: Mapped[list["Alert"]] = relationship(back_populates="raised_by_agent")  # noqa: F821
+    raised_alerts: Mapped[list["Alert"]] = relationship(  # noqa: F821
+        back_populates="raised_by_agent", foreign_keys="Alert.raised_by_agent_id"
+    )
     instructions: Mapped[list["Instruction"]] = relationship(back_populates="agent")  # noqa: F821
     activity_logs: Mapped[list["ActivityLog"]] = relationship(back_populates="agent")  # noqa: F821

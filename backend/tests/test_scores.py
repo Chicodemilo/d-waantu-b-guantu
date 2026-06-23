@@ -16,8 +16,11 @@
 
 import pytest
 
+from sqlalchemy import select
+
 from app.config.scoring import INITIAL_INFLUENCE
 from app.models.agent_score import AgentScore
+from app.models.alert import Alert, AlertSeverity
 from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
 from app.services import scoring as svc
 
@@ -115,6 +118,24 @@ class TestRebuild:
         assert touched >= 1
         db_session.refresh(cache)
         assert cache.reputation == 5
+
+    def test_rebuild_resets_drained_agent(self, db_session, scored_project):
+        """A cache row whose ledger events were all removed must reset to
+        0 / INITIAL_INFLUENCE, not keep stale values (DWB-427 follow-up)."""
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        ev = svc.apply_score_event(db_session, project_id=pid, subject_agent_id=a1,
+                                   trigger_type=ScoreTriggerType.ticket_closed, delta=7,
+                                   source=ScoreSource.auto, reason="x")
+        svc.rebuild_agent_scores(db_session, pid)
+        cache = db_session.get(AgentScore, (a1, pid))
+        assert cache.reputation == 7
+        # Remove all of the agent's ledger events, then rebuild again.
+        db_session.delete(db_session.get(ScoreEvent, ev.id))
+        db_session.commit()
+        svc.rebuild_agent_scores(db_session, pid)
+        db_session.refresh(cache)
+        assert cache.reputation == 0
+        assert cache.influence == INITIAL_INFLUENCE
 
 
 class TestRevert:
@@ -232,3 +253,183 @@ class TestRebuildAPI:
         r = client.post(f"/api/projects/{pid}/scores/rebuild")
         assert r.status_code == 200
         assert r.json()["agents_rebuilt"] >= 1
+
+
+class TestHumanAward:
+    def test_carrot_by_name_awards_and_broadcasts(self, client, db_session, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": "ScoreAlpha", "delta": 10, "reason": "great work",
+        })
+        assert r.status_code == 201
+        data = r.json()
+        assert data["subject_agent_id"] == a1
+        assert data["delta"] == 10
+        assert data["trigger_type"] == "carrot"
+        assert data["reputation"] == 10
+        # broadcast to both roster agents (a1 + a2)
+        assert data["broadcast_count"] == 2
+
+        ev = db_session.scalars(
+            select(ScoreEvent).where(ScoreEvent.subject_agent_id == a1)
+        ).first()
+        assert ev.source == ScoreSource.human
+        assert ev.trigger_type == ScoreTriggerType.carrot
+        assert ev.actor_agent_id is None and ev.actor_cost == 0
+
+        # subject's own alert is direct + recipient-tagged + elevated severity
+        subj_alert = db_session.scalars(
+            select(Alert).where(Alert.recipient_agent_id == a1)
+            .where(Alert.project_id == pid)
+        ).first()
+        assert subj_alert.severity == AlertSeverity.critical
+        assert "You received +10 from the human" in subj_alert.title
+        assert "great work" in subj_alert.body
+        # peer's alert is third-person
+        other_alert = db_session.scalars(
+            select(Alert).where(Alert.recipient_agent_id == a2)
+            .where(Alert.project_id == pid)
+        ).first()
+        assert "ScoreAlpha received +10 from the human" in other_alert.title
+
+    def test_stick_uses_negative_trigger(self, client, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": str(a1), "delta": -4, "reason": "regression",
+        })
+        assert r.status_code == 201
+        assert r.json()["trigger_type"] == "stick"
+        assert r.json()["reputation"] == -4
+
+    def test_reason_optional(self, client, scored_project):
+        pid, a2 = scored_project["project_id"], scored_project["a2"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": str(a2), "delta": 3,
+        })
+        assert r.status_code == 201
+
+    def test_zero_delta_rejected(self, client, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": str(a1), "delta": 0,
+        })
+        assert r.status_code == 400
+
+    def test_unknown_agent_404(self, client, scored_project):
+        pid = scored_project["project_id"]
+        r = client.post(f"/api/projects/{pid}/scores/award", json={
+            "agent": "NoSuchAgent", "delta": 5,
+        })
+        assert r.status_code == 404
+
+
+class TestAgentLookupByName:
+    def test_score_lookup_by_name(self, client, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        svc.apply_score_event(db_session, project_id=pid, subject_agent_id=a1,
+                              trigger_type=ScoreTriggerType.ticket_closed, delta=5,
+                              source=ScoreSource.auto, reason="x")
+        r = client.get(f"/api/projects/{pid}/scores/agent", params={"agent": "ScoreAlpha"})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["agent_id"] == a1
+        assert data["reputation"] == 5
+        assert len(data["ledger"]) == 1
+
+    def test_lookup_unknown_name_404(self, client, scored_project):
+        pid = scored_project["project_id"]
+        r = client.get(f"/api/projects/{pid}/scores/agent", params={"agent": "Ghost"})
+        assert r.status_code == 404
+
+
+class TestPeerEconomy:
+    def _peer(self, client, pid, actor_id, subject, delta, reason=None):
+        body = {"subject": str(subject), "delta": delta}
+        if reason is not None:
+            body["reason"] = reason
+        return client.post(f"/api/projects/{pid}/scores/peer", json=body,
+                           headers={"X-Agent-ID": str(actor_id)})
+
+    def test_peer_grant_moves_rep_and_spends_influence(self, client, db_session, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        r = self._peer(client, pid, a1, a2, 5, "nice fix")
+        assert r.status_code == 201
+        data = r.json()
+        assert data["trigger_type"] == "peer_grant"
+        assert data["subject_reputation"] == 5
+        assert data["actor_influence_remaining"] == INITIAL_INFLUENCE - 5
+        ev = db_session.scalars(
+            select(ScoreEvent).where(ScoreEvent.subject_agent_id == a2)
+            .where(ScoreEvent.source == ScoreSource.peer)
+        ).first()
+        assert ev.actor_agent_id == a1 and ev.actor_cost == 5
+        # broadcast at NORMAL (info) severity
+        alert = db_session.scalars(
+            select(Alert).where(Alert.recipient_agent_id == a2)
+            .where(Alert.project_id == pid)
+        ).first()
+        assert alert.severity == AlertSeverity.info
+
+    def test_peer_demerit(self, client, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        r = self._peer(client, pid, a1, a2, -4)
+        assert r.status_code == 201
+        assert r.json()["trigger_type"] == "peer_demerit"
+        assert r.json()["subject_reputation"] == -4
+        assert r.json()["actor_influence_remaining"] == INITIAL_INFLUENCE - 4
+
+    def test_no_self_scoring(self, client, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        r = self._peer(client, pid, a1, a1, 3)
+        assert r.status_code == 400
+        assert "self" in r.json()["detail"].lower()
+
+    def test_insufficient_influence_rejected(self, client, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        # grant 25 > 20 budget
+        r = self._peer(client, pid, a1, a2, 25)
+        assert r.status_code == 400
+        assert "influence" in r.json()["detail"].lower()
+
+    def test_per_action_ding_cap(self, client, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        r = self._peer(client, pid, a1, a2, -6)  # > MAX_DING_PER_ACTION (5)
+        assert r.status_code == 400
+        assert "per-action" in r.json()["detail"].lower()
+
+    def test_per_target_ding_cap_across_sprint(self, client, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        assert self._peer(client, pid, a1, a2, -5).status_code == 201
+        assert self._peer(client, pid, a1, a2, -5).status_code == 201  # total 10 = cap
+        r = self._peer(client, pid, a1, a2, -1)  # 11 > 10
+        assert r.status_code == 400
+        assert "per-target ding cap" in r.json()["detail"].lower()
+
+    def test_per_target_grant_cap_across_sprint(self, client, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        assert self._peer(client, pid, a1, a2, 5).status_code == 201
+        assert self._peer(client, pid, a1, a2, 5).status_code == 201  # total 10 = cap
+        r = self._peer(client, pid, a1, a2, 1)  # 11 > 10
+        assert r.status_code == 400
+        assert "per-target grant cap" in r.json()["detail"].lower()
+
+    def test_missing_actor_header_rejected(self, client, scored_project):
+        pid, a2 = scored_project["project_id"], scored_project["a2"]
+        r = client.post(f"/api/projects/{pid}/scores/peer", json={"subject": str(a2), "delta": 3})
+        assert r.status_code == 400
+        assert "x-agent-id" in r.json()["detail"].lower()
+
+    def test_unknown_subject_404(self, client, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        r = self._peer(client, pid, a1, "Ghost", 3)
+        assert r.status_code == 404
+
+    def test_influence_is_ledger_derived_and_rebuildable(self, client, db_session, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        self._peer(client, pid, a1, a2, 5)
+        # leaderboard reflects spend; rebuild keeps it consistent
+        before = {r["agent_id"]: r["influence"] for r in client.get(f"/api/projects/{pid}/scores").json()}
+        assert before[a1] == INITIAL_INFLUENCE - 5
+        svc.rebuild_agent_scores(db_session, pid)
+        after = {r["agent_id"]: r["influence"] for r in client.get(f"/api/projects/{pid}/scores").json()}
+        assert after[a1] == INITIAL_INFLUENCE - 5

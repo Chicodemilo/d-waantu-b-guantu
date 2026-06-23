@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Alert, AlertSeverity, AlertStatus
-# Last Modified: 2026-04-16
+# Last Modified: 2026-06-22 (DWB-426: recipient_agent_id for per-agent broadcasts)
 
 import enum
 from datetime import datetime
@@ -39,6 +39,12 @@ class Alert(Base):
     raised_by_agent_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("agents.id"), nullable=False, index=True
     )
+    # DWB-426: optional recipient for per-agent broadcast notifications (e.g.
+    # scoring carrot/stick alerts). NULL = a project-wide alert with no specific
+    # recipient (all historical alerts + the stale/rework/test alerts).
+    recipient_agent_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("agents.id"), nullable=True, index=True
+    )
     ticket_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True, index=True
     )
@@ -58,5 +64,7 @@ class Alert(Base):
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="alerts")  # noqa: F821
-    raised_by_agent: Mapped["Agent"] = relationship(back_populates="raised_alerts")  # noqa: F821
+    raised_by_agent: Mapped["Agent"] = relationship(  # noqa: F821
+        back_populates="raised_alerts", foreign_keys=[raised_by_agent_id]
+    )
     ticket: Mapped["Ticket | None"] = relationship(back_populates="alerts")  # noqa: F821

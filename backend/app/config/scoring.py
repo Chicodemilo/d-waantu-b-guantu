@@ -6,7 +6,7 @@
 # Callees: none
 # Data In: none
 # Data Out: SCORE_POINTS dict, INITIAL_INFLUENCE int, helper accessors
-# Last Modified: 2026-06-22
+# Last Modified: 2026-06-23 (DWB-427: anti-gaming caps)
 
 """Scoring point values (DWB-424).
 
@@ -43,9 +43,21 @@ SCORE_POINTS: dict[str, int] = {
 }
 
 # Per-sprint influence budget each agent receives for the peer economy
-# (DWB-427). Created on the agent_score cache row now; the per-sprint reset and
-# the spend paths land in wave 2.
+# (DWB-427). Remaining influence is DERIVED from the ledger per active sprint
+# (INITIAL_INFLUENCE - sum of actor_cost the agent spent this sprint), so it
+# auto-resets each sprint and never drifts from a stored counter.
 INITIAL_INFLUENCE: int = 20
+
+# Peer-economy anti-gaming caps (DWB-427), all tunable here.
+# - MAX_DING_PER_ACTION: most reputation one peer-stick can remove at once.
+# - MAX_DING_PER_TARGET_PER_SPRINT: most one agent can dock a specific peer
+#   across a whole sprint (kills vendettas).
+# - MAX_GRANT_PER_TARGET_PER_SPRINT: symmetric cap on awarding a specific peer
+#   across a sprint (kills collusion rings).
+# Total outgoing is additionally bounded by INITIAL_INFLUENCE.
+MAX_DING_PER_ACTION: int = 5
+MAX_DING_PER_TARGET_PER_SPRINT: int = 10
+MAX_GRANT_PER_TARGET_PER_SPRINT: int = 10
 
 
 def points_for(key: str, default: int = 0) -> int:

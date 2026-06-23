@@ -1,12 +1,12 @@
 # Path: app/schemas/score.py
 # File: score.py
 # Created: 2026-06-22
-# Purpose: Pydantic schemas for the agent scoring read API (DWB-424) - leaderboard rows, ledger entries, per-agent detail.
+# Purpose: Pydantic schemas for the agent scoring API (DWB-424 read; DWB-426 human write) - leaderboard rows, ledger entries, per-agent detail, human award request/response.
 # Caller: app/routers/scores.py
 # Callees: pydantic
-# Data In: service dicts from app.services.scoring
-# Data Out: LeaderboardRow, ScoreLedgerEntry, AgentScoreDetail
-# Last Modified: 2026-06-22
+# Data In: service dicts from app.services.scoring, human award request body
+# Data Out: LeaderboardRow, ScoreLedgerEntry, AgentScoreDetail, HumanScoreRequest/Response
+# Last Modified: 2026-06-23 (DWB-427)
 
 from pydantic import BaseModel
 
@@ -43,3 +43,44 @@ class AgentScoreDetail(BaseModel):
     influence: int
     sprint_delta: int
     ledger: list[ScoreLedgerEntry]
+
+
+class HumanScoreRequest(BaseModel):
+    """Human carrot/stick (DWB-426). `agent` is a name or id; delta is signed
+    (>0 carrot, <0 stick); reason optional."""
+    agent: str
+    delta: int
+    reason: str | None = None
+
+
+class HumanScoreResponse(BaseModel):
+    status: str
+    event_id: int
+    subject_agent_id: int
+    subject_name: str | None
+    delta: int
+    trigger_type: str
+    reputation: int
+    sprint_delta: int
+    broadcast_count: int
+
+
+class PeerScoreRequest(BaseModel):
+    """Peer carrot/stick (DWB-427). The actor is the X-Agent-ID caller; `subject`
+    is a name or id; delta is signed (>0 grant, <0 demerit); reason optional."""
+    subject: str
+    delta: int
+    reason: str | None = None
+
+
+class PeerScoreResponse(BaseModel):
+    status: str
+    event_id: int
+    actor_agent_id: int
+    subject_agent_id: int
+    subject_name: str | None
+    delta: int
+    trigger_type: str
+    subject_reputation: int
+    actor_influence_remaining: int
+    broadcast_count: int

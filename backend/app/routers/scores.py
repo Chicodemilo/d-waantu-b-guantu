@@ -1,22 +1,29 @@
 # Path: app/routers/scores.py
 # File: scores.py
 # Created: 2026-06-22
-# Purpose: HTTP read API for agent scoring (DWB-424) - project leaderboard, per-agent score detail + ledger, and a cache rebuild utility.
+# Purpose: HTTP API for agent scoring (DWB-424 read; DWB-426 human write; DWB-427 peer economy) - leaderboard, per-agent detail + ledger (by id or name), human carrot/stick award + team broadcast, cache rebuild.
 # Caller: app/main.py
 # Callees: app/services/scoring.py, app/models/project.py, app/models/agent.py
 # Data In: HTTP GET/POST
-# Data Out: LeaderboardRow[], AgentScoreDetail, rebuild result
-# Last Modified: 2026-06-22
+# Data Out: LeaderboardRow[], AgentScoreDetail, HumanScoreResponse, rebuild result
+# Last Modified: 2026-06-23 (DWB-427: peer economy endpoint)
 
 """Agent scoring read API (DWB-424)."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.agent import Agent
 from app.models.project import Project
-from app.schemas.score import AgentScoreDetail, LeaderboardRow
+from app.schemas.score import (
+    AgentScoreDetail,
+    HumanScoreRequest,
+    HumanScoreResponse,
+    LeaderboardRow,
+    PeerScoreRequest,
+    PeerScoreResponse,
+)
 from app.services import scoring as svc
 
 router = APIRouter(prefix="/api", tags=["scores"])
@@ -57,6 +64,108 @@ def get_agent_score(
     summary = svc.get_agent_summary(db, agent_id, pid)
     ledger = svc.get_agent_ledger(db, agent_id, pid, limit=limit)
     return {**summary, "ledger": ledger}
+
+
+@router.get("/projects/{project_id}/scores/agent", response_model=AgentScoreDetail)
+def get_project_agent_score(
+    project_id: int,
+    agent: str = Query(..., description="Agent name or id (for /score <agent>)"),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """Look up one agent's score detail + ledger by NAME or id within a project
+    (DWB-426). Backs the /score <agent> slash command, which passes a name."""
+    if db.get(Project, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    resolved = svc.resolve_agent_ref(db, agent)
+    if resolved is None:
+        raise HTTPException(404, f"Agent not found: {agent!r}")
+    summary = svc.get_agent_summary(db, resolved.id, project_id)
+    ledger = svc.get_agent_ledger(db, resolved.id, project_id, limit=limit)
+    return {**summary, "ledger": ledger}
+
+
+@router.post(
+    "/projects/{project_id}/scores/award",
+    response_model=HumanScoreResponse,
+    status_code=201,
+)
+def award_human_score(
+    project_id: int, data: HumanScoreRequest, db: Session = Depends(get_db)
+):
+    """Human carrot/stick (DWB-426): award (delta>0) or dock (delta<0) an
+    agent's reputation, free of influence cost, and broadcast it to the whole
+    team at elevated severity. Subject is resolved by name or id."""
+    if db.get(Project, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    if data.delta == 0:
+        raise HTTPException(400, "delta must be non-zero (positive carrot / negative stick)")
+    subject = svc.resolve_agent_ref(db, data.agent)
+    if subject is None:
+        raise HTTPException(404, f"Agent not found: {data.agent!r}")
+
+    event, broadcast_count = svc.human_score(
+        db, project_id=project_id, subject=subject,
+        delta=data.delta, reason=data.reason,
+    )
+    summary = svc.get_agent_summary(db, subject.id, project_id)
+    return {
+        "status": "ok",
+        "event_id": event.id,
+        "subject_agent_id": subject.id,
+        "subject_name": subject.name,
+        "delta": event.delta,
+        "trigger_type": event.trigger_type.value,
+        "reputation": summary["reputation"],
+        "sprint_delta": summary["sprint_delta"],
+        "broadcast_count": broadcast_count,
+    }
+
+
+@router.post(
+    "/projects/{project_id}/scores/peer",
+    response_model=PeerScoreResponse,
+    status_code=201,
+)
+def peer_score(
+    project_id: int,
+    data: PeerScoreRequest,
+    x_agent_id: int | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Peer carrot/stick (DWB-427): the acting agent (X-Agent-ID) spends
+    influence to move a peer's reputation. delta>0 grant, delta<0 demerit.
+    Anti-gaming caps (no self-scoring, influence budget, per-action and
+    per-target-per-sprint limits) are enforced in the service and surface as
+    HTTP 400 with a clear message."""
+    if db.get(Project, project_id) is None:
+        raise HTTPException(404, "Project not found")
+    if x_agent_id is None:
+        raise HTTPException(400, "X-Agent-ID header is required to identify the acting agent")
+    actor = db.get(Agent, x_agent_id)
+    if actor is None:
+        raise HTTPException(404, f"Acting agent not found: {x_agent_id}")
+    subject = svc.resolve_agent_ref(db, data.subject)
+    if subject is None:
+        raise HTTPException(404, f"Subject agent not found: {data.subject!r}")
+
+    event, broadcast_count = svc.peer_score(
+        db, project_id=project_id, actor=actor, subject=subject,
+        delta=data.delta, reason=data.reason,
+    )
+    summary = svc.get_agent_summary(db, subject.id, project_id)
+    return {
+        "status": "ok",
+        "event_id": event.id,
+        "actor_agent_id": actor.id,
+        "subject_agent_id": subject.id,
+        "subject_name": subject.name,
+        "delta": event.delta,
+        "trigger_type": event.trigger_type.value,
+        "subject_reputation": summary["reputation"],
+        "actor_influence_remaining": svc.remaining_influence(db, actor.id, project_id),
+        "broadcast_count": broadcast_count,
+    }
 
 
 @router.post("/projects/{project_id}/scores/rebuild")

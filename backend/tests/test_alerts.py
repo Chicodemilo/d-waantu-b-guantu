@@ -96,8 +96,8 @@ class TestGetAlert:
         }).json()
         data = client.get(f"/api/alerts/{created['id']}").json()
         expected_keys = {
-            "id", "project_id", "raised_by_agent_id", "ticket_id",
-            "title", "body", "severity", "status",
+            "id", "project_id", "raised_by_agent_id", "recipient_agent_id",
+            "ticket_id", "title", "body", "severity", "status",
             "created_at", "resolved_at", "user_sent_at",
         }
         assert set(data.keys()) == expected_keys

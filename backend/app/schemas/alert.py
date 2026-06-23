@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AlertCreate, AlertUpdate, AlertRead, SendToTeamResponse
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-22 (DWB-426: recipient_agent_id)
 
 from datetime import datetime
 
@@ -18,6 +18,7 @@ from app.models.alert import AlertSeverity, AlertStatus
 class AlertCreate(BaseModel):
     project_id: int
     raised_by_agent_id: int
+    recipient_agent_id: int | None = None
     ticket_id: int | None = None
     title: str
     body: str
@@ -64,6 +65,7 @@ class AlertRead(BaseModel):
     id: int
     project_id: int
     raised_by_agent_id: int
+    recipient_agent_id: int | None
     ticket_id: int | None
     title: str
     body: str
