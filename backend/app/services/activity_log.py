@@ -6,7 +6,7 @@
 # Callees: app/models/activity_log.py
 # Data In: db: Session, filters, semantic-event fields
 # Data Out: list[ActivityLog], ActivityLog
-# Last Modified: 2026-06-22 (DWB-418..421: register tool-action semantic verbs)
+# Last Modified: 2026-06-23 (DWB-432: register scoring semantic verbs)
 
 import json
 
@@ -69,6 +69,13 @@ SEMANTIC_ACTIONS = frozenset({
     "agent_spawned",
     "notification",
     "context_compaction",
+    # scoring events (DWB-432). score_awarded/score_docked fire for human + peer
+    # carrots/sticks only (auto-triggers are already represented by their
+    # ticket/test/failure feed events). lead_change fires when the project #1
+    # spot flips. entity_type="agent". Not middleware-logged -> no shadow entry.
+    "score_awarded",
+    "score_docked",
+    "lead_change",
 })
 
 # Read-side feed dedup (DWB-409). Maps each semantic event to the generic

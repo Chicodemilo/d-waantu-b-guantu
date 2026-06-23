@@ -18,6 +18,7 @@ delete a row: ``revert_score_event`` appends a reverting row (delta = -original)
 and stamps the original's ``reverted_by``.
 """
 
+import logging
 import math
 
 from fastapi import HTTPException
@@ -36,6 +37,12 @@ from app.models.alert import Alert, AlertSeverity, AlertStatus
 from app.models.project_agent import ProjectAgent
 from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
 from app.models.sprint import Sprint, SprintStatus
+from app.services.activity_log import log_activity
+
+logger = logging.getLogger(__name__)
+
+# Max chars of a reason persisted into an activity-feed score event (DWB-432).
+_SCORE_REASON_MAX = 100
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +85,49 @@ def _bump_cache(
 # ---------------------------------------------------------------------------
 
 
+def _leader_agent_id(db: Session, project_id: int) -> int | None:
+    """The project's current #1 agent (top reputation among the roster, name
+    tiebreak), or None when there is no meaningful leader (all reputations <= 0,
+    e.g. an all-zero board). Used to detect lead changes (DWB-432)."""
+    row = db.execute(
+        select(Agent.id, AgentScore.reputation, Agent.name)
+        .join(ProjectAgent, ProjectAgent.agent_id == Agent.id)
+        .join(
+            AgentScore,
+            (AgentScore.agent_id == Agent.id)
+            & (AgentScore.project_id == project_id),
+        )
+        .where(ProjectAgent.project_id == project_id)
+        .order_by(AgentScore.reputation.desc(), Agent.name.asc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    agent_id, reputation, _name = row
+    return agent_id if reputation > 0 else None
+
+
+def _emit_lead_change(db: Session, project_id: int, before: int | None) -> None:
+    """If the project #1 changed from ``before``, emit a lead_change feed event.
+    Guarded so it can never break the score write. Flushes only; the caller's
+    commit persists it alongside the score row."""
+    try:
+        after = _leader_agent_id(db, project_id)
+        if after is None or after == before:
+            return
+        new_name = db.get(Agent, after).name if after else None
+        prev_name = db.get(Agent, before).name if before else None
+        log_activity(
+            db, project_id, None, "agent", after, "lead_change",
+            {"new_leader": new_name, "previous_leader": prev_name},
+        )
+        logger.info(
+            "lead_change project=%s %s -> %s", project_id, prev_name, new_name
+        )
+    except Exception:
+        logger.warning("lead_change emit failed for project %s", project_id, exc_info=True)
+
+
 def apply_score_event(
     db: Session,
     *,
@@ -102,7 +152,13 @@ def apply_score_event(
     (peer economy, fully exercised in DWB-427). Pass ``commit=False`` to fold
     this into a caller-owned transaction (e.g. the auto-trigger engine running
     inside a request that also closes a ticket).
+
+    DWB-432: emits a lead_change feed event (any source) when this write flips
+    the project #1 spot.
     """
+    # Capture the leader BEFORE the write so we can detect a #1 flip.
+    leader_before = _leader_agent_id(db, project_id)
+
     event = ScoreEvent(
         project_id=project_id,
         sprint_id=sprint_id,
@@ -122,6 +178,8 @@ def apply_score_event(
     _bump_cache(db, subject_agent_id, project_id, reputation_delta=delta)
     if actor_agent_id is not None and actor_cost:
         _bump_cache(db, actor_agent_id, project_id, influence_delta=-actor_cost)
+
+    _emit_lead_change(db, project_id, leader_before)
 
     if commit:
         db.commit()
@@ -255,6 +313,10 @@ def rebuild_agent_scores(db: Session, project_id: int) -> int:
         row.influence = INITIAL_INFLUENCE - sprint_spent.get(aid, 0)
 
     db.commit()
+    logger.info(
+        "rebuilt %d agent_score rows for project %s from the ledger",
+        len(agent_ids), project_id,
+    )
     return len(agent_ids)
 
 
@@ -329,42 +391,45 @@ def peer_score(
 
     Broadcasts at normal severity on success. Returns (event, broadcast_count).
     """
+    def _reject(msg: str):
+        logger.warning(
+            "peer score rejected: %s (actor=%s subject=%s delta=%+d project=%s)",
+            msg, actor.name, subject.name, delta, project_id,
+        )
+        return HTTPException(400, msg)
+
     if delta == 0:
-        raise HTTPException(400, "delta must be non-zero (positive grant / negative demerit)")
+        raise _reject("delta must be non-zero (positive grant / negative demerit)")
     if actor.id == subject.id:
-        raise HTTPException(400, "no self-scoring: an agent cannot score itself")
+        raise _reject("no self-scoring: an agent cannot score itself")
 
     sid = active_sprint_id(db, project_id)
     cost = abs(delta)
 
     remaining = remaining_influence(db, actor.id, project_id, sid)
     if cost > remaining:
-        raise HTTPException(
-            400,
+        raise _reject(
             f"insufficient influence: this action costs {cost} but {actor.name} "
-            f"has {remaining} of {INITIAL_INFLUENCE} left this sprint",
+            f"has {remaining} of {INITIAL_INFLUENCE} left this sprint"
         )
 
     granted, dinged = peer_target_totals(db, project_id, sid, actor.id, subject.id)
     if delta < 0:
         if cost > MAX_DING_PER_ACTION:
-            raise HTTPException(
-                400,
-                f"per-action ding cap is {MAX_DING_PER_ACTION}; requested {cost}",
+            raise _reject(
+                f"per-action ding cap is {MAX_DING_PER_ACTION}; requested {cost}"
             )
         if dinged + cost > MAX_DING_PER_TARGET_PER_SPRINT:
-            raise HTTPException(
-                400,
+            raise _reject(
                 f"per-target ding cap this sprint is {MAX_DING_PER_TARGET_PER_SPRINT} "
-                f"({actor.name} has already docked {subject.name} by {dinged})",
+                f"({actor.name} has already docked {subject.name} by {dinged})"
             )
         trigger = ScoreTriggerType.peer_demerit
     else:
         if granted + cost > MAX_GRANT_PER_TARGET_PER_SPRINT:
-            raise HTTPException(
-                400,
+            raise _reject(
                 f"per-target grant cap this sprint is {MAX_GRANT_PER_TARGET_PER_SPRINT} "
-                f"({actor.name} has already granted {subject.name} {granted})",
+                f"({actor.name} has already granted {subject.name} {granted})"
             )
         trigger = ScoreTriggerType.peer_grant
 
@@ -380,6 +445,15 @@ def peer_score(
     )
     db.commit()
     db.refresh(event)
+    logger.info(
+        "peer %s: %s %+d to %s (project %s)",
+        trigger.value, actor.name, delta, subject.name, project_id,
+    )
+    _emit_score_feed_event(
+        db, project_id=project_id, actor_agent_id=actor.id,
+        subject_name=subject.name, subject_agent_id=subject.id,
+        delta=delta, reason=reason, source="peer",
+    )
     return event, count
 
 
@@ -434,6 +508,14 @@ def get_leaderboard(db: Session, project_id: int) -> list[dict]:
     ).all()
     rep_map = {aid: rep for aid, rep in rep_rows}
 
+    # DWB-432: agents with at least one subject score event (for the tier; an
+    # unscored agent gets the 'unscored' tier even when ranked last).
+    scored_ids = set(db.scalars(
+        select(ScoreEvent.subject_agent_id)
+        .where(ScoreEvent.project_id == project_id)
+        .distinct()
+    ).all())
+
     roster = db.execute(
         select(Agent.id, Agent.name, Agent.role)
         .join(ProjectAgent, ProjectAgent.agent_id == Agent.id)
@@ -452,6 +534,11 @@ def get_leaderboard(db: Session, project_id: int) -> list[dict]:
         })
 
     out.sort(key=lambda r: (-r["reputation"], -r["sprint_delta"], r["agent_name"] or ""))
+    # DWB-432: 1-based rank + tier (reuse the get_standing tiering).
+    total = len(out)
+    for i, row in enumerate(out, start=1):
+        row["rank"] = i
+        row["tier"] = _standing_tier(i, total, row["agent_id"] in scored_ids)
     return out
 
 
@@ -545,6 +632,40 @@ def broadcast_score_change(
     return count
 
 
+def _emit_score_feed_event(
+    db: Session,
+    *,
+    project_id: int,
+    actor_agent_id: int | None,
+    subject_name: str | None,
+    subject_agent_id: int,
+    delta: int,
+    reason: str | None,
+    source: str,
+) -> None:
+    """Emit a score_awarded / score_docked activity-feed event for a human or
+    peer score (DWB-432). Called AFTER the score row is committed; wrapped in
+    try/except with its own commit so a feed failure never affects the score
+    write (mirrors hook_tracking._persist_tool_action). Auto-triggers do NOT
+    call this - their ticket/test/failure feed events already cover them.
+    """
+    action = "score_awarded" if delta > 0 else "score_docked"
+    details = {"agent": subject_name, "delta": delta, "source": source}
+    if reason:
+        details["reason"] = reason[:_SCORE_REASON_MAX]
+    try:
+        log_activity(
+            db, project_id, actor_agent_id, "agent", subject_agent_id, action, details
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning(
+            "score feed event failed (action=%s subject=%s)",
+            action, subject_agent_id, exc_info=True,
+        )
+
+
 def human_score(
     db: Session,
     *,
@@ -570,6 +691,16 @@ def human_score(
     )
     db.commit()
     db.refresh(event)
+    logger.info(
+        "human %s: %+d to %s (project %s)",
+        trigger.value, delta, subject.name, project_id,
+    )
+    # Score row is durable; emit the feed event separately (guarded).
+    _emit_score_feed_event(
+        db, project_id=project_id, actor_agent_id=None,
+        subject_name=subject.name, subject_agent_id=subject.id,
+        delta=delta, reason=reason, source="human",
+    )
     return event, count
 
 
@@ -645,10 +776,12 @@ def get_standing(db: Session, agent_id: int, project_id: int) -> dict | None:
 
 
 def get_agent_summary(db: Session, agent_id: int, project_id: int) -> dict:
-    """Summary score figures for one agent on one project."""
+    """Summary score figures for one agent on one project. DWB-432: includes
+    leaderboard rank + tier (None when the agent is off-roster)."""
     row = db.get(AgentScore, (agent_id, project_id))
     sprint_id = active_sprint_id(db, project_id)
     delta_map = _sprint_delta_map(db, project_id, sprint_id)
+    standing = get_standing(db, agent_id, project_id)
     return {
         "agent_id": agent_id,
         "project_id": project_id,
@@ -656,6 +789,8 @@ def get_agent_summary(db: Session, agent_id: int, project_id: int) -> dict:
         # Influence is ledger-derived per active sprint (DWB-427), not the cache.
         "influence": remaining_influence(db, agent_id, project_id, sprint_id),
         "sprint_delta": delta_map.get(agent_id, 0),
+        "rank": standing["rank"] if standing else None,
+        "tier": standing["tier"] if standing else None,
     }
 
 

@@ -14,11 +14,14 @@
 
 """Tests for the agent scoring ledger + cache + read API (DWB-424)."""
 
+import json
+
 import pytest
 
 from sqlalchemy import select
 
 from app.config.scoring import INITIAL_INFLUENCE
+from app.models.activity_log import ActivityLog
 from app.models.agent_score import AgentScore
 from app.models.alert import Alert, AlertSeverity
 from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
@@ -552,3 +555,142 @@ class TestPeerEconomy:
         svc.rebuild_agent_scores(db_session, pid)
         after = {r["agent_id"]: r["influence"] for r in client.get(f"/api/projects/{pid}/scores").json()}
         assert after[a1] == INITIAL_INFLUENCE - 5
+
+
+def _activity(db, project_id, action):
+    rows = db.scalars(
+        select(ActivityLog)
+        .where(ActivityLog.project_id == project_id)
+        .where(ActivityLog.action == action)
+    ).all()
+    out = []
+    for r in rows:
+        d = r.details
+        if isinstance(d, str):
+            try:
+                d = json.loads(d)
+            except (ValueError, TypeError):
+                pass
+        out.append((r, d))
+    return out
+
+
+class TestScoreFeedEvents:
+    """DWB-432: human + peer scores emit score_awarded / score_docked feed
+    events; auto-triggers do NOT."""
+
+    def test_human_carrot_emits_score_awarded(self, client, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        client.post(f"/api/projects/{pid}/scores/award",
+                    json={"agent": str(a1), "delta": 7, "reason": "shipped it"})
+        rows = _activity(db_session, pid, "score_awarded")
+        assert len(rows) == 1
+        row, details = rows[0]
+        assert row.entity_type == "agent"
+        assert row.entity_id == a1
+        assert details["delta"] == 7
+        assert details["source"] == "human"
+        assert details["agent"] == "ScoreAlpha"
+        assert details["reason"] == "shipped it"
+
+    def test_human_stick_emits_score_docked_signed_delta(self, client, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        client.post(f"/api/projects/{pid}/scores/award",
+                    json={"agent": str(a1), "delta": -4, "reason": "regression"})
+        rows = _activity(db_session, pid, "score_docked")
+        assert len(rows) == 1
+        _row, details = rows[0]
+        assert details["delta"] == -4  # signed
+        assert details["source"] == "human"
+
+    def test_reason_truncated_to_100(self, client, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        long_reason = "x" * 250
+        client.post(f"/api/projects/{pid}/scores/award",
+                    json={"agent": str(a1), "delta": 3, "reason": long_reason})
+        _row, details = _activity(db_session, pid, "score_awarded")[0]
+        assert len(details["reason"]) == 100
+
+    def test_peer_emits_feed_event_with_source_peer(self, client, db_session, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        client.post(f"/api/projects/{pid}/scores/peer",
+                    json={"subject": str(a2), "delta": 5},
+                    headers={"X-Agent-ID": str(a1)})
+        rows = _activity(db_session, pid, "score_awarded")
+        assert len(rows) == 1
+        row, details = rows[0]
+        assert row.entity_id == a2
+        assert row.agent_id == a1  # actor recorded as the activity agent
+        assert details["source"] == "peer"
+
+    def test_auto_trigger_does_not_emit_score_feed_event(self, client, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        svc.apply_score_event(db_session, project_id=pid, subject_agent_id=a1,
+                              trigger_type=ScoreTriggerType.ticket_closed, delta=5,
+                              source=ScoreSource.auto, reason="auto")
+        assert _activity(db_session, pid, "score_awarded") == []
+        assert _activity(db_session, pid, "score_docked") == []
+
+
+class TestLeadChange:
+    """DWB-432: lead_change fires when a score write flips the project #1."""
+
+    def test_first_leader_emits_lead_change(self, client, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        client.post(f"/api/projects/{pid}/scores/award",
+                    json={"agent": str(a1), "delta": 5})
+        rows = _activity(db_session, pid, "lead_change")
+        assert len(rows) == 1
+        _row, details = rows[0]
+        assert details["new_leader"] == "ScoreAlpha"
+        assert details["previous_leader"] is None
+
+    def test_overtaking_emits_lead_change(self, client, db_session, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        client.post(f"/api/projects/{pid}/scores/award", json={"agent": str(a1), "delta": 5})
+        client.post(f"/api/projects/{pid}/scores/award", json={"agent": str(a2), "delta": 10})
+        rows = _activity(db_session, pid, "lead_change")
+        # one for first leader (a1), one for a2 overtaking
+        assert len(rows) == 2
+        _row, last = rows[0] if rows[0][0].id > rows[1][0].id else rows[1]
+        assert last["new_leader"] == "ScoreBeta"
+        assert last["previous_leader"] == "ScoreAlpha"
+
+    def test_no_lead_change_when_leader_unchanged(self, client, db_session, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        client.post(f"/api/projects/{pid}/scores/award", json={"agent": str(a1), "delta": 10})
+        client.post(f"/api/projects/{pid}/scores/award", json={"agent": str(a1), "delta": 3})
+        # only the first award changed the leader (None -> a1)
+        assert len(_activity(db_session, pid, "lead_change")) == 1
+
+    def test_fires_for_auto_source(self, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        svc.apply_score_event(db_session, project_id=pid, subject_agent_id=a1,
+                              trigger_type=ScoreTriggerType.ticket_closed, delta=5,
+                              source=ScoreSource.auto, reason="auto")
+        assert len(_activity(db_session, pid, "lead_change")) == 1
+
+
+class TestRankAndTier:
+    """DWB-432: rank + tier on leaderboard rows and agent-score detail."""
+
+    def test_leaderboard_rows_have_rank_and_tier(self, client, db_session, scored_project):
+        pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
+        svc.apply_score_event(db_session, project_id=pid, subject_agent_id=a1,
+                              trigger_type=ScoreTriggerType.ticket_closed, delta=10,
+                              source=ScoreSource.auto, reason="x")
+        rows = client.get(f"/api/projects/{pid}/scores").json()
+        assert rows[0]["rank"] == 1 and rows[0]["tier"] == "best"
+        # a2 has no events -> unscored even though ranked last
+        beta = [r for r in rows if r["agent_id"] == a2][0]
+        assert beta["tier"] == "unscored"
+        assert all("rank" in r and "tier" in r for r in rows)
+
+    def test_agent_detail_has_rank_and_tier(self, client, db_session, scored_project):
+        pid, a1 = scored_project["project_id"], scored_project["a1"]
+        svc.apply_score_event(db_session, project_id=pid, subject_agent_id=a1,
+                              trigger_type=ScoreTriggerType.ticket_closed, delta=5,
+                              source=ScoreSource.auto, reason="x")
+        data = client.get(f"/api/agents/{a1}/score", params={"project_id": pid}).json()
+        assert data["rank"] == 1
+        assert data["tier"] == "best"

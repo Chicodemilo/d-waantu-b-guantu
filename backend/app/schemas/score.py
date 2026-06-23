@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: service dicts from app.services.scoring, human award request body
 # Data Out: LeaderboardRow, ScoreLedgerEntry, AgentScoreDetail, HumanScoreRequest/Response
-# Last Modified: 2026-06-23 (DWB-427)
+# Last Modified: 2026-06-23 (DWB-432: rank + tier on leaderboard + agent detail)
 
 from pydantic import BaseModel
 
@@ -18,6 +18,8 @@ class LeaderboardRow(BaseModel):
     reputation: int
     sprint_delta: int
     influence: int
+    rank: int
+    tier: str
 
 
 class ScoreLedgerEntry(BaseModel):
@@ -42,6 +44,8 @@ class AgentScoreDetail(BaseModel):
     reputation: int
     influence: int
     sprint_delta: int
+    rank: int | None
+    tier: str | None
     ledger: list[ScoreLedgerEntry]
 
 

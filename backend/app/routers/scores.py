@@ -6,9 +6,11 @@
 # Callees: app/services/scoring.py, app/models/project.py, app/models/agent.py
 # Data In: HTTP GET/POST
 # Data Out: LeaderboardRow[], AgentScoreDetail, HumanScoreResponse, rebuild result
-# Last Modified: 2026-06-23 (DWB-430: project-membership guard on write paths)
+# Last Modified: 2026-06-23 (DWB-432: request logging on award/peer/rebuild + reject paths)
 
 """Agent scoring read API (DWB-424)."""
+
+import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -25,6 +27,8 @@ from app.schemas.score import (
     PeerScoreResponse,
 )
 from app.services import scoring as svc
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["scores"])
 
@@ -100,12 +104,17 @@ def award_human_score(
     if project is None:
         raise HTTPException(404, "Project not found")
     if data.delta == 0:
+        logger.warning("award rejected: zero delta (project %s, agent %r)", project_id, data.agent)
         raise HTTPException(400, "delta must be non-zero (positive carrot / negative stick)")
     subject = svc.resolve_agent_ref(db, data.agent)
     if subject is None:
+        logger.warning("award rejected: agent not found %r (project %s)", data.agent, project_id)
         raise HTTPException(404, f"Agent not found: {data.agent!r}")
     # DWB-430: scores are per-project; the subject must be on this project.
     if not svc.is_project_member(db, subject.id, project_id):
+        logger.warning(
+            "award rejected: %s not on project %s", subject.name, project.prefix
+        )
         raise HTTPException(
             404, f"Agent {subject.name!r} is not on project {project.prefix}"
         )
@@ -148,19 +157,24 @@ def peer_score(
     if project is None:
         raise HTTPException(404, "Project not found")
     if x_agent_id is None:
+        logger.warning("peer rejected: missing X-Agent-ID (project %s)", project_id)
         raise HTTPException(400, "X-Agent-ID header is required to identify the acting agent")
     actor = db.get(Agent, x_agent_id)
     if actor is None:
+        logger.warning("peer rejected: acting agent %s not found", x_agent_id)
         raise HTTPException(404, f"Acting agent not found: {x_agent_id}")
     # DWB-430: both actor and subject must belong to this project.
     if not svc.is_project_member(db, actor.id, project_id):
+        logger.warning("peer rejected: actor %s not on project %s", actor.name, project.prefix)
         raise HTTPException(
             404, f"Agent {actor.name!r} is not on project {project.prefix}"
         )
     subject = svc.resolve_agent_ref(db, data.subject)
     if subject is None:
+        logger.warning("peer rejected: subject not found %r (project %s)", data.subject, project_id)
         raise HTTPException(404, f"Subject agent not found: {data.subject!r}")
     if not svc.is_project_member(db, subject.id, project_id):
+        logger.warning("peer rejected: subject %s not on project %s", subject.name, project.prefix)
         raise HTTPException(
             404, f"Agent {subject.name!r} is not on project {project.prefix}"
         )
