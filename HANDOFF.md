@@ -2,38 +2,36 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current State (as of 2026-06-22)
+## Current State (as of 2026-06-23)
 
-- **Working tree clean. All this-session work committed AND pushed to origin/master** (tip `e96ca02`). Backend 1204→1222 passing, frontend 156→159 passing.
-- **Sprint S66 (id=107) still active** (epic 21). It now has **no open tickets** — the epic-21 work (404/405/406) plus carryover 413 and new 414 are all done.
-- No open alerts. The system-wide `in_progress: 1` in `/api/status` is **RVP-007 on project 7**, not DWB.
+- Working tree clean; all work committed AND pushed to origin/master (tip `b6af775`). Backend 1317 passing, frontend 178 passing.
+- Sprint S68 (id=118, epic 28 "Agent Scoring") active. All scoring tickets DWB-424..435 are done; no open scoring tickets. No open alerts on project 1.
 
-## Shipped this session (5 tickets, 4 commits)
+## Shipped this session (two systems)
 
-| Ticket | Commit | One-line |
-|---|---|---|
-| DWB-413 | `58fe262` | `delete_project` clears hook/dwb sessions + consolidation acks in dependency order, and NULLs homed agents' `project_id` (agents are global identities) instead of deleting them. |
-| DWB-414 | `b38400a` | Session close-scan scoped to genuine user-authored turns: filters `isMeta`, `toolUseResult`, and synthetic-wrapper string content (teammate-message, command echo/stdout, task-notification, system-reminder, ...) on both open + close. Matched in-memory, no user text persisted. |
-| DWB-406 | `9c9cf87` | Dropped unused `anthropic` dep (leftover after DWB-402 retired the AI classifier). |
-| DWB-405 | `e96ca02` | `force_headers` missing_files[] now render in the Sprint Gates panel (fetched only while gate is ON, rides existing poll tick). |
-| DWB-404 | (doc-only) | Spike resolved: subagents CAN write outside `.claude/` (incl `.dwb/`) with no permission crash. The crash is the `.claude/` permission dialog specifically. |
+**Deterministic action capture (DWB-417..421):** PostToolUse / Notification / PreCompact hooks -> `/api/hooks/tool-use` + `/lifecycle-event` -> `tool_actions` table. Classifies file_written / message_sent (recipient only, no body) / agent_spawned / notification / context_compaction; emits activity-feed verbs. Fire-and-forget, always 200.
 
-DWB-414 was the bug the old handoff loosely called "DWB-396" — that key was never filed; Pam filed it fresh as DWB-414 in S66.
-
-## Carryover (pre-existing, NOT from this session)
-
-- **10 stale backlog/todo tickets** on project 1, all in old sprints (49, 65, 102, 20, 23) — long-standing backlog, not active work. (DWB-051 Jira research, DWB-192-196/227-228 token/time audits, DWB-316 inbox viewer, DWB-066 auto-assign.)
-- **6 open failure records** (sprint 38 from March, sprint 107 from 2026-06-10; agents Sage/Sylvie/Barry). They predate this session and would only block an S66 sprint-close — harmless to a restart, but clear them before closing S66.
+**Agent Scoring (epic 28, DWB-424..435):**
+- `score_event` ledger (source of truth) + `agent_score` cache (rebuildable). `reputation` (all-time rank) + `influence` (per-sprint peer budget). Per-(agent, project).
+- Auto-triggers in `scoring_triggers.py`: ticket close (+no-rework bonus), rework, test_failure, stale, zero_token_close, gate_miss, forgot.
+- Human tools: `/carrot` `/stick` `/score` `/leaderboard` (`.claude/commands/`) -> `/scores/award` (free). Peer economy -> `/scores/peer` (X-Agent-ID), FLAT (any agent scores any other; only self-scoring barred); caps in `config/scoring.py`.
+- Broadcast: human/peer carrot/stick notify all project agents via per-agent alerts (`alert.recipient_agent_id`); human = critical severity.
+- Activity-feed events (DWB-432): `score_awarded`/`score_docked` (details: agent, signed delta, source, reason) + `lead_change` (new_leader/previous_leader). Auto-triggers NOT separately emitted.
+- `identity.md` standing block (DWB-431): rendered each spawn in `agent_memory.scaffold_agent_dir` from `scoring.get_standing` - rank + tiered motivational line (best/podium/above/mid/below/dead_last/unscored).
+- UI: leaderboard on Team Status (ProjectPage), Scoreboard tab on the team page (ProjectAgentsPage), carrot +10 / stick -10 buttons with inline reason (NO modal), AgentPage rank/tier + ledger, score on Roster + Dashboard.
+- Cross-project guard (DWB-430): scoring writes require the subject (and peer actor) to be on the project. Docs (DWB-429): ARCHITECTURE + README. Full spec: `docs/agent_scoring_spec.md`.
 
 ## Team
 
-- This session spawned Pam_DWB (14, PM), Barry_DWB (21, backend), **Stan (38, backend — NEW, created this session)**, Freddie (19, frontend). All parked alive at session end; respawn before use, do NOT SendMessage cold names.
+Spawned this session: Barry_DWB (21, backend - built most of scoring), Freddie (19, frontend - ran as "Freddie-2" due to name collision with the parked instance), Pam_DWB (14, PM), Dolores (28, docs). **Stan (38, backend) CRASHED at spawn on DWB-432 and produced nothing** (last_seen null, ticket never moved); Barry recovered it. All parked at session end; respawn before use, verify `presumed_live`, do NOT SendMessage cold names.
 
 ## Gotchas (carry forward)
 
-- **Synthetic user-role turns:** CC records tool results, teammate-message relays, command echoes, task-notifications, and system-reminders all with role=`user`. Anything scanning the transcript for "what the human typed" MUST filter these (see `_is_synthetic_user_text` / `_SYNTHETIC_USER_TAGS` in `hook_tracking.py`).
-- **delete_project FK order:** child rows (hook_sessions → dwb_sessions → consolidation_acks → tickets → project_agents) must clear before parents; homed agents get detached (NULL project_id), never deleted.
-- **`.claude/` Edit by subagent = crash** (permission dialog). Only the TL edits `.claude/`. Writes to `.dwb/` and ordinary project files are safe (DWB-404).
-- **Verify worker liveness** (`presumed_live`/`last_seen` on `/team`) before assuming a worker is building.
-- **`GET /api/alerts?status=open` is NOT project-scoped** — pass `project_id`. Same for `/api/status` and `/failure-records/summary`, which are system-wide across all projects.
-- **Doc ceilings** (`backend/app/config/token_budget.py`): HANDOFF 1500, ARCHITECTURE 7500, README 3500.
+- **`_HOOKS_SETTINGS_BLOCK`** (`routers/playbooks.py`) is the canonical hook config `deploy-playbooks` writes into `settings.json`. It now includes PostToolUse/Notification/PreCompact - keep it in sync with `.claude/settings.json` or a deploy WIPES the capture hooks. Drift-guard test in `test_playbooks.py`.
+- **Scoring is per-(agent, project)**; writes are membership-guarded. Slash commands live ONLY in DWB's `.claude/commands/` (deploy-playbooks does not copy commands to other repos).
+- **`identity.md` standing**: `unscored` takes precedence over `dead_last` (new agents are encouraged, not threatened).
+- **No modal component** in the frontend - inline text confirms only (firm rule).
+- **`.claude/` Edit by subagent = crash**; only the TL edits `.claude/` (commands, settings, playbooks).
+- **Ticket key != db id** - PATCH by db id (e.g. DWB-433 = id 979). Mixed these up once this session.
+- **Doc ceilings** (`token_budget.py`): HANDOFF 1500, ARCHITECTURE 7500, README 3500.
+- Dev server (vite :5173) needs a restart / hard-refresh to pick up new frontend files.
