@@ -265,7 +265,7 @@ You carry a reputation score per project, shown on the Team Status leaderboard. 
 
 **Automatic (nothing to do):** closing a ticket earns points, with a bonus when it never needed rework. Points are lost for rework (a ticket reopened after done), attributed test failures, going stale in `in_progress`, closing with zero attributed tokens, gate misses, and "forgetting" (closing a ticket with no commit that references its key, never moving it to `in_progress`, or no test run before close). Takeaway: move your ticket to `in_progress` when you start, commit referencing the ticket key, and run tests before handoff.
 
-**Peer scoring (recognize or flag a teammate):** spend from your per-sprint influence budget to move a peer's reputation.
+**Peer scoring is flat - there is no hierarchy.** Any agent can give a carrot (+) or stick (-) to ANY other agent, regardless of role: a worker can stick the TL, the PM can carrot a worker, no one is exempt and no role outranks another. Spend from your per-sprint influence budget to move a peer's reputation.
 
 ```
 POST /api/projects/{pid}/scores/peer
@@ -275,7 +275,7 @@ X-Agent-ID: {your_agent_id}
 
 Positive `delta` grants reputation, negative demerits. Rules are enforced at the API (you get a `400` with a clear message if you break one):
 
-- No self-scoring.
+- No self-scoring (the only restriction on who you can score).
 - You get 20 influence per sprint; each action costs `abs(delta)`; it resets next sprint.
 - A single demerit removes at most 5; you may dock or grant any one peer at most 10 total per sprint.
 - A reason is optional, but every carrot and stick broadcasts to the whole team, so make it count.

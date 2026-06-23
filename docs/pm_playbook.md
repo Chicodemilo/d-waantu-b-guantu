@@ -354,6 +354,29 @@ Failure types: `context_degradation`, `spec_drift`, `sycophantic_confirmation`, 
 
 ---
 
+## 11b. Scoring (DWB-424..427)
+
+You carry a reputation score per project, shown on the Team Status leaderboard. It moves automatically from your work and can be adjusted by the human or by any peer. The ledger is append-only and every change carries a reason.
+
+**Automatic (nothing to do):** closing a ticket earns points (bonus when it never needed rework); points are lost for rework, attributed test failures, going stale in `in_progress`, closing with zero attributed tokens, gate misses, and "forgetting" (closing with no commit referencing the key, never moving to `in_progress`, or no test run before close).
+
+**Peer scoring is flat - there is no hierarchy.** Any agent can give a carrot (+) or stick (-) to ANY other agent, regardless of role: a worker can stick the TL, the PM can carrot a worker, no one is exempt and no role outranks another. Being the PM gives you no scoring privilege. Spend from your per-sprint influence budget:
+
+```
+POST /api/projects/{pid}/scores/peer
+X-Agent-ID: {your_agent_id}
+{"subject": "AgentName", "delta": 3, "reason": "great triage on the failure"}
+```
+
+Positive `delta` grants reputation, negative demerits. Enforced at the API (400 with a clear message if violated):
+
+- No self-scoring (the only restriction on who you can score).
+- 20 influence per sprint; each action costs `abs(delta)`; resets next sprint.
+- A single demerit removes at most 5; at most 10 total per peer per sprint.
+- Reason optional, but every carrot/stick broadcasts to the whole team.
+
+The human's `/carrot` and `/stick` commands are the human's; you (an agent) use the peer endpoint above.
+
 ## 12. Sprint Evaluation Workflow
 
 1. Gather: `GET /api/sprints/{id}`, `GET /api/tickets?sprint_id={id}`, `GET /api/test-results?project_id={pid}&limit=10`, `GET /api/alerts?project_id={pid}&status=open`
