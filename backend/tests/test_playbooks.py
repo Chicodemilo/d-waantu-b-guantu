@@ -322,7 +322,8 @@ class TestDeployHooksSettings:
     """
 
     _EXPECTED_HOOK_EVENTS = {
-        "SessionStart", "UserPromptSubmit", "SessionEnd", "Stop", "SubagentStop"
+        "SessionStart", "UserPromptSubmit", "SessionEnd", "Stop", "SubagentStop",
+        "PostToolUse", "Notification", "PreCompact",
     }
 
     def _deploy_or_skip(self, client, project_id):
@@ -332,6 +333,25 @@ class TestDeployHooksSettings:
             pytest.skip("docs/ has no playbook files in this env")
         assert r.status_code == 200, r.text
         return r.json()
+
+    def test_block_matches_shipped_settings_json(self):
+        """Drift guard: the canonical _HOOKS_SETTINGS_BLOCK that deploy writes
+        MUST equal DWB's own .claude/settings.json hooks key, so a deploy into
+        DWB reports 'unchanged' and never clobbers hooks added to settings.json
+        (e.g. PostToolUse / Notification / PreCompact). If this fails, sync the
+        two: whichever is correct, make the other match exactly."""
+        import json
+
+        from app.routers.playbooks import _HOOKS_SETTINGS_BLOCK
+
+        # tests/ -> backend/ -> repo root -> .claude/settings.json
+        repo_root = Path(__file__).resolve().parents[2]
+        shipped = json.loads(
+            (repo_root / ".claude" / "settings.json").read_text(encoding="utf-8")
+        )
+        assert shipped["hooks"] == _HOOKS_SETTINGS_BLOCK, (
+            "deploy-playbooks hooks block has drifted from .claude/settings.json"
+        )
 
     def test_creates_settings_json_when_missing(self, client, make_project, tmp_path):
         import json

@@ -158,8 +158,9 @@ class DeployResult(BaseModel):
 
 
 # DWB-390: hooks block written into each project's `.claude/settings.json`
-# so SessionStart / SessionEnd / Stop / SubagentStop / UserPromptSubmit fire
-# in sibling repos the same way they do in DWB. Without this, projects
+# so SessionStart / SessionEnd / Stop / SubagentStop / UserPromptSubmit /
+# PostToolUse / Notification / PreCompact (DWB-417/421) fire in sibling repos
+# the same way they do in DWB. Without this, projects
 # 2/4/5/7/8/11 (and any new project) silently log zero token data because
 # their `.claude/` has no hooks configured at all. The hook command shape
 # matches DWB's own settings.json: curl POST the JSON payload to localhost
@@ -216,6 +217,41 @@ _HOOKS_SETTINGS_BLOCK: dict = {
                 "-H 'Content-Type: application/json' -d \"$(cat)\""
             ),
             "timeout": 30,
+        }],
+    }],
+    # DWB-417/421: deterministic action capture + lifecycle events. PostToolUse
+    # is matcher-scoped to the tools the scoring/capture layer classifies;
+    # Notification + PreCompact POST to the lifecycle-event endpoint. Mirrors
+    # DWB's own .claude/settings.json exactly so deploy reports "unchanged".
+    "PostToolUse": [{
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Task|SendMessage",
+        "hooks": [{
+            "type": "command",
+            "command": (
+                "curl -sf -X POST http://localhost:8000/api/hooks/tool-use "
+                "-H 'Content-Type: application/json' -d \"$(cat)\""
+            ),
+            "timeout": 5,
+        }],
+    }],
+    "Notification": [{
+        "hooks": [{
+            "type": "command",
+            "command": (
+                "curl -sf -X POST http://localhost:8000/api/hooks/lifecycle-event "
+                "-H 'Content-Type: application/json' -d \"$(cat)\""
+            ),
+            "timeout": 5,
+        }],
+    }],
+    "PreCompact": [{
+        "hooks": [{
+            "type": "command",
+            "command": (
+                "curl -sf -X POST http://localhost:8000/api/hooks/lifecycle-event "
+                "-H 'Content-Type: application/json' -d \"$(cat)\""
+            ),
+            "timeout": 5,
         }],
     }],
 }
