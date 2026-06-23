@@ -191,6 +191,29 @@ When done, message the TL: what you did, files changed, anything unexpected, whe
 
 **`in_review` is your terminal state.** Do not flip your ticket to `done` (TL-only after review) and do not mark your team-board task completed; the TL flips the board task when the review verdict lands. A board that says "completed" before review makes the TL's queue lie. Hand off, message, stand by.
 
+## Scoring (DWB-424..427)
+
+You carry a reputation score per project, shown on the Team Status leaderboard. It moves automatically from your work, and can be adjusted by the human or by peers. The ledger is append-only and every change carries a reason.
+
+**Automatic (nothing to do):** closing a ticket earns points, with a bonus when it never needed rework. Points are lost for rework (a ticket reopened after done), attributed test failures, going stale in `in_progress`, closing with zero attributed tokens, gate misses, and "forgetting" (closing a ticket with no commit that references its key, never moving it to `in_progress`, or no test run before close). Takeaway: move your ticket to `in_progress` when you start, commit referencing the ticket key, and run tests before handoff.
+
+**Peer scoring (recognize or flag a teammate):** spend from your per-sprint influence budget to move a peer's reputation.
+
+```
+POST /api/projects/{pid}/scores/peer
+X-Agent-ID: {your_agent_id}
+{"subject": "AgentName", "delta": 3, "reason": "caught a bug in my work"}
+```
+
+Positive `delta` grants reputation, negative demerits. Rules are enforced at the API (you get a `400` with a clear message if you break one):
+
+- No self-scoring.
+- You get 20 influence per sprint; each action costs `abs(delta)`; it resets next sprint.
+- A single demerit removes at most 5; you may dock or grant any one peer at most 10 total per sprint.
+- A reason is optional, but every carrot and stick broadcasts to the whole team, so make it count.
+
+The human's `/carrot` and `/stick` commands are theirs; agents use the peer endpoint above.
+
 ## Ad Hoc Work (No Filed Ticket)
 
 When the user signals the small-change waiver (see TL playbook § 4c) and the TL delegates a fix without filing a ticket, your tokens and time route to the project's **ad_hoc** bucket (DWB-353) instead of failing an unattributed-tokens alert. The bucket is computed automatically from `tracking_log` rows tagged `ad_hoc_token_report`; no special headers from you required. You don't need to think about it; just do the work. Real implementation work still goes through tickets as usual.
