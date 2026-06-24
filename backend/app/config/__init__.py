@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # DWB session idle sweeper (DWB-337). Disabled (interval=0) in tests so
     # the asyncio task doesn't fight with rolled-back transactions.
-    IDLE_TIMEOUT_MINUTES: int = 60
+    IDLE_TIMEOUT_MINUTES: int = 600
     IDLE_SWEEP_INTERVAL_SECONDS: int = 300
 
     # DWB-449: age-based purge of captured inter-agent messages. Rows older
