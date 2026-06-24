@@ -39,7 +39,7 @@ Three-tier architecture for tracking AI agent work across projects, sprints, and
 | Admin      | phpMyAdmin (Docker)   | 8080  | DB administration                |
 | Middleware | ActivityLoggerMiddleware | --  | Auto-logs all mutations          |
 
-The frontend polls the backend with adaptive intervals (2s when agents are active, 10s when idle). The backend follows a router -> service -> model pattern. An activity logger middleware auto-records all POST/PATCH/DELETE operations.
+The frontend polls with adaptive intervals (2s active, 10s idle). The backend follows a router -> service -> model pattern; an activity-logger middleware auto-records all POST/PATCH/DELETE operations.
 
 ---
 
@@ -87,7 +87,7 @@ Agent (standalone)
 
 | Table | Key Columns | Notes |
 |-------|-------------|-------|
-| **projects** | prefix, name, status, repo_path, jira_base_url, jira_project_key, tl/pm_overhead_tokens, tl/pm_overhead_time_seconds, force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_handoff_md, force_consolidation, playbooks_deployed_at | 7 sprint gate flags, all default OFF (opt-in). Status: active/paused/completed/archived |
+| **projects** | prefix, name, status, repo_path, jira_base_url, jira_project_key, tl/pm_overhead_tokens, tl/pm_overhead_time_seconds, force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_handoff_md, force_consolidation, capture_agent_comms, playbooks_deployed_at | 7 sprint gate flags, all default OFF (opt-in). `capture_agent_comms` (default ON) gates inter-agent message capture. Status: active/paused/completed/archived |
 | **epics** | project_id, name, description, status | Status: open/in_progress/completed |
 | **sprints** | project_id, epic_id, name, goal, sprint_number, status, start/end_date | Name auto-generated from goal. Completion triggers gate validation + alerts |
 | **tickets** | project_id, epic_id, sprint_id, assigned_agent_id, ticket_number, ticket_key, jira_issue_key, title, description, ticket_type, status, tokens_used, time_spent_seconds, token_source, completed_at | Auto-assigns sprint/epic on create. Status change triggers history + tracking events |
@@ -103,6 +103,7 @@ Agent (standalone)
 | **agent_score** | (agent_id, project_id) PK, reputation, influence, updated_at | DWB-424 derived cache, rebuildable from score_event. `reputation` = all-time rank; `influence` = per-sprint peer budget (ledger-derived, auto-resets) |
 | **tl_messages** | from_agent_id, to_agent_id (NULL=broadcast), from_project_id, body, created_at | DWB-436 cross-project team-lead channel. NOT project-scoped; from_project_id only records the sender's home project |
 | **tl_message_reads** | (message_id, agent_id) PK, read_at | DWB-436 per-(message, agent) read receipt; message_id FK ON DELETE CASCADE |
+| **inter_agent_messages** | project_id, dwb_session_id, from/to_agent_id, from/to_agent_name, body, summary, created_at | DWB-446 captured SendMessage log. `*_name` always stored; FK ids nullable. `dwb_session_id` display-only (never purged on). Age-purged > 4 days |
 | **instructions** | scope, project_id, agent_id, title, body | Scope: global/project/agent |
 | **activity_log** | project_id, agent_id, entity_type, entity_id, action, details, created_at | Auto-populated by middleware |
 | **test_results** | project_id, sprint_id, ticket_id, run_at, suite, total_tests, passed, failed, skipped, duration_seconds, status, details, triggered_by, triggered_context | Failed results auto-create failure_records |
@@ -142,18 +143,19 @@ Disabled during testing (`TESTING=1` env var).
 
 ### Endpoint Reference
 
-Full interactive reference at http://localhost:8000/docs (OpenAPI): 138 endpoints across 23 routers, standard CRUD per resource. The non-obvious / automation endpoints are catalogued in `README.md` API Reference. Notes that matter for the data model:
+Full OpenAPI reference at http://localhost:8000/docs (138 endpoints, 23 routers). The non-obvious / automation endpoints are catalogued in `README.md`. Notes that matter for the data model:
 
 - `GET /api/projects/{id}/team` (single-roundtrip roster) returns `{project_id, project_prefix, agents: [{agent_id, name, role, is_active, assigned_at, last_seen, presumed_live}]}`, active-only unless `?include_inactive=true`.
 - `GET /api/tracking/summary` `per_agent` rows aggregate `token_report` + `overhead_token_report` (a `tokens` total plus a separate `overhead_tokens`); `project_total.overhead_tokens` is the project-wide overhead figure.
 - `POST /api/agents/identify` + `/spawn-prepare` resolve `(role, name, project_prefix)`, accepting the short name or `<name>_<PREFIX>` form.
-- Agent memory (DWB-401) lives at `<repo>/.dwb/memory/<prefix>/<name>/` (outside the protected `.claude/` tree so subagents write it directly): `identity.md` (system-generated) + a free-form `memory.md` (agent-written, merges the old scratchpad + lessons; `recent_sessions` dropped, the DB is the session index). Writes via `memory/append` (`file=memory`) + `session-complete`. `memory.md` has a 4500-token passive trim ceiling (drop-oldest, never a close gate).
+- Agent memory (DWB-401) lives at `<repo>/.dwb/memory/<prefix>/<name>/` (outside `.claude/`, so subagents write it directly): `identity.md` (system-generated) + free-form `memory.md` (agent-written; merges old scratchpad + lessons, DB is the session index). Writes via `memory/append` + `session-complete`; `memory.md` has a 4500-token passive drop-oldest trim (never a close gate).
 - `GET /api/hooks/sessions?status=orphan&cutoff_minutes=60` returns stale active sessions for cleanup.
 - DWB session lifecycle: `POST /api/sessions/open` (omit `opened_at`), `.../close` (headline required on ai_confident/ai_asked; consolidation gate opt-in via `force_consolidation`, default OFF, TL-owned docs only), `.../reopen` (undoes a false close; 409 if another is open).
 - DWB session detection (DWB-402, Layer-2 Haiku retired): Layer-1 regex on open/close phrases, a SessionEnd transcript scan, slash commands (`/dwb-open`, `/dwb-close`), a 60-min idle sweeper. `ai_classifier` enum kept as a tombstone. Full reference: `docs/session_lifecycle.md`.
 - Action capture (DWB-417/421): `POST /api/hooks/tool-use` (matcher-scoped PostToolUse) and `POST /api/hooks/lifecycle-event` (Notification / PreCompact) are fire-and-forget, always return 200, and write `tool_actions` rows.
-- Scoring (epic 28): `GET /api/projects/{id}/scores` (leaderboard), `GET /api/agents/{id}/score` and `GET .../scores/agent?agent=NAME` (detail + reasoned ledger), `POST .../scores/award` (human), `POST .../scores/peer` (peer, `X-Agent-ID` header), `POST .../scores/rebuild`. See § 8.
-- Team-lead channel (DWB-436/437): `GET /api/tl-channel` (whole channel, cross-project; each message carries a `read_by` roster), `GET /api/tl-channel/unread?agent_id=`, `POST /api/tl-channel` (send, role-guarded), `POST /api/tl-channel/mark-read`. See § 8.
+- Scoring (epic 28): `GET .../scores` (leaderboard), `GET /api/agents/{id}/score` + `.../scores/agent?agent=NAME` (ledger), `POST .../scores/award` (human), `.../scores/peer` (peer, `X-Agent-ID`), `.../scores/rebuild`. See § 8.
+- Team-lead channel (DWB-436/437): `GET /api/tl-channel` (cross-project, with `read_by` roster), `.../unread?agent_id=`, `POST /api/tl-channel` (role-guarded send), `.../mark-read`. See § 8.
+- Inter-agent comms (DWB-446..449): `POST /api/hooks/agent-message` (capture), `GET`/`DELETE /api/projects/{id}/agent-messages` (log/clear). See § 8.
 
 ---
 
@@ -178,6 +180,7 @@ Full interactive reference at http://localhost:8000/docs (OpenAPI): 138 endpoint
 /projects/:id/agents                 -> ProjectAgentsPage (labeled "Team" in nav)
 /projects/:id/agents/:agentId        -> AgentPage
 /projects/:id/tests                  -> ProjectTestsPage
+/projects/:id/comms                  -> InterAgentCommsPage
 /projects/:id/docs                   -> DocsPage
 /docs                                -> SystemDocsPage
 /instructions                        -> InstructionsPage
@@ -196,27 +199,7 @@ Full interactive reference at http://localhost:8000/docs (OpenAPI): 138 endpoint
 
 ### API Client Layer
 
-```
-src/api/
-+-- client.js          # fetch wrapper, ApiError class
-+-- projects.js        # CRUD + deployPlaybooks
-+-- sprints.js         # CRUD
-+-- epics.js           # CRUD
-+-- agents.js          # CRUD
-+-- tickets.js         # CRUD
-+-- comments.js        # Create, list, delete
-+-- alerts.js          # CRUD + dismissAll + requestTestRun + sendToTeam
-+-- instructions.js    # CRUD + syncCheck + sync + playbooks
-+-- activityLogs.js    # Read-only
-+-- projectAgents.js   # Read-only
-+-- testResults.js     # Read by ID or project
-+-- failureRecords.js  # CRUD
-+-- tokens.js          # getTokenAudit()
-+-- tracking.js        # getTrackingSummary(projectId)
-+-- status.js          # getStatus, getTestCoverage, getCodeStandards
-+-- system.js          # runSystemTests
-+-- docs.js            # getProjectDocs, getSystemDocs
-```
+`src/api/` wraps `client.js` (fetch + ApiError) with one module per resource: `projects`, `sprints`, `epics`, `agents`, `tickets`, `comments`, `alerts`, `instructions`, `activityLogs`, `projectAgents`, `testResults`, `failureRecords`, `tokens`, `tracking`, `status`, `system`, `docs`, `agentMessages`. Most are CRUD; the richer ones add helpers (`projects.deployPlaybooks`, `alerts.dismissAll`/`requestTestRun`/`sendToTeam`, `instructions.sync`, `agentMessages.getAgentMessages`/`clearAgentMessages`).
 
 ### Zustand Store
 
@@ -302,9 +285,9 @@ The capture endpoints are fire-and-forget (always 200). Hook config lives in `.c
 
 SubagentStop creates a separate HookSession keyed on `agent_id` (not the parent `session_id`). Unmatched agent types (e.g. "Explore" subagent) fall back to TL as overhead.
 
-**SubagentStop transcript fallback (DWB-311).** CC's SubagentStop sends a synthetic `agent_transcript_path` that doesn't exist on disk; the real transcript is interleaved in the parent session's `.jsonl`, each line tagged `agentName`. When `parse_transcript()` returns 0, `_handle_subagent_stop()` falls back to `_parse_subagent_from_projects_dir`: sum usage from lines where `agentName == agent.name`. It runs only when the primary parse misses, the synthetic file is absent, and the marker resolved a named agent; on failure it returns zero, never worsening attribution.
+**SubagentStop transcript fallback (DWB-311).** CC's synthetic `agent_transcript_path` often doesn't exist; the real transcript is interleaved in the parent's `.jsonl`, each line tagged `agentName`. When `parse_transcript()` returns 0, `_handle_subagent_stop()` falls back to `_parse_subagent_from_projects_dir` (sum usage where `agentName == agent.name`). Runs only when the primary parse misses and the marker named an agent; returns zero on failure, never worsening attribution.
 
-**Marker-based attribution (DWB-294, 304).** SubagentStop session_ids are CC-internal and can't be pre-computed. The TL writes a **pending marker** at spawn: `.claude/agents/active/pending-<agent_id>-<unix_ms>-<rand4hex>` (JSON dict). On `_handle_subagent_stop`, `resolve_agent_from_marker` tries a literal `.claude/agents/active/<session_id>` lookup, else **atomically renames** the oldest unconsumed `pending-*` marker for the project to `<session_id>` (consumed once). Failures (missing/unparseable marker, unresolved agent_id) write a `failed_hooks` row with a specific `reason`.
+**Marker-based attribution (DWB-294, 304).** SubagentStop session_ids are CC-internal, so the TL writes a **pending marker** at spawn: `.claude/agents/active/pending-<agent_id>-<unix_ms>-<rand4hex>` (JSON dict). `resolve_agent_from_marker` tries a literal `<session_id>` lookup, else **atomically renames** the oldest unconsumed `pending-*` marker for the project to `<session_id>` (consumed once). Failures write a `failed_hooks` row with a specific `reason`.
 
 **Marker file format** (all marker files, both literal and pending, are JSON dicts):
 
@@ -314,7 +297,7 @@ SubagentStop creates a separate HookSession keyed on `agent_id` (not the parent 
 
 `agent_id` is the only authoritative field for attribution; the others are convenience/diagnostic.
 
-Workers get tokens on their active ticket (in_progress/in_review/recently-done ~5min); TL/PM get project overhead (`tl_overhead_tokens`/`pm_overhead_tokens`, DWB-305). Key files: `hook_tracking.py` (logic incl marker resolution + projects-dir fallback), `routers/hooks.py` (4 endpoints, never 5xx; failures -> `failed_hooks` + `error_logs`), `models/hook_session.py`, `models/failed_hook.py`.
+Workers get tokens on their active ticket (in_progress/in_review/recently-done ~5min); TL/PM get project overhead (`tl_overhead_tokens`/`pm_overhead_tokens`, DWB-305). Key files: `hook_tracking.py`, `routers/hooks.py` (endpoints never 5xx; failures -> `failed_hooks` + `error_logs`), `models/hook_session.py`, `models/failed_hook.py`.
 
 ---
 
@@ -408,26 +391,26 @@ Projects enforce up to 7 gates via `force_test_run`, `force_test_coverage`, `for
 - Rework detection: in_progress after done creates failure_record + PM alert
 
 ### Token Tracking
-- **Primary (passive):** lifecycle hooks capture tokens/time (§5); they increment `ticket.tokens_used` and the project overhead fields directly. Worker priority: `in_progress` > `todo` > `in_review` > recently `done` (5 min).
-- **Per-ticket via tracking API:** `POST /api/tracking/tokens` inserts event + increments ticket
-- **Per-ticket legacy:** `POST /api/tickets/{id}/tokens` increments directly (also inserts tracking event)
-- **Per-project overhead:** `POST /api/projects/{id}/overhead` increments `tl_overhead_tokens` or `pm_overhead_tokens`
-- **Audit:** `GET /api/tokens/audit` cross-checks totals and flags discrepancies
-- **Attribution detail:** `GET /api/tickets/{id}/token-attribution`
-- **Project summary:** `GET /api/tracking/summary` — per-ticket, per-agent, per-sprint rollups
+- **Primary (passive):** lifecycle hooks capture tokens/time (§5); they increment `ticket.tokens_used` and project overhead fields directly. Worker priority: `in_progress` > `todo` > `in_review` > recently `done` (5 min).
+- **Per-ticket:** `POST /api/tracking/tokens` (or legacy `POST /api/tickets/{id}/tokens`) inserts event + increments ticket.
+- **Per-project overhead:** `POST /api/projects/{id}/overhead` increments `tl_`/`pm_overhead_tokens`.
+- **Audit/detail:** `GET /api/tokens/audit` (flags discrepancies), `GET /api/tickets/{id}/token-attribution`, `GET /api/tracking/summary` (per-ticket/agent/sprint rollups).
 
 ### Deterministic Action Capture
 CC hooks capture actions passively (DWB-417..421): `PostToolUse` -> `/api/hooks/tool-use`, `Notification`/`PreCompact` -> `/api/hooks/lifecycle-event`. Each `tool_actions` row classifies an `event_type` and emits a feed verb; `message_sent` records the recipient only, never the body. Context resolves from `session_id` like session-end; all FKs nullable so a delivery gap never drops the row.
 
 ### Agent Scoring
-Per-agent-per-project scoring (epic 28, DWB-424..428). Append-only `score_event` ledger = source of truth; `agent_score` = rebuildable cache. Two currencies: **reputation** (all-time rank) and **influence** (per-sprint peer budget, default 20, ledger-derived, auto-resets). Values + caps in `app/config/scoring.py`.
-- **Auto-triggers** (no agent action): ticket_closed (+ no-rework bonus), rework, test_failure, stale, zero_token_close, gate_miss, forgot. Attributed via `ticket.assigned_agent_id` / `failure_record.logged_by`, not session attribution, so the right worker is credited.
+Per-agent-per-project scoring (epic 28, DWB-424..428). Append-only `score_event` ledger = source of truth; `agent_score` = rebuildable cache. Two currencies: **reputation** (all-time rank) and **influence** (per-sprint peer budget, default 20, auto-resets). Values + caps in `app/config/scoring.py`.
+- **Auto-triggers** (no agent action): ticket_closed (+ no-rework bonus), rework, test_failure, stale, zero_token_close, gate_miss, forgot. Attributed via `ticket.assigned_agent_id` / `failure_record.logged_by`, so the right worker is credited.
 - **Human tools** (free): `/carrot` `/stick` `/score` `/leaderboard` -> `POST .../scores/award`.
-- **Peer economy:** `POST .../scores/peer` (`X-Agent-ID` header). Flat - any agent may carrot/stick any other; only self-scoring is barred. Caps + the 20 influence/sprint budget in `config/scoring.py`.
+- **Peer economy:** `POST .../scores/peer` (`X-Agent-ID`). Flat - any agent may carrot/stick any other; only self-scoring is barred.
 - **Broadcast:** human + peer carrot/sticks notify all project agents via per-agent alerts (`alert.recipient_agent_id`); human critical, peer info. Auto-triggers do not broadcast.
 
 ### Archie Channel (Cross-Project TL Messaging)
-`tl_messages` (DWB-436/437) is a cross-project channel for team-leads. A message is direct (`to_agent_id` set) or broadcast (`to_agent_id` NULL = all other TLs); every TL can read every message, and `tl_message_reads` tracks per-(message, agent) read state. Role guard: the sender and any named recipient must be `role=team-lead`, else 400. Ping: a direct send writes one alert to the target, a broadcast one per OTHER active team-lead (reusing `alert.recipient_agent_id`), each landing on the recipient's project board. On spawn, an archie's unread messages render atop its `identity.md` (in `scaffold_agent_dir`, beside the scoring standing block) and are marked read once shown; `/tl` is the reply path. The table is NOT project-scoped; `delete_project` clears messages sent from the deleted project.
+`tl_messages` (DWB-436/437) is a cross-project channel for team-leads: a message is direct (`to_agent_id` set) or broadcast (NULL = all other TLs); every TL reads every message and `tl_message_reads` tracks per-(message, agent) read state. Sender and any named recipient must be `role=team-lead` (else 400). A send pings the target (direct) or every other active TL (broadcast) via `alert.recipient_agent_id`. On spawn, unread renders atop `identity.md` (in `scaffold_agent_dir`) and is marked read once shown; `/tl` replies. NOT project-scoped; `delete_project` clears messages sent from it.
+
+### Inter-Agent Comms Capture
+`inter_agent_messages` (DWB-446..449) logs native SendMessage traffic per project. Flow: the `PostToolUse` SendMessage hook -> `POST /api/hooks/agent-message` -> `handle_agent_message` resolves the SENDER from `session_id` (same resolver as token attribution) and the RECIPIENT best-effort by name within the project; `to_agent_name` is always stored even when the FK misses. Bodies ARE stored (agent text). Per-project `capture_agent_comms` (default ON) gates it: when off the hook returns 200 and stores nothing. `dwb_session_id` is display-only. Retention: `purge_old_agent_messages` deletes rows older than 4 days, riding the idle sweeper and keying off `created_at` alone (a message outlives its session). List/clear: `GET`/`DELETE /api/projects/{id}/agent-messages`; UI at `/projects/:id/comms`.
 
 ### Alert Auto-Creation
 - Ticket marked done with 0 tokens -> info alert
@@ -440,7 +423,7 @@ Per-agent-per-project scoring (epic 28, DWB-424..428). Append-only `score_event`
 `POST /api/tickets/stale-check` — PM polls for tickets stuck in_progress beyond a threshold. Creates a deduped warning alert (matches on ticket_key + minutes in title, only checks open/acknowledged). Resolves PM as alert raiser, falls back to assigned agent, then any project agent.
 
 ### ALERTS_PENDING.md Lifecycle
-`POST /api/alerts/send-to-team?project_id=X` writes open alerts to `.claude/ALERTS_PENDING.md` in the project repo and tags each alert with `user_sent_at`. When all alerts for a project are resolved or dismissed, `_auto_unlink_alerts_file()` deletes the file automatically. Triggered after `dismiss_all()` and `update_alert()` status changes.
+`POST /api/alerts/send-to-team?project_id=X` writes open alerts to `.claude/ALERTS_PENDING.md` and tags each with `user_sent_at`. When all of a project's alerts are resolved/dismissed, `_auto_unlink_alerts_file()` deletes the file (after `dismiss_all()` / `update_alert()` changes).
 
 ### Failure Analysis
 - Manual records: A-G taxonomy (context_degradation, spec_drift, sycophantic_confirmation, tool_selection_error, cascading_failure, silent_failure, integration_failure)
@@ -452,7 +435,7 @@ Per-agent-per-project scoring (epic 28, DWB-424..428). Append-only `score_event`
 Deleting a ticket cascades through: comments, status_history, alerts, test_results, failure_records, tracking_log, hook_sessions — all via `ondelete=CASCADE` on FKs and `cascade="all, delete-orphan"` / `cascade="all, delete"` on relationships.
 
 ### Project Deletion Cascade
-Deleting a project cascades through: alerts, test_results, activity_logs, instructions, tickets (and their children per above), failure_records, project_agents, sprints, epics.
+Deleting a project cascades through: alerts, test_results, activity_logs, instructions, inter_agent_messages, tl_messages (sent-from), tickets (and their children per above), failure_records, project_agents, sprints, epics.
 
 ### Jira Integration
 Projects optionally link to a Jira project via `jira_project_key`. DWB tickets map 1:1 to Jira issues via `jira_issue_key` (unique constraint). `POST /api/projects/{id}/disable-jira` clears all Jira links from the project and its tickets. Jira data is never modified.

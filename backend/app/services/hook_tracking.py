@@ -69,6 +69,7 @@ from app.models.hook_session import HookSession, HookSessionStatus, HookSessionT
 from app.models.project import Project
 from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
+from app.models.inter_agent_message import InterAgentMessage
 from app.models.ticket import Ticket, TicketStatus
 from app.models.tool_action import ToolAction
 from app.services import dwb_session as dwb_svc
@@ -2051,6 +2052,74 @@ def handle_lifecycle_event(db: Session, hook_data: dict) -> ToolAction:
         target=target,
         metadata=None,
     )
+
+
+# DWB-447: varchar caps for the inter_agent_messages row (table is varchar(255)
+# for the agent names, varchar(512) for the summary; body is TEXT/uncapped).
+_AGENT_NAME_MAX = 255
+_SUMMARY_MAX = 512
+
+
+def handle_agent_message(db: Session, hook_data: dict) -> InterAgentMessage | None:
+    """Capture one agent-to-agent SendMessage into inter_agent_messages (DWB-447).
+
+    The SENDER is resolved from the Claude Code ``session_id`` via the SAME
+    resolver token attribution + tool-action capture use
+    (``_resolve_tool_action_context``); for an established session the agent
+    comes from the existing hook_session, so no marker is consumed. The
+    RECIPIENT is resolved best-effort by name within the sender's project
+    (``resolve_agent``) - ``to_agent_name`` is ALWAYS stored even when the FK
+    can't resolve.
+
+    Returns the persisted row, or ``None`` (nothing stored) when:
+      - the project can't be resolved (project_id is NOT NULL), or
+      - ``project.capture_agent_comms`` is false (capture disabled).
+
+    Agent message bodies are NOT user text - they ARE stored (unlike Layer-2
+    open/close phrases). ``dwb_session_id`` is stamped for display only when a
+    session is open; it is never used to purge.
+    """
+    session_id = (hook_data.get("session_id") or "").strip() or None
+    cwd = hook_data.get("cwd", "") or ""
+    to_name = _truncate((hook_data.get("to") or "").strip() or None, _AGENT_NAME_MAX)
+    body = hook_data.get("message") or ""
+    summary = _truncate(hook_data.get("summary"), _SUMMARY_MAX)
+
+    project, from_agent_id, _ticket_id, dwb_session_id = _resolve_tool_action_context(
+        db, session_id=session_id, cwd=cwd,
+        hook_event="SendMessage", hook_data=hook_data,
+    )
+
+    # project_id is NOT NULL: with no project we cannot store. Per contract this
+    # is a captured:false 200, not an error.
+    if project is None:
+        return None
+    # Per-project capture gate (DWB-446 flag, default TRUE).
+    if not project.capture_agent_comms:
+        return None
+
+    from_agent_name = None
+    if from_agent_id is not None:
+        sender = db.get(Agent, from_agent_id)
+        from_agent_name = _truncate(sender.name, _AGENT_NAME_MAX) if sender else None
+
+    to_agent = resolve_agent(db, to_name, project.id) if to_name else None
+    to_agent_id = to_agent.id if to_agent is not None else None
+
+    msg = InterAgentMessage(
+        project_id=project.id,
+        dwb_session_id=dwb_session_id,
+        from_agent_id=from_agent_id,
+        from_agent_name=from_agent_name,
+        to_agent_name=to_name,
+        to_agent_id=to_agent_id,
+        body=body,
+        summary=summary,
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
 
 
 # DWB-443: chars of each message body echoed into a Stop-hook channel poke.

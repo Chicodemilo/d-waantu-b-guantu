@@ -70,6 +70,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys,json; d=json.load(sys.stdin); ti=d.get('tool_input') or {}; print(json.dumps({'to':ti.get('to'),'message':ti.get('message'),'summary':ti.get('summary'),'session_id':d.get('session_id')}))\" | curl -sf -X POST http://localhost:8000/api/hooks/agent-message -H 'Content-Type: application/json' -d @-",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Notification": [

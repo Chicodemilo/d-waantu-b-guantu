@@ -1,12 +1,12 @@
 // Path: src/pages/ProjectPage.jsx
 // File: ProjectPage.jsx
 // Created: 2026-03-29
-// Purpose: Project detail page with tools (archive, delete), sprint gates (incl. force_consolidation), doc gates (incl. force_handoff_md), alerts, consolidation status panel, sprint progress, overhead, velocity, and epics
+// Purpose: Project detail page with tools (archive, delete, capture-agent-comms toggle), sprint gates (incl. force_consolidation), doc gates (incl. force_handoff_md), alerts, consolidation status panel, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
 // Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-06-22
+// Last Modified: 2026-06-24
 
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -315,6 +315,25 @@ function ProjectPage() {
                   )}
                 </div>
               ))}
+            </div>
+
+            <div className="project-tools__section">
+              <div className="project-tools__section-title">Inter-Agent Comms</div>
+              <div className="project-tools__row">
+                <button
+                  className={`project-gate__toggle${project.capture_agent_comms ? ' project-gate__toggle--on' : ''}`}
+                  onClick={() => handleToggleGate('capture_agent_comms')}
+                  disabled={toggling.capture_agent_comms}
+                >
+                  Capture Agent Comms [{project.capture_agent_comms ? 'ON' : 'OFF'}]
+                </button>
+                <span className="tooltip-trigger">
+                  ?
+                  <span className="tooltip-content">
+                    When ON, agent-to-agent SendMessage traffic on this project is captured to the Inter-Agent Comms log. Default ON; toggle OFF to stop capturing. View the log on the project's Inter-Agent Comms page.
+                  </span>
+                </span>
+              </div>
             </div>
 
             <div className="project-tools__section">

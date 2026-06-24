@@ -238,17 +238,41 @@ _HOOKS_SETTINGS_BLOCK: dict = {
     # is matcher-scoped to the tools the scoring/capture layer classifies;
     # Notification + PreCompact POST to the lifecycle-event endpoint. Mirrors
     # DWB's own .claude/settings.json exactly so deploy reports "unchanged".
-    "PostToolUse": [{
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Task|SendMessage",
-        "hooks": [{
-            "type": "command",
-            "command": (
-                "curl -sf -X POST http://localhost:8000/api/hooks/tool-use "
-                "-H 'Content-Type: application/json' -d \"$(cat)\""
-            ),
-            "timeout": 5,
-        }],
-    }],
+    "PostToolUse": [
+        {
+            "matcher": "Write|Edit|MultiEdit|NotebookEdit|Task|SendMessage",
+            "hooks": [{
+                "type": "command",
+                "command": (
+                    "curl -sf -X POST http://localhost:8000/api/hooks/tool-use "
+                    "-H 'Content-Type: application/json' -d \"$(cat)\""
+                ),
+                "timeout": 5,
+            }],
+        },
+        # DWB-450: SendMessage body capture into inter_agent_messages. Separate
+        # matcher-group (SendMessage only) so it never fires on Write/Edit/Task.
+        # The agent-message endpoint takes a remapped body, not the raw hook
+        # payload, so a python3 stdlib one-liner pulls tool_input.{to,message,
+        # summary} + the top-level session_id and pipes the JSON to curl
+        # (-d @-). Best-effort/fire-and-forget like every other hook here: a
+        # missing python3 / bad stdin just yields no capture, never an error.
+        {
+            "matcher": "SendMessage",
+            "hooks": [{
+                "type": "command",
+                "command": (
+                    "python3 -c \"import sys,json; d=json.load(sys.stdin); "
+                    "ti=d.get('tool_input') or {}; "
+                    "print(json.dumps({'to':ti.get('to'),'message':ti.get('message'),"
+                    "'summary':ti.get('summary'),'session_id':d.get('session_id')}))\" "
+                    "| curl -sf -X POST http://localhost:8000/api/hooks/agent-message "
+                    "-H 'Content-Type: application/json' -d @-"
+                ),
+                "timeout": 5,
+            }],
+        },
+    ],
     "Notification": [{
         "hooks": [{
             "type": "command",

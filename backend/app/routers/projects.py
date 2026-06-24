@@ -15,13 +15,14 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.activity_log import ActivityLog
 from app.models.agent import Agent
 from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.inter_agent_message import InterAgentMessage
 from app.models.project import ProjectStatus
 from app.models.project_agent import ProjectAgent
 from app.models.ticket import Ticket
@@ -729,6 +730,77 @@ def list_project_playbook_files(project_id: int, db: Session = Depends(get_db)):
             "last_modified": last_modified,
         })
     return files
+
+
+@router.get("/{project_id}/agent-messages")
+def list_agent_messages(
+    project_id: int,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Paginated, newest-first log of captured inter-agent messages (DWB-448).
+
+    Envelope matches the project ticket-list convention
+    ({project_id, total, limit, offset, rows}). Each row carries the resolved
+    from/to agent ids + names, the body, the optional summary, created_at, and
+    the display-only dwb_session_id.
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    total = db.scalar(
+        select(func.count())
+        .select_from(InterAgentMessage)
+        .where(InterAgentMessage.project_id == project_id)
+    ) or 0
+
+    rows = db.scalars(
+        select(InterAgentMessage)
+        .where(InterAgentMessage.project_id == project_id)
+        .order_by(InterAgentMessage.created_at.desc(), InterAgentMessage.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+
+    return {
+        "project_id": project_id,
+        "total": int(total),
+        "limit": limit,
+        "offset": offset,
+        "rows": [
+            {
+                "id": r.id,
+                "from_agent_id": r.from_agent_id,
+                "from_agent_name": r.from_agent_name,
+                "to_agent_id": r.to_agent_id,
+                "to_agent_name": r.to_agent_name,
+                "body": r.body,
+                "summary": r.summary,
+                "created_at": r.created_at,
+                "dwb_session_id": r.dwb_session_id,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.delete("/{project_id}/agent-messages")
+def delete_agent_messages(project_id: int, db: Session = Depends(get_db)):
+    """Clear ALL captured inter-agent messages for a project (DWB-448).
+
+    Returns the number of rows removed. 404 when the project does not exist.
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    result = db.execute(
+        delete(InterAgentMessage).where(InterAgentMessage.project_id == project_id)
+    )
+    db.commit()
+    return {"deleted": int(result.rowcount or 0)}
 
 
 @router.get("/{project_id}/activity-feed")

@@ -1,12 +1,12 @@
 # Path: app/services/idle_sweeper.py
 # File: idle_sweeper.py
 # Created: 2026-06-09
-# Purpose: Background asyncio task that periodically auto-closes idle DWB sessions (DWB-337)
+# Purpose: Background asyncio task that periodically auto-closes idle DWB sessions (DWB-337) and purges aged inter-agent messages (DWB-449)
 # Caller: app/main.py lifespan
-# Callees: app.services.dwb_session.sweep_idle_sessions, app.database.SessionLocal
-# Data In: settings.IDLE_TIMEOUT_MINUTES, settings.IDLE_SWEEP_INTERVAL_SECONDS
-# Data Out: idle-closed DwbSession rows
-# Last Modified: 2026-06-09
+# Callees: app.services.dwb_session.sweep_idle_sessions, app.services.inter_agent_message.purge_old_agent_messages, app.database.SessionLocal
+# Data In: settings.IDLE_TIMEOUT_MINUTES, settings.IDLE_SWEEP_INTERVAL_SECONDS, settings.AGENT_MESSAGE_RETENTION_DAYS
+# Data Out: idle-closed DwbSession rows, purged InterAgentMessage rows
+# Last Modified: 2026-06-24 (DWB-449: ride the loop for the agent-message age purge)
 
 """Background sweeper for idle DWB sessions.
 
@@ -43,6 +43,7 @@ import os
 from app import database
 from app.config import settings
 from app.services.dwb_session import sweep_idle_sessions
+from app.services.inter_agent_message import purge_old_agent_messages
 
 logger = logging.getLogger(__name__)
 
@@ -71,19 +72,51 @@ def _run_one_sweep_sync(idle_minutes: int) -> int:
         db.close()
 
 
+def _run_agent_message_purge_sync(max_age_days: int) -> int:
+    """Run one age-based inter_agent_messages purge (DWB-449).
+
+    Rides the idle-sweeper cycle but is independent of session state: it keys
+    off created_at alone. Its own SessionLocal + try/except so a purge failure
+    never crashes the loop or affects the idle sweep. Logs the purged count.
+    """
+    if max_age_days <= 0:
+        return 0
+    db = database.SessionLocal()
+    try:
+        purged = purge_old_agent_messages(db, max_age_days=max_age_days)
+        if purged:
+            db.commit()
+            logger.info(
+                "idle sweeper: purged %d inter-agent message(s) older than %d day(s)",
+                purged,
+                max_age_days,
+            )
+        return purged
+    except Exception:
+        db.rollback()
+        logger.exception("idle sweeper: agent-message purge failed")
+        return 0
+    finally:
+        db.close()
+
+
 async def _sweep_loop() -> None:
     """The recurring sweep loop. Sleeps between sweeps; cancels cleanly."""
     interval = settings.IDLE_SWEEP_INTERVAL_SECONDS
     idle_minutes = settings.IDLE_TIMEOUT_MINUTES
+    retention_days = settings.AGENT_MESSAGE_RETENTION_DAYS
     logger.info(
-        "idle sweeper started (interval=%ds, idle_minutes=%d)",
+        "idle sweeper started (interval=%ds, idle_minutes=%d, "
+        "agent_msg_retention_days=%d)",
         interval,
         idle_minutes,
+        retention_days,
     )
     try:
         while True:
             await asyncio.sleep(interval)
             await asyncio.to_thread(_run_one_sweep_sync, idle_minutes)
+            await asyncio.to_thread(_run_agent_message_purge_sync, retention_days)
     except asyncio.CancelledError:
         logger.info("idle sweeper cancelled")
         raise

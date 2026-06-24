@@ -26,6 +26,7 @@ from app.schemas.hook_session import (
     HookEventInput,
     HookSessionRead,
 )
+from app.schemas.inter_agent_message import AgentMessageInput
 from app.schemas.tool_action import (
     LifecycleEventInput,
     ToolActionRead,
@@ -205,6 +206,57 @@ def hook_lifecycle_event(data: LifecycleEventInput, db: Session = Depends(get_db
         logger.exception("hook_lifecycle_event error")
         log_failed_hook(
             hook_event=data.hook_event_name or "LifecycleEvent",
+            status_code=200,
+            raw_payload=data.model_dump(),
+            error=f"{type(e).__name__}: {e}",
+        )
+        return {
+            "status": "error",
+            "detail": str(e),
+        }
+
+
+@router.post("/agent-message", status_code=200)
+def hook_agent_message(data: AgentMessageInput, db: Session = Depends(get_db)):
+    """Capture one agent-to-agent SendMessage into inter_agent_messages (DWB-447).
+
+    Resolves the SENDER from session_id (same resolver token attribution uses)
+    and best-effort resolves the recipient by name within the project. Stores
+    the body + optional summary; ``to_agent_name`` is always stored even when
+    the recipient FK can't resolve.
+
+    Returns 200 with ``captured: false`` and stores NOTHING when the project's
+    ``capture_agent_comms`` flag is false or no project resolves. Same
+    fire-and-forget contract as the other hook endpoints: MUST NEVER return
+    5xx — any leaked exception is swallowed, logged, and 200'd.
+    """
+    try:
+        msg = svc.handle_agent_message(db, data.model_dump())
+        if msg is None:
+            return {
+                "status": "ok",
+                "captured": False,
+                "message_id": None,
+                "from_agent_id": None,
+                "from_agent_name": None,
+                "to_agent_id": None,
+                "to_agent_name": data.to,
+                "dwb_session_id": None,
+            }
+        return {
+            "status": "ok",
+            "captured": True,
+            "message_id": msg.id,
+            "from_agent_id": msg.from_agent_id,
+            "from_agent_name": msg.from_agent_name,
+            "to_agent_id": msg.to_agent_id,
+            "to_agent_name": msg.to_agent_name,
+            "dwb_session_id": msg.dwb_session_id,
+        }
+    except Exception as e:
+        logger.exception("hook_agent_message error")
+        log_failed_hook(
+            hook_event=data.hook_event_name or "SendMessage",
             status_code=200,
             raw_payload=data.model_dump(),
             error=f"{type(e).__name__}: {e}",

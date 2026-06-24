@@ -29,6 +29,7 @@ from app.models.sprint import Sprint
 from app.models.status_history import StatusHistory
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket
+from app.models.inter_agent_message import InterAgentMessage
 from app.models.tl_message import TlMessage
 from app.models.tool_action import ToolAction
 from app.models.tracking_log import TrackingLog
@@ -117,6 +118,12 @@ def delete_project(db: Session, project: Project) -> None:
     # from OTHER projects persist - their from_project_id points elsewhere and
     # the agent rows are only detached (NULLed project_id), never deleted.
     db.execute(delete(TlMessage).where(TlMessage.from_project_id == pid))
+    # DWB-446: inter_agent_messages.project_id is a NOT NULL FK to projects and
+    # dwb_session_id FKs dwb_sessions (no cascade), so clear by project before
+    # both the dwb_sessions delete below and the project row go away.
+    db.execute(
+        delete(InterAgentMessage).where(InterAgentMessage.project_id == pid)
+    )
     # DWB-417/421: tool_actions linked to this project's DWB sessions must go
     # before those sessions (the dwb_session_id FK has no cascade). Ticket-linked
     # tool_actions cascade with their tickets below; agent-linked-only rows have

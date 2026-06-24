@@ -50,6 +50,8 @@ class ProjectUpdate(BaseModel):
     force_architecture_md: bool | None = None
     force_handoff_md: bool | None = None
     force_consolidation: bool | None = None
+    # DWB-446: per-project SendMessage agent-comms capture gate.
+    capture_agent_comms: bool | None = None
 
 
 class ProjectOverheadIncrement(BaseModel):
@@ -80,6 +82,7 @@ class ProjectRead(BaseModel):
     force_architecture_md: bool
     force_handoff_md: bool
     force_consolidation: bool
+    capture_agent_comms: bool
     playbooks_deployed_at: datetime | None
     created_at: datetime
     updated_at: datetime

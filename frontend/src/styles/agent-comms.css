@@ -1,0 +1,154 @@
+/* Path: src/styles/agent-comms.css */
+/* File: agent-comms.css */
+/* Created: 2026-06-24 */
+/* Purpose: Styles for the project-level Inter-Agent Comms glance view (DWB-451). Dense, single-line-per-row message log with from -> to, timestamp, and a body truncated to one line. Terminal aesthetic, mirrors tl-channel.css conventions. */
+/* Last Modified: 2026-06-24 */
+
+.agent-comms__head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.agent-comms__title {
+  font-size: 14px;
+  color: var(--green-bright);
+}
+
+.agent-comms__count {
+  color: var(--gray-light);
+  font-size: 12px;
+}
+
+.agent-comms__clear {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.agent-comms__clear-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--red);
+  cursor: pointer;
+}
+
+.agent-comms__clear-link:hover {
+  text-decoration: underline;
+}
+
+.agent-comms__confirm {
+  font-size: 12px;
+  color: var(--gray-light);
+}
+
+.agent-comms__confirm-yes {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--red);
+  cursor: pointer;
+}
+
+.agent-comms__confirm-cancel {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.agent-comms__confirm-yes:hover,
+.agent-comms__confirm-cancel:hover {
+  text-decoration: underline;
+}
+
+.agent-comms {
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}
+
+.agent-comms__header,
+.agent-comms__row {
+  display: grid;
+  grid-template-columns: 220px 150px 1fr;
+  gap: 12px;
+  padding: 5px 12px;
+  align-items: center;
+}
+
+.agent-comms__header {
+  border-bottom: 1px solid var(--border);
+  color: var(--gray-light);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  position: sticky;
+  top: 0;
+  background-color: var(--bg-alt);
+  z-index: 1;
+}
+
+.agent-comms__scroll {
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+.agent-comms__row {
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.agent-comms__row:last-child {
+  border-bottom: none;
+}
+
+/* From -> to pair kept on one compact line. */
+.agent-comms__pair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-comms__from {
+  color: var(--green);
+}
+
+.agent-comms__arrow {
+  color: var(--gray);
+}
+
+.agent-comms__to {
+  color: var(--blue);
+}
+
+.agent-comms__created {
+  color: var(--gray-light);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Core requirement: body truncated to a SINGLE line with ellipsis. */
+.agent-comms__body {
+  color: var(--green-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-comms__empty {
+  color: var(--gray-light);
+  padding: 24px 12px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}

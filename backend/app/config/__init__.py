@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     IDLE_TIMEOUT_MINUTES: int = 60
     IDLE_SWEEP_INTERVAL_SECONDS: int = 300
 
+    # DWB-449: age-based purge of captured inter-agent messages. Rows older
+    # than this many days are deleted on each idle-sweeper cycle (the purge
+    # rides the existing periodic loop; it is NOT tied to session close and
+    # keys off created_at alone). 0 disables the purge.
+    AGENT_MESSAGE_RETENTION_DAYS: int = 4
+
     # DWB-369: marker-file sweeper. Periodically cleans pending-* markers
     # whose worker died pre-SubagentStop AND finalized markers whose
     # hook_session has completed. Mirrors the idle_sweeper interval

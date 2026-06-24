@@ -11,7 +11,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, String, Text, func
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, String, Text, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -66,6 +66,11 @@ class Project(Base):
     force_architecture_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_handoff_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     force_consolidation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # DWB-446: gates SendMessage agent-comms capture per project. Default TRUE;
+    # when false POST /api/hooks/agent-message returns 200 and inserts nothing.
+    capture_agent_comms: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

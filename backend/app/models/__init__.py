@@ -38,6 +38,7 @@ from app.models.tool_action import ToolAction
 from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
 from app.models.agent_score import AgentScore
 from app.models.tl_message import TlMessage, TlMessageRead
+from app.models.inter_agent_message import InterAgentMessage
 
 __all__ = [
     "Project", "ProjectStatus", "JiraSyncStatus",
@@ -65,4 +66,5 @@ __all__ = [
     "ScoreEvent", "ScoreSource", "ScoreTriggerType",
     "AgentScore",
     "TlMessage", "TlMessageRead",
+    "InterAgentMessage",
 ]
