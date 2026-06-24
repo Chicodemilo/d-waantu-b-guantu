@@ -1,12 +1,12 @@
 // Path: src/components/tickets/TicketList.jsx
 // File: TicketList.jsx
 // Created: 2026-03-29
-// Purpose: Filterable ticket table with backlog toggle, status/type/sprint/epic/agent filters, and navigable rows
+// Purpose: Filterable ticket table with backlog toggle, status/type/sprint/epic/agent filters, navigable rows, and sub-task nesting under parents (DWB-457)
 // Caller: TicketsPage.jsx
 // Callees: react (useState), react-router-dom (useNavigate), useStore, TicketFilters, StatusBadge, tickets.css
 // Data In: projectId prop
 // Data Out: default export TicketList component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-24
 
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -103,6 +103,31 @@ function TicketList({ projectId }) {
     filtered = filtered.filter((t) => t.epic_id === Number(filters.epic_id));
   }
 
+  // Sub-task nesting (DWB-457). Children render indented immediately under their
+  // parent. A child whose parent isn't in the current view (filtered out)
+  // renders at top level but keeps its parent reference, so it never vanishes.
+  // ticket_key lookup spans ALL project tickets so orphan refs still resolve.
+  const ticketKeyById = new Map(tickets.map((t) => [t.id, t.ticket_key]));
+  const visibleIds = new Set(filtered.map((t) => t.id));
+  const childrenByParent = new Map();
+  const roots = [];
+  for (const t of filtered) {
+    const pid = t.parent_ticket_id;
+    if (pid != null && visibleIds.has(pid)) {
+      if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
+      childrenByParent.get(pid).push(t);
+    } else {
+      roots.push(t);
+    }
+  }
+  const ordered = [];
+  for (const root of roots) {
+    ordered.push({ ticket: root, nested: false });
+    for (const child of childrenByParent.get(root.id) || []) {
+      ordered.push({ ticket: child, nested: true });
+    }
+  }
+
   return (
     <div>
       <div className="ticket-list__header">
@@ -130,10 +155,14 @@ function TicketList({ projectId }) {
           <span className="ticket-row__tokens">Tokens</span>
           <span className="ticket-row__time">Time</span>
         </div>
-        {filtered.map((ticket) => (
+        {ordered.map(({ ticket, nested }) => {
+          const parentRef = ticket.parent_ticket_id != null
+            ? ticketKeyById.get(ticket.parent_ticket_id)
+            : null;
+          return (
           <div
             key={ticket.id}
-            className="ticket-row"
+            className={`ticket-row${nested ? ' ticket-row--subtask' : ''}`}
             onClick={() => navigate(`/projects/${projectId}/tickets/${ticket.id}`)}
           >
             <span className="ticket-row__key">{ticket.ticket_key}</span>
@@ -162,16 +191,28 @@ function TicketList({ projectId }) {
                 )}
               </span>
             )}
-            <span className="ticket-row__title">{ticket.title}</span>
+            <span className="ticket-row__title">
+              <span className="ticket-row__title-text">{ticket.title}</span>
+              {parentRef && (
+                <span className="ticket-row__parent-ref">child of {parentRef}</span>
+              )}
+            </span>
             <StatusBadge status={ticket.status} />
-            <span className="ticket-row__type">{ticket.ticket_type}</span>
+            <span className="ticket-row__type">
+              {ticket.ticket_type === 'subtask' ? (
+                <span className="ticket-type-badge ticket-type-badge--subtask">subtask</span>
+              ) : (
+                ticket.ticket_type
+              )}
+            </span>
             <span className="ticket-row__sprint">{getSprintName(ticket.sprint_id)}</span>
             <span className="ticket-row__epic">{getEpicName(ticket.epic_id)}</span>
             <span className="ticket-row__agent">{getAgentName(ticket.assigned_agent_id)}</span>
             <span className="ticket-row__tokens">{formatTokens(ticket.tokens_used)}</span>
             <span className="ticket-row__time">{formatTime(ticket.time_spent_seconds)}</span>
           </div>
-        ))}
+          );
+        })}
         {filtered.length === 0 && (
           <div className="empty-state">No tickets match the current filters</div>
         )}

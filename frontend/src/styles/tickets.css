@@ -68,9 +68,35 @@
 .ticket-row__title {
   color: var(--green);
   font-size: 13px;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ticket-row__title-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sub-task parent reference (DWB-457). Dim trailing tag on a child row that
+   points back at its parent ticket. Shown even when the parent is filtered
+   out of the view, so the relationship is never lost. */
+.ticket-row__parent-ref {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--gray);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+/* Sub-task row (DWB-457): indent the key cell and mark it with a left accent
+   so nesting under the parent reads at a glance. */
+.ticket-row--subtask .ticket-row__key {
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
 }
 
 .ticket-row__type {
@@ -78,6 +104,17 @@
   color: var(--gray-light);
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+
+/* Sub-task type badge (DWB-457). Small tag in the Type column. */
+.ticket-type-badge--subtask {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--orange);
+  border: 1px solid var(--orange);
+  border-radius: 2px;
 }
 
 .ticket-row__sprint {

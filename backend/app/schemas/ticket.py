@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: TicketCreate, TicketUpdate, TicketRead, TicketTokenIncrement, StaleCheckInput, StaleCheckResponse
-# Last Modified: 2026-03-29
+# Last Modified: 2026-06-24 (DWB-455: parent_ticket_id + embedded subtasks)
 
 from datetime import datetime
 
@@ -26,6 +26,11 @@ class TicketCreate(BaseModel):
     description: str | None = None
     ticket_type: TicketType = TicketType.task
     status: TicketStatus = TicketStatus.backlog
+    # DWB-455: native sub-task parent link. Required when ticket_type=subtask,
+    # must be null otherwise (enforced in the service layer with a 400). The
+    # subtask inherits epic_id from its parent and defaults sprint_id to the
+    # parent's sprint when sprint_id is omitted.
+    parent_ticket_id: int | None = None
     # DWB-332: surfaced on create so the Jira-disabled gate (project-level
     # project.jira_base_url null) can refuse linking attempts at the POST
     # path too. Service-layer rejects with a clean 400 when the project is
@@ -41,6 +46,9 @@ class TicketUpdate(BaseModel):
     description: str | None = None
     ticket_type: TicketType | None = None
     status: TicketStatus | None = None
+    # DWB-455: re-parent / convert to-or-from subtask. Same validation as
+    # create runs on the resulting (ticket_type, parent_ticket_id) pair.
+    parent_ticket_id: int | None = None
     tokens_used: int | None = None
     time_spent_seconds: int | None = None
     completed_at: datetime | None = None
@@ -77,6 +85,9 @@ class TicketSlimRead(BaseModel):
     project_id: int
     assigned_agent_id: int | None
     ticket_type: TicketType
+    # DWB-455: surfaced on the slim read so child summaries embedded in
+    # TicketRead.subtasks carry their parent link.
+    parent_ticket_id: int | None = None
 
 
 class TicketRead(BaseModel):
@@ -97,6 +108,11 @@ class TicketRead(BaseModel):
     time_spent_seconds: int
     token_source: str | None
     jira_issue_key: str | None
+    # DWB-455: self-referential sub-task linkage. parent_ticket_id is the FK;
+    # subtasks embeds slim summaries of this ticket's direct children (always
+    # empty for a subtask itself, since nesting is one level only).
+    parent_ticket_id: int | None
+    subtasks: list[TicketSlimRead] = []
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

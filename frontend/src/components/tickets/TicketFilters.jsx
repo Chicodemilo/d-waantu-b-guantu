@@ -17,7 +17,7 @@ function TicketFilters({ projectId, filters, onChange }) {
   const agents = useStore((s) => s.agents);
 
   const statuses = ['all', 'backlog', 'todo', 'in_progress', 'in_review', 'done'];
-  const types = ['all', 'task', 'bug', 'story'];
+  const types = ['all', 'task', 'bug', 'story', 'subtask'];
 
   const handleChange = (key, value) => {
     onChange({ ...filters, [key]: value });

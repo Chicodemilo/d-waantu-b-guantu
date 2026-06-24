@@ -6,7 +6,7 @@
 # Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking, services/activity_log, services/scoring_triggers
 # Data In: db: Session, TicketCreate/Update, acting_agent_id
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-06-22 (DWB-425: ticket_closed/rework/stale/zero_token/forgot scoring)
+# Last Modified: 2026-06-24 (DWB-455: sub-task parent validation + epic/sprint inheritance)
 
 import logging
 from datetime import datetime
@@ -85,6 +85,103 @@ def _raise_if_jira_disabled(project: Project, jira_issue_key) -> None:
         )
 
 
+def _resolve_subtask_parent(
+    db: Session,
+    *,
+    ticket_type: TicketType,
+    parent_ticket_id: int | None,
+    project_id: int,
+    this_ticket_id: int | None = None,
+) -> Ticket | None:
+    """DWB-455: validate the (ticket_type, parent_ticket_id) pair and return
+    the resolved parent Ticket (or None for non-subtasks). Raises HTTP 400 on
+    any rule violation. Rules:
+
+      - ticket_type=subtask REQUIRES parent_ticket_id; other types must leave
+        it null.
+      - parent must exist and be in the same project.
+      - parent cannot itself be a subtask (one level only, matching Jira).
+      - a ticket cannot be its own parent.
+    """
+    is_subtask = ticket_type == TicketType.subtask
+
+    if not is_subtask:
+        if parent_ticket_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "parent_only_on_subtask",
+                    "message": (
+                        "parent_ticket_id may only be set when "
+                        "ticket_type='subtask'. Clear parent_ticket_id or set "
+                        "ticket_type to subtask."
+                    ),
+                    "field": "parent_ticket_id",
+                },
+            )
+        return None
+
+    # is_subtask
+    if parent_ticket_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "subtask_requires_parent",
+                "message": (
+                    "ticket_type='subtask' requires a parent_ticket_id "
+                    "(the parent task this subtask belongs to)."
+                ),
+                "field": "parent_ticket_id",
+            },
+        )
+
+    if this_ticket_id is not None and parent_ticket_id == this_ticket_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "self_parent",
+                "message": "A ticket cannot be its own parent.",
+                "field": "parent_ticket_id",
+            },
+        )
+
+    parent = db.get(Ticket, parent_ticket_id)
+    if parent is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "parent_not_found",
+                "message": f"parent_ticket_id {parent_ticket_id} does not exist.",
+                "field": "parent_ticket_id",
+            },
+        )
+    if parent.project_id != project_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "parent_cross_project",
+                "message": (
+                    f"Parent ticket {parent.ticket_key} belongs to a different "
+                    f"project. A subtask must share its parent's project."
+                ),
+                "field": "parent_ticket_id",
+            },
+        )
+    if parent.ticket_type == TicketType.subtask:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "parent_is_subtask",
+                "message": (
+                    f"Parent ticket {parent.ticket_key} is itself a subtask. "
+                    f"Sub-tasks are one level deep only (matching Jira)."
+                ),
+                "field": "parent_ticket_id",
+            },
+        )
+    return parent
+
+
 def create_ticket(db: Session, data: TicketCreate) -> Ticket:
     values = data.model_dump()
 
@@ -96,25 +193,43 @@ def create_ticket(db: Session, data: TicketCreate) -> Ticket:
     # DWB-332: Jira-disabled hard gate at create time.
     _raise_if_jira_disabled(project, values.get("jira_issue_key"))
 
-    # Auto-assign sprint_id if not provided
+    # DWB-455: validate sub-task parent linkage. Returns the parent Ticket
+    # (subtasks) or None (everything else). Raises 400 on any rule violation.
+    parent = _resolve_subtask_parent(
+        db,
+        ticket_type=values["ticket_type"],
+        parent_ticket_id=values.get("parent_ticket_id"),
+        project_id=values["project_id"],
+    )
+
+    # Auto-assign sprint_id if not provided. DWB-455: a subtask defaults to its
+    # parent's sprint (keeping the Project->Epic->Sprint->Ticket chain valid)
+    # rather than the project's active sprint.
     if values.get("sprint_id") is None:
-        sprint = db.scalars(
-            select(Sprint)
-            .where(Sprint.project_id == values["project_id"])
-            .where(Sprint.status == SprintStatus.active)
-            .order_by(Sprint.created_at.desc())
-            .limit(1)
-        ).first()
-        if not sprint:
-            raise HTTPException(400, "No active sprint found for this project. Create an active sprint first or provide sprint_id.")
-        values["sprint_id"] = sprint.id
+        if parent is not None:
+            sprint = db.get(Sprint, parent.sprint_id)
+            values["sprint_id"] = parent.sprint_id
+        else:
+            sprint = db.scalars(
+                select(Sprint)
+                .where(Sprint.project_id == values["project_id"])
+                .where(Sprint.status == SprintStatus.active)
+                .order_by(Sprint.created_at.desc())
+                .limit(1)
+            ).first()
+            if not sprint:
+                raise HTTPException(400, "No active sprint found for this project. Create an active sprint first or provide sprint_id.")
+            values["sprint_id"] = sprint.id
     else:
         sprint = db.get(Sprint, values["sprint_id"])
         if not sprint:
             raise HTTPException(404, "Sprint not found")
 
-    # Auto-assign epic_id from sprint if not provided
-    if values.get("epic_id") is None and sprint:
+    # Epic assignment. DWB-455: a subtask always inherits its parent's epic_id
+    # (overriding any supplied value); otherwise fall back to the sprint's epic.
+    if parent is not None:
+        values["epic_id"] = parent.epic_id
+    elif values.get("epic_id") is None and sprint:
         values["epic_id"] = sprint.epic_id
 
     ticket = Ticket(**values)
@@ -159,6 +274,45 @@ def update_ticket(
         project = db.get(Project, ticket.project_id)
         if project is not None:
             _raise_if_jira_disabled(project, updates["jira_issue_key"])
+
+    # DWB-455: sub-task linkage validation. Only runs when the update touches
+    # ticket_type or parent_ticket_id; otherwise the existing pair is unchanged
+    # and already-valid. Validates the RESULTING (type, parent) combination.
+    if "ticket_type" in updates or "parent_ticket_id" in updates:
+        new_type = updates.get("ticket_type", ticket.ticket_type)
+        new_parent_id = updates.get("parent_ticket_id", ticket.parent_ticket_id)
+
+        # Block converting a ticket that already has children into a subtask
+        # (would create a two-level tree).
+        if new_type == TicketType.subtask:
+            has_children = db.scalar(
+                select(Ticket.id)
+                .where(Ticket.parent_ticket_id == ticket.id)
+                .limit(1)
+            )
+            if has_children:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "has_children_cannot_be_subtask",
+                        "message": (
+                            f"Ticket {ticket.ticket_key} has sub-tasks and "
+                            f"cannot itself become a subtask (one level only)."
+                        ),
+                        "field": "ticket_type",
+                    },
+                )
+
+        parent = _resolve_subtask_parent(
+            db,
+            ticket_type=new_type,
+            parent_ticket_id=new_parent_id,
+            project_id=ticket.project_id,
+            this_ticket_id=ticket.id,
+        )
+        # A subtask inherits its parent's epic so the hierarchy stays valid.
+        if parent is not None:
+            updates["epic_id"] = parent.epic_id
 
     status_changed = "status" in updates and updates["status"] != old_status
 

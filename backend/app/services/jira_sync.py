@@ -6,7 +6,7 @@
 # Callees: app/services/jira.py (read-only client), app/models/jira_ticket_snapshot, app/models/project
 # Data In: Jira REST responses (via app.services.jira), DWB ticket + snapshot rows
 # Data Out: Refreshed jira_ticket_snapshots rows + project sync-state columns; counts dict
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-24 (DWB-456: sub-task type + parent reconcile, READ-ONLY toward Jira)
 
 """Manual Jira -> DWB ingestion for the unified Jira table (DWB-342).
 
@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.models.jira_ticket_snapshot import JiraTicketSnapshot
 from app.models.project import JiraSyncStatus, Project
-from app.models.ticket import Ticket
+from app.models.ticket import Ticket, TicketType
 from app.services import jira as jira_client
 
 
@@ -143,6 +143,96 @@ def _normalize_jira_payload(issue: dict) -> dict:
             else None
         ),
     }
+
+
+def _is_jira_subtask_type(jira_issue_type: str | None) -> bool:
+    """DWB-456: is this snapshot's Jira issue type a sub-task?
+
+    The TL contract names "Sub-task", but Jira instance configs vary the
+    label ("Subtask", "Sub-task", "sub task"). Following the DWB-364
+    rationale (robustness to issue-type name variants), we match on the
+    space/hyphen-stripped lowercase form rather than an exact string. Only
+    the snapshot's persisted ``jira_issue_type`` string is available at
+    reconcile time (the upstream ``issue_type_is_subtask`` boolean is not
+    stored on the snapshot), so the string match is what we have to work with.
+    """
+    if not jira_issue_type:
+        return False
+    return jira_issue_type.replace("-", "").replace(" ", "").lower() == "subtask"
+
+
+def _reconcile_subtasks(
+    db: Session,
+    linked: list[Ticket],
+    counts: dict[str, Any],
+) -> None:
+    """DWB-456: reconcile DWB-side sub-task linkage from refreshed snapshots.
+
+    READ-ONLY toward Jira: this touches ONLY DWB rows (tickets.ticket_type /
+    tickets.parent_ticket_id). No Jira client call happens here.
+
+    For every linked ticket whose snapshot says it's a Jira sub-task:
+      - set the DWB ticket.ticket_type to subtask;
+      - resolve snapshot.jira_parent_key -> the parent DWB ticket via its
+        jira_issue_key (scoped to this project's linked set) and set the
+        child's parent_ticket_id;
+      - if the parent isn't linked in DWB, leave parent_ticket_id null and
+        append a note to counts["errors"] (no silent drop).
+    """
+    # Map jira_issue_key -> DWB ticket for parent resolution. jira_issue_key
+    # is unique system-wide, and a Jira sub-task's parent lives in the same
+    # project, so the project's linked set is the correct lookup scope.
+    ticket_by_jira_key = {
+        t.jira_issue_key: t for t in linked if t.jira_issue_key
+    }
+    snapshots = {
+        s.ticket_id: s
+        for s in db.scalars(
+            select(JiraTicketSnapshot).where(
+                JiraTicketSnapshot.ticket_id.in_([t.id for t in linked])
+            )
+        )
+    }
+
+    for ticket in linked:
+        snapshot = snapshots.get(ticket.id)
+        if snapshot is None or not _is_jira_subtask_type(snapshot.jira_issue_type):
+            continue
+
+        # Mark the DWB ticket as a sub-task (idempotent).
+        if ticket.ticket_type != TicketType.subtask:
+            ticket.ticket_type = TicketType.subtask
+
+        parent_key = snapshot.jira_parent_key
+        if not parent_key:
+            # Jira flagged it a sub-task but gave no parent key - leave the
+            # link null rather than guess.
+            counts["errors"].append({
+                "jira_key": ticket.jira_issue_key,
+                "subtask_parent_unresolved": (
+                    "issue is a Jira sub-task but has no parent key on the "
+                    "snapshot; parent_ticket_id left null"
+                ),
+            })
+            continue
+
+        parent = ticket_by_jira_key.get(parent_key)
+        if parent is None:
+            # Parent exists in Jira but is not linked in DWB. Leave null and
+            # surface a non-fatal note (no silent drop).
+            ticket.parent_ticket_id = None
+            counts["errors"].append({
+                "jira_key": ticket.jira_issue_key,
+                "subtask_parent_unresolved": (
+                    f"parent {parent_key} is not linked in DWB; "
+                    f"parent_ticket_id left null"
+                ),
+            })
+            continue
+
+        ticket.parent_ticket_id = parent.id
+
+    db.flush()
 
 
 def _try_acquire_lock(db: Session, project: Project) -> bool:
@@ -333,6 +423,9 @@ def run_sync(
                 counts["unchanged"] += 1
 
         db.flush()
+        # DWB-456: reconcile sub-task type + parent linkage from the now-
+        # refreshed snapshots. READ-ONLY toward Jira (DWB rows only).
+        _reconcile_subtasks(db, linked, counts)
         _release_lock(db, project, status=JiraSyncStatus.done, counts=counts)
         return counts
     except SyncAlreadyRunning:

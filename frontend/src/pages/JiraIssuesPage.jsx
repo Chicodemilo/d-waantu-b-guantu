@@ -1,7 +1,7 @@
 // Path: src/pages/JiraIssuesPage.jsx
 // File: JiraIssuesPage.jsx
 // Created: 2026-05-27
-// Purpose: Unified Jira table for a project (DWB-342). Renders the 10-column snapshot-backed view (DWB id/sprint/status + Jira id/sprint/status/assignee + created/updated + title), with a debounced fuzzy search box, sortable column headers, a manual sync button + canonical .tooltip-trigger info affordance describing the read-only ingestion, and row navigation to the DWB ticket detail page. Created/Updated columns format as dd-mm-yy hh:mm (24h, local TZ). Read-only Jira ingestion - nothing in this page modifies Jira. Null-guards jira_sprint and jira_reporter pending DWB-356 normalizer fix.
+// Purpose: Unified Jira table for a project (DWB-342). Renders the snapshot-backed view (DWB id/sprint/status + Jira id/sprint/status/type + DWB-side parent + Jira parent + epic + assignee + created/updated + title), with a debounced fuzzy search box, sortable column headers, a manual sync button + canonical .tooltip-trigger info affordance describing the read-only ingestion, and row navigation to the DWB ticket detail page. The DWB Parent column (DWB-457) sits left of the Jira Parent column so the two parent references line up; it reads row.dwb_parent_key resolved server-side from tickets.parent_ticket_id (DWB-456). Created/Updated columns format as dd-mm-yy hh:mm (24h, local TZ). Read-only Jira ingestion - nothing in this page modifies Jira. Null-guards jira_sprint and jira_reporter pending DWB-356 normalizer fix.
 // Caller: App.jsx (route: /projects/:id/jira)
 // Callees: react, react-router-dom (useParams, useNavigate), store/useStore, api/jira (getProjectJiraTickets, triggerProjectJiraSync, getProjectJiraSyncStatus), api/client (ApiError), styles/jira.css
 // Data In: Route param :id (DWB project id)
@@ -32,6 +32,7 @@ const COLUMNS = [
   { key: 'jira_sprint',   label: 'Jira Sprint',  align: 'left'  },
   { key: 'jira_status',   label: 'Jira Status',  align: 'left'  },
   { key: 'jira_issue_type', label: 'Type',       align: 'left'  },
+  { key: 'dwb_parent_key',  label: 'DWB Parent', align: 'left'  },
   { key: 'jira_parent_key', label: 'Parent',     align: 'left'  },
   { key: 'jira_epic_key',   label: 'Epic',       align: 'left'  },
   { key: 'jira_assignee', label: 'Assignee',     align: 'left'  },
@@ -326,6 +327,7 @@ function JiraIssuesPage() {
               <span className="jira-table__cell">{r.jira_sprint || DASH}</span>
               <span className="jira-table__cell jira-table__cell--status">{r.jira_status || DASH}</span>
               <span className="jira-table__cell">{r.jira_issue_type || DASH}</span>
+              <span className="jira-table__cell jira-table__cell--key">{r.dwb_parent_key || DASH}</span>
               <span className="jira-table__cell jira-table__cell--key">{r.jira_parent_key || DASH}</span>
               <span className="jira-table__cell jira-table__cell--key" title={r.jira_epic_name || ''}>{r.jira_epic_key || DASH}</span>
               <span className="jira-table__cell jira-table__cell--assignee">{r.jira_assignee || DASH}</span>

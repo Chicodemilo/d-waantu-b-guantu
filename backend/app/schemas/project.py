@@ -86,3 +86,12 @@ class ProjectRead(BaseModel):
     playbooks_deployed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectFromRepoRead(ProjectRead):
+    """DWB-461: from-repo creation response. Same as ProjectRead plus a
+    best-effort deploy_warning: null when the post-create .claude/ bundle
+    deploy succeeded, else a short string describing why it was skipped
+    (deploy failure never fails project creation)."""
+
+    deploy_warning: str | None = None

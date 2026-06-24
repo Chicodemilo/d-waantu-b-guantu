@@ -1,71 +1,68 @@
 /* Path: src/styles/agents.css */
 /* File: agents.css */
 /* Created: 2026-03-29 */
-/* Purpose: Styles for agent list cards, agent detail view, and agent metrics panels */
-/* Last Modified: 2026-04-09 */
+/* Purpose: Styles for agent list table, agent detail view, and agent metrics panels */
+/* Last Modified: 2026-06-24 */
 
-.agent-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-
-.agent-card {
-  padding: 16px;
-  background-color: var(--bg-alt);
+/* Agents table (DWB-460). Height-capped, body scrolls under a sticky header so
+   the dashboard stops growing as the roster grows. Builds on .data-table. */
+.agent-table-scroll {
+  max-height: 360px;
+  overflow-y: auto;
   border: 1px solid var(--border);
-  transition: border-color 0.15s;
 }
 
-.agent-card:hover {
-  border-color: var(--green-dim);
+.agent-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
 }
 
-.agent-card__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
+.agent-table__th--right {
+  text-align: right;
 }
 
-.agent-card__name {
+.agent-table__project {
+  color: var(--gray-light);
+  white-space: nowrap;
+}
+
+.agent-table__agent {
   color: var(--green-bright);
   font-weight: 500;
-  font-size: 14px;
+  white-space: nowrap;
 }
 
-.agent-card__role {
-  font-size: 11px;
+.agent-table__role {
   color: var(--orange);
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
+  white-space: nowrap;
 }
 
-/* Per-project reputation badge (DWB-435). */
-.agent-card__rep {
-  font-size: 11px;
-  color: var(--gray-light);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+.agent-table__rep {
+  text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  margin-left: 8px;
 }
 
-.agent-card__desc {
-  font-size: 12px;
-  color: var(--gray-light);
-  margin-bottom: 12px;
-  line-height: 1.5;
-}
-
-.agent-card__status {
-  display: flex;
+.agent-table__status {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 11px;
+  white-space: nowrap;
 }
 
+.agent-table__desc {
+  color: var(--gray-light);
+  font-size: 12px;
+}
+
+/* Status dot, shared by the agents table rows (DWB-460). */
 .agent-card__status-dot {
   width: 6px;
   height: 6px;

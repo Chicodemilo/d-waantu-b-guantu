@@ -79,6 +79,54 @@ class TestDeployPlaybooks:
                 assert r.status_code == 500
 
 
+class TestDeployMirrorsCommands:
+    """DWB-459: deploy-playbooks must mirror DWB's .claude/commands/*.md into
+    each target repo's .claude/commands/ so sibling-repo Archies get the
+    cross-project slash commands (carrot/stick/score/leaderboard/tl/etc.)."""
+
+    def test_commands_land_in_target_repo(self, client, make_project):
+        from app.routers.playbooks import DWB_COMMANDS_DIR
+
+        # Source must exist for this to be meaningful in the test env.
+        src_names = sorted(p.name for p in DWB_COMMANDS_DIR.glob("*.md"))
+        assert src_names, "expected DWB .claude/commands/*.md to exist"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="CMD1")
+            r = client.post(f"/api/projects/{project['id']}/deploy-playbooks")
+            assert r.status_code == 200
+            data = r.json()
+
+            commands_dir = Path(tmpdir) / ".claude" / "commands"
+            assert commands_dir.is_dir()
+            # Every source command file landed on disk with identical bytes.
+            for name in src_names:
+                dst = commands_dir / name
+                assert dst.is_file()
+                assert (
+                    dst.read_text() == (DWB_COMMANDS_DIR / name).read_text()
+                )
+            # First deploy reports each command as copied.
+            copied = {
+                e for e in data["deployed"] if e.startswith("commands/")
+            }
+            for name in src_names:
+                assert f"commands/{name} (copied)" in copied
+
+    def test_second_deploy_reports_unchanged(self, client, make_project):
+        from app.routers.playbooks import DWB_COMMANDS_DIR
+
+        src_names = sorted(p.name for p in DWB_COMMANDS_DIR.glob("*.md"))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="CMD2")
+            client.post(f"/api/projects/{project['id']}/deploy-playbooks")
+            r = client.post(f"/api/projects/{project['id']}/deploy-playbooks")
+            assert r.status_code == 200
+            deployed = r.json()["deployed"]
+            for name in src_names:
+                assert f"commands/{name} (unchanged)" in deployed
+
+
 class TestDeployScaffoldsMemoryDirs:
     """DWB-298: deploy-playbooks must also scaffold agent memory dirs."""
 

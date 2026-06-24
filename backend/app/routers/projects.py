@@ -6,9 +6,10 @@
 # Callees: app/services/project.py, app/services/project_agent.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-06-18 (DWB-398)
+# Last Modified: 2026-06-24 (DWB-458)
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,18 +27,27 @@ from app.models.inter_agent_message import InterAgentMessage
 from app.models.project import ProjectStatus
 from app.models.project_agent import ProjectAgent
 from app.models.ticket import Ticket
-from app.schemas.project import ProjectCreate, ProjectOverheadIncrement, ProjectRead, ProjectUpdate
+from app.schemas.project import (
+    ProjectCreate,
+    ProjectFromRepoRead,
+    ProjectOverheadIncrement,
+    ProjectRead,
+    ProjectUpdate,
+)
 from app.schemas.project_agent import ProjectTeamRead
 from app.schemas.test_result import TestResultRead
 from app.services import project as svc
 from app.services import project_agent as pa_svc
 from app.services import test_result as test_svc
+from app.services.playbook_deploy import deploy_bundle
 from app.services.activity_log import (
     MIDDLEWARE_ACTIONS,
     SEMANTIC_ACTIONS,
     SEMANTIC_GENERIC_SHADOWS,
 )
 from app.services.seed_demo import seed_demo_project
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -123,7 +133,7 @@ def _scan_repo(repo: Path) -> dict:
     return {"prefix": prefix, "name": display_name, "description": description}
 
 
-@router.post("/from-repo", response_model=ProjectRead, status_code=201)
+@router.post("/from-repo", response_model=ProjectFromRepoRead, status_code=201)
 def create_from_repo(data: FromRepoRequest, db: Session = Depends(get_db)):
     repo = Path(data.repo_path)
     if not repo.is_dir():
@@ -150,7 +160,31 @@ def create_from_repo(data: FromRepoRequest, db: Session = Depends(get_db)):
     project = svc.create_project(db, create_data)
     # Auto-check doc gates and raise alerts for missing docs
     _check_doc_gates(db, project)
-    return project
+
+    # DWB-461: deploy the full .claude/ bundle (playbooks, agent defs, hooks,
+    # AND the cross-project slash commands from DWB-459) into the new repo at
+    # creation time, so a fresh project has everything from inception without a
+    # manual deploy-playbooks call. Best-effort: a deploy failure (e.g. repo not
+    # writable) must NOT fail creation - it is captured as a warning in the
+    # response, mirroring the per-agent memory-scaffold error handling.
+    deploy_warning: str | None = None
+    try:
+        deploy_bundle(db, project)
+        db.refresh(project)
+    except Exception as e:  # noqa: BLE001 - creation must survive any deploy error
+        deploy_warning = (
+            f"project created, but .claude/ bundle deploy failed: "
+            f"{type(e).__name__}: {e}. Run deploy-playbooks manually once the "
+            f"repo is writable."
+        )
+        logger.warning(
+            "create_from_repo: bundle deploy failed for project id=%s (%s): %s",
+            project.id, project.prefix, e,
+        )
+
+    result = ProjectFromRepoRead.model_validate(project)
+    result.deploy_warning = deploy_warning
+    return result
 
 
 @router.post("/seed-demo", status_code=201)
@@ -297,8 +331,29 @@ def list_project_jira_tickets(
         base = base.order_by(sort_col.desc(), Ticket.id.desc())
     base = base.limit(limit).offset(offset)
 
+    page = db.execute(base).all()
+
+    # DWB-456 add-on: resolve the DWB-side parent key (parent_ticket_id ->
+    # parent ticket's ticket_key) server-side. One batched lookup over just
+    # this page's parent ids - resolving client-side would break under
+    # pagination (the parent row may live on another page). Null when the
+    # ticket has no parent.
+    parent_ids = {
+        ticket.parent_ticket_id
+        for ticket, _snap, _sprint in page
+        if ticket.parent_ticket_id is not None
+    }
+    parent_key_by_id: dict[int, str] = {}
+    if parent_ids:
+        parent_key_by_id = {
+            pid: pkey
+            for pid, pkey in db.execute(
+                select(Ticket.id, Ticket.ticket_key).where(Ticket.id.in_(parent_ids))
+            ).all()
+        }
+
     rows = []
-    for ticket, snapshot, sprint in db.execute(base).all():
+    for ticket, snapshot, sprint in page:
         rows.append({
             "ticket_id": ticket.id,
             "dwb_key": ticket.ticket_key,
@@ -326,6 +381,15 @@ def list_project_jira_tickets(
             # DWB-364: 13th column. Populated for subtasks only; non-
             # subtask rows serve None and the UI shows '-'.
             "jira_parent_key": snapshot.jira_parent_key if snapshot else None,
+            # DWB-456 add-on: the DWB-side parent's ticket_key, resolved from
+            # tickets.parent_ticket_id. Null when the ticket has no parent.
+            # Pairs with the Jira-side jira_parent_key column in the UI
+            # (Freddie's DWB-457 renders both).
+            "dwb_parent_key": (
+                parent_key_by_id.get(ticket.parent_ticket_id)
+                if ticket.parent_ticket_id is not None
+                else None
+            ),
         })
 
     return {
@@ -478,6 +542,30 @@ def update_project(
     project = svc.get_project(db, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
+
+    # DWB-458: reject a silent half-enable of Jira. jira_project_key is
+    # meaningless without jira_base_url - saving a key while the base URL stays
+    # null leaves Jira disabled but looking configured (the RVP POR/null bug).
+    # Compute the RESULTING state (incoming fields override the stored ones) and
+    # require both present together. Clearing both (disable) and setting base_url
+    # alone both stay valid.
+    fields_set = data.model_fields_set
+    resulting_base_url = (
+        data.jira_base_url if "jira_base_url" in fields_set else project.jira_base_url
+    )
+    resulting_project_key = (
+        data.jira_project_key
+        if "jira_project_key" in fields_set
+        else project.jira_project_key
+    )
+    if resulting_project_key and not resulting_base_url:
+        raise HTTPException(
+            400,
+            "jira_project_key requires jira_base_url - both must be set together. "
+            "Provide jira_base_url alongside jira_project_key, or clear both to "
+            "disable Jira.",
+        )
+
     return svc.update_project(db, project, data)
 
 

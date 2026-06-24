@@ -111,6 +111,138 @@ class TestUpdateProject:
         assert r.status_code == 404
 
 
+class TestJiraEnableHardening:
+    """DWB-458: jira_project_key must never be saved while jira_base_url is
+    null (the silent half-enable that disables Jira but looks configured)."""
+
+    def test_project_key_without_base_url_returns_400(self, client, make_project):
+        project = make_project()
+        r = client.patch(f"/api/projects/{project['id']}", json={
+            "jira_project_key": "POR",
+        })
+        assert r.status_code == 400
+        detail = r.json()["detail"]
+        assert "jira_project_key" in detail
+        assert "jira_base_url" in detail
+
+    def test_both_together_returns_200(self, client, make_project):
+        project = make_project()
+        r = client.patch(f"/api/projects/{project['id']}", json={
+            "jira_base_url": "https://example.atlassian.net",
+            "jira_project_key": "POR",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["jira_base_url"] == "https://example.atlassian.net"
+        assert body["jira_project_key"] == "POR"
+
+    def test_base_url_alone_returns_200(self, client, make_project):
+        project = make_project()
+        r = client.patch(f"/api/projects/{project['id']}", json={
+            "jira_base_url": "https://example.atlassian.net",
+        })
+        assert r.status_code == 200
+        assert r.json()["jira_base_url"] == "https://example.atlassian.net"
+        assert r.json()["jira_project_key"] is None
+
+    def test_clearing_both_returns_200(self, client, make_project):
+        # First fully enable, then disable by clearing both together.
+        project = make_project()
+        client.patch(f"/api/projects/{project['id']}", json={
+            "jira_base_url": "https://example.atlassian.net",
+            "jira_project_key": "POR",
+        })
+        r = client.patch(f"/api/projects/{project['id']}", json={
+            "jira_base_url": None,
+            "jira_project_key": None,
+        })
+        assert r.status_code == 200
+        assert r.json()["jira_base_url"] is None
+        assert r.json()["jira_project_key"] is None
+
+    def test_project_key_alone_when_base_url_already_set_returns_200(
+        self, client, make_project
+    ):
+        # base_url already persisted; adding the key alone is a valid enable.
+        project = make_project()
+        client.patch(f"/api/projects/{project['id']}", json={
+            "jira_base_url": "https://example.atlassian.net",
+        })
+        r = client.patch(f"/api/projects/{project['id']}", json={
+            "jira_project_key": "POR",
+        })
+        assert r.status_code == 200
+        assert r.json()["jira_project_key"] == "POR"
+
+    def test_clearing_base_url_while_key_remains_returns_400(
+        self, client, make_project
+    ):
+        # Disabling by nulling base_url only, leaving a stale key, is the exact
+        # half-enable we reject - the resulting state has key but no base_url.
+        project = make_project()
+        client.patch(f"/api/projects/{project['id']}", json={
+            "jira_base_url": "https://example.atlassian.net",
+            "jira_project_key": "POR",
+        })
+        r = client.patch(f"/api/projects/{project['id']}", json={
+            "jira_base_url": None,
+        })
+        assert r.status_code == 400
+
+
+class TestCreateFromRepoDeploysBundle:
+    """DWB-461: POST /from-repo deploys the full .claude/ bundle (incl. the
+    DWB-459 slash commands) into the new repo at creation, best-effort - a
+    deploy failure surfaces as deploy_warning and never fails creation."""
+
+    def test_commands_land_in_new_repo_on_create(self, client, tmp_path):
+        from app.services.playbook_deploy import DWB_COMMANDS_DIR
+
+        src_names = sorted(p.name for p in DWB_COMMANDS_DIR.glob("*.md"))
+        assert src_names, "expected DWB .claude/commands/*.md to exist"
+
+        r = client.post(
+            "/api/projects/from-repo", json={"repo_path": str(tmp_path)}
+        )
+        assert r.status_code == 201, r.text
+        data = r.json()
+        # Clean deploy -> no warning.
+        assert data["deploy_warning"] is None
+
+        commands_dir = tmp_path / ".claude" / "commands"
+        assert commands_dir.is_dir()
+        for name in src_names:
+            dst = commands_dir / name
+            assert dst.is_file()
+            assert dst.read_text() == (DWB_COMMANDS_DIR / name).read_text()
+
+        # Bundle siblings also landed (proves the shared deploy ran, not a
+        # commands-only shortcut): playbooks + hooks settings.json.
+        assert (tmp_path / ".claude" / "worker_playbook.md").is_file()
+        assert (tmp_path / ".claude" / "settings.json").is_file()
+
+    def test_deploy_failure_does_not_fail_creation(
+        self, client, tmp_path, monkeypatch
+    ):
+        def _boom(db, project):
+            raise RuntimeError("disk on fire")
+
+        # Patch where create_from_repo looks it up (imported into the router).
+        monkeypatch.setattr("app.routers.projects.deploy_bundle", _boom)
+
+        r = client.post(
+            "/api/projects/from-repo", json={"repo_path": str(tmp_path)}
+        )
+        # Creation still succeeds despite the deploy blowing up.
+        assert r.status_code == 201, r.text
+        data = r.json()
+        assert data["deploy_warning"] is not None
+        assert "disk on fire" in data["deploy_warning"]
+        # The project row really exists and is fetchable.
+        got = client.get(f"/api/projects/{data['id']}")
+        assert got.status_code == 200
+
+
 class TestRepoPath:
     def test_create_with_repo_path(self, client):
         r = client.post("/api/projects", json={

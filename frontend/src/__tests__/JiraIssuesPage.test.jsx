@@ -138,6 +138,52 @@ describe('JiraIssuesPage (DWB-342)', () => {
     expect(second.textContent).toContain('FRA-102');
   });
 
+  it('renders the DWB Parent column left of the Jira Parent column and shows dwb_parent_key (DWB-457)', async () => {
+    getProjectJiraTickets.mockResolvedValue(
+      listResp([
+        row({ ticket_id: 1003, dwb_key: 'FRA-103', jira_key: 'FRA-103', dwb_parent_key: 'FRA-100', jira_parent_key: 'FRA-90', title: 'a subtask row' }),
+      ])
+    );
+    getProjectJiraSyncStatus.mockResolvedValue({ status: 'idle', last_synced_at: null, counts: null });
+
+    await act(async () => {
+      renderAt();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('jira-table')).toBeInTheDocument();
+    });
+
+    const dwbCol = screen.getByTestId('jira-col-dwb_parent_key');
+    const jiraCol = screen.getByTestId('jira-col-jira_parent_key');
+    expect(dwbCol).toBeInTheDocument();
+    expect(jiraCol).toBeInTheDocument();
+    expect(dwbCol.textContent).toMatch(/^DWB Parent/);
+    // DWB parent header must precede the Jira parent header in DOM order.
+    expect(
+      dwbCol.compareDocumentPosition(jiraCol) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    // Both parent values render on the row.
+    expect(screen.getByText('FRA-100')).toBeInTheDocument();
+    expect(screen.getByText('FRA-90')).toBeInTheDocument();
+  });
+
+  it('null-guards dwb_parent_key to a dash when the ticket has no DWB parent (DWB-457)', async () => {
+    getProjectJiraTickets.mockResolvedValue(
+      listResp([row({ ticket_id: 1004, dwb_key: 'FRA-104', jira_key: 'FRA-104', dwb_parent_key: null })])
+    );
+    getProjectJiraSyncStatus.mockResolvedValue({ status: 'idle', last_synced_at: null, counts: null });
+
+    await act(async () => {
+      renderAt();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('jira-row')).toBeInTheDocument();
+    });
+    // The row text contains a dash for the missing DWB parent (does not crash).
+    expect(screen.getByTestId('jira-row').textContent).toMatch(/-/);
+  });
+
   it('debounces the search input and re-issues the fetch with q=', async () => {
     getProjectJiraTickets.mockResolvedValue(listResp([row()]));
     getProjectJiraSyncStatus.mockResolvedValue({ status: 'idle', last_synced_at: null, counts: null });

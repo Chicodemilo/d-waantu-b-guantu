@@ -60,6 +60,7 @@ class TestGetTicket:
             "ticket_number", "ticket_key", "title", "description",
             "ticket_type", "status", "tokens_used", "time_spent_seconds",
             "token_source", "jira_issue_key",
+            "parent_ticket_id", "subtasks",
             "created_at", "updated_at", "completed_at",
         }
         assert set(data.keys()) == expected_keys

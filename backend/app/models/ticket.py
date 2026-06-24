@@ -1,12 +1,12 @@
 # Path: app/models/ticket.py
 # File: ticket.py
 # Created: 2026-03-29
-# Purpose: Ticket ORM model with status/type enums and cascade-delete child relationships
+# Purpose: Ticket ORM model with status/type enums, self-referential sub-task linkage, and cascade-delete child relationships
 # Caller: app/services/ticket.py
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Ticket, TicketStatus, TicketType
-# Last Modified: 2026-04-16
+# Last Modified: 2026-06-24 (DWB-454: subtask type + parent_ticket_id self-ref)
 
 import enum
 from datetime import datetime
@@ -21,6 +21,10 @@ class TicketType(str, enum.Enum):
     task = "task"
     bug = "bug"
     story = "story"
+    # DWB-454: native sub-task support. A subtask MUST carry a
+    # parent_ticket_id (validated at the service/router layer); the parent
+    # must itself be a non-subtask (one level only, matching Jira).
+    subtask = "subtask"
 
 
 class TicketStatus(str, enum.Enum):
@@ -47,6 +51,16 @@ class Ticket(Base):
     )
     assigned_agent_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("agents.id"), nullable=True, index=True
+    )
+    # DWB-454: self-referential link for native sub-tasks. Nullable (only
+    # subtask-type tickets set it). ON DELETE SET NULL so deleting a parent
+    # orphans its children rather than cascading them away - the children
+    # remain real tickets, just unparented.
+    parent_ticket_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("tickets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     ticket_number: Mapped[int] = mapped_column(Integer, nullable=False)
     ticket_key: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
@@ -75,6 +89,14 @@ class Ticket(Base):
     epic: Mapped["Epic | None"] = relationship(back_populates="tickets")  # noqa: F821
     sprint: Mapped["Sprint"] = relationship(back_populates="tickets")  # noqa: F821
     assigned_agent: Mapped["Agent | None"] = relationship(back_populates="assigned_tickets")  # noqa: F821
+    # DWB-454: self-referential parent/children. remote_side=[id] marks the
+    # "one" side so SQLAlchemy reads parent_ticket_id as the many->one FK.
+    parent: Mapped["Ticket | None"] = relationship(
+        "Ticket", remote_side=[id], back_populates="subtasks"
+    )
+    subtasks: Mapped[list["Ticket"]] = relationship(
+        "Ticket", back_populates="parent"
+    )
     comments: Mapped[list["Comment"]] = relationship(back_populates="ticket", cascade="all, delete-orphan")  # noqa: F821
     alerts: Mapped[list["Alert"]] = relationship(back_populates="ticket", cascade="all, delete")  # noqa: F821
     status_history: Mapped[list["StatusHistory"]] = relationship(back_populates="ticket", cascade="all, delete-orphan")  # noqa: F821

@@ -438,7 +438,7 @@
 
 .jira-table__row {
   display: grid;
-  grid-template-columns: 55px 110px 70px 70px 110px 70px 60px 100px 100px 95px 100px 100px 2fr;
+  grid-template-columns: 55px 110px 70px 70px 110px 70px 60px 100px 100px 100px 95px 100px 100px 2fr;
   gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
