@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AgentCreate, AgentUpdate, AgentRead
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-24 (DWB-466: drop api_key from AgentRead - never echo the secret back)
 
 from datetime import datetime
 
@@ -45,6 +45,11 @@ class AgentListRead(BaseModel):
 
 
 class AgentRead(BaseModel):
+    # DWB-466: api_key is intentionally OMITTED. GET /api/agents/{id} (and the
+    # POST-create echo) previously returned the key in cleartext. The key is a
+    # secret; callers supply it on create and resolve agents by id/name
+    # thereafter, so there is never a reason to read it back. AgentListRead
+    # already excluded it; this brings the detail/create response in line.
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -52,7 +57,6 @@ class AgentRead(BaseModel):
     name: str
     description: str | None
     role: str
-    api_key: str
     is_active: bool
     created_at: datetime
     updated_at: datetime

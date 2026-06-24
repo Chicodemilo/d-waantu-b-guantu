@@ -57,10 +57,28 @@ class TestGetAgent:
         agent = make_agent()
         data = client.get(f"/api/agents/{agent['id']}").json()
         expected_keys = {
-            "id", "project_id", "name", "description", "role", "api_key",
+            "id", "project_id", "name", "description", "role",
             "is_active", "created_at", "updated_at",
         }
         assert set(data.keys()) == expected_keys
+
+    def test_get_does_not_leak_api_key(self, client, make_agent):
+        # DWB-466: GET /api/agents/{id} must never return the api_key secret.
+        agent = make_agent()
+        data = client.get(f"/api/agents/{agent['id']}").json()
+        assert "api_key" not in data
+
+    def test_create_response_does_not_leak_api_key(self, client, make_project):
+        # DWB-466: the POST-create echo must not return the api_key either.
+        project = make_project()
+        r = client.post("/api/agents", json={
+            "project_id": project["id"],
+            "name": "Secret Agent",
+            "role": "developer",
+            "api_key": "should-not-be-echoed",
+        })
+        assert r.status_code == 201
+        assert "api_key" not in r.json()
 
     def test_get_nonexistent_returns_404(self, client):
         r = client.get("/api/agents/999999")
