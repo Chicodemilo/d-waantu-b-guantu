@@ -1,7 +1,9 @@
 ---
 description: Dock reputation from an agent (/stick <agent> <points> "optional reason")
+allowed-tools: Bash
 ---
-!python3 << 'EOF'
+```!
+python3 << 'PYEOF'
 import os, json, sys, shlex
 from urllib import request, error
 
@@ -53,4 +55,7 @@ except error.HTTPError as e:
         except Exception:
             pass
     print(msg)
-EOF
+PYEOF
+```
+
+Report the result of the command above back to me in one short line: the agent, the -N reputation change, and their new total (or the error message if it failed). Do nothing else.
