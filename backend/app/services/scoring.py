@@ -33,7 +33,7 @@ from app.config.scoring import (
 )
 from app.models.agent import Agent
 from app.models.agent_score import AgentScore
-from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.alert import Alert, AlertCategory, AlertSeverity, AlertStatus
 from app.models.project_agent import ProjectAgent
 from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
 from app.models.sprint import Sprint, SprintStatus
@@ -588,13 +588,20 @@ def broadcast_score_change(
     actor_agent_id: int | None = None,
     actor_name: str | None = None,
 ) -> int:
-    """Notify every project agent (plus the subject) of a carrot/stick via the
-    alerts system. Human events use elevated (critical) severity; peer events
-    use normal (info). The subject's own row is phrased directly ("You
-    received ..."); everyone else sees the third-person form. Auto-triggers do
-    NOT call this (mechanical/too frequent). Returns the number of alert rows
-    written. The caller owns the commit.
+    """Notify every project agent (plus the subject) of a HUMAN carrot/stick via
+    the alerts system, at elevated (critical) severity. The subject's own row is
+    phrased directly ("You received ..."); everyone else sees the third-person
+    form. Auto-triggers do NOT call this (mechanical/too frequent). Returns the
+    number of alert rows written. The caller owns the commit.
+
+    DWB-463: PEER carrots/sticks are demoted from alerts to the activity feed
+    (epic 37, alerts-vs-actions). They no longer create Alert rows here; the
+    caller's score_awarded/score_docked feed event (_emit_score_feed_event) is
+    the peer record. So this returns 0 immediately for any non-human source.
     """
+    if source != "human":
+        return 0
+
     severity = AlertSeverity.critical if source == "human" else AlertSeverity.info
     origin = "the human" if source == "human" else (actor_name or "a peer")
     sign = f"{delta:+d}"
@@ -636,6 +643,8 @@ def broadcast_score_change(
             body=body,
             severity=severity,
             status=AlertStatus.open,
+            # DWB-462: reputation carrot/stick -> scoring category.
+            category=AlertCategory.scoring,
         ))
         count += 1
     db.flush()

@@ -6,13 +6,13 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AlertCreate, AlertUpdate, AlertRead, SendToTeamResponse
-# Last Modified: 2026-06-22 (DWB-426: recipient_agent_id)
+# Last Modified: 2026-06-24 (DWB-462: category taxonomy)
 
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.alert import AlertSeverity, AlertStatus
+from app.models.alert import AlertCategory, AlertSeverity, AlertStatus
 
 
 class AlertCreate(BaseModel):
@@ -23,6 +23,8 @@ class AlertCreate(BaseModel):
     title: str
     body: str
     severity: AlertSeverity = AlertSeverity.info
+    # DWB-462: defaults to actionable when the caller doesn't specify.
+    category: AlertCategory = AlertCategory.actionable
 
 
 class DismissAllRequest(BaseModel):
@@ -36,6 +38,15 @@ class DismissAllResponse(BaseModel):
 class RunTestsRequest(BaseModel):
     project_id: int
     raised_by_agent_id: int | None = None
+
+
+class RunTestsResponse(BaseModel):
+    """DWB-463: a test-run request is recorded to the activity feed, not as an
+    alert. Deliberately carries no `id`, so the activity-logger middleware does
+    not also log a generic 'created' row for the POST."""
+    status: str
+    project_id: int
+    action: str
 
 
 class AlertUpdate(BaseModel):
@@ -56,6 +67,7 @@ class AlertSlimRead(BaseModel):
     title: str
     severity: AlertSeverity
     status: AlertStatus
+    category: AlertCategory
     project_id: int
 
 
@@ -71,6 +83,7 @@ class AlertRead(BaseModel):
     body: str
     severity: AlertSeverity
     status: AlertStatus
+    category: AlertCategory
     created_at: datetime
     resolved_at: datetime | None
     user_sent_at: datetime | None

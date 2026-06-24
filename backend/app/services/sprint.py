@@ -19,7 +19,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-from app.models.alert import Alert, AlertSeverity, AlertStatus
 from app.models.epic import Epic, EpicStatus
 from app.models.failure_record import FailureRecord
 from app.models.project import Project
@@ -462,27 +461,13 @@ def _find_agent_by_role(db: Session, project_id: int, role: str) -> Agent | None
 
 
 def _on_sprint_completed(db: Session, sprint: Sprint) -> None:
-    alert_title = f"Sprint {sprint.name} closed — tests needed"
-    alert_body = (
-        f"Sprint S{sprint.sprint_number} ({sprint.name}) has been completed. "
-        "Tests should be written for all new features."
-    )
-
-    tester_agent = None
-    for role in _ALERT_ROLES:
-        agent = _find_agent_by_role(db, sprint.project_id, role)
-        if not agent:
-            continue
-        if role == "tester":
-            tester_agent = agent
-        db.add(Alert(
-            project_id=sprint.project_id,
-            raised_by_agent_id=agent.id,
-            title=alert_title,
-            body=alert_body,
-            severity=AlertSeverity.info,
-            status=AlertStatus.open,
-        ))
+    # DWB-463: the per-role "tests needed" ALERT rows are removed (epic 37,
+    # alerts-vs-actions). We deliberately do NOT write a feed entry here: the
+    # sprint close is already represented in the activity feed by the
+    # sprint_closed event (DWB-410, emitted by update_sprint), so a second
+    # write would duplicate it. This handler now only locates the tester to
+    # auto-assign the next sprint's test ticket.
+    tester_agent = _find_agent_by_role(db, sprint.project_id, "tester")
 
     # Find the next sprint for the same project. Post-DWB-331 only one
     # sprint can be active per project, so the auto-ticket target is the

@@ -377,3 +377,44 @@ describe('ActivityFeed (scoring events, DWB-433 part 4)', () => {
     ).toBe('Barry_DWB overtook Sage for #1'));
   });
 });
+
+describe('ActivityFeed (demoted test-run notice, DWB-464)', () => {
+  it('renders test_run_requested as a "requested a test run" phrase', async () => {
+    getActivityFeed.mockResolvedValue([
+      {
+        id: 30,
+        action: 'test_run_requested',
+        entity_type: 'test_run',
+        entity_id: 7,
+        details: { triggered_by: 'Sage' },
+        agent_name: 'Sage',
+        agent_role: 'tester',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    renderFeed(1);
+
+    await screen.findByText(/requested a test run: Sage/);
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it('renders test_run_requested with no note when details are empty', async () => {
+    getActivityFeed.mockResolvedValue([
+      {
+        id: 31,
+        action: 'test_run_requested',
+        entity_type: 'test_run',
+        entity_id: 8,
+        details: {},
+        agent_name: 'system',
+        agent_role: null,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    renderFeed(1);
+
+    await screen.findByText('requested a test run');
+  });
+});

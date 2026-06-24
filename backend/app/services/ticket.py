@@ -6,17 +6,18 @@
 # Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking, services/activity_log, services/scoring_triggers
 # Data In: db: Session, TicketCreate/Update, acting_agent_id
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-06-24 (DWB-455: sub-task parent validation + epic/sprint inheritance)
+# Last Modified: 2026-06-24 (DWB-465: dup ticket_key/number -> 409 not 500 on create)
 
 import logging
 from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.alert import Alert, AlertCategory, AlertSeverity, AlertStatus
 from app.models.failure_record import FailureRecord
 from app.models.project import Project
 from app.models.project_agent import ProjectAgent
@@ -234,7 +235,31 @@ def create_ticket(db: Session, data: TicketCreate) -> Ticket:
 
     ticket = Ticket(**values)
     db.add(ticket)
-    db.commit()
+    # DWB-465: ticket_key is globally unique and (project_id, ticket_number) is
+    # unique per project. A colliding key/number (client computed it off a stale
+    # MAX, or retried the same POST) used to surface as a raw 500 from the
+    # IntegrityError on commit. Convert it to a clean, retryable 409 so callers
+    # can bump the number and retry instead of treating create as broken. Roll
+    # back first so the session is usable and nothing partial lingers.
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_ticket",
+                "message": (
+                    f"A ticket with ticket_key {values.get('ticket_key')!r} "
+                    f"(or ticket_number {values.get('ticket_number')} in this "
+                    f"project) already exists. Ticket keys and per-project "
+                    f"numbers are unique - pick the next free number and retry."
+                ),
+                "field": "ticket_key",
+                "ticket_key": values.get("ticket_key"),
+                "ticket_number": values.get("ticket_number"),
+            },
+        ) from exc
     db.refresh(ticket)
     return ticket
 
@@ -495,6 +520,8 @@ def _check_rework(db: Session, ticket: Ticket) -> None:
         body=f"{ticket.ticket_key} was moved back to in_progress after being marked done. A failure record has been created.",
         severity=AlertSeverity.info,
         status=AlertStatus.open,
+        # DWB-462: rework needs the PM to act (classify the failure).
+        category=AlertCategory.actionable,
     ))
 
     # DWB-425: penalize the rework, folded into this transaction. Side-effect

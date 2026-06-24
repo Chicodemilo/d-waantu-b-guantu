@@ -42,7 +42,10 @@ def sprint_close_project(client, make_project, make_epic):
 
 
 class TestSprintCloseAlerts:
-    def test_closing_sprint_creates_alerts(self, client, sprint_close_project):
+    def test_closing_sprint_creates_no_tests_needed_alerts(self, client, sprint_close_project):
+        # DWB-463: the per-role "tests needed" alert rows are removed. The close
+        # itself is already represented in the feed by the sprint_closed event
+        # (DWB-410), so no new feed entry is added here either.
         ctx = sprint_close_project
         sprint = client.post("/api/sprints", json={
             "project_id": ctx["project"]["id"],
@@ -61,6 +64,7 @@ class TestSprintCloseAlerts:
         assert r.status_code == 200
         assert r.json()["status"] == "completed"
 
+        # No new alert rows for the tests-needed notice.
         alerts_after = client.get("/api/alerts", params={
             "project_id": ctx["project"]["id"],
         }).json()
@@ -68,12 +72,16 @@ class TestSprintCloseAlerts:
             a for a in alerts_after
             if a["id"] not in {al["id"] for al in alerts_before}
         ]
-        # One alert per role (team-lead, pm, tester)
-        assert len(new_alerts) == 3
-        assert all(a["severity"] == "info" for a in new_alerts)
-        assert all("tests needed" in a["title"].lower() for a in new_alerts)
+        assert all("tests needed" not in a["title"].lower() for a in new_alerts)
 
-    def test_alert_mentions_sprint_name(self, client, sprint_close_project):
+        # The close is represented in the feed by the existing sprint_closed event.
+        feed = client.get(f"/api/projects/{ctx['project']['id']}/activity-feed").json()
+        closed = [e for e in feed if e.get("action") == "sprint_closed"]
+        assert len(closed) >= 1
+        # And no duplicate tests_requested verb is emitted.
+        assert not any(e.get("action") == "tests_requested" for e in feed)
+
+    def test_sprint_closed_feed_event_present_on_close(self, client, sprint_close_project):
         ctx = sprint_close_project
         sprint = client.post("/api/sprints", json={
             "project_id": ctx["project"]["id"],
@@ -85,14 +93,13 @@ class TestSprintCloseAlerts:
 
         client.patch(f"/api/sprints/{sprint['id']}", json={"status": "completed"})
 
-        alerts = client.get("/api/alerts", params={
-            "project_id": ctx["project"]["id"],
-        }).json()
-        sprint_alerts = [
-            a for a in alerts
-            if "Auth Rework" in a.get("title", "") or "Auth Rework" in a.get("body", "")
+        feed = client.get(f"/api/projects/{ctx['project']['id']}/activity-feed").json()
+        closed = [
+            e for e in feed
+            if e.get("action") == "sprint_closed" and e.get("entity_id") == sprint["id"]
         ]
-        assert len(sprint_alerts) >= 1
+        assert len(closed) == 1
+        assert closed[0]["details"]["sprint_number"] == 5
 
     def test_non_completed_status_does_not_create_alerts(
         self, client, sprint_close_project

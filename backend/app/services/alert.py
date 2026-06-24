@@ -14,7 +14,7 @@ from pathlib import Path
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.alert import Alert, AlertCategory, AlertSeverity, AlertStatus
 from app.models.project import Project
 from app.schemas.alert import AlertCreate, AlertUpdate
 
@@ -24,6 +24,7 @@ def list_alerts(
     project_id: int | None = None,
     severity: AlertSeverity | None = None,
     status: AlertStatus | None = None,
+    category: AlertCategory | None = None,
 ) -> list[Alert]:
     stmt = select(Alert)
     if project_id:
@@ -32,6 +33,8 @@ def list_alerts(
         stmt = stmt.where(Alert.severity == severity)
     if status:
         stmt = stmt.where(Alert.status == status)
+    if category:
+        stmt = stmt.where(Alert.category == category)
     stmt = stmt.order_by(Alert.created_at.desc())
     return list(db.scalars(stmt).all())
 

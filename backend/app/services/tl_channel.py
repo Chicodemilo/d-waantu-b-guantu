@@ -24,7 +24,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.alert import Alert, AlertCategory, AlertSeverity, AlertStatus
 from app.models.project import Project
 from app.models.tl_message import TlMessage, TlMessageRead
 
@@ -143,6 +143,8 @@ def _ping(
                 body=body,
                 severity=AlertSeverity.info,
                 status=AlertStatus.open,
+                # DWB-462: TL-channel pings are inter-agent comms.
+                category=AlertCategory.comms,
             ))
             count += 1
         db.flush()

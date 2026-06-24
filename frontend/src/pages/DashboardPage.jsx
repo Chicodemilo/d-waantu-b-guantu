@@ -22,7 +22,7 @@ import '../styles/dashboard.css';
 function DashboardPage() {
   const navigate = useNavigate();
   const projects = useStore((s) => s.projects).filter((p) => p.status === 'active');
-  const openAlerts = useStore((s) => s.getOpenAlerts());
+  const openAlerts = useStore((s) => s.getSurfacedAlerts()); // DWB-464: surfaced categories only
   const clearAllAlerts = useStore((s) => s.clearAllAlerts);
   const getProject = useStore((s) => s.getProject);
   const [addExpanded, setAddExpanded] = useState(false);
@@ -66,6 +66,7 @@ function DashboardPage() {
               <thead>
                 <tr>
                   <th>Project</th>
+                  <th>Category</th>
                   <th>Severity</th>
                   <th>Title</th>
                   <th>Created</th>
@@ -83,6 +84,13 @@ function DashboardPage() {
                         {proj ? (
                           <Link to={`/projects/${proj.id}`}>{proj.prefix}</Link>
                         ) : '\u2014'}
+                      </td>
+                      <td>
+                        {alert.category ? (
+                          <span className={`alert-category-badge alert-category-badge--${alert.category}`}>
+                            {alert.category}
+                          </span>
+                        ) : '-'}
                       </td>
                       <td style={{ color: severityColor }}>{alert.severity}</td>
                       <td>{alert.title}</td>

@@ -76,6 +76,14 @@ SEMANTIC_ACTIONS = frozenset({
     "score_awarded",
     "score_docked",
     "lead_change",
+    # DWB-463: the ad-hoc test-run request is demoted from an alert to a feed
+    # action (epic 37, alerts-vs-actions). The sprint-close "tests needed"
+    # notice is NOT given its own verb - the existing sprint_closed event
+    # already represents the close in the feed, and peer scoring already has
+    # score_awarded/score_docked, so only test-run needed a new verb. The
+    # run-tests endpoint returns no id, so the middleware never logs a generic
+    # row for it (no shadow entry needed).
+    "test_run_requested",
 })
 
 # Read-side feed dedup (DWB-409). Maps each semantic event to the generic

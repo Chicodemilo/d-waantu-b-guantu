@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import useStore from '../store/useStore';
+import useStore, { SURFACED_ALERT_CATEGORIES } from '../store/useStore';
 import ProjectHeader from '../components/project/ProjectHeader';
 import { updateProject, deleteProject, disableJira, getGateStatus } from '../api/projects';
 import { dismissAllAlerts, getAlerts, sendAlertsToTeam } from '../api/alerts';
@@ -45,6 +45,7 @@ function ProjectPage() {
   const [dismissing, setDismissing] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState(null);
+  const [alertCategory, setAlertCategory] = useState('all'); // DWB-464 panel filter
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [jiraKeyInput, setJiraKeyInput] = useState(''); // unused but kept for state cleanup
   const [jiraSaving, setJiraSaving] = useState(false);
@@ -433,11 +434,57 @@ function ProjectPage() {
             {sendResult === 'done' && <span className="sync-btn__status">{'\u2713'} sent</span>}
             {sendResult === 'error' && <span className="sync-btn__status" style={{ color: 'var(--red)' }}>send failed</span>}
           </div>
-          <div className="alerts-container">
-            {[...alerts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).map((alert) => (
-              <AlertBanner key={alert.id} alert={alert} />
-            ))}
-          </div>
+          {(() => {
+            // DWB-464: group + filter the open alerts by category. Surfaced
+            // categories list first (store order); anything else (or null)
+            // falls into an "other" bucket so it is never silently dropped.
+            const catOf = (a) => a.category || 'other';
+            const orderOf = (c) => {
+              const i = SURFACED_ALERT_CATEGORIES.indexOf(c);
+              return i === -1 ? 99 : i;
+            };
+            const orderedCats = [...new Set(alerts.map(catOf))]
+              .sort((x, y) => orderOf(x) - orderOf(y) || x.localeCompare(y));
+            const countOf = (c) => alerts.filter((a) => catOf(a) === c).length;
+            const visibleCats = alertCategory === 'all'
+              ? orderedCats
+              : orderedCats.filter((c) => c === alertCategory);
+            const byDate = (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0);
+
+            return (
+              <>
+                <div className="alert-cat-filter">
+                  <button
+                    type="button"
+                    className={`alert-cat-chip${alertCategory === 'all' ? ' alert-cat-chip--active' : ''}`}
+                    onClick={() => setAlertCategory('all')}
+                  >
+                    all {alerts.length}
+                  </button>
+                  {orderedCats.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`alert-cat-chip alert-cat-chip--${c}${alertCategory === c ? ' alert-cat-chip--active' : ''}`}
+                      onClick={() => setAlertCategory(c)}
+                    >
+                      {c} {countOf(c)}
+                    </button>
+                  ))}
+                </div>
+                <div className="alerts-container">
+                  {visibleCats.map((cat) => (
+                    <div key={cat} className="alert-group">
+                      <div className="alert-group__title">{cat}</div>
+                      {alerts.filter((a) => catOf(a) === cat).sort(byDate).map((alert) => (
+                        <AlertBanner key={alert.id} alert={alert} />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 

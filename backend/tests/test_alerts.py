@@ -97,7 +97,7 @@ class TestGetAlert:
         data = client.get(f"/api/alerts/{created['id']}").json()
         expected_keys = {
             "id", "project_id", "raised_by_agent_id", "recipient_agent_id",
-            "ticket_id", "title", "body", "severity", "status",
+            "ticket_id", "title", "body", "severity", "status", "category",
             "created_at", "resolved_at", "user_sent_at",
         }
         assert set(data.keys()) == expected_keys
@@ -155,29 +155,29 @@ class TestUpdateAlert:
 
 
 class TestRunTests:
-    def test_run_tests_returns_201(self, client, make_project, make_agent):
+    """DWB-463: a test-run request is recorded to the activity feed, not as an
+    alert. The endpoint returns a RunTestsResponse and creates NO alert row."""
+
+    def test_run_tests_returns_201_and_records_feed_event(self, client, make_project, make_agent):
         project = make_project()
         agent = make_agent()
+        alerts_before = client.get("/api/alerts", params={"project_id": project["id"]}).json()
         r = client.post("/api/alerts/run-tests", json={
             "project_id": project["id"],
             "raised_by_agent_id": agent["id"],
         })
         assert r.status_code == 201
         data = r.json()
-        assert data["title"] == "Test run requested"
-        assert data["severity"] == "info"
-        assert data["status"] == "open"
-        assert project["name"] in data["body"]
-
-    def test_run_tests_with_explicit_agent_id(self, client, make_project, make_agent):
-        project = make_project()
-        agent = make_agent()
-        r = client.post("/api/alerts/run-tests", json={
-            "project_id": project["id"],
-            "raised_by_agent_id": agent["id"],
-        })
-        assert r.status_code == 201
-        assert r.json()["raised_by_agent_id"] == agent["id"]
+        assert data["status"] == "recorded"
+        assert data["project_id"] == project["id"]
+        assert data["action"] == "test_run_requested"
+        # No alert row was created.
+        alerts_after = client.get("/api/alerts", params={"project_id": project["id"]}).json()
+        assert len(alerts_after) == len(alerts_before)
+        # The activity feed carries the test_run_requested action.
+        feed = client.get(f"/api/projects/{project['id']}/activity-feed").json()
+        actions = [e.get("action") for e in feed]
+        assert "test_run_requested" in actions
 
     def test_run_tests_nonexistent_project_returns_404(self, client):
         r = client.post("/api/alerts/run-tests", json={"project_id": 999999})

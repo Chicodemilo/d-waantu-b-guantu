@@ -188,6 +188,78 @@
   overflow-y: auto;
 }
 
+/* Alert category UI (DWB-464). Badge on each banner + the dashboard table, a
+   filter chip row above the panel, and per-category group headers. */
+.alert-category-badge {
+  display: inline-block;
+  padding: 0 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border: 1px solid var(--gray-light);
+  color: var(--gray-light);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.alert-category-badge--comms {
+  color: var(--blue);
+  border-color: var(--blue-dim);
+}
+
+.alert-category-badge--scoring {
+  color: var(--orange);
+  border-color: var(--orange);
+}
+
+.alert-category-badge--actionable {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+
+.alert-cat-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.alert-cat-chip {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--gray-light);
+  font-family: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.alert-cat-chip:hover {
+  border-color: var(--green-dim);
+  color: var(--green);
+}
+
+.alert-cat-chip--active {
+  border-color: var(--green);
+  color: var(--green-bright);
+  background-color: var(--bg-alt);
+}
+
+.alert-group {
+  margin-bottom: 8px;
+}
+
+.alert-group__title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+  margin: 4px 0 2px;
+}
+
 .alert-banner {
   padding: 4px 10px;
   border: 1px solid var(--border);

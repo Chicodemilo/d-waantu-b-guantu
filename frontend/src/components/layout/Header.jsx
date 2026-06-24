@@ -1,19 +1,20 @@
 // Path: src/components/layout/Header.jsx
 // File: Header.jsx
 // Created: 2026-03-29
-// Purpose: Renders the top header bar with hamburger menu button, dynamic page title, and open alerts badge
+// Purpose: Renders the top header bar with hamburger menu button, dynamic page title, and surfaced-alert badge (DWB-464)
 // Caller: AppShell.jsx
 // Callees: react-router-dom (useLocation, Link), useStore
 // Data In: location pathname, alerts and projects from store, onMenuClick callback
 // Data Out: default export Header component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-24
 
 import { useLocation, Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 
 function Header({ onMenuClick }) {
   const location = useLocation();
-  const openAlerts = useStore((s) => s.getOpenAlerts());
+  // DWB-464: badge counts only surfaced-category open alerts.
+  const openAlerts = useStore((s) => s.getSurfacedAlerts());
   const projects = useStore((s) => s.projects);
 
   const getProjectFromPath = () => {

@@ -5,8 +5,8 @@
 # Caller: app/services/alert.py, sprint.py, ticket.py
 # Callees: app/database.Base
 # Data In: DB rows
-# Data Out: Alert, AlertSeverity, AlertStatus
-# Last Modified: 2026-06-22 (DWB-426: recipient_agent_id for per-agent broadcasts)
+# Data Out: Alert, AlertSeverity, AlertStatus, AlertCategory
+# Last Modified: 2026-06-24 (DWB-462: category taxonomy comms/scoring/actionable)
 
 import enum
 from datetime import datetime
@@ -27,6 +27,23 @@ class AlertStatus(str, enum.Enum):
     open = "open"
     acknowledged = "acknowledged"
     resolved = "resolved"
+
+
+class AlertCategory(str, enum.Enum):
+    """DWB-462: alerts-vs-actions taxonomy (epic 37).
+
+    - comms: inter-agent communication surfaced as an alert (TL-channel pings).
+    - scoring: a reputation carrot/stick the team should see.
+    - actionable: something requires action (missing gate file, rework).
+
+    Things that are NOT real alerts (peer scoring, sprint-close notice,
+    test-run requested) are demoted to the activity feed in DWB-463 and stop
+    creating Alert rows entirely.
+    """
+
+    comms = "comms"
+    scoring = "scoring"
+    actionable = "actionable"
 
 
 class Alert(Base):
@@ -55,6 +72,16 @@ class Alert(Base):
     )
     status: Mapped[AlertStatus] = mapped_column(
         Enum(AlertStatus), nullable=False, default=AlertStatus.open
+    )
+    # DWB-462: taxonomy bucket. Defaults to actionable so any creation path
+    # that doesn't set it explicitly still carries a valid category (the
+    # status open_alerts count and the /api/alerts filter both key off it).
+    category: Mapped[AlertCategory] = mapped_column(
+        Enum(AlertCategory),
+        nullable=False,
+        default=AlertCategory.actionable,
+        server_default=AlertCategory.actionable.value,
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()

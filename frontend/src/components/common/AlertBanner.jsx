@@ -1,12 +1,12 @@
 // Path: src/components/common/AlertBanner.jsx
 // File: AlertBanner.jsx
 // Created: 2026-03-29
-// Purpose: Renders a dismissible alert banner with severity styling, agent/project source, and relative timestamp
+// Purpose: Renders a dismissible alert banner with severity styling, category badge (DWB-464), agent/project source, and relative timestamp
 // Caller: DashboardPage.jsx, ProjectPage.jsx
 // Callees: useStore, common.css
-// Data In: props { alert } (alert object with severity, title, body, raised_by_agent_id, project_id, created_at)
+// Data In: props { alert } (alert object with severity, category, title, body, raised_by_agent_id, project_id, created_at)
 // Data Out: default export AlertBanner component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-06-24
 
 import useStore from '../../store/useStore';
 import '../../styles/common.css';
@@ -36,6 +36,11 @@ function AlertBanner({ alert }) {
     <div className={`alert-banner alert-banner--${alert.severity}`}>
       <div className="alert-banner__content">
         <div className="alert-banner__meta">
+          {alert.category && (
+            <span className={`alert-category-badge alert-category-badge--${alert.category}`}>
+              {alert.category}
+            </span>
+          )}
           {alert.created_at && (
             <span className="alert-banner__time">{relativeTime(alert.created_at)}</span>
           )}

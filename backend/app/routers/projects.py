@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.activity_log import ActivityLog
 from app.models.agent import Agent
-from app.models.alert import Alert, AlertSeverity, AlertStatus
+from app.models.alert import Alert, AlertCategory, AlertSeverity, AlertStatus
 from app.models.inter_agent_message import InterAgentMessage
 from app.models.project import ProjectStatus
 from app.models.project_agent import ProjectAgent
@@ -662,6 +662,8 @@ def _check_doc_gates(db: Session, project) -> list[dict]:
                             body=f"The project toggle {toggle_field} is enabled but {filename} does not exist. Create this file before attempting to close a sprint.",
                             severity=AlertSeverity.critical,
                             status=AlertStatus.open,
+                            # DWB-462: missing gate file needs action.
+                            category=AlertCategory.actionable,
                         ))
                         db.commit()
 

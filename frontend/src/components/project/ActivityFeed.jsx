@@ -1,12 +1,12 @@
 // Path: src/components/project/ActivityFeed.jsx
 // File: ActivityFeed.jsx
 // Created: 2026-03-29
-// Purpose: Live-polling activity feed showing recent project events with columnar layout, semantic-verb-aware rendering (incl. scoring events score_awarded/score_docked/lead_change, DWB-433 part 4), and relative timestamps
+// Purpose: Live-polling activity feed showing recent project events with columnar layout, semantic-verb-aware rendering (incl. scoring events score_awarded/score_docked/lead_change, DWB-433 part 4, and the DWB-464 demoted test_run_requested notice), and relative timestamps
 // Caller: ProjectPage.jsx
 // Callees: react (useState, useEffect, useRef), react-router-dom (Link), api/activityFeed (getActivityFeed)
 // Data In: projectId prop
 // Data Out: default export ActivityFeed component
-// Last Modified: 2026-06-23
+// Last Modified: 2026-06-24
 
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
@@ -41,6 +41,17 @@ function renderActivity(entry, projectId) {
   const details = (typeof entry.details === 'object' && entry.details !== null)
     ? entry.details
     : {};
+
+  // DWB-464: demoted test-run notice (DWB-463 emits action=test_run_requested,
+  // entity_type=project). Matched on the verb before the type branches so it
+  // renders regardless of entity_type. The live payload carries a redundant
+  // details.message ("Ad-hoc test run requested for project X") which we do NOT
+  // echo - the feed is already project-scoped. A concise details.triggered_by /
+  // reason, if present, is appended.
+  if (action === 'test_run_requested') {
+    const note = details.triggered_by || details.reason || '';
+    return <>requested a test run{note ? `: ${truncate(note, 50)}` : ''}</>;
+  }
 
   if (type === 'ticket') {
     const key = details.ticket_key;

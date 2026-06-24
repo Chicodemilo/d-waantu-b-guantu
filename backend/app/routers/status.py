@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.database import engine, get_db
 from app.models.agent import Agent
-from app.models.alert import Alert, AlertStatus
+from app.models.alert import Alert, AlertCategory, AlertStatus
 from app.models.ticket import Ticket, TicketStatus
 from app.schemas.test_result import TestResultCreate
 from app.services import test_result as test_result_svc
@@ -57,8 +57,19 @@ def get_status(db: Session = Depends(get_db)):
     active_agents = db.scalar(
         select(func.count()).select_from(Agent).where(Agent.is_active.is_(True))
     ) or 0
+    # DWB-462: count only categorized alerts (comms / scoring / actionable).
+    # A defensive scope so the dashboard badge reflects real alerts; once
+    # DWB-463 demotes peer-scoring / sprint-close / test-run to the activity
+    # feed, those rows no longer exist as alerts and the count drops naturally.
     open_alerts = db.scalar(
-        select(func.count()).select_from(Alert).where(Alert.status == AlertStatus.open)
+        select(func.count())
+        .select_from(Alert)
+        .where(Alert.status == AlertStatus.open)
+        .where(Alert.category.in_([
+            AlertCategory.comms,
+            AlertCategory.scoring,
+            AlertCategory.actionable,
+        ]))
     ) or 0
     in_progress_tickets = db.scalar(
         select(func.count())

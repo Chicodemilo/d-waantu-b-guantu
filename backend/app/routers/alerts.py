@@ -12,10 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.alert import AlertSeverity, AlertStatus
-from app.schemas.alert import AlertCreate, AlertRead, AlertSlimRead, AlertUpdate, DismissAllRequest, DismissAllResponse, RunTestsRequest, SendToTeamResponse
+from app.models.alert import AlertCategory, AlertSeverity, AlertStatus
+from app.schemas.alert import AlertCreate, AlertRead, AlertSlimRead, AlertUpdate, DismissAllRequest, DismissAllResponse, RunTestsRequest, RunTestsResponse, SendToTeamResponse
 from app.services import alert as svc
 from app.services import project as project_svc
+from app.services.activity_log import log_activity
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -25,10 +26,13 @@ def list_alerts(
     project_id: int | None = Query(None),
     severity: AlertSeverity | None = Query(None),
     status: AlertStatus | None = Query(None),
+    category: AlertCategory | None = Query(None),
     fields: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
-    alerts = svc.list_alerts(db, project_id=project_id, severity=severity, status=status)
+    alerts = svc.list_alerts(
+        db, project_id=project_id, severity=severity, status=status, category=category
+    )
     schema = AlertSlimRead if fields == "slim" else AlertRead
     return [schema.model_validate(a) for a in alerts]
 
@@ -50,19 +54,27 @@ def dismiss_all_alerts(data: DismissAllRequest, db: Session = Depends(get_db)):
     return DismissAllResponse(dismissed=count)
 
 
-@router.post("/run-tests", response_model=AlertRead, status_code=201)
+@router.post("/run-tests", response_model=RunTestsResponse, status_code=201)
 def request_test_run(data: RunTestsRequest, db: Session = Depends(get_db)):
+    """DWB-463: an ad-hoc test-run request is an action, not an alert. It is
+    recorded to the project activity feed (test_run_requested) instead of
+    creating an Alert row."""
     project = project_svc.get_project(db, data.project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    alert_data = AlertCreate(
-        project_id=data.project_id,
-        raised_by_agent_id=data.raised_by_agent_id or 1,
-        title="Test run requested",
-        body=f"Ad-hoc test run requested for project {project.name}",
-        severity=AlertSeverity.info,
+    log_activity(
+        db,
+        data.project_id,
+        data.raised_by_agent_id,
+        "project",
+        data.project_id,
+        "test_run_requested",
+        {"message": f"Ad-hoc test run requested for project {project.name}"},
     )
-    return svc.create_alert(db, alert_data)
+    db.commit()
+    return RunTestsResponse(
+        status="recorded", project_id=data.project_id, action="test_run_requested"
+    )
 
 
 @router.get("/{alert_id}", response_model=AlertRead)

@@ -65,9 +65,9 @@ const comments = [
 ];
 
 const alerts = [
-  { id: 1, status: 'open', severity: 'warning' },
-  { id: 2, status: 'open', severity: 'critical' },
-  { id: 3, status: 'acknowledged', severity: 'info' },
+  { id: 1, status: 'open', severity: 'warning', category: 'actionable' },
+  { id: 2, status: 'open', severity: 'critical', category: 'comms' },
+  { id: 3, status: 'acknowledged', severity: 'info', category: 'scoring' },
 ];
 
 const projectAgents = [
@@ -197,6 +197,27 @@ describe('getOpenAlerts', () => {
     const result = useStore.getState().getOpenAlerts();
     expect(result).toHaveLength(2);
     expect(result.every((a) => a.status === 'open')).toBe(true);
+  });
+});
+
+
+describe('getSurfacedAlerts (DWB-464)', () => {
+  it('returns open alerts only in surfaced categories', () => {
+    useStore.getState().setAlerts(alerts);
+    const result = useStore.getState().getSurfacedAlerts();
+    // alerts 1 (actionable) + 2 (comms) are open + surfaced; 3 is acknowledged.
+    expect(result).toHaveLength(2);
+    expect(result.map((a) => a.id).sort()).toEqual([1, 2]);
+  });
+
+  it('excludes open alerts with a demoted or null category', () => {
+    useStore.getState().setAlerts([
+      { id: 10, status: 'open', severity: 'info', category: 'comms' },
+      { id: 11, status: 'open', severity: 'info', category: 'peer_scoring' },
+      { id: 12, status: 'open', severity: 'info', category: null },
+    ]);
+    const result = useStore.getState().getSurfacedAlerts();
+    expect(result.map((a) => a.id)).toEqual([10]);
   });
 });
 

@@ -105,6 +105,77 @@ class TestCreateTicket:
         assert data["description"] == "Detailed desc"
 
 
+class TestCreateTicketSprintResolution:
+    """DWB-465: an explicit sprint_id must always win over the active-sprint
+    auto-assign fallback, and a duplicate ticket_key/number must return a clean
+    409 instead of a raw 500 from the IntegrityError on commit."""
+
+    def test_explicit_sprint_id_wins_over_active_sprint(
+        self, client, make_project, make_sprint
+    ):
+        project = make_project()
+        active = make_sprint(project_id=project["id"])  # first -> active
+        target = make_sprint(project_id=project["id"])  # second -> planned
+        assert active["status"] == "active"
+        assert target["id"] != active["id"]
+
+        r = client.post("/api/tickets", json={
+            "project_id": project["id"],
+            "sprint_id": target["id"],
+            "ticket_number": 1,
+            "ticket_key": "SPR-001",
+            "title": "explicit sprint",
+        })
+        assert r.status_code == 201
+        # Lands in the explicitly requested sprint, NOT the active default.
+        assert r.json()["sprint_id"] == target["id"]
+        # Epic follows the chosen sprint, not the active one.
+        assert r.json()["epic_id"] == target["epic_id"]
+
+    def test_omitted_sprint_id_auto_assigns_active(
+        self, client, make_project, make_sprint
+    ):
+        project = make_project()
+        active = make_sprint(project_id=project["id"])
+        make_sprint(project_id=project["id"])  # a second (planned) sprint exists
+
+        r = client.post("/api/tickets", json={
+            "project_id": project["id"],
+            "ticket_number": 2,
+            "ticket_key": "SPR-002",
+            "title": "auto sprint",
+        })
+        assert r.status_code == 201
+        assert r.json()["sprint_id"] == active["id"]
+
+    def test_duplicate_ticket_key_returns_409_not_500(
+        self, client, make_project, make_sprint
+    ):
+        project = make_project()
+        make_sprint(project_id=project["id"])
+        body = {
+            "project_id": project["id"],
+            "ticket_number": 7,
+            "ticket_key": "DUP-007",
+            "title": "first",
+        }
+        assert client.post("/api/tickets", json=body).status_code == 201
+
+        # Same key/number again -> clean 409, not a 500.
+        # (Note: in production the original row stays committed because each
+        # request is its own transaction; the rollback only discards the failed
+        # insert - verified live. The shared-transaction test harness collapses
+        # all requests into one transaction, so a row-count assertion here would
+        # test harness semantics, not the fix. The 409 + detail is the
+        # regression that matters: it used to be a raw 500.)
+        dup = dict(body, title="second")
+        r = client.post("/api/tickets", json=dup)
+        assert r.status_code == 409, r.text
+        detail = r.json()["detail"]
+        assert detail["error"] == "duplicate_ticket"
+        assert detail["ticket_key"] == "DUP-007"
+
+
 class TestUpdateTicket:
     def test_patch_updates_fields(self, client, make_ticket):
         ticket = make_ticket()

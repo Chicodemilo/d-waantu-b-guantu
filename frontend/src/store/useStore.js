@@ -12,6 +12,13 @@ import { create } from 'zustand';
 import { updateAlert, dismissAllAlerts } from '../api/alerts';
 import { POLLING_IDLE_INTERVAL } from '../config';
 
+// Alert categories that SURFACE as alerts (DWB-464). Anything outside this set
+// (or with a null category) is a demoted action that lives in the activity feed,
+// not the alert count. Backend AlertCategory enum (DWB-462): comms | scoring |
+// actionable. category=scoring means human carrot/stick only; peer scoring
+// never creates an alert row.
+export const SURFACED_ALERT_CATEGORIES = ['comms', 'scoring', 'actionable'];
+
 const useStore = create((set, get) => ({
   // Projects
   projects: [],
@@ -71,6 +78,13 @@ const useStore = create((set, get) => ({
   alerts: [],
   setAlerts: (alerts) => set({ alerts }),
   getOpenAlerts: () => get().alerts.filter((a) => a.status === 'open'),
+  // DWB-464: open alerts whose category is in the surfaced set. Drives the
+  // header badge and the dashboard count so demoted/uncategorized rows don't
+  // inflate "alerts N".
+  getSurfacedAlerts: () =>
+    get().alerts.filter(
+      (a) => a.status === 'open' && SURFACED_ALERT_CATEGORIES.includes(a.category)
+    ),
   dismissAlert: (id) => {
     set((state) => ({
       alerts: state.alerts.map((a) =>
@@ -111,7 +125,11 @@ const useStore = create((set, get) => ({
       total_tickets: state.tickets.length,
       tickets_done: state.tickets.filter((t) => t.status === 'done').length,
       tickets_in_progress: state.tickets.filter((t) => t.status === 'in_progress').length,
-      open_alerts: state.alerts.filter((a) => a.status === 'open').length,
+      // DWB-464: count only surfaced-category open alerts, matching the header
+      // badge and the server-scoped /api/status open_alerts.
+      open_alerts: state.alerts.filter(
+        (a) => a.status === 'open' && SURFACED_ALERT_CATEGORIES.includes(a.category)
+      ).length,
       total_tokens: state.tickets.reduce((sum, t) => sum + t.tokens_used, 0) +
         state.projects.reduce((sum, p) => sum + p.tl_overhead_tokens + p.pm_overhead_tokens, 0),
     };
