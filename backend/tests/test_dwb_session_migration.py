@@ -33,7 +33,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.schema import CreateColumn
+from sqlalchemy.schema import CreateColumn, CreateIndex
 
 from app.config import settings
 from app.database import Base
@@ -201,6 +201,27 @@ def test_migration_round_trip(alembic_cfg):
                     conn.execute(
                         text(f"ALTER TABLE dwb_sessions ADD COLUMN {col_ddl}")
                     )
+        # DWBG-010: forward-roll missing INDEXES too. The DWB-335 upgrade
+        # re-creates dwb_sessions with only that revision's indexes; later
+        # migrations add more (e.g. DWBG-010's ftx_dwb_sessions_search FULLTEXT
+        # index). The column forward-roll above does not bring indexes back, so
+        # without this an index added after DWB-335 vanishes for the rest of the
+        # test session and MATCH-based tests fail. Diff ORM-declared indexes
+        # against the live table and CREATE any that are missing - sourced from
+        # the model (CreateIndex honors mysql_prefix='FULLTEXT'), so future
+        # indexes land here for free, no sibling line per ticket.
+        insp = inspect(engine)
+        live_index_names = {ix["name"] for ix in insp.get_indexes("dwb_sessions")}
+        missing_indexes = [
+            ix
+            for ix in DwbSession.__table__.indexes
+            if ix.name not in live_index_names
+        ]
+        if missing_indexes:
+            dialect = engine.dialect
+            with engine.begin() as conn:
+                for ix in missing_indexes:
+                    conn.execute(text(str(CreateIndex(ix).compile(dialect=dialect))))
         # DWB-381: forward-roll the open_method + close_method enums to the
         # current model definition. The DWB-335 upgrade re-creates the table
         # at that revision's enum shape; later migrations (e.g. DWB-381) add

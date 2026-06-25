@@ -1,12 +1,12 @@
 # Path: app/routers/dwb_sessions.py
 # File: dwb_sessions.py
 # Created: 2026-06-09
-# Purpose: REST endpoints for DWB session open/close/reopen + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-395 reopen, DWB-493 summary+keywords on list/detail)
+# Purpose: REST endpoints for DWB session open/close/reopen + read rollups + cross-session search (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-395 reopen, DWB-493 summary+keywords on list/detail, DWBG-011 GET /api/sessions/search)
 # Caller: app/main.py
-# Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/schemas/dwb_session.py, app/models/entity_keyword.py
+# Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/services/dwb_session_search.py, app/schemas/dwb_session.py, app/models/entity_keyword.py
 # Data In: HTTP POST JSON bodies, GET query/path params
-# Data Out: DwbSessionRead, DwbSessionListItem[], DwbSessionDetail (or 404/409)
-# Last Modified: 2026-06-25 (DWB-493: expose summary + batched weighted keywords on list + detail)
+# Data Out: DwbSessionRead, DwbSessionListItem[], DwbSessionDetail, DwbSessionSearchResult[] (or 404/409/422)
+# Last Modified: 2026-06-25 (DWBG-014 generate-narrative endpoint; DWBG-016 GET /api/sessions/recent)
 
 """HTTP layer for DWB session lifecycle.
 
@@ -44,12 +44,16 @@ from app.schemas.dwb_session import (
     DwbSessionDetail,
     DwbSessionKeyword,
     DwbSessionListItem,
+    DwbSessionNarrativeResult,
     DwbSessionOpenConflict,
     DwbSessionOpenRequest,
     DwbSessionRead,
+    DwbSessionRecentItem,
+    DwbSessionSearchResult,
 )
 from app.services import dwb_session as svc
 from app.services import dwb_session_rollup as rollup
+from app.services import dwb_session_search as search_svc
 
 router = APIRouter(prefix="/api/sessions", tags=["dwb_sessions"])
 
@@ -238,6 +242,7 @@ def close_dwb_session(
         close_phrase=body.close_phrase,
         now=body.closed_at,
         headline=body.headline,
+        narrative=body.narrative,  # DWBG-007: TL-authored interpretive narrative
     )
 
     if not was_already_closed:
@@ -305,6 +310,179 @@ def reopen_dwb_session(
     db.commit()
     db.refresh(reopened)
     return reopened
+
+
+# ---------------------------------------------------------------------------
+# DWBG-014: on-demand / regenerate session narrative
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{session_id}/generate-narrative",
+    status_code=200,
+    response_model=DwbSessionNarrativeResult,
+)
+def generate_dwb_session_narrative(
+    session_id: int,
+    db: Session = Depends(get_db),
+):
+    """Generate (or regenerate) the LLM wrap-up narrative for a session (DWBG-014).
+
+    Builds the DWBG-013 work record, summarizes it via the Claude API, redacts
+    (DWBG-008), and persists with narrative_author='summarizer'. Works on open or
+    closed sessions (regenerate is allowed even after close). Always overwrites
+    any existing narrative with the fresh run - this is the explicit "regenerate"
+    action, distinct from the auto-on-close path that only fills a gap.
+
+    Best-effort: a skip (no ANTHROPIC_API_KEY, no agent evidence in the window, an
+    API error, or an unparseable response) returns 200 with generated=False rather
+    than an error, so the UI button degrades gracefully. 404 only when the session
+    does not exist."""
+    row = db.get(DwbSession, session_id)
+    if row is None:
+        raise HTTPException(404, f"DWB session {session_id} not found")
+
+    narrative = svc.generate_session_narrative(db, row)
+    if narrative is not None:
+        db.commit()
+        db.refresh(row)
+
+    return DwbSessionNarrativeResult(
+        session_id=row.id,
+        generated=narrative is not None,
+        narrative_author=row.narrative_author,
+        narrative_generated_at=row.narrative_generated_at,
+        narrative=row.narrative,
+    )
+
+
+# ---------------------------------------------------------------------------
+# DWBG-011: cross-session search
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/search",
+    response_model=list[DwbSessionSearchResult],
+)
+def search_dwb_sessions(
+    q: str = Query(..., description="FULLTEXT query over session prose"),
+    project_id: int | None = Query(None, description="Scope to one project; omit for cross-project"),
+    agent_id: int | None = Query(None, description="Only sessions a given agent worked"),
+    epic_id: int | None = Query(None, description="Only sessions where a ticket on this epic completed in-window"),
+    date_from: datetime | None = Query(None, alias="from", description="opened_at >= this (ISO 8601)"),
+    date_to: datetime | None = Query(None, alias="to", description="opened_at <= this (ISO 8601)"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Ranked cross-session search over session write-up prose (DWBG-011).
+
+    `q` runs a MySQL FULLTEXT MATCH over dwb_sessions.search_text (DWBG-010:
+    headline + summary + narrative flattened into one indexed column). Results
+    rank by FULLTEXT relevance, boosted by the summed entity_keywords.weight for
+    keywords whose term matched the query, with recency (opened_at) as the
+    tiebreaker. Search is cross-project when `project_id` is omitted.
+
+    Facets (all optional, ANDed): project_id, agent_id (a linked hook_session),
+    epic_id (a ticket on that epic completed in the session window), and a
+    from/to date range on opened_at.
+
+    `q` must be non-blank: a missing/empty/whitespace-only query is a 422. A
+    valid-but-unmatched query returns an empty list (200). The endpoint reuses
+    the DWB-493 batched keyword read for the keyword chips so there is no N+1
+    across the result page.
+
+    Only agent-produced prose is indexed (DWB-351 / DWBG-003); no user prompt
+    text is searchable.
+    """
+    if not q or not q.strip():
+        raise HTTPException(422, "Search query 'q' must not be empty or blank")
+
+    hits = search_svc.search_sessions(
+        db,
+        q=q.strip(),
+        project_id=project_id,
+        agent_id=agent_id,
+        epic_id=epic_id,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+        offset=offset,
+    )
+    if not hits:
+        return []
+
+    # DWB-493 batched keyword read for the chips - one query for the whole page.
+    keywords_map = _keywords_by_session(db, [h["id"] for h in hits])
+
+    return [
+        DwbSessionSearchResult(
+            id=h["id"],
+            project_id=h["project_id"],
+            headline=h["headline"],
+            opened_at=h["opened_at"],
+            closed_at=h["closed_at"],
+            total_tokens=h["total_tokens"],
+            relevance=h["relevance"],
+            keyword_boost=h["keyword_boost"],
+            score=h["score"],
+            snippet=h["snippet"],
+            keywords=keywords_map.get(h["id"], []),
+        )
+        for h in hits
+    ]
+
+
+# ---------------------------------------------------------------------------
+# DWBG-016 dependency: cross-project recent sessions (Recall page default view)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/recent",
+    response_model=list[DwbSessionRecentItem],
+)
+def recent_dwb_sessions(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Cross-project recent DWB sessions, newest-first (DWBG-016 dependency).
+
+    Slim rows in the same shape as the search result rows (id, project_id,
+    headline, opened_at, closed_at, total_tokens, keywords) so Freddie's Recall
+    page can show recent sessions by default with the same card component it uses
+    for search hits. Ordered by opened_at DESC (id DESC tiebreak for determinism)
+    with limit/offset paging.
+
+    Registered before the `/{session_id}` catch-all so "recent" is not parsed as
+    a session id. Reuses the DWB-493 batched keyword read so there is no N+1
+    across the page."""
+    rows = list(
+        db.execute(
+            select(DwbSession)
+            .order_by(desc(DwbSession.opened_at), desc(DwbSession.id))
+            .limit(limit)
+            .offset(offset)
+        ).scalars()
+    )
+    if not rows:
+        return []
+
+    keywords_map = _keywords_by_session(db, [r.id for r in rows])
+    return [
+        DwbSessionRecentItem(
+            id=r.id,
+            project_id=r.project_id,
+            headline=r.headline,
+            opened_at=r.opened_at,
+            closed_at=r.closed_at,
+            total_tokens=r.total_tokens,
+            keywords=keywords_map.get(r.id, []),
+        )
+        for r in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +609,9 @@ def get_dwb_session_detail(
         close_reason=row.close_reason,
         headline=row.headline,
         summary=row.summary,
+        narrative=row.narrative,
+        narrative_author=row.narrative_author,
+        narrative_generated_at=row.narrative_generated_at,
         keywords=keywords,
         status="open" if is_open else "closed",
         live=is_open,

@@ -1,8 +1,8 @@
 /* Path: src/styles/sessions.css */
 /* File: sessions.css */
 /* Created: 2026-06-10 */
-/* Purpose: Styles for SessionPanel (current DWB session live view) + RecentSessionsStrip (last N sessions list) + SessionsPage breadcrumb/title */
-/* Last Modified: 2026-06-10 */
+/* Purpose: Styles for SessionPanel (current DWB session live view) + RecentSessionsStrip (last N sessions list) + SessionsPage breadcrumb/title + SessionRecallPage cross-project search (DWBG-012) */
+/* Last Modified: 2026-06-25 (DWBG-012: Session Recall page + result-card styles) */
 
 .session-panel {
   border: 1px solid var(--border);
@@ -266,6 +266,85 @@
   white-space: nowrap;
 }
 
+/* DWBG-009: TL-authored narrative block, set off from the deterministic summary. */
+.session-summary__narrative {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.session-summary__narrative-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.session-summary__narrative-label {
+  color: var(--orange);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.session-summary__narrative-prov {
+  color: var(--gray-light);
+  font-size: 11px;
+}
+
+/* DWBG-015: rich narrative rendering — code chips, links, bullets. */
+.narrative-bullets {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+}
+
+.narrative-bullet {
+  position: relative;
+  color: var(--green);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 2px 0 2px 16px;
+}
+
+.narrative-bullet::before {
+  content: '–';
+  position: absolute;
+  left: 0;
+  color: var(--gray-light);
+}
+
+.narrative-chip {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-alt);
+  color: var(--orange-bright);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.narrative-link {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.narrative-link:hover {
+  color: var(--blue-dim);
+}
+
+.narrative-link--ref,
+.narrative-ref {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.narrative-ref {
+  color: var(--green-bright);
+}
+
 .recent-sessions__row {
   display: grid;
   grid-template-columns: 50px 1.1fr 1.1fr 90px 90px 70px 70px 2fr;
@@ -482,4 +561,224 @@
   font-size: 11px;
   line-height: 1.5;
   max-width: 720px;
+}
+
+/* DWBG-012: cross-project Session Recall page (/sessions). */
+.recall__lede {
+  color: var(--gray-light);
+  font-size: 12px;
+  margin: 4px 0 16px;
+}
+
+.recall__controls {
+  margin-bottom: 18px;
+}
+
+.recall__search-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.recall__search-input {
+  flex: 1;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.recall__search-input::placeholder {
+  color: var(--gray);
+}
+
+.recall__search-input:focus {
+  outline: none;
+  border-color: var(--green-dim);
+}
+
+.recall__search-btn {
+  background: var(--green-dim);
+  color: var(--bg);
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 18px;
+  cursor: pointer;
+}
+
+.recall__search-btn:hover {
+  background: var(--green);
+}
+
+.recall__search-btn:disabled {
+  background: var(--gray);
+  color: var(--bg-alt);
+  cursor: not-allowed;
+}
+
+.recall__facets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.recall__facet {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.recall__facet-label {
+  color: var(--gray-light);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.recall__facet-input {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 5px 7px;
+  min-width: 120px;
+}
+
+.recall__facet-input:focus {
+  outline: none;
+  border-color: var(--green-dim);
+}
+
+.recall__clear-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--gray-light);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.recall__clear-btn:hover {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+
+.recall__state {
+  color: var(--gray-light);
+  font-size: 12px;
+  padding: 24px 0;
+}
+
+.recall__state--error {
+  color: var(--red);
+}
+
+.recall__count {
+  color: var(--gray-light);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+}
+
+/* DWBG-016: count + "back to recent" affordance share a row in search mode. */
+.recall__count-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recall__count-row .recall__count {
+  margin-bottom: 0;
+}
+
+.recall__recent-btn {
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.recall__recent-btn:hover {
+  color: var(--blue-dim);
+  text-decoration: underline;
+}
+
+.recall__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-result {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 12px 14px;
+}
+
+.session-result:hover {
+  background: var(--bg-hover);
+  border-color: var(--green-dim);
+}
+
+.session-result__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.session-result__headline {
+  color: var(--green-bright);
+  font-size: 13px;
+}
+
+.session-result__id {
+  color: var(--gray);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.session-result__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--gray-light);
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.session-result__project {
+  color: var(--blue);
+}
+
+.session-result__sep {
+  color: var(--gray);
+}
+
+.session-result__snippet {
+  color: var(--green);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
+.session-result__keywords {
+  margin: 0;
 }

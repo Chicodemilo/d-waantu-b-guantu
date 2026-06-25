@@ -1,12 +1,12 @@
 // Path: src/__tests__/SessionDetailPage.test.jsx
 // File: SessionDetailPage.test.jsx
 // Created: 2026-06-10
-// Purpose: Tests for SessionDetailPage — route resolves and fetches by :sid, full payload renders (header, methods, phrases, by_role, by_ticket, overhead), back link points to the sessions list, 404 path shows a session-not-found view with back navigation, polling cease on closed sessions
+// Purpose: Tests for SessionDetailPage — route resolves and fetches by :sid, full payload renders (header, methods, phrases, by_role, by_ticket, overhead), back link points to the sessions list, 404 path shows a session-not-found view with back navigation, polling cease on closed sessions. DWBG-022: narrative refs become clickable repo links (file, file:line, commit sha) when the session's project has a repo_url, and stay styled non-clickable text when repo_url is null. DWBG-023: a source-aware "back to search" affordance appears only when the user arrived from the cross-project Recall page (location.state.from='recall').
 // Caller: vitest test runner
-// Callees: ../pages/SessionDetailPage, ../api/sessions (mocked), ../api/client (ApiError), ../store/useStore (mocked)
-// Data In: Mocked sessions API + store selectors
+// Callees: ../pages/SessionDetailPage, ../api/sessions (mocked), ../api/projects (mocked), ../api/client (ApiError), ../store/useStore (mocked)
+// Data In: Mocked sessions API + projects API + store selectors
 // Data Out: Test assertions
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-25 (DWBG-022 narrative ref links; DWBG-023 source-aware back-nav)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
@@ -17,6 +17,10 @@ vi.mock('../api/sessions', () => ({
   getSession: vi.fn(),
 }));
 
+vi.mock('../api/projects', () => ({
+  getProject: vi.fn(),
+}));
+
 let mockProject = { id: 1, prefix: 'DWB', name: 'D\'Waantu B\'Guantu' };
 vi.mock('../store/useStore', () => ({
   default: (selector) => selector({ getProject: () => mockProject }),
@@ -24,6 +28,7 @@ vi.mock('../store/useStore', () => ({
 
 import SessionDetailPage from '../pages/SessionDetailPage';
 import { getSession } from '../api/sessions';
+import { getProject } from '../api/projects';
 import { ApiError } from '../api/client';
 
 function closedDetail(overrides = {}) {
@@ -55,9 +60,10 @@ function closedDetail(overrides = {}) {
   };
 }
 
-function renderAt(path) {
+function renderAt(path, state) {
+  const entry = state ? { pathname: path, state } : path;
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/projects/:id/sessions/:sid" element={<SessionDetailPage />} />
       </Routes>
@@ -69,6 +75,10 @@ describe('SessionDetailPage', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     getSession.mockReset();
+    getProject.mockReset();
+    // Default: project read with no remote, so narrative refs stay plain text
+    // unless a test opts into a repo_url.
+    getProject.mockResolvedValue({ id: 1, prefix: 'DWB', repo_url: null });
     mockProject = { id: 1, prefix: 'DWB', name: 'D\'Waantu B\'Guantu' };
   });
 
@@ -162,5 +172,142 @@ describe('SessionDetailPage', () => {
       expect(screen.getByText('CLOSED')).toBeInTheDocument();
     });
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // DWBG-022: clickable code/commit references in the narrative.
+  describe('DWBG-022 narrative ref links', () => {
+    // A narrative whose bullets carry a file ref, a file:line ref, and a commit sha.
+    function narrativeDetail(overrides = {}) {
+      return closedDetail({
+        narrative: {
+          lead: 'Touched app/main.py and shipped commit 1a2b3c4d5e6f7081.',
+          sections: [
+            {
+              title: 'Changes',
+              bullets: [
+                'Edited src/components/project/InlineMarkdown.jsx',
+                'Fixed the bug at app/services/sprint.py:142',
+                'Landed in commit deadbeef1234567',
+              ],
+            },
+          ],
+        },
+        narrative_author: 'Archie_DWB',
+        narrative_generated_at: '2026-06-25T12:00:00',
+        ...overrides,
+      });
+    }
+
+    it('renders file, file:line, and commit refs as repo links when repo_url is present', async () => {
+      getSession.mockResolvedValue(narrativeDetail());
+      getProject.mockResolvedValue({
+        id: 1,
+        prefix: 'DWB',
+        repo_url: 'https://github.com/acme/dwb',
+      });
+
+      await act(async () => {
+        renderAt('/projects/1/sessions/4');
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/DWB Session #4/)).toBeInTheDocument();
+      });
+      // repo_url fetch resolves -> refs become anchors.
+      await waitFor(() => {
+        expect(
+          screen.getByText('src/components/project/InlineMarkdown.jsx').closest('a')
+        ).not.toBeNull();
+      });
+
+      // file ref -> blob/HEAD/{path}
+      const fileLink = screen
+        .getByText('src/components/project/InlineMarkdown.jsx')
+        .closest('a');
+      expect(fileLink.getAttribute('href')).toBe(
+        'https://github.com/acme/dwb/blob/HEAD/src/components/project/InlineMarkdown.jsx'
+      );
+      expect(fileLink.getAttribute('target')).toBe('_blank');
+      expect(fileLink.getAttribute('rel')).toBe('noopener noreferrer');
+
+      // file:line ref -> blob/HEAD/{path}#L{line}
+      const lineLink = screen.getByText('app/services/sprint.py:142').closest('a');
+      expect(lineLink.getAttribute('href')).toBe(
+        'https://github.com/acme/dwb/blob/HEAD/app/services/sprint.py#L142'
+      );
+
+      // commit sha -> commit/{sha}
+      const shaLink = screen.getByText('deadbeef1234567').closest('a');
+      expect(shaLink.getAttribute('href')).toBe(
+        'https://github.com/acme/dwb/commit/deadbeef1234567'
+      );
+      expect(shaLink.getAttribute('rel')).toBe('noopener noreferrer');
+    });
+
+    it('renders refs as styled non-clickable text when repo_url is null', async () => {
+      getSession.mockResolvedValue(narrativeDetail());
+      getProject.mockResolvedValue({ id: 1, prefix: 'DWB', repo_url: null });
+
+      await act(async () => {
+        renderAt('/projects/1/sessions/4');
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/DWB Session #4/)).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(getProject).toHaveBeenCalled();
+      });
+
+      // No anchor for any of the refs; they render as styled spans.
+      const fileNode = screen.getByText('src/components/project/InlineMarkdown.jsx');
+      expect(fileNode.closest('a')).toBeNull();
+      expect(fileNode).toHaveClass('narrative-ref');
+
+      const shaNode = screen.getByText('deadbeef1234567');
+      expect(shaNode.closest('a')).toBeNull();
+      expect(shaNode).toHaveClass('narrative-ref');
+
+      // And no undefined/broken hrefs leaked into the document.
+      expect(document.querySelector('a[href*="undefined"]')).toBeNull();
+    });
+  });
+
+  // DWBG-023: source-aware "back to search" affordance.
+  describe('DWBG-023 source-aware back-nav', () => {
+    it('shows a back-to-search link when arriving from recall, pointing at the preserved query', async () => {
+      getSession.mockResolvedValue(closedDetail());
+
+      await act(async () => {
+        renderAt('/projects/1/sessions/4', {
+          from: 'recall',
+          recallSearch: '?q=migration&project_id=1',
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/DWB Session #4/)).toBeInTheDocument();
+      });
+
+      const back = screen.getByTestId('back-to-recall');
+      expect(back.getAttribute('href')).toBe('/sessions?q=migration&project_id=1');
+    });
+
+    it('does NOT show a back-to-search link when arriving from the per-project list', async () => {
+      getSession.mockResolvedValue(closedDetail());
+
+      await act(async () => {
+        renderAt('/projects/1/sessions/4'); // no router state -> not from recall
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/DWB Session #4/)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId('back-to-recall')).toBeNull();
+      // The normal per-project sessions breadcrumb is still present.
+      const backLinks = screen.getAllByRole('link', { name: /sessions/ });
+      expect(backLinks.some((a) => a.getAttribute('href') === '/projects/1/sessions')).toBe(true);
+    });
   });
 });

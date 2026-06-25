@@ -29,6 +29,12 @@ vi.mock('../api/sessions', () => ({
   getSession: vi.fn(),
 }));
 
+// DWBG-022: SessionDetailPage now fetches the session's project for repo_url.
+// Stub it (no remote) so these tests make no real network call.
+vi.mock('../api/projects', () => ({
+  getProject: vi.fn().mockResolvedValue({ id: 1, prefix: 'DWB', repo_url: null }),
+}));
+
 let mockProject = { id: 1, prefix: 'DWB', name: "D'Waantu B'Guantu" };
 vi.mock('../store/useStore', () => ({
   default: (selector) => selector({ getProject: () => mockProject }),

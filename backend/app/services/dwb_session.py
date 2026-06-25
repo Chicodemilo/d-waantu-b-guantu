@@ -3,10 +3,10 @@
 # Created: 2026-06-09
 # Purpose: Service-layer business logic for DWB session open/close/reopen + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases, DWB-382 ai_classifier added to AI-set, DWB-395 reopen_session, DWB-484 close-time write-up synthesis: headline/summary/keywords)
 # Caller: app/services/idle_sweeper.py (sweep loop), app/routers/dwb_sessions.py (open + close + reopen endpoints), app/services/hook_tracking.py (grace-window resurrect)
-# Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.models.entity_keyword, app.models.ticket, app.models.comment, app.models.inter_agent_message, app.services.dwb_session_rollup, app.services.keyword_extraction, app.services.session_synthesizer, app.database.SessionLocal
+# Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.models.entity_keyword, app.models.ticket, app.models.comment, app.models.inter_agent_message, app.models.project, app.services.dwb_session_rollup, app.services.keyword_extraction, app.services.session_synthesizer, app.services.session_work_record, app.services.session_narrative, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-06-25 (DWB-500: TF-IDF re-rank of keywords in _assemble_rollup via rank_tfidf + df/N from rollup helper)
+# Last Modified: 2026-06-25 (DWB-500 TF-IDF re-rank of keywords; DWBG-007 TL narrative; DWBG-008 redaction; DWBG-014 summarizer auto-narrative on close, gated on force_session_writeup)
 
 """DWB session business logic.
 
@@ -44,6 +44,7 @@ elapsed since open.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Iterable
 
@@ -60,12 +61,15 @@ from app.models.dwb_session import (
 from app.models.entity_keyword import EntityKeyword
 from app.models.hook_session import HookSession
 from app.models.inter_agent_message import InterAgentMessage
+from app.models.project import Project
 from app.models.ticket import Ticket
 from app.models.tracking_log import TrackingLog
 from app.services import dwb_session_rollup as rollup_svc
 from app.services.activity_log import log_activity
 from app.services.keyword_extraction import rank_tfidf
+from app.services.session_narrative import generate_narrative
 from app.services.session_synthesizer import synthesize_session_summary
+from app.services.session_work_record import build_work_record, has_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -477,6 +481,111 @@ def _apply_synthesis(
     db.flush()
 
 
+_REDACTION = "[REDACTED]"
+
+# DWBG-008: secret-shaped patterns scrubbed from a narrative before persist, per
+# the org no-secrets policy + DWBG-003 derived-not-quoted. Order matters: the
+# specific token/format patterns run FIRST so a multi-token secret (e.g.
+# "Bearer <token>") is fully removed; the generic key=value rule runs LAST to
+# mop up labelled secrets whose value isn't a recognized token shape. (If
+# key=value ran first it would consume only the first token after the key and
+# leave a trailing secret behind.)
+_SECRET_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._\-]{16,}"),       # Authorization: Bearer xxx
+    re.compile(r"\bsk-[A-Za-z0-9]{16,}"),                      # OpenAI-style
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}"),               # GitHub tokens
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                       # AWS access key id
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"),             # Slack tokens
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),  # JWT
+    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),                      # US SSN
+    re.compile(r"\b(?:\d[ -]?){13,16}\b"),                     # 13-16 digit card numbers
+    # key: value / key=value where the key names a secret (keep the key, drop value)
+    re.compile(
+        r"(?i)\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?key|"
+        r"secret[_-]?key|token|auth(?:orization)?|bearer)\b\s*[:=]\s*\S+"
+    ),
+)
+
+
+def _redact_text(s: str) -> str:
+    for pat in _SECRET_PATTERNS:
+        s = pat.sub(_REDACTION, s)
+    return s
+
+
+def _redact_value(v):
+    """Recursively scrub secret-shaped strings from a JSON-ish value."""
+    if isinstance(v, str):
+        return _redact_text(v)
+    if isinstance(v, list):
+        return [_redact_value(x) for x in v]
+    if isinstance(v, dict):
+        # Keys are structural (lead/sections/title/bullets); scrub values only.
+        return {k: _redact_value(x) for k, x in v.items()}
+    return v
+
+
+def _redact_narrative(narrative: dict | list) -> dict | list:
+    """Scrub secret-shaped strings (api keys, tokens, passwords, SSNs, card
+    numbers) from a TL-authored narrative before persist (DWBG-008).
+
+    Walks the free-form JSON recursively and replaces matches in every string
+    value with a fixed marker. Enforces the org no-secrets policy and the
+    DWBG-003 derived-not-quoted principle. Pure + deterministic; the close path
+    routes narrative through here (the call site guards exceptions, so a redaction
+    failure never blocks a close)."""
+    return _redact_value(narrative)
+
+
+# ---------------------------------------------------------------------------
+# DWBG-014: LLM session-writeup summarizer wiring
+# ---------------------------------------------------------------------------
+
+
+def generate_session_narrative(
+    db: Session, session: DwbSession, *, now: datetime | None = None
+) -> dict | None:
+    """DWBG-014: build the work record, summarize it via the Claude API, redact,
+    and persist a human-readable narrative onto the session with
+    narrative_author='summarizer'.
+
+    BEST-EFFORT, like the P1 narrative: this NEVER raises and NEVER blocks a
+    close. The whole pipeline (work-record gather -> Claude API -> parse ->
+    redact -> persist) is wrapped; any failure logs and returns None, leaving the
+    session's deterministic summary baseline untouched. flush-only; the caller
+    owns the commit.
+
+    Returns the persisted narrative dict on success, else None. Used both by the
+    auto-on-close path (close_session, gated on force_session_writeup) and by the
+    on-demand POST /api/sessions/{id}/generate-narrative endpoint (which may
+    regenerate even on an already-closed session)."""
+    try:
+        end = now if now is not None else (session.closed_at or _utcnow())
+        work_record = build_work_record(db, session, now=end)
+        if not has_evidence(work_record):
+            logger.info(
+                "session %s has no agent evidence in window; skipping narrative",
+                session.id,
+            )
+            return None
+        narrative = generate_narrative(work_record)
+        if narrative is None:
+            return None
+        narrative = _redact_narrative(narrative)
+        session.narrative = narrative
+        session.narrative_author = "summarizer"
+        session.narrative_generated_at = _strip_tz(end)
+        db.flush()
+        return narrative
+    except Exception:
+        logger.warning(
+            "summarizer narrative generation failed for DWB session %s; "
+            "leaving the session without an LLM narrative",
+            session.id, exc_info=True,
+        )
+        return None
+
+
 def close_session(
     db: Session,
     session: DwbSession,
@@ -486,6 +595,7 @@ def close_session(
     close_phrase: str | None = None,
     now: datetime | None = None,
     headline: str | None = None,
+    narrative: dict | list | None = None,
 ) -> DwbSession:
     """Close an open DwbSession. Idempotent: if the session is already closed,
     returns it unchanged (no double-close, no overwrite of close fields).
@@ -528,6 +638,20 @@ def close_session(
     session.close_phrase = close_phrase
     if headline is not None:
         session.headline = headline
+    # DWBG-007: persist a TL-authored narrative when supplied (conscious closes).
+    # Best-effort and additive: a failure here must NEVER block the close, and
+    # the deterministic summary (_apply_synthesis below) stays the guaranteed
+    # baseline. Redaction (DWBG-008) is applied before persist.
+    if narrative is not None:
+        try:
+            session.narrative = _redact_narrative(narrative)
+            session.narrative_author = "tl"
+            session.narrative_generated_at = closed_at
+        except Exception:
+            logger.warning(
+                "narrative persist failed for DWB session %s; closing without it",
+                session.id, exc_info=True,
+            )
     session.total_tokens = _rollup_tokens(db, session)
     session.total_time_seconds = max(
         0, int((closed_at - session.opened_at).total_seconds())
@@ -542,6 +666,18 @@ def close_session(
     # Guarded internally so a synthesis failure never blocks the close, and
     # placed before the feed event so session_closed carries the final headline.
     _apply_synthesis(db, session, now=closed_at)
+
+    # DWBG-014: auto-generate the human-readable wrap-up narrative on EVERY close
+    # path (close_session is the single funnel), gated on the project's
+    # force_session_writeup flag (DEFAULT ON). Best-effort and fully guarded:
+    # generation NEVER blocks or fails a close. A TL-supplied narrative
+    # (DWBG-007) takes precedence and is not overwritten - the summarizer only
+    # fills the gap when no conscious narrative was authored (the common case on
+    # regex/slash/idle/machine closes, which carry no warm TL to write one).
+    if session.narrative is None:
+        project = db.get(Project, session.project_id)
+        if project is None or project.force_session_writeup:
+            generate_session_narrative(db, session, now=closed_at)
 
     # DWB-411: semantic session_closed event. Emitted only on a real close
     # (the already-closed early-return above skips it, so no double-emit on an

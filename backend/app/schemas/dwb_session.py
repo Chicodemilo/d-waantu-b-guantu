@@ -1,12 +1,12 @@
 # Path: app/schemas/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: Pydantic schemas for DWB session CRUD + lifecycle + rollup endpoints (DWB-335, DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-481 structured summary JSON, DWB-493 summary+keywords on list/detail read)
+# Purpose: Pydantic schemas for DWB session CRUD + lifecycle + rollup endpoints (DWB-335, DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-481 structured summary JSON, DWB-493 summary+keywords on list/detail read, DWBG-011 cross-session search result row)
 # Caller: app/routers/dwb_sessions.py
 # Callees: pydantic
 # Data In: JSON request body
-# Data Out: DwbSessionCreate, DwbSessionUpdate, DwbSessionRead, DwbSessionOpenRequest, DwbSessionCloseRequest, DwbSessionOpenConflict, DwbSessionKeyword, DwbSessionListItem, DwbSessionByRoleEntry, DwbSessionByTicketEntry, DwbSessionDetail
-# Last Modified: 2026-06-25 (DWB-493: expose summary + weighted keywords on list + detail reads; DWB-500: keyword weight is now a TF-IDF relevance score)
+# Data Out: DwbSessionCreate, DwbSessionUpdate, DwbSessionRead, DwbSessionOpenRequest, DwbSessionCloseRequest, DwbSessionOpenConflict, DwbSessionKeyword, DwbSessionListItem, DwbSessionByRoleEntry, DwbSessionByTicketEntry, DwbSessionDetail, DwbSessionSearchResult, DwbSessionRecentItem, DwbSessionNarrativeResult
+# Last Modified: 2026-06-25 (DWB-493 summary+keywords on read; DWB-500 keyword weight is a TF-IDF relevance score; DWBG-014 generate-narrative result; DWBG-016 recent sessions row)
 
 from datetime import datetime
 
@@ -112,6 +112,13 @@ class DwbSessionCloseRequest(BaseModel):
     close_phrase: str | None = None
     closed_at: datetime | None = None
     headline: str | None = None
+    # DWBG-007: optional TL-authored narrative — the interpretive layer
+    # (decisions, blockers, next-steps) the deterministic summary cannot
+    # produce. Free-form JSON, same shape as `summary` so the frontend renders
+    # both uniformly. Only persisted on conscious closes (ai_confident /
+    # ai_asked); additive and best-effort, so omitting it never blocks a close.
+    # Authored over agent/tool turns only (never user prompts; DWBG-003).
+    narrative: dict | list | None = None
 
 
 class DwbSessionOpenConflict(BaseModel):
@@ -236,6 +243,10 @@ class DwbSessionDetail(BaseModel):
     headline: str | None = None
     # DWB-481: structured bulleted write-up mirrored from the row (None until synthesized).
     summary: dict | list | None = None
+    # DWBG-007: TL-authored interpretive narrative + provenance (None until authored).
+    narrative: dict | list | None = None
+    narrative_author: str | None = None
+    narrative_generated_at: datetime | None = None
     # DWB-493: weighted keywords for this session, sorted weight desc.
     keywords: list[DwbSessionKeyword] = Field(default_factory=list)
     # status / live partials flag
@@ -253,3 +264,87 @@ class DwbSessionDetail(BaseModel):
     # DWB-353: ad_hoc bucket (worker tokens without ticket attribution in window).
     ad_hoc_overhead_tokens: int = 0
     ad_hoc_overhead_seconds: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Cross-session search (DWBG-011)
+# ---------------------------------------------------------------------------
+
+
+class DwbSessionSearchResult(BaseModel):
+    """One ranked row from GET /api/sessions/search (DWBG-011).
+
+    Deliberately slim - the search results page renders cards and links each to
+    the detail endpoint, so it does not need the full rollup. Carries enough to
+    render a result card: the session identity, when it ran, its token cost, a
+    matched snippet of prose, and the weighted keyword chips (reused from the
+    DWB-493 batched keyword read).
+
+    `relevance` is the raw MySQL FULLTEXT MATCH score (natural-language mode).
+    `keyword_boost` is the summed entity_keywords.weight for keywords whose term
+    matched the query; `score` is the combined rank value the rows were sorted
+    by (relevance + a fixed multiple of keyword_boost), exposed so the frontend
+    can show why a row ranked where it did and so tests can assert ordering.
+    `snippet` is a short slice of search_text around the first matched term,
+    or the headline when no inline match window is found.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    headline: str | None = None
+    opened_at: datetime
+    closed_at: datetime | None
+    total_tokens: int
+    relevance: float
+    keyword_boost: float
+    score: float
+    snippet: str | None = None
+    keywords: list[DwbSessionKeyword] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Cross-project recent sessions (DWBG-016 dependency, for the Recall page)
+# ---------------------------------------------------------------------------
+
+
+class DwbSessionRecentItem(BaseModel):
+    """One row from GET /api/sessions/recent (DWBG-016 dependency).
+
+    Cross-project, newest-first, slim — the same fields as a search result row so
+    Freddie's Recall page can render recent sessions by default with the same card
+    component it uses for search hits, just without the relevance/score fields.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    headline: str | None = None
+    opened_at: datetime
+    closed_at: datetime | None
+    total_tokens: int
+    keywords: list[DwbSessionKeyword] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# On-demand narrative generation (DWBG-014)
+# ---------------------------------------------------------------------------
+
+
+class DwbSessionNarrativeResult(BaseModel):
+    """Response body for POST /api/sessions/{id}/generate-narrative (DWBG-014).
+
+    `generated` is True when the summarizer produced and persisted a narrative,
+    False when it was skipped (no API key, no agent evidence in the window, an API
+    error, or an unparseable response) — generation is best-effort, so a skip is a
+    200 with generated=False, not an error. `narrative` carries the persisted JSON
+    when generated, else the session's existing narrative (which may be None or a
+    prior TL/summarizer narrative)."""
+
+    session_id: int
+    generated: bool
+    narrative_author: str | None = None
+    narrative_generated_at: datetime | None = None
+    narrative: dict | list | None = None

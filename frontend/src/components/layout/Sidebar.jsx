@@ -1,12 +1,12 @@
 // Path: src/components/layout/Sidebar.jsx
 // File: Sidebar.jsx
 // Created: 2026-03-29
-// Purpose: Navigation sidebar with links to dashboard, system tests, system docs, error log, the cross-project archie channel, the help center, and per-project sub-nav (tickets, team, sessions, tests, docs, inter-agent comms, jira); collapses on mobile
+// Purpose: Navigation sidebar with links to dashboard, system tests, system docs, error log, the cross-project session recall page, the cross-project archie channel, the help center, and per-project sub-nav (tickets, team, sessions, tests, docs, inter-agent comms, jira); collapses on mobile
 // Caller: AppShell.jsx
 // Callees: react (useState), react-router-dom (NavLink, useLocation), useStore
 // Data In: projects from store, current location pathname, open prop, onNavClick callback
 // Data Out: default export Sidebar component
-// Last Modified: 2026-06-25
+// Last Modified: 2026-06-25 (DWBG-012: top-level session_recall nav entry)
 
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -91,6 +91,7 @@ function Sidebar({ open, onNavClick }) {
   const isSystemDocsActive = location.pathname === '/docs';
   const isErrorLogActive = location.pathname === '/errors';
   const isArchieChannelActive = location.pathname === '/archie-channel';
+  const isSessionRecallActive = location.pathname === '/sessions';
   const isHelpActive = location.pathname === '/help';
 
   return (
@@ -121,6 +122,12 @@ function Sidebar({ open, onNavClick }) {
             <NavLink to="/errors" className={caretLinkClass(isErrorLogActive)} onClick={onNavClick}>
               error_log
             </NavLink>
+          </li>
+          <li className="sidebar__link-with-info">
+            <NavLink to="/sessions" className={caretLinkClass(isSessionRecallActive)} onClick={onNavClick}>
+              session_recall
+            </NavLink>
+            <span className="tooltip-trigger">?<span className="tooltip-content">Cross-project search over every project's session write-ups, headlines, and keywords.</span></span>
           </li>
           <li className="sidebar__link-with-info">
             <NavLink to="/archie-channel" className={caretLinkClass(isArchieChannelActive)} onClick={onNavClick}>

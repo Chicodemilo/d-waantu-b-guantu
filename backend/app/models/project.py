@@ -1,12 +1,12 @@
 # Path: app/models/project.py
 # File: project.py
 # Created: 2026-03-29
-# Purpose: Project ORM model with status enum, sprint gate flags, Jira fields, and Jira sync state (DWB-342)
+# Purpose: Project ORM model with status enum, sprint gate flags, Jira fields, Jira sync state (DWB-342), and the session-writeup generation gate (DWBG-014)
 # Caller: app/services/project.py, sprint.py
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Project, ProjectStatus
-# Last Modified: 2026-06-10
+# Last Modified: 2026-06-25 (DWBG-014 force_session_writeup gate)
 
 import enum
 from datetime import datetime
@@ -66,6 +66,13 @@ class Project(Base):
     force_architecture_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_handoff_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     force_consolidation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # DWBG-014: gates LLM session-writeup narrative generation per project.
+    # Default TRUE (the headline feature is on out of the box); PATCH off to
+    # disable auto-generation on close for token-sensitive projects. The
+    # summarizer is best-effort and never blocks a close regardless of this flag.
+    force_session_writeup: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
     # DWB-446: gates SendMessage agent-comms capture per project. Default TRUE;
     # when false POST /api/hooks/agent-message returns 200 and inserts nothing.
     capture_agent_comms: Mapped[bool] = mapped_column(

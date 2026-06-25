@@ -60,9 +60,12 @@ class TestGetProject:
             "force_headers", "force_test_coverage", "force_test_run",
             "force_initial_md", "force_architecture_md",
             "force_handoff_md", "force_consolidation",
+            "force_session_writeup",
             "capture_agent_comms",
             "playbooks_deployed_at",
             "created_at", "updated_at",
+            # DWBG-021: computed GitHub web base (null off a real repo).
+            "repo_url",
         }
         assert set(data.keys()) == expected_keys
 

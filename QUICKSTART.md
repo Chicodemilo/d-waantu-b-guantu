@@ -104,6 +104,23 @@ Two ways to populate the dashboard:
 - **Seed a demo (fastest):** on the dashboard, click `$ seed demo project`, or call `POST /api/projects/seed-demo`. This creates a fully populated demo project so you can explore every view with realistic data. Delete it once you start tracking real work.
 - **Track a real repo:** click `$ add project` and enter a repo path, or call `POST /api/projects/from-repo` with `{"repo_path": "/path/to/repo"}`. It auto-detects the name, prefix, and description from the repo.
 
+## 7. (Optional) Ollama — local session wrap-up narratives
+
+DWB can auto-generate a human-readable wrap-up narrative for each session (decisions, blockers, next steps, grounded in the session's git diff). This is **optional** — DWB runs fine without it; a session simply closes without a narrative (best-effort: a close is never blocked).
+
+The narrative summarizer is pluggable via `DWB_SUMMARIZER_PROVIDER` (see `.env.example`). The **default is `ollama`** — local inference, no API key, and your code/diffs never leave the machine.
+
+```bash
+# macOS
+brew install ollama
+brew services start ollama          # or: ollama serve   (foreground)
+ollama pull qwen2.5-coder           # the default DWB_SUMMARIZER_MODEL
+```
+
+DWB talks to Ollama at `OLLAMA_BASE_URL` (default `http://localhost:11434`) using `DWB_SUMMARIZER_MODEL` (default `qwen2.5-coder`) — both overridable in `.env`. With Ollama installed and a model pulled, closing a session generates the narrative automatically.
+
+**Prefer Anthropic instead?** Set `DWB_SUMMARIZER_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` in `.env` — higher-quality prose, but diffs are sent to the API and tokens are billed. `mlx` (Apple-Silicon local) is reserved for a future provider.
+
 ---
 
 ## Ports

@@ -18,6 +18,7 @@ from app.models.agent_score import AgentScore
 from app.models.alert import Alert
 from app.models.comment import Comment
 from app.models.dwb_session import DwbSession
+from app.models.entity_keyword import EntityKeyword
 from app.models.epic import Epic
 from app.models.failure_record import FailureRecord
 from app.models.hook_session import HookSession
@@ -134,6 +135,15 @@ def delete_project(db: Session, project: Project) -> None:
     if dwb_session_ids:
         db.execute(
             delete(ToolAction).where(ToolAction.dwb_session_id.in_(dwb_session_ids))
+        )
+        # DWBG-004: entity_keywords is a polymorphic table (no FK to dwb_sessions),
+        # so deleting the sessions below does not cascade to it. Purge the
+        # session-scoped keyword rows here or they orphan on project delete.
+        db.execute(
+            delete(EntityKeyword).where(
+                (EntityKeyword.entity_type == "dwb_session")
+                & (EntityKeyword.entity_id.in_(dwb_session_ids))
+            )
         )
     # Delete hook sessions (FK to project, sprints, dwb_sessions, tickets) before
     # those parents go away.

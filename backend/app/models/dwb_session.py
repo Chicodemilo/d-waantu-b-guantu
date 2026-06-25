@@ -1,12 +1,12 @@
 # Path: app/models/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone], DWB-481 structured summary JSON column)
+# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone], DWB-481 structured summary JSON column, DWBG-006 narrative + provenance columns, DWBG-010 search_text generated column + FULLTEXT index)
 # Caller: app/services/dwb_session.py (DWB-337), app/routers/dwb_sessions.py (DWB-338)
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: DwbSession, DwbOpenMethod, DwbCloseMethod, DwbCloseReason
-# Last Modified: 2026-06-25
+# Last Modified: 2026-06-25 (DWBG-010)
 
 import enum
 from datetime import datetime
@@ -88,6 +88,18 @@ class DwbSession(Base):
             "is_open",
             unique=True,
         ),
+        # DWBG-010: FULLTEXT index over the generated `search_text` column so
+        # the prose in headline + summary (JSON) + narrative (JSON) is
+        # searchable. MySQL cannot FULLTEXT-index JSON directly, so search_text
+        # is a STORED generated column flattening those three into one TEXT
+        # field (see the column definition below). `mysql_prefix="FULLTEXT"`
+        # makes SQLAlchemy emit `CREATE FULLTEXT INDEX`, so both the alembic
+        # migration AND Base.metadata.create_all (the lat_test path) build it.
+        Index(
+            "ftx_dwb_sessions_search",
+            "search_text",
+            mysql_prefix="FULLTEXT",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -128,6 +140,50 @@ class DwbSession(Base):
     # bulleted sections or a list of bullet strings). Nullable; only set once a
     # session has been synthesized. Substrate only this sprint - no reader yet.
     summary: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+
+    # DWBG-006/007: the interpretive narrative layer that the deterministic
+    # `summary` cannot produce — decisions, blockers, next-steps — authored over
+    # the session's agent/tool turns (never user prompts; see DWBG-003). Distinct
+    # from `summary` (the always-present deterministic baseline, never blocked):
+    # `narrative` is additive and best-effort, so a close never depends on it.
+    # Same free-form JSON shape as `summary` so SessionSummary can render it
+    # uniformly. Provenance travels alongside: `narrative_author` records who
+    # produced it (tl = inline at a conscious close, summarizer = async backfill
+    # of an idle/machine close) and `narrative_generated_at` when.
+    narrative: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    narrative_author: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    narrative_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+
+    # DWBG-010: FULLTEXT search substrate. MySQL cannot FULLTEXT-index a JSON
+    # column, so this STORED generated column flattens the three prose-bearing
+    # fields - `headline` (VARCHAR) plus `summary` and `narrative` (both JSON,
+    # CAST to CHAR) - into one searchable TEXT blob. The ftx_dwb_sessions_search
+    # FULLTEXT index (declared in __table_args__) sits on this column; the search
+    # endpoint (DWBG-011) ranks via MATCH(search_text) AGAINST(:q). The
+    # structural JSON keys (lead/sections/title/bullets) appear in every row, so
+    # MySQL natural-language mode treats them as low-IDF stopwords and they do
+    # not pollute relevance. STORED (not VIRTUAL) because InnoDB FULLTEXT
+    # requires a materialized column; read-only - never assigned in Python.
+    #
+    # NULLIF guards two empties so neither leaks into search_text as noise:
+    #   - headline: NULLIF(headline,'') drops an empty string.
+    #   - summary/narrative: SQLAlchemy's JSON type serializes a Python None to
+    #     the JSON literal `null`, so CAST(... AS CHAR) yields the four-char
+    #     string 'null' rather than SQL NULL. NULLIF(..., 'null') collapses that
+    #     back to NULL. CONCAT_WS then drops every NULL arg entirely, so an
+    #     unsynthesized session has an empty search_text instead of "null null".
+    search_text: Mapped[str | None] = mapped_column(
+        Text,
+        Computed(
+            "(CONCAT_WS(' ', NULLIF(headline,''), "
+            "NULLIF(CAST(summary AS CHAR),'null'), "
+            "NULLIF(CAST(narrative AS CHAR),'null')))",
+            persisted=True,
+        ),
+        nullable=True,
+    )
 
     # Generated single-active marker: 1 when closed_at IS NULL, NULL when
     # closed_at IS NOT NULL. The (project_id, is_open) UNIQUE index above

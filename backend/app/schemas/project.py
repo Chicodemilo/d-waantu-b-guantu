@@ -6,13 +6,14 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: ProjectCreate, ProjectUpdate, ProjectRead, ProjectOverheadIncrement
-# Last Modified: 2026-06-05
+# Last Modified: 2026-06-25 (DWBG-021 repo_url computed field)
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
 from app.models.project import ProjectStatus
+from app.services.repo_url import derive_repo_web_url
 
 
 class ProjectCreate(BaseModel):
@@ -30,6 +31,8 @@ class ProjectCreate(BaseModel):
     force_architecture_md: bool = False
     force_handoff_md: bool = True
     force_consolidation: bool = False
+    # DWBG-014: LLM session-writeup generation gate, default ON.
+    force_session_writeup: bool = True
 
 
 class ProjectUpdate(BaseModel):
@@ -50,6 +53,8 @@ class ProjectUpdate(BaseModel):
     force_architecture_md: bool | None = None
     force_handoff_md: bool | None = None
     force_consolidation: bool | None = None
+    # DWBG-014: LLM session-writeup generation gate (PATCH off to disable).
+    force_session_writeup: bool | None = None
     # DWB-446: per-project SendMessage agent-comms capture gate.
     capture_agent_comms: bool | None = None
 
@@ -82,10 +87,21 @@ class ProjectRead(BaseModel):
     force_architecture_md: bool
     force_handoff_md: bool
     force_consolidation: bool
+    force_session_writeup: bool
     capture_agent_comms: bool
     playbooks_deployed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def repo_url(self) -> str | None:
+        """DWBG-021: GitHub web base derived on read from the project's git
+        remote (e.g. https://github.com/owner/repo). null when there is no git
+        remote, the path is not a repo, or the remote is not a recognizable
+        GitHub remote. Computed (not persisted) so it is always fresh and needs
+        no migration; the derive helper is best-effort and never raises."""
+        return derive_repo_web_url(self.repo_path)
 
 
 class ProjectFromRepoRead(ProjectRead):
