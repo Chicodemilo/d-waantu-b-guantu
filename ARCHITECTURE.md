@@ -3,26 +3,11 @@
 Technical reference for D'Waantu B'Guantu (DWB).
 
 ```
-+-------------------------------------------------------------+
-|                    D'Waantu B'Guantu                         |
-|                                                              |
-|  +----------+    +------------------+    +---------------+   |
-|  |  React    |--->|  FastAPI         |--->|  MySQL 8.0    |   |
-|  |  :5173    |<---|  :8000           |<---|  :23847       |   |
-|  +----------+    +------------------+    +---------------+   |
-|       |               ^       ^                ^             |
-|       |               |       |                |             |
-|       |          +-------+ +--------------+ +----------+    |
-|       |          |Claude | |Activity Logger| |phpMyAdmin |    |
-|       |          |Code   | | (middleware)  | |  :8080    |    |
-|       |          |Hooks  | +--------------+ +----------+    |
-|       |          +-------+                                   |
-|       |            |  SessionStart  -> POST /api/hooks/...   |
-|  Vite dev server   |  SessionEnd   -> parse transcript JSONL |
-|  polls /api/status |  SubagentStop -> dedicated handler      |
-|  adaptive 2s/10s   |                                         |
-|                    Docker Compose manages DB + PMA            |
-+-------------------------------------------------------------+
+React :5173  <->  FastAPI :8000  <->  MySQL 8.0 :23847  (+ phpMyAdmin :8080)
+                        ^
+   Claude Code hooks (SessionStart/End, SubagentStop, PostToolUse)
+   -> POST /api/hooks/*   |   ActivityLogger middleware auto-logs mutations
+   Vite polls /api/status (adaptive 2s/10s)   |   Docker Compose runs DB + PMA
 ```
 
 ---
@@ -181,12 +166,17 @@ Full OpenAPI reference at http://localhost:8000/docs (138 endpoints, 23 routers)
 /projects/:id/agents/:agentId        -> AgentPage
 /projects/:id/tests                  -> ProjectTestsPage
 /projects/:id/comms                  -> InterAgentCommsPage
+/projects/:id/sessions               -> SessionsPage
+/projects/:id/sessions/current       -> SessionCurrentPage
+/projects/:id/sessions/:sid          -> SessionDetailPage
 /projects/:id/docs                   -> DocsPage
 /docs                                -> SystemDocsPage
 /instructions                        -> InstructionsPage
 /tests                               -> TestResultsPage
 /tests/:runId                        -> TestResultsPage (detail mode)
 /errors                              -> ErrorLogPage
+/archie-channel                      -> ArchieChannelPage
+/help                                -> HelpPage
 ```
 
 ### Key UI Features
@@ -196,10 +186,11 @@ Full OpenAPI reference at http://localhost:8000/docs (138 endpoints, 23 routers)
 - **Test performance tab** with duration charts and sparklines
 - **Tracking summary** with time/token rollups from hooks
 - **Adaptive polling** 2s active, 10s idle
+- **Help Center** (`/help`): in-app onboarding, quick-start flow + per-view help with live fuzzy search
 
 ### API Client Layer
 
-`src/api/` wraps `client.js` (fetch + ApiError) with one module per resource: `projects`, `sprints`, `epics`, `agents`, `tickets`, `comments`, `alerts`, `instructions`, `activityLogs`, `projectAgents`, `testResults`, `failureRecords`, `tokens`, `tracking`, `status`, `system`, `docs`, `agentMessages`. Most are CRUD; the richer ones add helpers (`projects.deployPlaybooks`, `alerts.dismissAll`/`requestTestRun`/`sendToTeam`, `instructions.sync`, `agentMessages.getAgentMessages`/`clearAgentMessages`).
+`src/api/` wraps `client.js` (fetch + ApiError) with one module per resource (projects, sprints, epics, agents, tickets, comments, alerts, instructions, activityLogs, projectAgents, testResults, failureRecords, tokens, tracking, status, system, docs, agentMessages). Most are CRUD; richer ones add helpers (deployPlaybooks, alerts.dismissAll/requestTestRun/sendToTeam, instructions.sync, agentMessages get/clear).
 
 ### Zustand Store
 
@@ -225,8 +216,13 @@ Plain CSS with custom properties. No frameworks, no CSS-in-JS.
 | tickets.css   | Ticket lists, detail, comments, filters, timeline     |
 | charts.css    | AsciiChart, AsciiProgressBar, SprintVelocity          |
 | tests.css     | Test run listings, detail views, sparklines           |
+| help.css      | Help Center page, fuzzy search, collapsible sections  |
 
 Font: JetBrains Mono / Fira Code (monospace). BEM-inspired naming (`component__element`, `component--variant`).
+
+### Help Center
+
+`/help` (`pages/HelpPage.jsx`) is in-app onboarding. Top is a quick-start: a linear startup flow plus standalone shortcut callouts (rendered as separate regions, not chained). Below, domain sections mirror the sidebar nav, each a Why/How/Where summary + bullets. Content lives in `src/helpContent/`: `index.js` auto-discovers `sections/*.js` via `import.meta.glob` (drop a file, it renders, no wiring), `quickStart.js` holds the flow/callouts, `CONTRACT.md` defines the section shape. Three reusable presentational components in `components/help/`: `FuzzySearch` (+ `hooks/useFuzzyFilter`, dependency-free substring/subsequence matcher), `CollapsibleSection` (controlled open so search force-opens matches), `SummaryHeader`.
 
 ---
 
@@ -407,10 +403,10 @@ Per-agent-per-project scoring (epic 28, DWB-424..428). Append-only `score_event`
 - **Broadcast:** human + peer carrot/sticks notify all project agents via per-agent alerts (`alert.recipient_agent_id`); human critical, peer info. Auto-triggers do not broadcast.
 
 ### Archie Channel (Cross-Project TL Messaging)
-`tl_messages` (DWB-436/437) is a cross-project channel for team-leads: a message is direct (`to_agent_id` set) or broadcast (NULL = all other TLs); every TL reads every message and `tl_message_reads` tracks per-(message, agent) read state. Sender and any named recipient must be `role=team-lead` (else 400). A send pings the target (direct) or every other active TL (broadcast) via `alert.recipient_agent_id`. On spawn, unread renders atop `identity.md` (in `scaffold_agent_dir`) and is marked read once shown; `/tl` replies. NOT project-scoped; `delete_project` clears messages sent from it.
+`tl_messages` (DWB-436/437) is a cross-project team-lead channel: a message is direct (`to_agent_id` set) or broadcast (NULL = all other TLs); `tl_message_reads` tracks per-(message, agent) read state. Sender and any named recipient must be `role=team-lead` (else 400). A send pings the target or every other active TL via `alert.recipient_agent_id`. On spawn, unread renders atop `identity.md` and is marked read once shown; `/tl` replies. NOT project-scoped; `delete_project` clears messages sent from it.
 
 ### Inter-Agent Comms Capture
-`inter_agent_messages` (DWB-446..449) logs native SendMessage traffic per project. Flow: the `PostToolUse` SendMessage hook -> `POST /api/hooks/agent-message` -> `handle_agent_message` resolves the SENDER from `session_id` (same resolver as token attribution) and the RECIPIENT best-effort by name within the project; `to_agent_name` is always stored even when the FK misses. Bodies ARE stored (agent text). Per-project `capture_agent_comms` (default ON) gates it: when off the hook returns 200 and stores nothing. `dwb_session_id` is display-only. Retention: `purge_old_agent_messages` deletes rows older than 4 days, riding the idle sweeper and keying off `created_at` alone (a message outlives its session). List/clear: `GET`/`DELETE /api/projects/{id}/agent-messages`; UI at `/projects/:id/comms`.
+`inter_agent_messages` (DWB-446..449) logs native SendMessage traffic per project. The `PostToolUse` SendMessage hook -> `POST /api/hooks/agent-message` resolves the sender from `session_id` (same resolver as token attribution) and the recipient best-effort by name; `to_agent_name` is always stored even when the FK misses, and bodies ARE stored. Per-project `capture_agent_comms` (default ON) gates it (off = 200, stores nothing). `purge_old_agent_messages` drops rows older than 4 days on the idle sweeper, keying off `created_at` alone. List/clear: `GET`/`DELETE /api/projects/{id}/agent-messages`; UI at `/projects/:id/comms`.
 
 ### Alert Auto-Creation
 - Ticket marked done with 0 tokens -> info alert
@@ -438,4 +434,4 @@ Deleting a ticket cascades through: comments, status_history, alerts, test_resul
 Deleting a project cascades through: alerts, test_results, activity_logs, instructions, inter_agent_messages, tl_messages (sent-from), tickets (and their children per above), failure_records, project_agents, sprints, epics.
 
 ### Jira Integration
-Projects optionally link to a Jira project via `jira_project_key`. DWB tickets map 1:1 to Jira issues via `jira_issue_key` (unique constraint). `POST /api/projects/{id}/disable-jira` clears all Jira links from the project and its tickets. Jira data is never modified.
+Projects optionally link to a Jira project via `jira_project_key`. DWB tickets map 1:1 to Jira issues via `jira_issue_key` (unique constraint); a duplicate key returns a clean 409 on both create and update/PATCH (DWB-465/476), never a raw 500. `POST /api/projects/{id}/disable-jira` clears all Jira links from the project and its tickets. Jira data is never modified.

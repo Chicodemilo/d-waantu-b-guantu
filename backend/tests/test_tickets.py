@@ -191,6 +191,57 @@ class TestUpdateTicket:
         r = client.patch("/api/tickets/999999", json={"title": "Nope"})
         assert r.status_code == 404
 
+    def test_patch_duplicate_jira_key_returns_409_not_500(
+        self, client, make_project, make_sprint
+    ):
+        """DWB-476: jira_issue_key is globally unique. PATCH-linking a ticket to
+        a key already linked to another ticket used to surface as a raw 500 from
+        the IntegrityError on the update commit (the create path was already
+        guarded in DWB-465; the update path was not). It must now return a clean
+        409 with a duplicate_jira_key detail so the caller can pick a free key.
+        """
+        # Jira-enabled project (jira_base_url set) so jira_issue_key writes pass
+        # the DWB-332 hard gate and reach the unique constraint.
+        project = make_project(
+            jira_base_url="https://example.atlassian.net",
+            jira_project_key="EX",
+        )
+        make_sprint(project_id=project["id"])
+
+        first = client.post("/api/tickets", json={
+            "project_id": project["id"],
+            "ticket_number": 1,
+            "ticket_key": "EX-001",
+            "title": "first",
+        }).json()
+        second = client.post("/api/tickets", json={
+            "project_id": project["id"],
+            "ticket_number": 2,
+            "ticket_key": "EX-002",
+            "title": "second",
+        }).json()
+
+        # Link the first ticket to a Jira issue.
+        r1 = client.patch(
+            f"/api/tickets/{first['id']}", json={"jira_issue_key": "EX-100"}
+        )
+        assert r1.status_code == 200, r1.text
+        assert r1.json()["jira_issue_key"] == "EX-100"
+
+        # Linking the second ticket to the SAME key hits the unique constraint.
+        # It used to be a raw 500; now it is a clean 409. (As with the create
+        # test, the shared-transaction harness means a row-count assertion would
+        # test harness semantics, not the fix; the 409 + detail is the regression
+        # that matters.)
+        r2 = client.patch(
+            f"/api/tickets/{second['id']}", json={"jira_issue_key": "EX-100"}
+        )
+        assert r2.status_code == 409, r2.text
+        detail = r2.json()["detail"]
+        assert detail["error"] == "duplicate_jira_key"
+        assert detail["field"] == "jira_issue_key"
+        assert detail["jira_issue_key"] == "EX-100"
+
 
 class TestCompletedAtStamp:
     """DWB-373: PATCH-to-done stamps Ticket.completed_at so the sessions list

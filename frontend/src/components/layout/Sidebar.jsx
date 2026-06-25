@@ -1,12 +1,12 @@
 // Path: src/components/layout/Sidebar.jsx
 // File: Sidebar.jsx
 // Created: 2026-03-29
-// Purpose: Navigation sidebar with links to dashboard, instructions, system tests, the cross-project archie channel, and per-project sub-nav (tickets, team, sessions, tests, docs, inter-agent comms, jira); collapses on mobile
+// Purpose: Navigation sidebar with links to dashboard, system tests, system docs, error log, the cross-project archie channel, the help center, and per-project sub-nav (tickets, team, sessions, tests, docs, inter-agent comms, jira); collapses on mobile
 // Caller: AppShell.jsx
 // Callees: react (useState), react-router-dom (NavLink, useLocation), useStore
 // Data In: projects from store, current location pathname, open prop, onNavClick callback
 // Data Out: default export Sidebar component
-// Last Modified: 2026-06-24
+// Last Modified: 2026-06-25
 
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -91,6 +91,7 @@ function Sidebar({ open, onNavClick }) {
   const isSystemDocsActive = location.pathname === '/docs';
   const isErrorLogActive = location.pathname === '/errors';
   const isArchieChannelActive = location.pathname === '/archie-channel';
+  const isHelpActive = location.pathname === '/help';
 
   return (
     <aside className={`sidebar${open ? ' sidebar--open' : ''}`}>
@@ -126,6 +127,11 @@ function Sidebar({ open, onNavClick }) {
               archie_channel
             </NavLink>
             <span className="tooltip-trigger">?<span className="tooltip-content">Cross-project team-lead messaging channel. Spans all projects.</span></span>
+          </li>
+          <li>
+            <NavLink to="/help" className={caretLinkClass(isHelpActive)} onClick={onNavClick}>
+              help
+            </NavLink>
           </li>
 
           <li className="sidebar__section-label">

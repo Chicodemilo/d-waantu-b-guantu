@@ -2,32 +2,33 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current State (as of 2026-06-24, end of day)
+## Current State (as of 2026-06-25)
 
-- Working tree clean; all work committed AND pushed to origin/master (tip `74ee3e4`). Backend 1362 passing, frontend 188 passing.
-- Epic 35 "Inter-Agent Comms Capture & Log" / sprint S70 (id=125) DONE: DWB-446..452 all closed and accepted.
-- DWB session 42 closed. Team fully shut down (Barry_DWB-2, Freddie, Pam_DWB, Sage all terminated) - respawn before use, verify live name, do NOT SendMessage cold names.
-- Backlog is clear. Prior carried items resolved this session: **DWB-413** (delete_project 500) verified DONE end-to-end (live DELETE 204 with full child rows); **DWB-396** (prose false-close) was never a real ticket - DWB-414 fully covers it; **DWB-445** (dormant-wake spike) DROPPED by user - not feasible in CC (a Stopped teammate's process has exited; no inbox watcher re-wakes it). Do not re-spike 445.
+- Working tree committed + pushed to origin/master. Backend 1408 passing, frontend green (24 new help-center tests, 24/24 coverage).
+- Latest sprint S73 (id 132) "In-App Help Center" DONE and closed: DWB-468..479 (12 tickets) all done.
+- DWB session 47 is OPEN (this session is still active; not closed). Team is currently LIVE (Pam_DWB, Freddie, Sylvie, Dolores, Barry_DWB, Sage) and parked for item 2 - NOT shut down. Respawn + verify live names if a later session inherits this.
 
-## Shipped this session (Inter-Agent Comms, epic 35)
+## Shipped this session (S73, epic 40 "Help Center & Reliable Session Write-ups")
 
-Captures native Claude Code SendMessage traffic between agents into DWB, per project.
-- `inter_agent_messages` table (DWB-446): project_id NOT NULL, dwb_session_id nullable (display only), from/to agent id+name, body TEXT, summary, created_at indexed. Migration `dwb446a1b2c3`. Added to `delete_project` cascade. New `capture_agent_comms` bool on projects (default ON).
-- Capture endpoint `POST /api/hooks/agent-message` (DWB-447): resolves SENDER from session_id via the existing token-attribution resolver (`_resolve_tool_action_context`), recipient best-effort by name; `to_agent_name` always stored. NOOP (200, no insert) when toggle off. Bodies ARE stored (agent text, not user text - privacy rule N/A).
-- List/clear (DWB-448): `GET`/`DELETE /api/projects/{id}/agent-messages` (paged, newest-first, envelope `{project_id,total,limit,offset,rows}`).
-- 4-day purge (DWB-449): `purge_old_agent_messages` rides the idle sweeper, keys off `created_at` alone (survives sessions), logs counts. NOT tied to session close.
-- SendMessage hook (DWB-450): `PostToolUse` matcher `SendMessage` -> remaps tool_input -> POSTs the capture endpoint. In `_HOOKS_SETTINGS_BLOCK` + `.claude/settings.json`, redeployed to CI/D2J/RVP.
-- Frontend (DWB-451): project nav item "inter-agent comms" -> `/projects/:id/comms`. Dense terminal page, date-listed newest-first, body truncated single-line, inline-confirm Clear (no modal), polls 3s. Capture toggle in ProjectPage Tools panel.
-- Tests + docs (DWB-452): 12 capture tests; ARCHITECTURE + README sections.
+In-app Help Center at `/help`:
+- Reusable components (DWB-468): `FuzzySearch` + `useFuzzyFilter` (dependency-free substring/subsequence matcher), `CollapsibleSection` (controlled open so search force-opens matches), `SummaryHeader` (Why/How/Where + bullets). Built generic for item-2 reuse.
+- HelpPage + nav + contract (DWB-469): `/help` route + sidebar Overview entry. Quick-start = linear flow + separate callouts (not chained). Domain sections mirror the nav. Content auto-discovered from `frontend/src/helpContent/sections/*.js` via `import.meta.glob` (drop a file, it renders, no index edits - see `helpContent/CONTRACT.md`). Live fuzzy search force-opens matches.
+- Content (DWB-470..475), one author per domain: quick-start (Sylvie), docs (Dolores), dashboard+comms (Freddie), sessions/error_log/archie_channel (Barry), system_tests/tests (Sage), tickets/team/jira (Pam). All 7 slash commands documented in-place (dwb-open/close in quick-start, carrot/stick/score/leaderboard in team, tl in archie_channel).
+- Bug fix (DWB-476): PATCH /api/tickets with a duplicate `jira_issue_key` now returns 409 not 500 (mirrored the create-path IntegrityError guard) + regression test.
+- Doc sweep (DWB-477..479): ARCHITECTURE (help center + jira-409, condensed under the 7500 ceiling), QUICKSTART (current setup + `/help` pointer), new FILE_TREE.md.
+
+A cross-check accuracy pass (each section verified by a NON-author against the live app) caught 3 real issues, all fixed: tests.js failure types "A-G" -> named types; sessions.js idle timeout "60 min" -> 10h (`IDLE_TIMEOUT_MINUTES=600`); the jira PATCH 500 (became DWB-476). The pass earned its keep - keep doing it for content/doc work.
+
+## NEXT: Item 2 - Reliable Session Write-ups (queued, NOT started)
+
+User's next ask, two parts:
+- **Backend:** server-side synthesis of a session write-up (headline/title + keyword-rich bulleted summary) on EVERY close path (idle_timeout, regex, ai_confident, slash) - generated from session activity, NOT dependent on the closer supplying it. Root issue: some sessions close with a null headline (seen on 32/36/38). Title AND summary must both be reliable, because the summary is only as good as the title mechanism.
+- **Frontend:** session page UI with an expandable bulleted write-up + summary at top + fuzzy search filtering the session list. HEAVY reuse of the S73 help components - build on FuzzySearch/useFuzzyFilter/CollapsibleSection/SummaryHeader, do not rebuild.
 
 ## Gotchas (carry forward)
 
-- **`_HOOKS_SETTINGS_BLOCK`** (routers/playbooks.py) MUST stay byte-equal to `.claude/settings.json` hooks (drift-guard test). When a worker edits the block, the TL mirrors settings.json by GENERATING it from the dict (`.venv python -c "import _HOOKS_SETTINGS_BLOCK; dump into settings['hooks']"`), never hand-editing. See Archie memory.md.
-- **`.claude/` Edit by subagent = crash**; only the TL edits `.claude/` (settings, commands, playbooks). Split .claude/-touching tickets: worker does backend half, TL does the .claude/ half.
-- **ARCHITECTURE.md is at 7496/7500 - effectively AT ceiling.** Any addition MUST be offset by condensing first or the session/sprint close 422s. README 3496/3500 also tight.
-- **`/carrot` `/stick` need args on ONE line** (`/stick Name 3 reason`); bare `/stick` just prints usage. Commands work (verified); portal carrot/stick UI hits the same endpoint.
-- **settings.json hot-reload caveat**: already-running CC sessions on tracked repos won't fire the new SendMessage capture hook until restart; fresh sessions capture immediately.
-- **No modal component** - inline text confirms only. No icons, no em-dashes.
-- **Ticket key != db id** - PATCH by db id (DWB-446 = id 1007 ... DWB-452 = id 1013).
-- **Comms page open design Q**: row shows `summary || body` truncated (body on hover). User to decide if it should always show body instead.
-- Barry was respawned as **Barry_DWB-2** after a spawn-time stall (cosmetic; db id 21 intact).
+- **ARCHITECTURE.md is at 7491/7500 - effectively AT ceiling.** Any addition must condense first or the session/sprint close 422s.
+- **Playbook doc drift:** the team-lead playbook prose still says "60-min idle sweeper" but live config is `IDLE_TIMEOUT_MINUTES=600` (10h). Not yet fixed (playbooks are DWB-team-owned). Worth a cleanup ticket.
+- **helpContent auto-discovery:** add `sections/<key>.js` per CONTRACT.md; the index globs it in, no wiring.
+- **Teammate message bodies sometimes don't reach the TL** (only the summary line). Ask workers to put key facts in a one-line summary when it matters.
+- `.claude/` edits crash subagents; root `.md` and `frontend/src` are safe for workers.

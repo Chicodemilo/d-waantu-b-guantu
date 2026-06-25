@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Root application component that initializes data polling, mounts the RouteLogger (DWB-371) for backend-visible nav lifecycle, and defines all routes
 // Caller: main.jsx
-// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, components/common/RouteLogger, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/DocsPage, pages/SystemDocsPage, pages/SessionsPage, pages/SessionDetailPage, pages/ArchieChannelPage, pages/InterAgentCommsPage
+// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, components/common/RouteLogger, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/DocsPage, pages/SystemDocsPage, pages/SessionsPage, pages/SessionDetailPage, pages/ArchieChannelPage, pages/InterAgentCommsPage, pages/HelpPage
 // Data In: None
 // Data Out: Exports App component (renders route tree inside AppShell)
-// Last Modified: 2026-06-24
+// Last Modified: 2026-06-25
 
 import { Routes, Route } from 'react-router-dom';
 import useAppData from './hooks/useAppData';
@@ -32,6 +32,7 @@ import SessionCurrentPage from './pages/SessionCurrentPage';
 import SessionDetailPage from './pages/SessionDetailPage';
 import ArchieChannelPage from './pages/ArchieChannelPage';
 import InterAgentCommsPage from './pages/InterAgentCommsPage';
+import HelpPage from './pages/HelpPage';
 
 function App() {
   useAppData();
@@ -56,6 +57,7 @@ function App() {
         <Route path="/projects/:id/sessions/:sid" element={<SessionDetailPage />} />
         <Route path="/projects/:id/comms" element={<InterAgentCommsPage />} />
         <Route path="/archie-channel" element={<ArchieChannelPage />} />
+        <Route path="/help" element={<HelpPage />} />
         <Route path="/docs" element={<SystemDocsPage />} />
         <Route path="/instructions" element={<InstructionsPage />} />
         <Route path="/tests" element={<TestResultsPage />} />

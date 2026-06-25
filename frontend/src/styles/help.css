@@ -1,0 +1,319 @@
+/*
+ * Path: src/styles/help.css
+ * File: help.css
+ * Created: 2026-06-25
+ * Purpose: Styles for the reusable help components (DWB-468): FuzzySearch,
+ *          CollapsibleSection, SummaryHeader. Terminal aesthetic, plain CSS
+ *          with theme custom properties. Page-level Help layout styles are
+ *          appended here under the HelpPage section (DWB-469).
+ * Caller: components/help/FuzzySearch.jsx, components/help/CollapsibleSection.jsx,
+ *         components/help/SummaryHeader.jsx, pages/HelpPage.jsx
+ * Callees: styles/theme.css (custom properties)
+ * Last Modified: 2026-06-25
+ */
+
+/* ---- FuzzySearch ---- */
+.fuzzy-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.fuzzy-search__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;
+}
+
+.fuzzy-search__prompt {
+  color: var(--green-dim);
+  font-size: 13px;
+}
+
+.fuzzy-search__prompt::before {
+  content: '> ';
+  color: var(--gray-light);
+}
+
+.fuzzy-search__input {
+  flex: 1 1 auto;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--green-bright);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 7px 10px;
+}
+
+.fuzzy-search__input:focus {
+  outline: none;
+  border-color: var(--green-dim);
+}
+
+.fuzzy-search__input::placeholder {
+  color: var(--gray);
+}
+
+.fuzzy-search__clear {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--gray-light);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.fuzzy-search__clear:hover {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+
+.fuzzy-search__count {
+  color: var(--gray-light);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ---- CollapsibleSection ---- */
+.collapsible {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-alt);
+  margin-bottom: 8px;
+}
+
+.collapsible--open {
+  border-color: var(--green-dim);
+}
+
+.collapsible__header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+.collapsible__header:hover {
+  background: var(--bg-hover);
+}
+
+.collapsible__caret {
+  color: var(--green-dim);
+  flex: 0 0 auto;
+}
+
+.collapsible__title {
+  flex: 1 1 auto;
+  font-weight: 600;
+}
+
+.collapsible__subtitle {
+  color: var(--gray-light);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.collapsible__body {
+  padding: 4px 14px 14px 38px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- SummaryHeader ---- */
+.summary-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summary-header__row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  line-height: 1.5;
+}
+
+.summary-header__label {
+  flex: 0 0 52px;
+  color: var(--orange);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.summary-header__text {
+  flex: 1 1 auto;
+  color: var(--green-bright);
+  font-size: 13px;
+}
+
+.summary-header__bullets {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-header__bullet {
+  color: var(--gray-light);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.summary-header__bullet::marker {
+  color: var(--green-dim);
+}
+
+/* ---- HelpPage (DWB-469) ---- */
+.help-page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 8px 4px 48px;
+}
+
+.help-page__header {
+  margin-bottom: 20px;
+}
+
+.help-page__title {
+  color: var(--green-bright);
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+
+.help-page__lead {
+  color: var(--gray-light);
+  font-size: 13px;
+  margin: 0;
+}
+
+.help-quickstart {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-alt);
+  padding: 16px;
+  margin-bottom: 28px;
+}
+
+.help-quickstart__title {
+  color: var(--orange);
+  font-size: 15px;
+  margin: 0 0 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.help-quickstart__regions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 24px;
+}
+
+@media (max-width: 720px) {
+  .help-quickstart__regions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.help-flow__title,
+.help-callouts__title {
+  color: var(--green);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.help-flow__list {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.help-flow__step {
+  color: var(--green-bright);
+  line-height: 1.5;
+}
+
+.help-flow__step::marker {
+  color: var(--green-dim);
+}
+
+.help-flow__step-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.help-flow__step-detail {
+  display: block;
+  color: var(--gray-light);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.help-callouts__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.help-callout {
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--orange);
+  border-radius: 4px;
+  background: var(--bg);
+  padding: 10px 12px;
+}
+
+.help-callout__title {
+  display: block;
+  color: var(--orange-bright);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.help-callout__detail {
+  display: block;
+  color: var(--gray-light);
+  font-size: 12px;
+  margin-top: 3px;
+  line-height: 1.45;
+}
+
+.help-domains__search {
+  margin-bottom: 18px;
+}
+
+.help-group {
+  margin-bottom: 22px;
+}
+
+.help-group__label {
+  color: var(--gray-light);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin: 0 0 10px;
+}
+
+.help-empty {
+  color: var(--gray);
+  font-size: 13px;
+  font-style: italic;
+}

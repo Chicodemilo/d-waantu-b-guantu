@@ -6,7 +6,7 @@
 # Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking, services/activity_log, services/scoring_triggers
 # Data In: db: Session, TicketCreate/Update, acting_agent_id
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-06-24 (DWB-465: dup ticket_key/number -> 409 not 500 on create)
+# Last Modified: 2026-06-25 (DWB-476: dup jira_issue_key -> 409 not 500 on update/PATCH)
 
 import logging
 from datetime import datetime
@@ -353,7 +353,29 @@ def update_ticket(
     if status_changed and updates["status"] == TicketStatus.done:
         ticket.completed_at = datetime.utcnow()
 
-    db.commit()
+    # DWB-476: jira_issue_key is globally unique. PATCH-linking a ticket to a
+    # key already linked to another ticket hits the unique constraint on this
+    # commit and used to surface as a raw 500 (the create path at line ~245
+    # already guards its commit; this one did not). Convert it to a clean 409
+    # so callers can pick a free key and retry. Roll back first so the session
+    # is usable and nothing partial lingers.
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_jira_key",
+                "message": (
+                    f"jira_issue_key {updates.get('jira_issue_key')!r} is already "
+                    f"linked to another ticket. Each Jira issue maps to exactly one "
+                    f"ticket - unlink it there first or pick a different key."
+                ),
+                "field": "jira_issue_key",
+                "jira_issue_key": updates.get("jira_issue_key"),
+            },
+        ) from exc
     db.refresh(ticket)
 
     # Record status change in history
