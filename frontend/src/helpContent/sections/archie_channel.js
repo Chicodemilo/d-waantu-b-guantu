@@ -27,4 +27,9 @@ export default {
     'Read state: GET /api/tl-channel lists the whole channel most-recent-first with a full read_by roster; GET /api/tl-channel/unread lists a lead\'s unread, and POST /api/tl-channel/mark-read marks one message or all.',
     'Unread channel messages are surfaced to a team lead at spawn (in their identity) and via the Stop-hook channel poke, both team-lead-only.',
   ],
+  // DWB-497: cross-links to related sections.
+  links: [
+    { to: 'comms', label: 'Inter-Agent Comms' },
+    { to: 'sessions', label: 'Sessions' },
+  ],
 };

@@ -408,6 +408,9 @@ Per-agent-per-project scoring (epic 28, DWB-424..428). Append-only `score_event`
 ### Inter-Agent Comms Capture
 `inter_agent_messages` (DWB-446..449) logs native SendMessage traffic per project. The `PostToolUse` SendMessage hook -> `POST /api/hooks/agent-message` resolves the sender from `session_id` (same resolver as token attribution) and the recipient best-effort by name; `to_agent_name` is always stored even when the FK misses, and bodies ARE stored. Per-project `capture_agent_comms` (default ON) gates it (off = 200, stores nothing). `purge_old_agent_messages` drops rows older than 4 days on the idle sweeper, keying off `created_at` alone. List/clear: `GET`/`DELETE /api/projects/{id}/agent-messages`; UI at `/projects/:id/comms`.
 
+### Session Write-up Synthesis
+On every DWB session close (all paths + the idle sweeper, via `_apply_synthesis` in `close_session`) a deterministic synthesizer (`session_synthesizer.py`, NO LLM) builds from the session rollup: a headline (kept if the closer supplied one, else synthesized ~5-10 words - fixes null headlines on idle/regex closes), a structured `summary` JSON `{lead, sections:[{title,bullets}]}` on `dwb_sessions.summary`, and weighted keywords. Keywords come from `keyword_extraction.py` (pure: frequency rank + stopword drop, ticket keys verbatim, kebab-case) over an agent-text-only corpus (`_gather_corpus`, no user prompts - DWB-351), stored in the generic `entity_keywords` table (entity_type/entity_id/keyword/weight, both indexed) - substrate for future cross-entity linked relations. List + detail endpoints expose both (one batched keyword query). Synthesis is guarded (a failure never blocks a close) and idempotent on reopen. A one-shot backfill re-synthesizes legacy null-headline sessions via the same path.
+
 ### Alert Auto-Creation
 - Ticket marked done with 0 tokens -> info alert
 - Sprint completed -> alerts for team-lead, pm, tester + auto-creates test ticket

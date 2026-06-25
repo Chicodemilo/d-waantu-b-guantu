@@ -25,4 +25,9 @@ export default {
     'Use clear to wipe this project\'s log; it asks for an inline confirm first.',
     'Capture is toggled per project by capture_agent_comms in the project Tools panel; old messages auto-purge after a few days.',
   ],
+  // DWB-497: cross-links to related sections.
+  links: [
+    { to: 'archie_channel', label: 'Archie Channel' },
+    { to: 'team', label: 'Team' },
+  ],
 };

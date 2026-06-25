@@ -200,20 +200,10 @@
   margin: 0;
 }
 
+/* DWB-496: quick-start is now a CollapsibleSection; it supplies the border, box,
+ * and header. Keep only the spacing below it. */
 .help-quickstart {
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-alt);
-  padding: 16px;
   margin-bottom: 28px;
-}
-
-.help-quickstart__title {
-  color: var(--orange);
-  font-size: 15px;
-  margin: 0 0 14px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .help-quickstart__regions {
@@ -316,4 +306,38 @@
   color: var(--gray);
   font-size: 13px;
   font-style: italic;
+}
+
+/* DWB-496: in-section cross-links ("See also" row). */
+.help-section__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.help-section__links-label {
+  color: var(--gray-light);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.help-link {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--blue);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.help-link:hover {
+  color: var(--blue-dim);
+  border-color: var(--blue-dim);
 }

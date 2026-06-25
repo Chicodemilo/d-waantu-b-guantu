@@ -8,7 +8,8 @@
 // Caller: pages/HelpPage.jsx (and any page needing controlled collapsible regions)
 // Callees: none (controlled by parent via open/onToggle)
 // Data In: title (node), open (bool), onToggle (fn), children (node), subtitle (node),
-//          className (string)
+//          className (string), id (string - set on the section element so a parent
+//          can scroll it into view, DWB-496)
 // Data Out: default export CollapsibleSection; fires onToggle(!open) on header click
 // Last Modified: 2026-06-25
 
@@ -21,13 +22,14 @@ function CollapsibleSection({
   children,
   subtitle = null,
   className = '',
+  id,
 }) {
   const handleToggle = () => {
     if (onToggle) onToggle(!open);
   };
 
   return (
-    <section className={`collapsible${open ? ' collapsible--open' : ''} ${className}`.trim()}>
+    <section id={id} className={`collapsible${open ? ' collapsible--open' : ''} ${className}`.trim()}>
       <button
         type="button"
         className="collapsible__header"

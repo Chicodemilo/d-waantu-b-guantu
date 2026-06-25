@@ -24,4 +24,10 @@ export default {
     'The ticket_key (DWB-475) is the human label; the database id is what API paths use, and the two are not interchangeable.',
     'The detail page shows description, stats, status history, comments, and the Jira link widget when Jira is enabled.',
   ],
+  // DWB-497: cross-links to related sections.
+  links: [
+    { to: 'team', label: 'Team' },
+    { to: 'sessions', label: 'Sessions' },
+    { to: 'jira', label: 'Jira' },
+  ],
 };

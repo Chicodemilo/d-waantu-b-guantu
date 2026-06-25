@@ -30,4 +30,10 @@ export default {
     'The detail view breaks tokens down by role, by ticket, and into the TL, PM, and Ad Hoc overhead buckets.',
     'Sessions are scoped per project, so Archie_DWB and Archie_CI can each hold an open session in parallel with no cross-contamination.',
   ],
+  // DWB-497: cross-links to related sections.
+  links: [
+    { to: 'tickets', label: 'Tickets' },
+    { to: 'team', label: 'Team' },
+    { to: 'archie_channel', label: 'Archie Channel' },
+  ],
 };

@@ -1,20 +1,22 @@
 // Path: src/pages/HelpPage.jsx
 // File: HelpPage.jsx
 // Created: 2026-06-25
-// Purpose: Help Center page (DWB-469). Top region is the QUICK START: a linear
-//          ordered startup flow and standalone callouts, rendered as two visually
-//          separate blocks (not chained). Below, domain CollapsibleSections mirror
-//          the sidebar nav and are driven by helpContent/index.js, so content lands
-//          incrementally. A FuzzySearch at the top filters the domain sections live
-//          and force-opens matches.
+// Purpose: Help Center page (DWB-469, DWB-496). The whole page is uniformly
+//          collapsible. The QUICK START (linear startup flow + standalone callouts,
+//          two visually separate blocks) is itself a CollapsibleSection that defaults
+//          OPEN. Below, domain CollapsibleSections mirror the sidebar nav and are
+//          driven by helpContent/index.js, so content lands incrementally. A
+//          FuzzySearch filters the domain sections live and force-opens matches.
+//          Sections may declare cross-links ({to, label}) that force-open AND scroll
+//          a target section into view (DWB-496), reusing the same force-open plumbing.
 // Caller: App.jsx route /help
-// Callees: react (useState, useMemo), components/help/FuzzySearch, CollapsibleSection,
+// Callees: react (useState, useMemo, useEffect), components/help/FuzzySearch, CollapsibleSection,
 //          SummaryHeader; hooks/useFuzzyFilter; helpContent (helpGroups, quickStart)
 // Data In: static help content from helpContent/index.js
 // Data Out: default export HelpPage component
 // Last Modified: 2026-06-25
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import FuzzySearch from '../components/help/FuzzySearch';
 import CollapsibleSection from '../components/help/CollapsibleSection';
 import SummaryHeader from '../components/help/SummaryHeader';
@@ -31,13 +33,25 @@ function sectionSearchText(section) {
     .join(' ');
 }
 
+// DWB-496: DOM id for a domain section, so a cross-link can scroll it into view.
+const sectionDomId = (key) => `help-section-${key}`;
+
 function HelpPage() {
   const [query, setQuery] = useState('');
   const [manualOpen, setManualOpen] = useState(() => new Set());
+  // DWB-496: quick-start is collapsible too, but starts OPEN (first thing a
+  // newcomer reads).
+  const [quickStartOpen, setQuickStartOpen] = useState(true);
+  // DWB-496: a section key queued to scroll into view after the open-state commit.
+  const [pendingScroll, setPendingScroll] = useState(null);
 
   const allSections = useMemo(
     () => helpGroups.flatMap((g) => g.sections),
     []
+  );
+  const sectionKeys = useMemo(
+    () => new Set(allSections.map((s) => s.key)),
+    [allSections]
   );
   const searchItems = useMemo(
     () => allSections.map((s) => ({ id: s.key, text: sectionSearchText(s) })),
@@ -75,6 +89,32 @@ function HelpPage() {
     });
   };
 
+  // DWB-496: cross-link navigation. Clear any active filter (so the target is
+  // visible regardless of the current search), force the target section open,
+  // and queue it to scroll into view once the open-state commit lands.
+  const goToSection = (key) => {
+    if (!sectionKeys.has(key)) return;
+    setQuery('');
+    setManualOpen((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    setPendingScroll(key);
+  };
+
+  useEffect(() => {
+    if (!pendingScroll) return;
+    const el =
+      typeof document !== 'undefined'
+        ? document.getElementById(sectionDomId(pendingScroll))
+        : null;
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setPendingScroll(null);
+  }, [pendingScroll]);
+
   const flow = (quickStart && quickStart.flow) || [];
   const callouts = (quickStart && quickStart.callouts) || [];
 
@@ -87,9 +127,13 @@ function HelpPage() {
         </p>
       </header>
 
-      {/* QUICK START: two visually separate regions, not chained together. */}
-      <section className="help-quickstart">
-        <h2 className="help-quickstart__title">Quick start</h2>
+      {/* QUICK START: collapsible (default open), two visually separate regions. */}
+      <CollapsibleSection
+        title="Quick start"
+        open={quickStartOpen}
+        onToggle={setQuickStartOpen}
+        className="help-quickstart"
+      >
         <div className="help-quickstart__regions">
           <div className="help-flow">
             <h3 className="help-flow__title">Startup flow</h3>
@@ -127,7 +171,7 @@ function HelpPage() {
             )}
           </div>
         </div>
-      </section>
+      </CollapsibleSection>
 
       {/* DOMAIN SECTIONS: mirror the nav, filtered + force-opened by search. */}
       <section className="help-domains">
@@ -148,21 +192,42 @@ function HelpPage() {
           visibleGroups.map((group) => (
             <div key={group.id} className="help-group">
               <h2 className="help-group__label">{group.label}</h2>
-              {group.sections.map((section) => (
-                <CollapsibleSection
-                  key={section.key}
-                  title={section.title}
-                  open={isOpen(section.key)}
-                  onToggle={() => toggle(section.key)}
-                >
-                  <SummaryHeader
-                    why={section.summary && section.summary.why}
-                    how={section.summary && section.summary.how}
-                    where={section.summary && section.summary.where}
-                    bullets={section.bullets}
-                  />
-                </CollapsibleSection>
-              ))}
+              {group.sections.map((section) => {
+                // DWB-496: only render cross-links whose target section exists.
+                const links = (Array.isArray(section.links) ? section.links : [])
+                  .filter((l) => l && sectionKeys.has(l.to));
+                return (
+                  <CollapsibleSection
+                    key={section.key}
+                    id={sectionDomId(section.key)}
+                    title={section.title}
+                    open={isOpen(section.key)}
+                    onToggle={() => toggle(section.key)}
+                  >
+                    <SummaryHeader
+                      why={section.summary && section.summary.why}
+                      how={section.summary && section.summary.how}
+                      where={section.summary && section.summary.where}
+                      bullets={section.bullets}
+                    />
+                    {links.length > 0 && (
+                      <div className="help-section__links">
+                        <span className="help-section__links-label">See also</span>
+                        {links.map((l) => (
+                          <button
+                            key={l.to}
+                            type="button"
+                            className="help-link"
+                            onClick={() => goToSection(l.to)}
+                          >
+                            {l.label || l.to}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </CollapsibleSection>
+                );
+              })}
             </div>
           ))
         )}

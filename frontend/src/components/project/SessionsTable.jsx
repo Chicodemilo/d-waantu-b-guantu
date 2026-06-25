@@ -3,17 +3,65 @@
 // Created: 2026-06-10
 // Purpose: Full DWB sessions table for a project — every session by default (no slice), scannable rows. Columns: # | Start | End | Duration | Tokens | Tix Made | Tix Done | Summary (headline -> ticket_summary fallback). Aggregate fields are null-guarded for the DWB-346 transition. Rows link to the per-session detail page. Renamed from RecentSessionsStrip after DWB-349 made this the primary content of SessionsPage. Accepts optional `limit` to cap the row count (e.g. when embedding a small recent-only widget elsewhere). Duration column ticks live (every 10s) for any row whose closed_at is null — derived from (now - opened_at) — so the open session matches the elapsed display in the SessionFooter. Closed rows use the frozen total_time_seconds from the API.
 // Caller: SessionsPage.jsx
-// Callees: react (useState, useEffect), react-router-dom (Link), api/sessions (getProjectSessions), styles/sessions.css
-// Data In: projectId prop, optional limit prop (default undefined = all rows)
+// Callees: react (useState, useEffect, useMemo), react-router-dom (Link), api/sessions (getProjectSessions), components/help/FuzzySearch, hooks/useFuzzyFilter, styles/sessions.css
+// Data In: projectId prop, optional limit prop (default undefined = all rows), optional searchable prop (DWB-487: render a fuzzy filter over the list)
 // Data Out: Default export SessionsTable component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-06-25
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { getProjectSessions } from '../../api/sessions';
+import FuzzySearch from '../help/FuzzySearch';
+import useFuzzyFilter from '../../hooks/useFuzzyFilter';
 import '../../styles/sessions.css';
 
 const DASH = '-';
+
+// DWB-487: flatten the DWB-493 summary dict ({ lead, sections: [{ title, bullets }] })
+// into one searchable string. Tolerates null / legacy shapes.
+function summaryText(summary) {
+  if (!summary || typeof summary !== 'object') {
+    return typeof summary === 'string' ? summary : '';
+  }
+  const parts = [summary.lead];
+  if (Array.isArray(summary.sections)) {
+    for (const s of summary.sections) {
+      if (!s) continue;
+      parts.push(s.title);
+      if (Array.isArray(s.bullets)) parts.push(...s.bullets);
+    }
+  }
+  return parts.filter(Boolean).join(' ');
+}
+
+// DWB-487: flatten the DWB-493 keywords array ([{ keyword, weight }]) to its terms.
+// Also accepts a plain string array defensively.
+function keywordText(keywords) {
+  if (!Array.isArray(keywords)) return '';
+  return keywords
+    .map((k) => (typeof k === 'string' ? k : k && k.keyword))
+    .filter(Boolean)
+    .join(' ');
+}
+
+// DWB-487: build the searchable text for one session row. Isolated so binding the
+// DWB-493 list fields (summary dict + weighted keywords) is contained here. Today
+// the list exposes headline + ticket_summary; summary/keywords/ticket_keys are read
+// defensively and contribute the instant 493 adds them to the list payload. Ticket
+// keys are also carried inside summary section bullets ("3 completed: DWB-476 ..."),
+// so a ticket-key query matches through the summary text even without a dedicated
+// list field.
+function sessionSearchText(row) {
+  const parts = [
+    `#${row.id}`,
+    row.headline,
+    row.ticket_summary,
+    summaryText(row.summary),
+    keywordText(row.keywords),
+    Array.isArray(row.ticket_keys) ? row.ticket_keys.join(' ') : row.ticket_keys,
+  ];
+  return parts.filter(Boolean).join(' ');
+}
 
 function parseUtc(iso) {
   if (!iso) return null;
@@ -71,10 +119,18 @@ function whatLabel(row) {
 
 const DURATION_TICK_MS = 10000;
 
-function SessionsTable({ projectId, limit }) {
+function SessionsTable({ projectId, limit, searchable = false }) {
   const [rows, setRows] = useState(null); // null = loading, [] = empty
   const [error, setError] = useState(null);
   const [now, setNow] = useState(() => Date.now());
+  const [query, setQuery] = useState('');
+
+  // DWB-487: live fuzzy filter over the loaded rows (only when searchable).
+  const searchItems = useMemo(
+    () => (rows || []).map((r) => ({ id: r.id, text: sessionSearchText(r) })),
+    [rows]
+  );
+  const { matchedIds } = useFuzzyFilter(searchItems, query);
 
   // 10s tick so the Duration column for open sessions stays live (matches the
   // SessionFooter's elapsed display). Closed rows ignore `now` and keep using
@@ -135,8 +191,23 @@ function SessionsTable({ projectId, limit }) {
     );
   }
 
+  const querying = searchable && query.trim() !== '';
+  const displayed = querying ? rows.filter((r) => matchedIds.has(r.id)) : rows;
+
   return (
     <div className="recent-sessions">
+      {searchable && (
+        <div className="recent-sessions__search">
+          <FuzzySearch
+            value={query}
+            onChange={setQuery}
+            placeholder="filter sessions..."
+            label="search sessions"
+            resultCount={querying ? displayed.length : null}
+            totalCount={rows.length}
+          />
+        </div>
+      )}
       <div className="recent-sessions__row recent-sessions__row--header">
         <span>#</span>
         <span>Start</span>
@@ -147,7 +218,12 @@ function SessionsTable({ projectId, limit }) {
         <span className="recent-sessions__col-num">Tix Done</span>
         <span>Summary</span>
       </div>
-      {rows.map((r) => {
+      {querying && displayed.length === 0 && (
+        <div className="recent-sessions__empty" data-testid="sessions-no-match">
+          No sessions match "{query}".
+        </div>
+      )}
+      {displayed.map((r) => {
         const ticketsMade = r.tickets_made == null ? DASH : r.tickets_made;
         const ticketsDone = r.tickets_completed == null ? DASH : r.tickets_completed;
         // Live duration for open rows (recompute each 10s tick); frozen

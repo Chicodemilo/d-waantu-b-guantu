@@ -25,4 +25,9 @@ export default {
     '/score <agent> prints one agent reputation, sprint delta, influence, and recent ledger.',
     '/leaderboard prints the whole-project table of reputation, sprint delta, and influence.',
   ],
+  // DWB-497: cross-links to related sections.
+  links: [
+    { to: 'tickets', label: 'Tickets' },
+    { to: 'sessions', label: 'Sessions' },
+  ],
 };

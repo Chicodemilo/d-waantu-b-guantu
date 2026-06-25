@@ -25,4 +25,9 @@ export default {
     'Two gates read these runs at sprint close: force_test_run blocks the close unless at least one run exists since the sprint started, and force_test_coverage blocks it if any router lacks a test file. Run tests before closing.',
     'The failures tab maps to the failure taxonomy: seven named manual types (Context Degradation, Spec Drift, Sycophantic Confirmation, Tool Selection Error, Cascading Failure, Silent Failure, Integration Failure) plus the auto-detected rework and test_failure categories.',
   ],
+  // DWB-497: cross-links to related sections.
+  links: [
+    { to: 'system_tests', label: 'System Tests' },
+    { to: 'tickets', label: 'Tickets' },
+  ],
 };

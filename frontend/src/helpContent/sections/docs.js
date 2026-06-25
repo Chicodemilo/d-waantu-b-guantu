@@ -25,4 +25,8 @@ export default {
     'The DWB project has no separate docs: this view points you to system_docs in the Overview nav instead.',
     'A project needs a configured repo path for this view to load.',
   ],
+  // DWB-497: cross-links to related sections.
+  links: [
+    { to: 'system_docs', label: 'System Docs' },
+  ],
 };

@@ -1,12 +1,12 @@
 # Path: app/services/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: Service-layer business logic for DWB session open/close/reopen + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases, DWB-382 ai_classifier added to AI-set, DWB-395 reopen_session)
+# Purpose: Service-layer business logic for DWB session open/close/reopen + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases, DWB-382 ai_classifier added to AI-set, DWB-395 reopen_session, DWB-484 close-time write-up synthesis: headline/summary/keywords)
 # Caller: app/services/idle_sweeper.py (sweep loop), app/routers/dwb_sessions.py (open + close + reopen endpoints), app/services/hook_tracking.py (grace-window resurrect)
-# Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.database.SessionLocal
+# Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.models.entity_keyword, app.models.ticket, app.models.comment, app.models.inter_agent_message, app.services.dwb_session_rollup, app.services.keyword_extraction, app.services.session_synthesizer, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-06-19 (DWB-411: emit session_opened / session_closed activity events)
+# Last Modified: 2026-06-25 (DWB-484: synthesize + persist headline/summary/keywords on every close path)
 
 """DWB session business logic.
 
@@ -43,21 +43,35 @@ elapsed since open.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Iterable
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.models.comment import Comment
 from app.models.dwb_session import (
     DwbCloseMethod,
     DwbCloseReason,
     DwbOpenMethod,
     DwbSession,
 )
+from app.models.entity_keyword import EntityKeyword
 from app.models.hook_session import HookSession
+from app.models.inter_agent_message import InterAgentMessage
+from app.models.ticket import Ticket
 from app.models.tracking_log import TrackingLog
+from app.services import dwb_session_rollup as rollup_svc
 from app.services.activity_log import log_activity
+from app.services.keyword_extraction import extract_keywords
+from app.services.session_synthesizer import synthesize_session_summary
+
+logger = logging.getLogger(__name__)
+
+# DWB-484: keywords mined at session close are tagged with this source label
+# on their EntityKeyword rows (entity_type='dwb_session').
+_KEYWORD_SOURCE = "session_synth"
 
 
 def _utcnow() -> datetime:
@@ -257,6 +271,202 @@ def _rollup_tokens(db: Session, session: DwbSession) -> int:
     return int(total or 0)
 
 
+# ---------------------------------------------------------------------------
+# DWB-484: session write-up synthesis (headline + summary + keywords) on close
+# ---------------------------------------------------------------------------
+
+
+def _gather_corpus(
+    db: Session,
+    session: DwbSession,
+    win_start: datetime,
+    win_end: datetime,
+    by_role: list[dict],
+    by_ticket: list[dict],
+) -> list[str]:
+    """Assemble the keyword-extraction corpus for a session window (DWB-482/484).
+
+    AGENT-PRODUCED TEXT ONLY (HARD PRIVACY RULE, DWB-351): ticket keys + titles +
+    descriptions, inter-agent comms (body + summary), ticket comments, and
+    agent/role names. NEVER user-typed prompt text - DWB persists none, and this
+    gathering layer must not introduce any.
+    """
+    texts: list[str] = []
+
+    # Tickets created OR completed in the window, plus any worked (by_ticket).
+    ticket_ids = {t["ticket_id"] for t in by_ticket if t.get("ticket_id")}
+    window_tickets = db.execute(
+        select(Ticket)
+        .where(Ticket.project_id == session.project_id)
+        .where(
+            or_(
+                (Ticket.created_at >= win_start) & (Ticket.created_at <= win_end),
+                (Ticket.completed_at.isnot(None))
+                & (Ticket.completed_at >= win_start)
+                & (Ticket.completed_at <= win_end),
+            )
+        )
+    ).scalars().all()
+    seen_ids: set[int] = set()
+    for t in window_tickets:
+        seen_ids.add(t.id)
+        # ticket_key (DWB-900) is kept verbatim by the extractor regardless of
+        # frequency, so a session always yields at least its tickets as keywords.
+        if t.ticket_key:
+            texts.append(t.ticket_key)
+        if t.title:
+            texts.append(t.title)
+        if t.description:
+            texts.append(t.description)
+    # Worked tickets not already pulled above (touched but neither created nor
+    # completed in the window).
+    missing = ticket_ids - seen_ids
+    if missing:
+        for t in db.execute(
+            select(Ticket).where(Ticket.id.in_(missing))
+        ).scalars().all():
+            if t.ticket_key:
+                texts.append(t.ticket_key)
+            if t.title:
+                texts.append(t.title)
+            if t.description:
+                texts.append(t.description)
+
+    # Agent + role names (system/agent vocabulary, not user text).
+    for r in by_role:
+        if r.get("agent_name"):
+            texts.append(r["agent_name"])
+        if r.get("role"):
+            texts.append(r["role"])
+
+    # Inter-agent comms linked to this DWB session (body + summary).
+    for m in db.execute(
+        select(InterAgentMessage).where(
+            InterAgentMessage.dwb_session_id == session.id
+        )
+    ).scalars().all():
+        if m.body:
+            texts.append(m.body)
+        if m.summary:
+            texts.append(m.summary)
+
+    # Ticket comments authored in the window on tickets touched this session.
+    all_ticket_ids = seen_ids | ticket_ids
+    if all_ticket_ids:
+        for c in db.execute(
+            select(Comment)
+            .where(Comment.ticket_id.in_(all_ticket_ids))
+            .where(Comment.created_at >= win_start)
+            .where(Comment.created_at <= win_end)
+        ).scalars().all():
+            if c.body:
+                texts.append(c.body)
+
+    return texts
+
+
+def _assemble_rollup(
+    db: Session,
+    session: DwbSession,
+    *,
+    now: datetime,
+    supplied_headline: str | None,
+) -> dict:
+    """Build the synthesizer's rollup dict (DWB-484) from the read-only rollup
+    helpers + a privacy-safe corpus + the DWB-482 pure keyword extractor. Pure
+    data assembly; the synthesizer itself (DWB-483) does the distillation.
+
+    Corpus gathering (``_gather_corpus``) is agent-produced text only (DWB-351):
+    ticket keys/titles/descriptions, session-linked comms, in-window comments,
+    agent/role names - never user prompt text."""
+    win_start, win_end = rollup_svc.compute_window(session, now=now)
+    by_role = rollup_svc.compute_by_role(db, session, now=now)
+    by_ticket = rollup_svc.compute_by_ticket(db, session, now=now)
+    aggs = rollup_svc.compute_list_aggregates(db, session, now=now)
+
+    # Completed-in-window tickets with key+title for named summary bullets.
+    completed_tickets = [
+        {"ticket_key": key, "title": title}
+        for key, title in db.execute(
+            select(Ticket.ticket_key, Ticket.title)
+            .where(Ticket.project_id == session.project_id)
+            .where(Ticket.completed_at.isnot(None))
+            .where(Ticket.completed_at >= win_start)
+            .where(Ticket.completed_at <= win_end)
+            .order_by(Ticket.completed_at.asc())
+        ).all()
+    ]
+
+    corpus = _gather_corpus(db, session, win_start, win_end, by_role, by_ticket)
+    keywords = [(kw.keyword, kw.weight) for kw in extract_keywords(corpus)]
+
+    return {
+        "headline": supplied_headline,
+        "by_role": by_role,
+        "by_ticket": by_ticket,
+        "tickets_made": aggs.get("tickets_made", 0),
+        "tickets_completed": aggs.get("tickets_completed", 0),
+        "agents_active": aggs.get("agents_active", 0),
+        "ticket_summary": aggs.get("ticket_summary"),
+        "completed_tickets": completed_tickets,
+        "total_tokens": int(session.total_tokens or 0),
+        "total_time_seconds": int(session.total_time_seconds or 0),
+        "keywords": keywords,
+    }
+
+
+def _apply_synthesis(
+    db: Session, session: DwbSession, *, now: datetime
+) -> None:
+    """DWB-484: synthesize headline/summary/keywords and persist them onto the
+    closing session. Keeps a supplied headline, synthesizes when null (the
+    null-headline fix). Idempotent on reopen/re-close: existing session keyword
+    rows are cleared before reinsert. flush-only; the caller owns the commit.
+
+    Guarded: a synthesis failure must NEVER block a close. The read/compute
+    phase is isolated in a try that returns early on error WITHOUT writing
+    anything, so the close stamps (already set by the caller) are never rolled
+    back. We deliberately do NOT call db.rollback() here - that would discard
+    the in-flight close on the shared transaction."""
+    # Read/compute phase - pure reads + the pure synthesizer. If anything here
+    # throws, nothing has been written yet, so the close proceeds untouched.
+    try:
+        rollup = _assemble_rollup(
+            db, session, now=now, supplied_headline=session.headline
+        )
+        result = synthesize_session_summary(rollup)
+    except Exception:
+        logger.warning(
+            "session synthesis failed for DWB session %s; closing without it",
+            session.id, exc_info=True,
+        )
+        return
+
+    # Write phase - trivial ORM ops on the same uncommitted transaction.
+    # Keep a supplied headline; synthesize only when none was set.
+    if session.headline is None:
+        session.headline = result["headline"]
+    session.summary = result["summary"]
+
+    # Idempotent: drop any prior keyword rows for this session before
+    # reinserting (covers reopen -> re-close recompute).
+    db.execute(
+        EntityKeyword.__table__.delete().where(
+            (EntityKeyword.entity_type == "dwb_session")
+            & (EntityKeyword.entity_id == session.id)
+        )
+    )
+    for kw in result["keywords"]:
+        db.add(EntityKeyword(
+            entity_type="dwb_session",
+            entity_id=session.id,
+            keyword=kw["keyword"],
+            weight=kw["weight"],
+            source=_KEYWORD_SOURCE,
+        ))
+    db.flush()
+
+
 def close_session(
     db: Session,
     session: DwbSession,
@@ -276,9 +486,11 @@ def close_session(
       - closed_at = now (default utcnow)
       - total_tokens = sum of linked hook_sessions.total_tokens
       - total_time_seconds = (closed_at - opened_at).total_seconds()
-      - headline (DWB-346) = passthrough; persisted when non-None. The idle
-        sweeper never supplies one (machine-driven close has nothing to
-        say); only the explicit close endpoint does.
+      - headline (DWB-346) = passthrough; persisted when non-None. When the
+        caller supplies none (regex/slash/idle closes), DWB-484 synthesizes one
+        from the rollup so the session is never left blank.
+      - summary (DWB-484) = structured write-up JSON, synthesized from the
+        rollup; weighted keyword rows (EntityKeyword) are inserted alongside.
 
     DWB-351 privacy guard: when ``close_method`` is ``ai_confident``,
     ``ai_asked``, or ``ai_classifier`` (DWB-382) the ``close_phrase`` is
@@ -311,6 +523,15 @@ def close_session(
         0, int((closed_at - session.opened_at).total_seconds())
     )
     db.flush()
+
+    # DWB-484: synthesize the write-up over the session rollup and persist it -
+    # headline (only when the caller supplied none -> fixes the null-headline
+    # bug on regex/slash/idle closes), structured `summary` JSON, and weighted
+    # EntityKeyword rows. Runs on EVERY close path because close_session is the
+    # single funnel (the close endpoint and sweep_idle_sessions both route here).
+    # Guarded internally so a synthesis failure never blocks the close, and
+    # placed before the feed event so session_closed carries the final headline.
+    _apply_synthesis(db, session, now=closed_at)
 
     # DWB-411: semantic session_closed event. Emitted only on a real close
     # (the already-closed early-return above skips it, so no double-emit on an

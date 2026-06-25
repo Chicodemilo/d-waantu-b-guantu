@@ -1,16 +1,16 @@
 # Path: app/schemas/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: Pydantic schemas for DWB session CRUD + lifecycle + rollup endpoints (DWB-335, DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket)
+# Purpose: Pydantic schemas for DWB session CRUD + lifecycle + rollup endpoints (DWB-335, DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-481 structured summary JSON, DWB-493 summary+keywords on list/detail read)
 # Caller: app/routers/dwb_sessions.py
 # Callees: pydantic
 # Data In: JSON request body
-# Data Out: DwbSessionCreate, DwbSessionUpdate, DwbSessionRead, DwbSessionOpenRequest, DwbSessionCloseRequest, DwbSessionOpenConflict, DwbSessionListItem, DwbSessionByRoleEntry, DwbSessionByTicketEntry, DwbSessionDetail
-# Last Modified: 2026-06-10
+# Data Out: DwbSessionCreate, DwbSessionUpdate, DwbSessionRead, DwbSessionOpenRequest, DwbSessionCloseRequest, DwbSessionOpenConflict, DwbSessionKeyword, DwbSessionListItem, DwbSessionByRoleEntry, DwbSessionByTicketEntry, DwbSessionDetail
+# Last Modified: 2026-06-25 (DWB-493: expose summary + weighted keywords on list + detail reads)
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.dwb_session import DwbCloseMethod, DwbCloseReason, DwbOpenMethod
 
@@ -39,6 +39,8 @@ class DwbSessionUpdate(BaseModel):
     close_reason: DwbCloseReason | None = None
     total_tokens: int | None = None
     total_time_seconds: int | None = None
+    # DWB-481: structured bulleted write-up (free-form JSON, synthesizer-owned).
+    summary: dict | list | None = None
 
 
 class DwbSessionRead(BaseModel):
@@ -57,6 +59,8 @@ class DwbSessionRead(BaseModel):
     total_time_seconds: int
     # DWB-346: user-supplied summary set on close. None when never set.
     headline: str | None = None
+    # DWB-481: structured bulleted write-up (free-form JSON). None until synthesized.
+    summary: dict | list | None = None
     is_open: int | None
     created_at: datetime
     updated_at: datetime
@@ -131,6 +135,18 @@ class DwbSessionOpenConflict(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class DwbSessionKeyword(BaseModel):
+    """One weighted keyword for a session (DWB-493), mined by the close-time
+    synthesizer (DWB-484) and stored in entity_keywords. The list endpoints
+    surface these sorted by weight descending so the FE renders a tag row
+    without its own sort. `weight` is the per-session occurrence count."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    keyword: str
+    weight: int
+
+
 class DwbSessionListItem(BaseModel):
     """One row in GET /api/projects/{id}/sessions. Status is "open" when
     closed_at IS NULL, else "closed".
@@ -169,6 +185,10 @@ class DwbSessionListItem(BaseModel):
     # DWB-353: ad_hoc overhead bucket (worker tokens without ticket).
     ad_hoc_overhead_tokens: int = 0
     ad_hoc_overhead_seconds: int = 0
+    # DWB-493: structured write-up + weighted keywords surfaced on the list so
+    # the dashboard can fuzzy-match / preview without a per-row detail fetch.
+    summary: dict | list | None = None
+    keywords: list[DwbSessionKeyword] = Field(default_factory=list)
 
 
 class DwbSessionByRoleEntry(BaseModel):
@@ -212,6 +232,10 @@ class DwbSessionDetail(BaseModel):
     close_reason: DwbCloseReason | None
     # DWB-346: user-supplied headline mirrored from the row.
     headline: str | None = None
+    # DWB-481: structured bulleted write-up mirrored from the row (None until synthesized).
+    summary: dict | list | None = None
+    # DWB-493: weighted keywords for this session, sorted weight desc.
+    keywords: list[DwbSessionKeyword] = Field(default_factory=list)
     # status / live partials flag
     status: str
     live: bool

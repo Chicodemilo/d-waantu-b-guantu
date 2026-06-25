@@ -1,17 +1,18 @@
 # Path: app/models/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone])
+# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone], DWB-481 structured summary JSON column)
 # Caller: app/services/dwb_session.py (DWB-337), app/routers/dwb_sessions.py (DWB-338)
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: DwbSession, DwbOpenMethod, DwbCloseMethod, DwbCloseReason
-# Last Modified: 2026-06-11
+# Last Modified: 2026-06-25
 
 import enum
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Computed,
     DateTime,
@@ -120,6 +121,13 @@ class DwbSession(Base):
     # the dashboard list row stays one line; longer text is the detail view's
     # job, not the headline's.
     headline: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    # DWB-481: structured, bulleted session write-up produced by the synthesizer
+    # (DWB-483). Distinct from `headline` (the <=80-char one-line summary): this
+    # is free-form JSON (the synthesizer owns its exact shape, e.g. a dict of
+    # bulleted sections or a list of bullet strings). Nullable; only set once a
+    # session has been synthesized. Substrate only this sprint - no reader yet.
+    summary: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
 
     # Generated single-active marker: 1 when closed_at IS NULL, NULL when
     # closed_at IS NOT NULL. The (project_id, is_open) UNIQUE index above

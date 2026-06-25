@@ -224,6 +224,48 @@
   padding: 12px 16px;
 }
 
+/* DWB-487: fuzzy filter row above the sessions table. */
+.recent-sessions__search {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* DWB-486: session write-up (summary JSON) + keyword tags. */
+.session-summary {
+  margin: 0 0 20px;
+}
+
+.session-summary--empty {
+  color: var(--gray-light);
+  font-style: italic;
+  font-size: 13px;
+  padding: 10px 0;
+}
+
+.session-summary__lead {
+  color: var(--green-bright);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.session-summary__keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+.session-summary__tag {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-alt);
+  color: var(--blue);
+  font-size: 11px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
 .recent-sessions__row {
   display: grid;
   grid-template-columns: 50px 1.1fr 1.1fr 90px 90px 70px 70px 2fr;

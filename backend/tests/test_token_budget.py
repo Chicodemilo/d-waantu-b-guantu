@@ -180,7 +180,8 @@ class TestCeilingRebalance:
     """Post-DWB-331 ceilings (2026-06-05): playbook 2500→4000,
     project_rules 1000→3000, claude_md 1500→2000, architecture 6000→7500,
     readme 2500→3500, initial 1500→2000. agent_def stays at 1500. memory and
-    handoff caps unchanged.
+    handoff caps unchanged. DWB-399: project_rules 3000→4000. DWB-490:
+    architecture 7500→8500 (doc grew with help-center + session-write-up work).
 
     Asserts caps surface on the budget endpoint. If a future ticket tunes
     them again, the source of truth (_TOKEN_CEILINGS in routers/projects.py)
@@ -206,14 +207,18 @@ class TestCeilingRebalance:
         )
         assert rules["ceiling"] == 4000
 
-    def test_architecture_ceiling_is_7500(self, client, make_project, tmp_path):
+    def test_architecture_ceiling_is_8500(self, client, make_project, tmp_path):
+        # DWB-490: raised 7500 -> 8500. ARCHITECTURE.md hit the cap twice in one
+        # session (help-center + session-write-up features); the doc is
+        # legitimately growing, so the ceiling encodes reality rather than
+        # forcing lossy condensing of load-bearing reference detail.
         repo = _setup_repo(tmp_path, "DR3", agent_names=[])
         proj = make_project(prefix="DR3", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         arch = next(
             f for f in data["files"] if f["category"] == "architecture"
         )
-        assert arch["ceiling"] == 7500
+        assert arch["ceiling"] == 8500
 
     def test_readme_ceiling_is_3500(self, client, make_project, tmp_path):
         repo = _setup_repo(tmp_path, "DR4", agent_names=[])

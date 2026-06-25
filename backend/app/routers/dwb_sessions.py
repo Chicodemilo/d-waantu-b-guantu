@@ -1,12 +1,12 @@
 # Path: app/routers/dwb_sessions.py
 # File: dwb_sessions.py
 # Created: 2026-06-09
-# Purpose: REST endpoints for DWB session open/close/reopen + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-395 reopen)
+# Purpose: REST endpoints for DWB session open/close/reopen + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-395 reopen, DWB-493 summary+keywords on list/detail)
 # Caller: app/main.py
-# Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/schemas/dwb_session.py
+# Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/schemas/dwb_session.py, app/models/entity_keyword.py
 # Data In: HTTP POST JSON bodies, GET query/path params
 # Data Out: DwbSessionRead, DwbSessionListItem[], DwbSessionDetail (or 404/409)
-# Last Modified: 2026-06-17
+# Last Modified: 2026-06-25 (DWB-493: expose summary + batched weighted keywords on list + detail)
 
 """HTTP layer for DWB session lifecycle.
 
@@ -36,11 +36,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.dwb_session import DwbCloseMethod, DwbSession
+from app.models.entity_keyword import EntityKeyword
 from app.services import agent_consolidation as consolidation_svc
 from app.models.project import Project
 from app.schemas.dwb_session import (
     DwbSessionCloseRequest,
     DwbSessionDetail,
+    DwbSessionKeyword,
     DwbSessionListItem,
     DwbSessionOpenConflict,
     DwbSessionOpenRequest,
@@ -50,6 +52,30 @@ from app.services import dwb_session as svc
 from app.services import dwb_session_rollup as rollup
 
 router = APIRouter(prefix="/api/sessions", tags=["dwb_sessions"])
+
+
+def _keywords_by_session(
+    db: Session, session_ids: list[int]
+) -> dict[int, list[DwbSessionKeyword]]:
+    """Batch-fetch session keywords (DWB-493): ONE query over entity_keywords
+    for all given session ids, grouped in Python and sorted weight desc (then
+    keyword asc for a stable tie-break). Avoids an N+1 across a sessions page.
+    Returns {session_id: [DwbSessionKeyword, ...]}; ids with no rows are absent.
+    """
+    if not session_ids:
+        return {}
+    rows = db.execute(
+        select(EntityKeyword)
+        .where(EntityKeyword.entity_type == "dwb_session")
+        .where(EntityKeyword.entity_id.in_(session_ids))
+        .order_by(desc(EntityKeyword.weight), EntityKeyword.keyword.asc())
+    ).scalars().all()
+    out: dict[int, list[DwbSessionKeyword]] = {}
+    for r in rows:
+        out.setdefault(r.entity_id, []).append(
+            DwbSessionKeyword(keyword=r.keyword, weight=r.weight)
+        )
+    return out
 
 # Second router exposes the project-scoped list under /api/projects/{id}/sessions
 # without polluting projects.py with DWB-session-specific logic.
@@ -324,6 +350,9 @@ def list_project_sessions(
         ).scalars()
     )
 
+    # DWB-493: batch-fetch keywords for the whole page in one query (no N+1).
+    keywords_map = _keywords_by_session(db, [r.id for r in rows])
+
     items: list[DwbSessionListItem] = []
     for r in rows:
         agg = rollup.compute_list_aggregates(db, r)
@@ -345,6 +374,8 @@ def list_project_sessions(
                 ticket_summary=agg["ticket_summary"],
                 ad_hoc_overhead_tokens=ad_hoc_tokens,
                 ad_hoc_overhead_seconds=ad_hoc_seconds,
+                summary=r.summary,
+                keywords=keywords_map.get(r.id, []),
             )
         )
     return items
@@ -377,6 +408,8 @@ def get_dwb_session_detail(
     by_ticket = rollup.compute_by_ticket(db, row)
     tl_overhead, pm_overhead = rollup.compute_overhead_deltas(db, row)
     ad_hoc_tokens, ad_hoc_seconds = rollup.compute_ad_hoc_bucket(db, row)
+    # DWB-493: weighted keywords for this one session, sorted weight desc.
+    keywords = _keywords_by_session(db, [row.id]).get(row.id, [])
 
     if is_open:
         live_tokens, live_time = rollup.compute_live_totals(db, row)
@@ -397,6 +430,8 @@ def get_dwb_session_detail(
         close_method=row.close_method,
         close_reason=row.close_reason,
         headline=row.headline,
+        summary=row.summary,
+        keywords=keywords,
         status="open" if is_open else "closed",
         live=is_open,
         total_tokens=total_tokens,

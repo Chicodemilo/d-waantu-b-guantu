@@ -30,7 +30,11 @@ TOKEN_CEILINGS = {
     "claude_md": 2000,
     "project_rules": 4000,
     "handoff": 1500,
-    "architecture": 7500,
+    # DWB-490: raised 7500 -> 8500. ARCHITECTURE.md hit the cap twice in one
+    # session (help-center + session-write-up features); per the repeated-pressure
+    # rule the doc is legitimately growing, so encode reality rather than
+    # lossily condense load-bearing reference detail.
+    "architecture": 8500,
     "readme": 3500,
     "initial": 2000,
     "memory_identity": 600,

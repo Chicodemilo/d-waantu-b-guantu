@@ -56,6 +56,9 @@ export default {
     'Concrete thing you can do here.',
     'Another action or behavior worth knowing.',
   ],
+  links: [                     // OPTIONAL (DWB-496); cross-links to related sections
+    { to: 'jira', label: 'Jira integration' },
+  ],
 };
 ```
 
@@ -66,6 +69,29 @@ Rules:
   not background. Plain strings. No icons, no em-dashes.
 - Be accurate to the real UI: open the page you are documenting and describe what
   is actually there.
+
+## Cross-links between sections (DWB-496)
+
+A section may declare an optional `links` array to point readers at related
+sections. This is a **structured** field, not an inline string token, and it is
+fully backward-compatible: `bullets` stay plain strings, and `links` is optional.
+
+```js
+links: [
+  { to: 'tickets', label: 'Tickets' },   // `to` MUST be a canonical section key
+  { to: 'jira', label: 'Jira integration' },
+]
+```
+
+- `to` (REQUIRED): the canonical `key` of the target section.
+- `label` (REQUIRED): the clickable text shown to the reader.
+- Rendered as a "See also" row at the bottom of the section body. Clicking a link
+  force-opens the target section (reusing the same force-open plumbing as fuzzy
+  search) AND scrolls it into view. Any active search filter is cleared first so
+  the target is reachable.
+- A link whose `to` does not resolve to an existing section is silently skipped,
+  so it is safe to author a link before its target file lands.
+- Keep cross-links relevant and few per section. Plain text labels, no icons.
 
 ## Canonical section keys (render order mirrors the sidebar nav)
 

@@ -23,4 +23,8 @@ export default {
     'The Jira page is a read-only snapshot with fuzzy search and sortable columns; the sync button pulls the latest Jira state on demand.',
     'A ticket can be unlinked on its own without disabling Jira for the whole project.',
   ],
+  // DWB-497: cross-links to related sections.
+  links: [
+    { to: 'tickets', label: 'Tickets' },
+  ],
 };

@@ -9,7 +9,7 @@
 // Last Modified: 2026-06-10
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, act, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../../../api/sessions', () => ({
@@ -184,6 +184,89 @@ describe('SessionsTable', () => {
     // Open row: now 40s. Closed row: still 30 min (frozen).
     expect(openRowEl.textContent).toMatch(/40s/);
     expect(closedRowEl.textContent).toMatch(/30m/);
+  });
+
+  // DWB-487: fuzzy search over the sessions list.
+  it('renders no search box unless searchable is set', async () => {
+    getProjectSessions.mockResolvedValue([row({ id: 1, headline: 'A' })]);
+    render(wrap(<SessionsTable projectId={1} />));
+    await waitFor(() => expect(screen.getByText('#1')).toBeInTheDocument());
+    expect(screen.queryByLabelText('search sessions')).toBeNull();
+  });
+
+  it('filters the list live by headline when searchable', async () => {
+    getProjectSessions.mockResolvedValue([
+      row({ id: 1, opened_at: '2026-06-10T10:00:00', headline: 'Inter-agent comms capture' }),
+      row({ id: 2, opened_at: '2026-06-09T10:00:00', headline: 'Scoring leaderboard work' }),
+    ]);
+    render(wrap(<SessionsTable projectId={1} searchable />));
+    await waitFor(() => expect(screen.getAllByTestId('recent-session-row')).toHaveLength(2));
+    fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'comms' } });
+    expect(screen.getByText('#1')).toBeInTheDocument();
+    expect(screen.queryByText('#2')).toBeNull();
+  });
+
+  it('filters by ticket_summary as well as headline', async () => {
+    getProjectSessions.mockResolvedValue([
+      row({ id: 1, opened_at: '2026-06-10T10:00:00', headline: null, ticket_summary: 'Help Center build' }),
+      row({ id: 2, opened_at: '2026-06-09T10:00:00', headline: 'Something else' }),
+    ]);
+    render(wrap(<SessionsTable projectId={1} searchable />));
+    await waitFor(() => expect(screen.getAllByTestId('recent-session-row')).toHaveLength(2));
+    fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'help center' } });
+    expect(screen.getByText('Help Center build')).toBeInTheDocument();
+    expect(screen.queryByText('#2')).toBeNull();
+  });
+
+  it('filters by DWB-493 weighted keywords once the list exposes them', async () => {
+    getProjectSessions.mockResolvedValue([
+      row({ id: 1, opened_at: '2026-06-10T10:00:00', headline: 'Session A', keywords: [{ keyword: 'migration', weight: 40 }, { keyword: 'alembic', weight: 12 }] }),
+      row({ id: 2, opened_at: '2026-06-09T10:00:00', headline: 'Session B', keywords: [{ keyword: 'frontend', weight: 9 }] }),
+    ]);
+    render(wrap(<SessionsTable projectId={1} searchable />));
+    await waitFor(() => expect(screen.getAllByTestId('recent-session-row')).toHaveLength(2));
+    fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'alembic' } });
+    expect(screen.getByText('Session A')).toBeInTheDocument();
+    expect(screen.queryByText('Session B')).toBeNull();
+  });
+
+  it('filters by DWB-493 summary dict text (lead + section bullets, incl. ticket keys)', async () => {
+    getProjectSessions.mockResolvedValue([
+      row({
+        id: 1,
+        opened_at: '2026-06-10T10:00:00',
+        headline: 'Session A',
+        summary: { lead: 'Shipped the session work-up', sections: [{ title: 'Tickets', bullets: ['3 completed: DWB-486 detail page'] }] },
+      }),
+      row({ id: 2, opened_at: '2026-06-09T10:00:00', headline: 'Session B', summary: { lead: 'Unrelated', sections: [] } }),
+    ]);
+    render(wrap(<SessionsTable projectId={1} searchable />));
+    await waitFor(() => expect(screen.getAllByTestId('recent-session-row')).toHaveLength(2));
+    // ticket key embedded in a summary section bullet
+    fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'DWB-486' } });
+    expect(screen.getByText('Session A')).toBeInTheDocument();
+    expect(screen.queryByText('Session B')).toBeNull();
+  });
+
+  it('filters by a dedicated ticket_keys list field if present', async () => {
+    getProjectSessions.mockResolvedValue([
+      row({ id: 1, opened_at: '2026-06-10T10:00:00', headline: 'Session A', ticket_keys: ['DWB-481'] }),
+      row({ id: 2, opened_at: '2026-06-09T10:00:00', headline: 'Session B', ticket_keys: ['DWB-487'] }),
+    ]);
+    render(wrap(<SessionsTable projectId={1} searchable />));
+    await waitFor(() => expect(screen.getAllByTestId('recent-session-row')).toHaveLength(2));
+    fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'DWB-487' } });
+    expect(screen.getByText('Session B')).toBeInTheDocument();
+    expect(screen.queryByText('Session A')).toBeNull();
+  });
+
+  it('shows a no-match message when the query matches nothing', async () => {
+    getProjectSessions.mockResolvedValue([row({ id: 1, headline: 'Only session' })]);
+    render(wrap(<SessionsTable projectId={1} searchable />));
+    await waitFor(() => expect(screen.getByText('#1')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('search sessions'), { target: { value: 'zzzzzz' } });
+    expect(screen.getByTestId('sessions-no-match')).toBeInTheDocument();
+    expect(screen.queryByText('#1')).toBeNull();
   });
 
   it('rows are anchor links to /projects/:pid/sessions/:sid', async () => {

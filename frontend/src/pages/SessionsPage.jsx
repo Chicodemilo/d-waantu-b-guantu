@@ -6,7 +6,7 @@
 // Callees: react-router-dom (useParams, Link), store/useStore, ../components/project/SessionsTable, ../styles/dashboard.css, ../styles/sessions.css
 // Data In: Route param id (project id), project from store
 // Data Out: Default export SessionsPage component
-// Last Modified: 2026-06-19 (de-ceremony: session detection = regex + slash + idle sweeper; AI layer retired)
+// Last Modified: 2026-06-25 (DWB-487: SessionsTable rendered with searchable fuzzy filter)
 
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
@@ -71,7 +71,7 @@ function SessionsPage() {
         </details>
       </div>
 
-      <SessionsTable projectId={id} />
+      <SessionsTable projectId={id} searchable />
     </div>
   );
 }
