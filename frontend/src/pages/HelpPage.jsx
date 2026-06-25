@@ -7,16 +7,19 @@
 //          OPEN. Below, domain CollapsibleSections mirror the sidebar nav and are
 //          driven by helpContent/index.js, so content lands incrementally. A
 //          FuzzySearch filters the domain sections live and force-opens matches.
-//          Sections may declare cross-links ({to, label}) that force-open AND scroll
-//          a target section into view (DWB-496), reusing the same force-open plumbing.
+//          Sections may declare cross-links: a section link ({to, label}) force-opens
+//          AND scrolls a target section into view (DWB-496), reusing the same force-open
+//          plumbing; a portal link ({route, label}) SPA-navigates to a real page via
+//          React Router (DWB-501, global sections only).
 // Caller: App.jsx route /help
-// Callees: react (useState, useMemo, useEffect), components/help/FuzzySearch, CollapsibleSection,
+// Callees: react (useState, useMemo, useEffect), react-router-dom (Link), components/help/FuzzySearch, CollapsibleSection,
 //          SummaryHeader; hooks/useFuzzyFilter; helpContent (helpGroups, quickStart)
 // Data In: static help content from helpContent/index.js
 // Data Out: default export HelpPage component
 // Last Modified: 2026-06-25
 
 import { useState, useMemo, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import FuzzySearch from '../components/help/FuzzySearch';
 import CollapsibleSection from '../components/help/CollapsibleSection';
 import SummaryHeader from '../components/help/SummaryHeader';
@@ -193,9 +196,10 @@ function HelpPage() {
             <div key={group.id} className="help-group">
               <h2 className="help-group__label">{group.label}</h2>
               {group.sections.map((section) => {
-                // DWB-496: only render cross-links whose target section exists.
+                // Keep a link only if it resolves: a section cross-link (DWB-496)
+                // whose target exists, OR a portal link (DWB-501) with a route.
                 const links = (Array.isArray(section.links) ? section.links : [])
-                  .filter((l) => l && sectionKeys.has(l.to));
+                  .filter((l) => l && (l.route || sectionKeys.has(l.to)));
                 return (
                   <CollapsibleSection
                     key={section.key}
@@ -213,16 +217,28 @@ function HelpPage() {
                     {links.length > 0 && (
                       <div className="help-section__links">
                         <span className="help-section__links-label">See also</span>
-                        {links.map((l) => (
-                          <button
-                            key={l.to}
-                            type="button"
-                            className="help-link"
-                            onClick={() => goToSection(l.to)}
-                          >
-                            {l.label || l.to}
-                          </button>
-                        ))}
+                        {links.map((l) =>
+                          l.route ? (
+                            // DWB-501: portal link - SPA navigate to a real page.
+                            <Link
+                              key={`route:${l.route}`}
+                              to={l.route}
+                              className="help-link help-link--portal"
+                            >
+                              {l.label || l.route}
+                            </Link>
+                          ) : (
+                            // DWB-496: section cross-link - force-open + scroll.
+                            <button
+                              key={`section:${l.to}`}
+                              type="button"
+                              className="help-link"
+                              onClick={() => goToSection(l.to)}
+                            >
+                              {l.label || l.to}
+                            </button>
+                          )
+                        )}
                       </div>
                     )}
                   </CollapsibleSection>

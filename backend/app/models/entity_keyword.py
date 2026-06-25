@@ -29,9 +29,12 @@ class EntityKeyword(Base):
     This sprint only `entity_type='dwb_session'` rows are written, but ticket /
     epic / agent keyword sets can land later with no migration.
 
-    `weight` is the occurrence count of `keyword` within that entity's corpus
-    (per-session frequency for sessions), used downstream for ranking. `source`
-    is a free-form label for where the term was mined from (e.g. 'extraction').
+    `weight` is an integer ranking weight (higher = more prominent). Its exact
+    meaning depends on the writer: a pure-TF caller stores the raw occurrence
+    count, while the dwb_session close path stores a TF-IDF RELEVANCE SCORE
+    (DWB-500) so terms common across many sessions sink and session-distinctive
+    terms rise. Either way it is an int >= 1 and consumers sort by it desc.
+    `source` is a free-form label for where the term was mined from.
 
     Indexes (DWB-481): a single-column index on `keyword` for term lookups
     across entities, and a composite index on (entity_type, entity_id) so all
@@ -48,7 +51,8 @@ class EntityKeyword(Base):
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
     entity_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     keyword: Mapped[str] = mapped_column(String(255), nullable=False)
-    # Per-entity occurrence count (per-session frequency for dwb_session rows).
+    # Int ranking weight (>=1): raw TF count for pure-TF callers, TF-IDF
+    # relevance score for the dwb_session close path (DWB-500).
     weight: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # Free-form label for the mining source (e.g. 'extraction').
     source: Mapped[str] = mapped_column(String(64), nullable=False)

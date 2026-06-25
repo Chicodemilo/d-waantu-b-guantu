@@ -7,7 +7,7 @@ from urllib import request, error
 
 cwd = os.getcwd()
 try:
-    with request.urlopen("http://localhost:8000/api/projects", timeout=2) as r:
+    with request.urlopen("http://localhost:8000/api/projects", timeout=10) as r:
         projects = json.load(r)
 except (error.URLError, TimeoutError) as e:
     print(f"DWB API unreachable: {e}")
@@ -35,7 +35,7 @@ req = request.Request(
     method="POST",
 )
 try:
-    with request.urlopen(req, timeout=2) as r:
+    with request.urlopen(req, timeout=10) as r:
         result = json.load(r)
     print(f"Opened DWB session {result['id']} for {project['prefix']} (method=slash)")
 except error.HTTPError as e:

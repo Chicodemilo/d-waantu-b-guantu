@@ -40,7 +40,11 @@ DEFAULT_SESSION_IDS: tuple[int, ...] = (32, 36, 38)
 
 
 def _select_targets(
-    db: Session, *, session_ids: list[int] | None, all_null_headline: bool
+    db: Session,
+    *,
+    session_ids: list[int] | None,
+    all_null_headline: bool,
+    force: bool = False,
 ) -> tuple[list[DwbSession], list[dict]]:
     """Resolve which sessions to backfill.
 
@@ -48,6 +52,12 @@ def _select_targets(
     target is a CLOSED session whose headline IS NULL. For an explicit id list
     we report why any requested id was skipped; for --all-null-headline we just
     sweep every closed null-headline session.
+
+    `force` (DWB-499 re-synthesis): for the explicit-id path, also include
+    already-headlined closed sessions so a re-run refreshes their summary +
+    keywords (e.g. after a stopword change). _apply_synthesis preserves the
+    existing headline and only rewrites summary/keywords, so a forced re-run is
+    still non-destructive to a real close's headline.
     """
     if all_null_headline:
         targets = list(
@@ -69,7 +79,7 @@ def _select_targets(
             skipped.append({"id": sid, "reason": "not found"})
         elif s.closed_at is None:
             skipped.append({"id": sid, "reason": "still open"})
-        elif s.headline is not None:
+        elif s.headline is not None and not force:
             skipped.append({"id": sid, "reason": "already has headline"})
         else:
             targets.append(s)
@@ -81,6 +91,7 @@ def run_backfill(
     *,
     session_ids: list[int] | None = None,
     all_null_headline: bool = False,
+    force: bool = False,
     dry_run: bool = False,
 ) -> dict:
     """Backfill synthesis over the resolved target sessions.
@@ -95,7 +106,10 @@ def run_backfill(
     Returns a summary dict: {targeted, populated, failed, skipped, populated_ids}.
     """
     targets, skipped = _select_targets(
-        db, session_ids=session_ids, all_null_headline=all_null_headline
+        db,
+        session_ids=session_ids,
+        all_null_headline=all_null_headline,
+        force=force,
     )
 
     populated_ids: list[int] = []
@@ -140,6 +154,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Sweep every closed session with a null headline (overrides --session-ids).",
     )
     parser.add_argument(
+        "--regenerate",
+        action="store_true",
+        help="Re-synthesize even sessions that already have a headline (refreshes "
+        "summary + keywords, e.g. after a stopword change; headline preserved). "
+        "Explicit-id path only.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Report which sessions would be backfilled without writing.",
@@ -160,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             db,
             session_ids=session_ids,
             all_null_headline=args.all_null_headline,
+            force=args.regenerate,
             dry_run=args.dry_run,
         )
         if not args.dry_run:

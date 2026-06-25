@@ -18,6 +18,7 @@ from app.services.keyword_extraction import (
     extract_keywords,
     is_ticket_key,
     normalize_term,
+    rank_tfidf,
     tokenize,
 )
 
@@ -57,6 +58,16 @@ class TestNormalizeTerm:
     def test_pure_punctuation_returns_none(self):
         assert normalize_term("---") is None
         assert normalize_term("!!!") is None
+
+    def test_bare_numbers_dropped_letters_kept(self):
+        # DWB-500: bare digits / numeric fragments are noise (digit analogue of
+        # number-words); anything with a letter survives; ticket keys exempt.
+        assert normalize_term("2") is None
+        assert normalize_term("100") is None
+        assert normalize_term("1)") is None
+        assert normalize_term("3.0") is None
+        assert normalize_term("utf8") == "utf8"  # has a letter -> kept
+        assert normalize_term("DWB-500") == "DWB-500"  # ticket key preserved
 
 
 class TestTokenize:
@@ -145,3 +156,100 @@ class TestExtractKeywords:
         kws = {k.keyword: k.weight for k in result}
         assert kws.get("system-ops") == 2
         assert kws.get("archie-dwb") == 2
+
+
+class TestStopwordsDwb499:
+    """Number-words + generic filler are dropped; DWB domain terms are NOT."""
+
+    def test_number_words_dropped(self):
+        # Cardinals + ordinals are pure counting noise (the "one" x133 bug).
+        texts = ["one " * 60 + "two three first second migration migration"]
+        result = extract_keywords(texts, min_frequency=1)
+        kws = {k.keyword for k in result}
+        for noise in ("one", "two", "three", "first", "second"):
+            assert noise not in kws
+        assert "migration" in kws  # real term survives
+
+    def test_generic_filler_dropped(self):
+        texts = ["real real really new actually stuff etc migration migration"]
+        result = extract_keywords(texts, min_frequency=1)
+        kws = {k.keyword for k in result}
+        for filler in ("real", "really", "new", "actually", "stuff", "etc"):
+            assert filler not in kws
+        assert "migration" in kws
+
+    def test_domain_terms_NOT_dropped(self):
+        # The principle (DWB-499): DWB vocabulary stays - it's legitimately
+        # relevant when a session is about it. TF-IDF, not stopwords, handles
+        # cross-session ubiquity.
+        texts = ["ticket session keyword summary sprint test"]
+        result = extract_keywords(texts, min_frequency=1)
+        kws = {k.keyword for k in result}
+        for domain in ("ticket", "session", "keyword", "summary", "sprint", "test"):
+            assert domain in kws
+
+
+class TestRankTfidf:
+    """DWB-500: TF-IDF re-rank. df/N passed in; module stays pure."""
+
+    def test_ubiquitous_term_in_every_doc_is_dropped(self):
+        # "tests" in every session (df==N) -> idf 0 -> dropped; a term in one
+        # session survives.
+        texts = ["tests tests tests tests distinctive distinctive"]
+        df = {"tests": 10, "distinctive": 1}
+        result = rank_tfidf(texts, document_frequencies=df, total_documents=10)
+        kws = {k.keyword for k in result}
+        assert "tests" not in kws
+        assert "distinctive" in kws
+
+    def test_distinctive_outranks_higher_tf_ubiquitous(self):
+        # Archie's case: a high-TF near-ubiquitous term must NOT outrank a
+        # lower-TF distinctive term once IDF is applied.
+        texts = ["tests " * 20 + "distinctive " * 5]
+        df = {"tests": 50, "distinctive": 1}
+        result = rank_tfidf(texts, document_frequencies=df, total_documents=53)
+        order = [k.keyword for k in result]
+        assert order[0] == "distinctive"
+        d = next(k for k in result if k.keyword == "distinctive")
+        t = next(k for k in result if k.keyword == "tests")
+        assert d.weight > t.weight  # relevance score, not raw TF (20 vs 5)
+
+    def test_weight_is_relevance_score_not_raw_count(self):
+        import math
+
+        texts = ["alpha alpha"]  # tf=2
+        df = {"alpha": 1}
+        result = rank_tfidf(texts, document_frequencies=df, total_documents=10)
+        alpha = next(k for k in result if k.keyword == "alpha")
+        expected = max(1, round(2 * math.log((10 + 1) / (1 + 1))))
+        assert alpha.weight == expected
+        assert alpha.weight != 2  # not the raw count
+
+    def test_brand_new_term_surfaces(self):
+        # df=0 (term never stored) -> high idf -> distinctive.
+        result = rank_tfidf(
+            ["novelterm novelterm"], document_frequencies={}, total_documents=10
+        )
+        assert "novelterm" in {k.keyword for k in result}
+
+    def test_ticket_key_always_kept_even_if_ubiquitous(self):
+        # A ticket key in every doc (df==N -> idf 0) is still kept, floored >=1.
+        result = rank_tfidf(
+            ["DWB-500 work"], document_frequencies={"DWB-500": 100}, total_documents=100
+        )
+        keys = [k for k in result if k.is_ticket_key]
+        assert any(k.keyword == "DWB-500" and k.weight >= 1 for k in keys)
+
+    def test_low_n_falls_back_to_pure_tf(self):
+        # N<2 -> degenerate IDF -> pure-TF ranking (weight == raw count).
+        texts = ["alpha alpha alpha beta"]
+        result = rank_tfidf(texts, document_frequencies={}, total_documents=1)
+        kws = {k.keyword: k.weight for k in result}
+        assert kws.get("alpha") == 3  # raw TF preserved, not a score
+
+    def test_deterministic(self):
+        texts = ["tests tests distinctive distinctive distinctive"]
+        df = {"tests": 8, "distinctive": 1}
+        a = rank_tfidf(texts, document_frequencies=df, total_documents=10)
+        b = rank_tfidf(texts, document_frequencies=df, total_documents=10)
+        assert a == b

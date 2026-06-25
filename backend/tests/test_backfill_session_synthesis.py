@@ -183,3 +183,25 @@ class TestRunBackfill:
         assert result["targeted"] >= 2
         assert s1.id in result["populated_ids"]
         assert s2.id in result["populated_ids"]
+
+    def test_force_regenerates_already_headlined(
+        self, db_session, closed_null_headline_session
+    ):
+        # First pass populates + sets a headline.
+        s = closed_null_headline_session()
+        backfill.run_backfill(db_session, session_ids=[s.id])
+        db_session.refresh(s)
+        headline_before = s.headline
+        assert headline_before is not None
+
+        # Without force it is skipped; with force it is re-synthesized (DWB-499
+        # stopword-refresh path). Headline is preserved; keyword rows are
+        # rewritten in place (no duplication).
+        skipped = backfill.run_backfill(db_session, session_ids=[s.id])
+        assert skipped["targeted"] == 0
+
+        forced = backfill.run_backfill(db_session, session_ids=[s.id], force=True)
+        assert forced["targeted"] == 1
+        db_session.refresh(s)
+        assert s.headline == headline_before  # headline preserved
+        assert _keyword_count(db_session, s.id) > 0

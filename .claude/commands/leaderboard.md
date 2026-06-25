@@ -7,7 +7,7 @@ from urllib import request, error
 
 cwd = os.getcwd()
 try:
-    with request.urlopen("http://localhost:8000/api/projects", timeout=2) as r:
+    with request.urlopen("http://localhost:8000/api/projects", timeout=10) as r:
         projects = json.load(r)
 except (error.URLError, TimeoutError) as e:
     print(f"DWB API unreachable: {e}")
@@ -19,7 +19,7 @@ if not project:
 
 url = f"http://localhost:8000/api/projects/{project['id']}/scores"
 try:
-    with request.urlopen(url, timeout=3) as r:
+    with request.urlopen(url, timeout=10) as r:
         rows = json.load(r)
 except error.HTTPError as e:
     print(f"HTTP {e.code}: {e.read().decode()}")

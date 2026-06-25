@@ -97,6 +97,10 @@ The Claude Code permission dialog for editing files under `.claude/` crashes sub
 - Memory updates go through the API only: see Memory Writes below.
 - If your work requires a `.claude/settings.json` (or other harness-config) change, flag it to the TL; they'll handle the edit directly from the main CC window where a user is attached for the permission dialog.
 
+## Shared Code: Grep Callers Before You Delete
+
+Before deleting or refactoring shared code another agent owns — especially the session close path (`services/dwb_session.py`) — grep ALL callers/importers FIRST, and give the owner a heads-up. A module deleted while something still imports it crashes the API on reload (this is exactly how the backend went down during a live keyword-dedup). On a hot shared file, ask the owner to diff-review your change and run the suite before you commit, and don't refactor it live under concurrent edits — coordinate, then make one clean change.
+
 ## Memory Writes: When and How
 
 DWB-401 collapsed memory to a single free-form `memory.md` (identity.md is still system-generated). Write it through the API: the FastAPI process applies the ISO heading and the passive size-trim consistently. Two endpoints, one for in-flight notes and one for wrap-up.

@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: DwbSessionCreate, DwbSessionUpdate, DwbSessionRead, DwbSessionOpenRequest, DwbSessionCloseRequest, DwbSessionOpenConflict, DwbSessionKeyword, DwbSessionListItem, DwbSessionByRoleEntry, DwbSessionByTicketEntry, DwbSessionDetail
-# Last Modified: 2026-06-25 (DWB-493: expose summary + weighted keywords on list + detail reads)
+# Last Modified: 2026-06-25 (DWB-493: expose summary + weighted keywords on list + detail reads; DWB-500: keyword weight is now a TF-IDF relevance score)
 
 from datetime import datetime
 
@@ -139,7 +139,9 @@ class DwbSessionKeyword(BaseModel):
     """One weighted keyword for a session (DWB-493), mined by the close-time
     synthesizer (DWB-484) and stored in entity_keywords. The list endpoints
     surface these sorted by weight descending so the FE renders a tag row
-    without its own sort. `weight` is the per-session occurrence count."""
+    without its own sort. `weight` is an int TF-IDF RELEVANCE SCORE (DWB-500),
+    not a raw occurrence count: terms common across many sessions are
+    down-weighted so session-distinctive terms rank higher."""
 
     model_config = ConfigDict(from_attributes=True)
 

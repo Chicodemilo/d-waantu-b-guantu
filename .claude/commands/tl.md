@@ -26,14 +26,14 @@ else:
     recipient_name = None
     body = raw
 
-def get(path, timeout=3):
+def get(path, timeout=10):
     with request.urlopen(API + path, timeout=timeout) as r:
         return json.load(r)
 
 cwd = os.getcwd()
 try:
-    projects = get("/api/projects", timeout=2)
-    agents = get("/api/agents", timeout=3)
+    projects = get("/api/projects", timeout=10)
+    agents = get("/api/agents", timeout=10)
 except (error.URLError, TimeoutError) as e:
     print(f"DWB API unreachable: {e}")
     sys.exit(0)
@@ -70,7 +70,7 @@ payload = json.dumps({"from_agent_id": sender["id"], "to_agent_id": to_agent_id,
 req = request.Request(API + "/api/tl-channel", data=payload,
                       headers={"Content-Type": "application/json"}, method="POST")
 try:
-    with request.urlopen(req, timeout=3) as r:
+    with request.urlopen(req, timeout=10) as r:
         res = json.load(r)
     m = res["message"]
     dest = m["to_agent_name"] if not m["is_broadcast"] else "ALL archies"

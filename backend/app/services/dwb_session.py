@@ -6,7 +6,7 @@
 # Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.models.entity_keyword, app.models.ticket, app.models.comment, app.models.inter_agent_message, app.services.dwb_session_rollup, app.services.keyword_extraction, app.services.session_synthesizer, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-06-25 (DWB-484: synthesize + persist headline/summary/keywords on every close path)
+# Last Modified: 2026-06-25 (DWB-500: TF-IDF re-rank of keywords in _assemble_rollup via rank_tfidf + df/N from rollup helper)
 
 """DWB session business logic.
 
@@ -64,7 +64,7 @@ from app.models.ticket import Ticket
 from app.models.tracking_log import TrackingLog
 from app.services import dwb_session_rollup as rollup_svc
 from app.services.activity_log import log_activity
-from app.services.keyword_extraction import extract_keywords
+from app.services.keyword_extraction import rank_tfidf
 from app.services.session_synthesizer import synthesize_session_summary
 
 logger = logging.getLogger(__name__)
@@ -398,7 +398,17 @@ def _assemble_rollup(
     ]
 
     corpus = _gather_corpus(db, session, win_start, win_end, by_role, by_ticket)
-    keywords = [(kw.keyword, kw.weight) for kw in extract_keywords(corpus)]
+    # DWB-500: TF-IDF re-rank. df/N are TRUE document frequencies computed over
+    # every closed session's full corpus (not the stored top-N, which under-
+    # counts ubiquitous terms). rank_tfidf stays pure (df/N passed in); weight is
+    # a relevance score, not a raw count (falls back to pure TF when N < 2).
+    df_map, n_docs = rollup_svc.compute_corpus_document_frequencies(db)
+    keywords = [
+        (kw.keyword, kw.weight)
+        for kw in rank_tfidf(
+            corpus, document_frequencies=df_map, total_documents=n_docs
+        )
+    ]
 
     return {
         "headline": supplied_headline,

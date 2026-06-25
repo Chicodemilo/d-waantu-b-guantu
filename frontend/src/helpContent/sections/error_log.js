@@ -27,8 +27,9 @@ export default {
     'Each client log carries a level (debug, info, warn, error), a category, and an optional route; query them with GET /api/client-logs by level, category, route, or since.',
     'Hook scripts always exit 0, so a logged hook error never blocks the caller.',
   ],
-  // DWB-497: cross-links to related sections.
+  // DWB-497: section cross-links; DWB-501: portal link to the live page.
   links: [
+    { route: '/errors', label: 'Open the error log' },
     { to: 'dashboard', label: 'Dashboard' },
     { to: 'tests', label: 'Tests' },
   ],

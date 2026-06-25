@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
 from app.models.dwb_session import DwbSession
+from app.models.entity_keyword import EntityKeyword
 from app.models.epic import Epic
 from app.models.hook_session import HookSession
 from app.models.ticket import Ticket
@@ -209,6 +210,94 @@ def compute_by_ticket(
 
     entries.sort(key=lambda r: (-r["tokens"], r["ticket_key"]))
     return entries
+
+
+def compute_session_document_frequencies(
+    db: Session,
+) -> tuple[dict[str, int], int]:
+    """Document-frequency table for TF-IDF keyword ranking (DWB-500).
+
+    Returns ({keyword: count of distinct dwb_session entity_ids containing it},
+    N) where N = the number of distinct dwb_session entity_ids present in
+    entity_keywords. This is the cross-session corpus the ranker uses to
+    down-weight ubiquitous terms; it is sourced from the STORED keyword
+    distribution (already-synthesized sessions), so it is a self-consistent
+    proxy that stabilises as more sessions are synthesized. A term absent from
+    the table has df = 0 and is treated as maximally distinctive by rank_tfidf.
+    Read-only; the caller passes the result into the pure ranker so
+    keyword_extraction stays DB-free.
+    """
+    n = (
+        db.execute(
+            select(func.count(func.distinct(EntityKeyword.entity_id))).where(
+                EntityKeyword.entity_type == "dwb_session"
+            )
+        ).scalar()
+        or 0
+    )
+    rows = db.execute(
+        select(
+            EntityKeyword.keyword,
+            func.count(func.distinct(EntityKeyword.entity_id)),
+        )
+        .where(EntityKeyword.entity_type == "dwb_session")
+        .group_by(EntityKeyword.keyword)
+    ).all()
+    return {keyword: int(count) for keyword, count in rows}, int(n)
+
+
+def compute_corpus_document_frequencies(
+    db: Session, *, session_ids: list[int] | None = None
+) -> tuple[dict[str, int], int]:
+    """TRUE document-frequency table for TF-IDF keyword ranking (DWB-500).
+
+    Unlike compute_session_document_frequencies (which counts the STORED top-N
+    keywords and therefore UNDER-counts terms that are common in text but rarely
+    top-ranked), this tokenises each closed session's FULL corpus and counts, per
+    term, the number of distinct sessions whose corpus CONTAINS it. That is the
+    real df, so genuinely ubiquitous boilerplate ("tests", "ticket") gets the
+    high df it deserves and IDF actually penalises it.
+
+    Returns ({term: distinct-session count}, N) where N = the number of closed
+    sessions with a non-empty corpus (empty sessions are not documents). The
+    corpus is gathered the same way the close path gathers it (agent-produced
+    text only, DWB-351); tokenisation reuses the pure extractor.
+
+    SCALE CAVEAT: this is an in-memory two-pass over every closed session's
+    corpus (pass 1 = this function builds df; pass 2 = the caller scores one
+    session against it). Fine at tens of sessions. If the history grows to many
+    hundreds/thousands, this wants a PERSISTENT document-frequency index updated
+    incrementally on close, not a full re-tokenise every time (future work).
+    """
+    # Lazy import: dwb_session imports this module at top level, so importing
+    # _gather_corpus at module scope would be circular. Resolved at call time.
+    from app.services.dwb_session import _gather_corpus
+    from app.services.keyword_extraction import STOPWORDS, tokenize
+
+    query = select(DwbSession).where(DwbSession.closed_at.isnot(None))
+    if session_ids is not None:
+        query = query.where(DwbSession.id.in_(session_ids))
+    sessions = db.scalars(query.order_by(DwbSession.id)).all()
+
+    df: dict[str, int] = {}
+    n = 0
+    for s in sessions:
+        win_start, win_end = compute_window(s)
+        by_role = compute_by_role(db, s, now=win_end)
+        by_ticket = compute_by_ticket(db, s, now=win_end)
+        corpus = _gather_corpus(db, s, win_start, win_end, by_role, by_ticket)
+        terms = {
+            tok
+            for text in corpus
+            for tok in tokenize(text)
+            if tok not in STOPWORDS
+        }
+        if not terms:
+            continue
+        n += 1
+        for term in terms:
+            df[term] = df.get(term, 0) + 1
+    return df, n
 
 
 def compute_overhead_deltas(

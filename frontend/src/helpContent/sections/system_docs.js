@@ -24,8 +24,9 @@ export default {
     'Edit a doc at the shown path and refresh; the page re-reads the file, there is nothing to publish.',
     'Files that do not exist are grouped below a divider with a missing badge and the expected path.',
   ],
-  // DWB-497: cross-links to related sections.
+  // DWB-497: section cross-links; DWB-501: portal link to the live page.
   links: [
+    { route: '/docs', label: 'Open system docs' },
     { to: 'docs', label: 'Project Docs' },
     { to: 'system_tests', label: 'System Tests' },
   ],

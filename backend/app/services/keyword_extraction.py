@@ -11,8 +11,9 @@
 # Caller: app/services/* (session synthesizer, DWB-483)
 # Callees: re, collections, dataclasses (stdlib only)
 # Data In: an iterable of plain-text strings (the activity corpus)
-# Data Out: extract_keywords, normalize_term, tokenize, is_ticket_key,
-#           KeywordWeight, STOPWORDS, TICKET_KEY_RE
+# Data Out: extract_keywords (pure TF), rank_tfidf (TF-IDF, DWB-500),
+#           normalize_term, tokenize, is_ticket_key, KeywordWeight, STOPWORDS,
+#           TICKET_KEY_RE
 # Last Modified: 2026-06-25
 #
 # HARD PRIVACY RULE (DWB-351): this module must NEVER be fed user-typed prompt
@@ -23,19 +24,21 @@
 # raw user prompts. (DWB persists no user prompt text anyway; this keeps the
 # corpus on the safe side of that line.)
 #
-# FUTURE (documented, NOT built - TF-IDF down-weighting): today `weight` is the
-# raw per-session term frequency (TF). A term that is common across EVERY
-# session (e.g. "ticket", "sprint", a recurring agent name) scores high in every
-# write-up even though it carries little signal about THIS session. A later
-# enhancement would multiply TF by an inverse-document-frequency factor computed
-# across all sessions (IDF = log(total_sessions / sessions_containing_term)), so
-# session-distinctive terms rank above boilerplate. That needs a corpus-wide
-# document-frequency table and is deliberately out of scope here; the substrate
-# (entity_keywords.weight as an int count + entity_type/entity_id) already
-# supports recomputing weights later without a schema change.
+# TWO RANKERS (DWB-500):
+#   - extract_keywords: pure TF. `weight` = raw per-session occurrence COUNT.
+#   - rank_tfidf: TF-IDF. `weight` = an int RELEVANCE SCORE (tf * idf), NOT a
+#     count. Terms common across many sessions sink; session-distinctive terms
+#     rise. IDF = log((N+1)/(df+1)) (no outside +1 floor, so a term in EVERY
+#     session -> 0 -> dropped). df/N come from the stored keyword distribution,
+#     passed IN by the DB-aware caller (dwb_session_rollup.compute_session_
+#     document_frequencies) - this module stays pure/DB-free. The close path
+#     (dwb_session._assemble_rollup) uses rank_tfidf, so what lands in
+#     entity_keywords.weight is the relevance score. Below 2 documents IDF is
+#     degenerate, so rank_tfidf falls back to pure-TF (extract_keywords).
 
 from __future__ import annotations
 
+import math
 import re
 from collections import Counter
 from collections.abc import Iterable
@@ -85,6 +88,24 @@ STOPWORDS: frozenset[str] = frozenset(
         "wasn", "we", "were", "weren", "what", "when", "where", "which",
         "while", "who", "whom", "why", "will", "with", "won", "would",
         "wouldn", "you", "your", "yours", "yourself", "yourselves",
+        # DWB-499: number-words (cardinals + ordinals) - "one" was ranking 133 in
+        # live session tags. Pure counting noise, never session-distinctive.
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+        "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+        "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
+        "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred",
+        "thousand", "million", "billion",
+        "first", "second", "third", "fourth", "fifth", "sixth", "seventh",
+        "eighth", "ninth", "tenth",
+        # DWB-499: obvious generic English filler spotted scanning real session
+        # corpora (47/36). Deliberately NOT DWB domain terms (ticket/session/
+        # keyword/summary/sprint stay OUT - their cross-session ubiquity is
+        # TF-IDF's job, not the stopword list's).
+        "real", "really", "new", "actually", "basically", "thing", "things",
+        "lot", "lots", "stuff", "etc", "via", "per", "also", "able", "okay",
+        "ok", "yeah", "yep", "nope",
+        # DWB-500: filler surfaced once TF-IDF lifted it out of the TF shadow.
+        "already",
     }
 )
 
@@ -120,7 +141,10 @@ def normalize_term(raw: str) -> str | None:
       separators (underscores, slashes, dots, stray punctuation) collapses to a
       single hyphen, so "Archie_DWB" -> "archie-dwb", "team/lead" -> "team-lead",
       and an already-kebab "system-ops" is unchanged.
-    - Returns None when nothing usable remains (e.g. pure punctuation).
+    - Returns None when nothing usable remains (e.g. pure punctuation), OR when
+      the term has no letters (DWB-500: bare numbers like "1"/"2"/"100" and
+      digit-only fragments are counting noise, the digit analogue of the
+      number-words dropped in DWB-499; ticket keys are exempt - handled above).
     """
     stripped = _EDGE_PUNCT_RE.sub("", raw)
     if not stripped:
@@ -129,7 +153,12 @@ def normalize_term(raw: str) -> str | None:
         return stripped.upper()
     lowered = stripped.lower()
     kebab = _INNER_SEP_RE.sub("-", lowered).strip("-")
-    return kebab or None
+    if not kebab:
+        return None
+    # Drop tokens with no alphabetic character (bare digits / numeric fragments).
+    if not any(ch.isalpha() for ch in kebab):
+        return None
+    return kebab
 
 
 def tokenize(text: str) -> list[str]:
@@ -180,12 +209,7 @@ def extract_keywords(
         A list of KeywordWeight, ranked. Ticket keys and normal terms are
         merged into one ranked list (keys always present).
     """
-    counts: Counter[str] = Counter()
-    for text in texts:
-        for token in tokenize(text):
-            if token in STOPWORDS:
-                continue
-            counts[token] += 1
+    counts = _tally(texts)
 
     keys: list[KeywordWeight] = []
     normals: list[KeywordWeight] = []
@@ -203,3 +227,84 @@ def extract_keywords(
     merged = keys + normals
     merged.sort(key=rank)
     return merged
+
+
+def rank_tfidf(
+    texts: Iterable[str],
+    *,
+    document_frequencies: dict[str, int],
+    total_documents: int,
+    min_frequency: int = DEFAULT_MIN_FREQUENCY,
+    top_n: int = DEFAULT_TOP_N,
+) -> list[KeywordWeight]:
+    """Rank a corpus's terms by TF-IDF relevance (DWB-500).
+
+    Same TF pass as extract_keywords, then each term's raw TF is multiplied by an
+    inverse-document-frequency factor so terms common across MANY sessions sink
+    and session-distinctive terms rise. Unlike extract_keywords, the returned
+    `KeywordWeight.weight` is a TF-IDF RELEVANCE SCORE (int), not a raw count -
+    so a consumer that sorts by weight desc (the synthesizer + the read API)
+    reflects relevance directly.
+
+    IDF = log((N + 1) / (df + 1))   [N = total documents, df = docs containing
+    the term]. The +1s guard div-by-zero and smooth; there is deliberately NO
+    outside +1 floor (that would keep IDF >= 1 and let a high-TF ubiquitous term
+    keep dominating). A term in EVERY document -> df = N -> IDF = 0 -> dropped
+    (pure boilerplate is not distinctive). `document_frequencies` is sourced from
+    the stored keyword distribution; a term absent from it has df = 0 (treated as
+    maximally distinctive).
+
+    Selection / scoring:
+      - score = tf * idf (float, used for ranking).
+      - Non-ticket terms must clear `min_frequency` (TF) AND have score > 0.
+      - Ticket keys (DWB-468) are ALWAYS kept verbatim regardless of TF/score,
+        and emitted in addition to the top_n normal terms (same contract as
+        extract_keywords).
+      - Stored weight = max(1, round(score)) so a kept tag is never 0 (488).
+      - Ranked by score desc, then keyword asc (deterministic).
+
+    Bootstrap guard: TF-IDF needs at least 2 documents to mean anything. With
+    `total_documents` < 2 (a fresh/empty corpus, e.g. the first close or an
+    isolated test transaction) IDF is degenerate (every term -> 0), so this
+    falls back to pure-TF ranking via extract_keywords - identical to today's
+    behaviour until a real cross-session distribution exists.
+    """
+    if total_documents < 2:
+        return extract_keywords(texts, min_frequency=min_frequency, top_n=top_n)
+
+    counts = _tally(texts)
+    n = total_documents
+
+    # Build (KeywordWeight, score_float) pairs; rank by the precise float score.
+    keys: list[tuple[KeywordWeight, float]] = []
+    normals: list[tuple[KeywordWeight, float]] = []
+    for term, tf in counts.items():
+        df = document_frequencies.get(term, 0)
+        score = tf * math.log((n + 1) / (df + 1))
+        kw = KeywordWeight(term, max(1, round(score)), is_ticket_key(term))
+        if kw.is_ticket_key:
+            # Always kept verbatim; floored to >=1 even if df makes idf ~0.
+            keys.append((kw, score))
+        elif tf >= min_frequency and score > 0:
+            normals.append((kw, score))
+
+    rank = lambda pair: (-pair[1], pair[0].keyword)  # noqa: E731 - stable key
+    keys.sort(key=rank)
+    normals.sort(key=rank)
+    normals = normals[: max(top_n, 0)]
+
+    merged = keys + normals
+    merged.sort(key=rank)
+    return [kw for kw, _score in merged]
+
+
+def _tally(texts: Iterable[str]) -> Counter:
+    """Tokenise + normalise the corpus and count non-stopword term frequencies.
+    Shared by extract_keywords (pure TF) and rank_tfidf (TF-IDF)."""
+    counts: Counter[str] = Counter()
+    for text in texts:
+        for token in tokenize(text):
+            if token in STOPWORDS:
+                continue
+            counts[token] += 1
+    return counts

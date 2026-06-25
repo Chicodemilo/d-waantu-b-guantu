@@ -24,8 +24,9 @@ export default {
     'The coverage table lists each backend router, the test file that covers it (or missing), and an overall covered count; this is what the force_test_coverage gate checks.',
     'These runs cover DWB itself, so they are recorded against the DWB project rather than a tracked project.',
   ],
-  // DWB-497: cross-links to related sections.
+  // DWB-497: section cross-links; DWB-501: portal link to the live page.
   links: [
+    { route: '/tests', label: 'Open system tests' },
     { to: 'tests', label: 'Project Tests' },
     { to: 'system_docs', label: 'System Docs' },
   ],

@@ -93,6 +93,30 @@ links: [
   so it is safe to author a link before its target file lands.
 - Keep cross-links relevant and few per section. Plain text labels, no icons.
 
+### Portal links (DWB-501)
+
+A `links` entry may instead be a **portal link** that navigates to a real page in
+the app, rather than force-opening another help section. Use `route` instead of `to`:
+
+```js
+links: [
+  { route: '/tests', label: 'Open system tests' },   // portal link -> SPA navigation
+  { to: 'tests', label: 'Project Tests' },            // section link -> force-open + scroll
+]
+```
+
+- `route` (REQUIRED for a portal link): an in-app path. Rendered as a React Router
+  link (SPA navigation, no full reload), styled green to read as "go to the page".
+- `label` (REQUIRED): the clickable text.
+- A link object is one OR the other: `{route, label}` (portal) or `{to, label}`
+  (section). The two kinds can be mixed in the same `links` array.
+- **Only use portal links from the five GLOBAL sections** (dashboard, system_tests,
+  system_docs, error_log, archie_channel) whose routes are static (`/`, `/tests`,
+  `/docs`, `/errors`, `/archie-channel`). Do NOT add portal links to project-scoped
+  sections (tickets, team, sessions, tests, docs, comms, jira): those pages live at
+  `/projects/:id/...` and the help page has no current-project context to resolve the
+  id. Keep those as section cross-links.
+
 ## Canonical section keys (render order mirrors the sidebar nav)
 
 Overview group:

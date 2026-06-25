@@ -327,6 +327,7 @@
 }
 
 .help-link {
+  display: inline-block;
   background: none;
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -335,9 +336,20 @@
   font-family: var(--font-mono);
   font-size: 12px;
   padding: 3px 8px;
+  text-decoration: none;
 }
 
 .help-link:hover {
   color: var(--blue-dim);
   border-color: var(--blue-dim);
+}
+
+/* DWB-501: portal links navigate to a real page; tint green to read as "go there". */
+.help-link--portal {
+  color: var(--green);
+}
+
+.help-link--portal:hover {
+  color: var(--green-bright);
+  border-color: var(--green-dim);
 }

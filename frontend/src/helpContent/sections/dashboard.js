@@ -27,8 +27,9 @@ export default {
     'Project cards link into each project; Time & Tokens and Token Audit summarize spend.',
     'The Agents section is a sortable table; click a row to open that agent.',
   ],
-  // DWB-496/497: cross-links to related help sections (force-open + scroll).
+  // DWB-496/497: section cross-links; DWB-501: portal link to the live page.
   links: [
+    { route: '/', label: 'Open the dashboard' },
     { to: 'tickets', label: 'Tickets' },
     { to: 'team', label: 'Team' },
     { to: 'sessions', label: 'Sessions' },
