@@ -1,12 +1,12 @@
 # D'Waantu B'Guantu (DWB)
 
-A multi-agent workflow dashboard that makes Claude Code teams **cheaper, clearer, and smarter**.
+A multi-agent workflow dashboard for Claude Code teams: ticket tracking, token accounting, and session continuity for a roster of agents.
 
-- **Token efficiency** — structured playbooks + slim API responses keep agents on work; budget monitoring warns before bloat.
-- **Team visibility** — real-time insight into what every agent is doing and where things are stuck.
-- **Session continuity** — HANDOFF.md, playbooks, and project rules carry knowledge between sessions.
+- **Token efficiency:** structured playbooks and slim API responses keep agent context spent on work, and budget monitoring warns when context files grow past their ceilings.
+- **Team visibility:** see what every agent is doing, which tickets are moving, and where things are stuck.
+- **Session continuity:** HANDOFF.md, playbooks, and project rules carry knowledge between sessions.
 
-**Contributing** — DWB is open source. If something's broken, inefficient, or could be better, open a PR. No ceremony — just make it better.
+**Contributing:** DWB is open source. If something is broken or could work better, open a PR.
 
 ---
 
@@ -21,7 +21,7 @@ claude
 Then paste:
 
 ```
-You are Archie, the Team Lead. You report to me. Read this repo — it's
+You are Archie, the Team Lead. You report to me. Read this repo. It's
 D'Waantu B'Guantu, our project management system. We'll be using it to
 track our projects. Do the quick start setup and report back when
 running.
@@ -37,9 +37,9 @@ Archie reads the repo, runs setup, creates your first project, and reports back.
 React UI (Vite/5173) ──▶ FastAPI (:8000) ──▶ MySQL 8 (:23847)
 ```
 
-- **Backend** — FastAPI, SQLAlchemy 2.0, Pydantic v2; routers → services → models, Alembic migrations.
-- **Frontend** — React 18, Vite, Zustand, React Router; plain CSS, dark terminal aesthetic (JetBrains Mono); adaptive polling 2s/10s.
-- **Database** — MySQL 8.0 via Docker (PyMySQL).
+- **Backend:** FastAPI, SQLAlchemy 2.0, Pydantic v2; routers → services → models, Alembic migrations.
+- **Frontend:** React 18, Vite, Zustand, React Router; plain CSS, dark terminal aesthetic (JetBrains Mono); adaptive polling 2s/10s.
+- **Database:** MySQL 8.0 via Docker (PyMySQL).
 
 ---
 
@@ -51,7 +51,7 @@ React UI (Vite/5173) ──▶ FastAPI (:8000) ──▶ MySQL 8 (:23847)
 Project → Epic → Sprint → Ticket
 ```
 
-Enforced at the API — every ticket needs a sprint, every sprint an epic, every epic a project. Missing parents return 400.
+Enforced at the API: every ticket needs a sprint, every sprint an epic, every epic a project. Missing parents return 400.
 
 **Auto-assignment:** Tickets without `sprint_id` get the active sprint and inherit its epic; sprints without `epic_id` get the latest open epic.
 
@@ -87,13 +87,13 @@ Master playbooks in `docs/` deploy to other repos via `POST /api/projects/{id}/d
 
 The `tracking_log` table is the source of truth, recording discrete events: `start`, `stop`, `token_report`, `overhead_start`, `overhead_stop`.
 
-**Time** — start/stop event pairs per ticket; status transitions auto-insert them (e.g., moving to `in_progress` logs a `start`).
+**Time:** start/stop event pairs per ticket; status transitions auto-insert them (e.g., moving to `in_progress` logs a `start`).
 
-**Tokens** — captured passively via Claude Code lifecycle hooks: `SessionStart` → `/api/hooks/session-start` (logs start); `SessionEnd` → `/api/hooks/session-end` (parses JSONL, logs stop + tokens, increments `ticket.tokens_used`); `SubagentStop` → same endpoint for teammate transcripts.
+**Tokens:** captured passively via Claude Code lifecycle hooks: `SessionStart` → `/api/hooks/session-start` (logs start); `SessionEnd` → `/api/hooks/session-end` (parses JSONL, logs stop + tokens, increments `ticket.tokens_used`); `SubagentStop` → same endpoint for teammate transcripts.
 
-**Attribution priority:** Workers get tokens on their active ticket: `in_progress` > `todo` > `in_review` > recently `done` (5 min). Unmatched TL/PM sessions go to project overhead (`tl_overhead_tokens`, `pm_overhead_tokens`). Hook config lives in `.claude/settings.json`; zero manual intervention.
+**Attribution priority:** Workers get tokens on their active ticket: `in_progress` > `todo` > `in_review` > recently `done` (5 min). Unmatched TL/PM sessions go to project overhead (`tl_overhead_tokens`, `pm_overhead_tokens`). Hook config lives in `.claude/settings.json` and runs without manual steps.
 
-**Overhead** — TL/PM coordination tracks at project level via `overhead_start`/`overhead_stop` into per-role buckets; `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total plus a separate `overhead_tokens`.
+**Overhead:** TL/PM coordination tracks at project level via `overhead_start`/`overhead_stop` into per-role buckets; `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total plus a separate `overhead_tokens`.
 
 Hooks handle backfill and recovery automatically; no separate scan script is needed.
 
@@ -158,9 +158,9 @@ Native Claude Code SendMessage traffic is captured per project (DWB-446..449): a
 
 Alerts are flags raised by agents or automation that need human attention. Severities: info, warning, critical.
 
-**Dashboard** — read-only table (Project, Severity, Title, Created).
+**Dashboard:** read-only table (Project, Severity, Title, Created).
 
-**Project page** — full alert cards with actions: `$ dismiss all` (bulk dismiss open alerts) and `$ send to team` (writes `ALERTS_PENDING.md` to the project repo for teammates).
+**Project page:** full alert cards with actions: `$ dismiss all` (bulk dismiss open alerts) and `$ send to team` (writes `ALERTS_PENDING.md` to the project repo for teammates).
 
 ---
 
@@ -195,9 +195,9 @@ Run history: `GET /api/test-results/performance`
 
 ## Adding a Project
 
-**Demo:** `POST /api/projects/seed-demo` — fully-populated demo (prefix `DMO`) with agents, epics, sprints, tickets, test results. Idempotent.
+**Demo:** `POST /api/projects/seed-demo` creates a fully-populated demo (prefix `DMO`) with agents, epics, sprints, tickets, and test results. Idempotent.
 
-**From repo:** `POST /api/projects/from-repo` with `{"repo_path": "..."}` — auto-detects name, prefix, description.
+**From repo:** `POST /api/projects/from-repo` with `{"repo_path": "..."}` auto-detects name, prefix, and description.
 
 **Then:** assign agents, create epic + sprint (with a goal), deploy playbooks, tickets.
 
@@ -238,8 +238,8 @@ Standard CRUD exists for all resources; the non-obvious and automation ones:
 | POST | `/api/tl-channel` | Send a channel message, direct or broadcast (TL only) |
 | POST | `/api/tl-channel/mark-read` | Mark channel messages read (one or all) |
 | GET | `/api/hooks/sessions` | List hook sessions (`status=orphan` for cleanup) |
-| POST | `/api/sessions/open` | Open a DWB session — OMIT `opened_at` (server-stamped) |
-| POST | `/api/sessions/{id}/close` | Close a DWB session — `headline` required on AI methods (422 otherwise); consolidation gate opt-in (`force_consolidation`, default OFF), TL-owned docs only |
+| POST | `/api/sessions/open` | Open a DWB session; omit `opened_at` (server-stamped) |
+| POST | `/api/sessions/{id}/close` | Close a DWB session; `headline` required on AI methods (422 otherwise); consolidation gate opt-in (`force_consolidation`, default OFF), TL-owned docs only |
 | GET | `/api/projects/{id}/sessions` | List DWB sessions, most recent first |
 | GET | `/api/sessions/{id}` | DWB session detail rollup (by_role/by_ticket/overhead) |
 | POST | `/api/agents/identify` | Resolve identity from `(role, name, project_prefix)`; short or `_<PREFIX>` form |
