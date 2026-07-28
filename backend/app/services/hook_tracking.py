@@ -6,7 +6,7 @@
 # Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
-# Last Modified: 2026-06-22 (DWB-418..421)
+# Last Modified: 2026-07-28 (DWB-506: exclude cache_read_input_tokens from total_tokens - it re-counted cached context every turn, inflating attribution to billions; kept in breakdown for visibility)
 #
 # DWB-417 (2026-06-22): handle_tool_use ingests the PostToolUse hook and
 # persists one tool_actions row per tool call, resolving agent/dwb_session/
@@ -534,6 +534,11 @@ def _parse_transcript_lines(lines_iter, *, agent_name_filter: str | None = None)
     """Shared transcript-line scanner. Sums usage entries; if
     agent_name_filter is set, only counts lines whose `agentName` matches.
 
+    ``total_tokens`` is the distinct-token (delta) sum: input + output +
+    cache_creation. ``cache_read_input_tokens`` is deliberately EXCLUDED from
+    the total (DWB-506) because it re-counts the same cached context on every
+    turn; it is still surfaced under ``breakdown["cache_read"]``.
+
     Returns the same shape as parse_transcript().
     """
     total = 0
@@ -567,7 +572,18 @@ def _parse_transcript_lines(lines_iter, *, agent_name_filter: str | None = None)
             out = usage.get("output_tokens", 0)
             cache_create = usage.get("cache_creation_input_tokens", 0)
             cache_read = usage.get("cache_read_input_tokens", 0)
-            total += inp + out + cache_create + cache_read
+            # DWB-506: cache_read_input_tokens is the volume re-read from the
+            # prompt cache on THIS turn - for a multi-turn session that is
+            # ~the entire prior context on EVERY turn. Summing it across turns
+            # is cumulative double counting: each cached token gets re-counted
+            # on every subsequent turn, which inflated real sessions to
+            # billions of "tokens" (session 65: 97% of a 5.47B rollup was
+            # cache_read). The distinct-token (delta) measure is
+            # input + output + cache_creation - the NEW tokens each turn
+            # (cache_creation counts each context token exactly once, when it
+            # is first written to cache). cache_read stays in the breakdown for
+            # cache-efficiency visibility but is EXCLUDED from total_tokens.
+            total += inp + out + cache_create
             breakdown["input"] += inp
             breakdown["output"] += out
             breakdown["cache_creation"] += cache_create
@@ -666,6 +682,10 @@ def parse_transcript(path: str) -> dict:
             "breakdown": {"input": int, "output": int, "cache_creation": int, "cache_read": int},
             "end_time": datetime | None,
         }
+
+    DWB-506: total_tokens = input + output + cache_creation. cache_read is NOT
+    summed into the total (it re-counts cached context every turn); it is only
+    reported under breakdown["cache_read"].
     """
     transcript = Path(path)
     if not transcript.exists():
