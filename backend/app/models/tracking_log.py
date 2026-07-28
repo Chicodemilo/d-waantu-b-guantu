@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: TrackingLog
-# Last Modified: 2026-04-16
+# Last Modified: 2026-07-28
 
 from datetime import datetime
 
@@ -33,7 +33,9 @@ class TrackingLog(Base):
         BigInteger, ForeignKey("sprints.id"), nullable=True, index=True
     )
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # BigInteger (DWB-505): per-event token count summed into tracking totals;
+    # widened from INT so large aggregations can never overflow the column.
+    tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

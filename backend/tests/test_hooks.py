@@ -9,7 +9,7 @@
 #                app.services.hook_tracking (parse_transcript, resolve_agent)
 # Data In:       Factory-created projects, agents, tickets via conftest fixtures; JSONL transcripts
 # Data Out:      Assertions on hook_session records, tracking events, summary aggregations
-# Last Modified: 2026-04-09
+# Last Modified: 2026-07-28 (DWB-506: total_tokens excludes cache_read; updated affected assertions)
 
 """Tests for passive hook-based tracking (Phase 8)."""
 
@@ -289,7 +289,9 @@ class TestSessionEnd:
         assert bd["output"] == 200
         assert bd["cache_creation"] == 30
         assert bd["cache_read"] == 50
-        assert session["total_tokens"] == 380
+        # DWB-506: cache_read is retained in the breakdown but excluded from
+        # the total. total = input + output + cache_creation = 330.
+        assert session["total_tokens"] == 330
 
     def test_creates_stop_and_token_report_for_worker(
         self, client, hook_project, hook_agent_worker, make_transcript,
@@ -401,7 +403,7 @@ class TestSessionEnd:
 class TestTranscriptParser:
     """Direct tests for parse_transcript service function."""
 
-    def test_counts_all_four_token_types(self, make_transcript):
+    def test_counts_token_types_excluding_cache_read(self, make_transcript):
         path = make_transcript(
             agent_name="test",
             messages=[{
@@ -412,7 +414,9 @@ class TestTranscriptParser:
             }],
         )
         result = parse_transcript(path)
-        assert result["total_tokens"] == 425
+        # DWB-506: total = input + output + cache_creation = 350; cache_read
+        # (75) is tracked in the breakdown but NOT summed into the total.
+        assert result["total_tokens"] == 350
         assert result["breakdown"]["input"] == 100
         assert result["breakdown"]["output"] == 200
         assert result["breakdown"]["cache_creation"] == 50
@@ -645,19 +649,20 @@ class TestEndToEndRollup:
         # Verify summary
         summary = client.get("/api/tracking/summary", params={"project_id": pid}).json()
 
-        # Per-ticket: tokens = 500+300+200+400+200+100 = 1700
+        # DWB-506: cache_read (200) is excluded from the total. Distinct-token
+        # sum = 500+300 + 400+200+100 = 1500 (cache_creation 100 counts once).
         ticket_entry = [t for t in summary["per_ticket"] if t["ticket_id"] == ticket["id"]]
         assert len(ticket_entry) == 1
-        assert ticket_entry[0]["tokens"] == 1700
+        assert ticket_entry[0]["tokens"] == 1500
         assert ticket_entry[0]["time_seconds"] >= 1
 
         # Per-agent
         agent_entry = [a for a in summary["per_agent"] if a["agent_id"] == hook_agent_worker["id"]]
         assert len(agent_entry) == 1
-        assert agent_entry[0]["tokens"] == 1700
+        assert agent_entry[0]["tokens"] == 1500
 
         # Project total
-        assert summary["project_total"]["tokens"] == 1700
+        assert summary["project_total"]["tokens"] == 1500
         assert summary["project_total"]["time_seconds"] >= 1
 
     def test_overhead_flow_in_summary(

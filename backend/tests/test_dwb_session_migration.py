@@ -6,7 +6,7 @@
 # Callees: alembic.command, sqlalchemy.inspect, sqlalchemy.schema.AddColumn
 # Data In: lat_test (already at head via conftest create_all)
 # Data Out: Assertions on schema after up/down round-trip
-# Last Modified: 2026-06-22 (DWB-417: drop+rebuild dwb_sessions referrers around the round-trip)
+# Last Modified: 2026-07-28 (DWB-505: forward-roll total_tokens back to the model's BIGINT type in teardown so later tests don't inherit the INT column the DWB-335 CREATE TABLE restores)
 
 """Round-trips the DWB-335 migration against the test database to verify the
 hand-written upgrade + downgrade both succeed and produce the expected
@@ -222,6 +222,19 @@ def test_migration_round_trip(alembic_cfg):
                     f"ALTER TABLE dwb_sessions MODIFY COLUMN close_method "
                     f"ENUM({close_values}) NULL"
                 )
+            )
+        # DWB-505: the DWB-335 CREATE TABLE built total_tokens as INT; the model
+        # later widened it to BIGINT (DWB-505). The re-upgrade above restored the
+        # old INT shape, so MODIFY it back to the model's type or every later
+        # test in this session inherits an INT column and a large rollup 500s.
+        # Sourced from the ORM column so a future type change to it forward-rolls
+        # here for free, mirroring the enum forward-roll above - no sibling line.
+        tt_ddl = CreateColumn(
+            DwbSession.__table__.c.total_tokens
+        ).compile(dialect=engine.dialect)
+        with engine.begin() as conn:
+            conn.execute(
+                text(f"ALTER TABLE dwb_sessions MODIFY COLUMN {tt_ddl}")
             )
         # Rebuild any tables we dropped before the downgrade (referrers of
         # dwb_sessions). dwb_sessions is back at this point, so the FKs resolve.

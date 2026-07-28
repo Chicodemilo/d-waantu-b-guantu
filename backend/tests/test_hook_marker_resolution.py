@@ -8,7 +8,7 @@
 # Callees: POST /api/hooks/session-start|session-end, GET /api/tracking/summary
 # Data In: tmp_path-rooted .claude/agents/active/<sid> marker files; JSONL transcripts
 # Data Out: Assertions on hook_session.agent_id, tracking_log via summary, ticket.tokens_used
-# Last Modified: 2026-06-04
+# Last Modified: 2026-07-28 (DWB-506: total_tokens excludes cache_read; updated two token totals)
 
 """DWB-294 marker-resolution acceptance gate.
 
@@ -919,7 +919,8 @@ class TestSubagentStopProductionTranscriptPath:
         assert r.status_code == 200
 
         session = client.get(f"/api/hooks/sessions/{subagent_sid}").json()
-        # Total tokens from the realistic transcript: 500+200 + 800+300+100 = 1900
+        # DWB-506: cache_read (100) excluded from the total. Distinct-token sum
+        # from the realistic transcript = 500+200 + 800+300 = 1800.
         assert session["total_tokens"] > 0, (
             f"SubagentStop with real work must persist nonzero tokens; "
             f"got {session['total_tokens']}"
@@ -964,9 +965,10 @@ class TestSubagentStopProductionTranscriptPath:
         })
 
         session = client.get(f"/api/hooks/sessions/{subagent_sid}").json()
-        # 1000+500+200+50 = 1750
-        assert session["total_tokens"] == 1750, (
-            f"breakdown should sum exactly to 1750: got {session['total_tokens']}"
+        # DWB-506: total = input+output+cache_creation = 1000+500+200 = 1700.
+        # cache_read (50) is retained in the breakdown but excluded from total.
+        assert session["total_tokens"] == 1700, (
+            f"breakdown should sum exactly to 1700: got {session['total_tokens']}"
         )
         breakdown = session.get("token_breakdown") or {}
         assert breakdown.get("input") == 1000
