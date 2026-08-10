@@ -6,7 +6,7 @@
 # Callees: All ORM models, app/services/project.delete_project
 # Data In: db: Session
 # Data Out: dict with created entity counts
-# Last Modified: 2026-08-10 (DWB-005)
+# Last Modified: 2026-08-10 (DWB-007)
 
 import shutil
 from datetime import date, datetime, timedelta
@@ -371,6 +371,13 @@ _CODING_STANDARDS_MD = """\
 - Type hints on all function signatures; `X | None` over `Optional[X]`.
 - snake_case functions and variables, PascalCase classes.
 - Services own business logic; route handlers stay thin.
+
+## Components & Reuse
+
+- If a component can be reused, build it reusable from the start.
+- Scan the existing component tree before planning new UI.
+- Borrowing a component into another view? Move it to `common/`, update
+  both call sites, and test both uses.
 
 ## Testing
 

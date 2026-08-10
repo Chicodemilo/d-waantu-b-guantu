@@ -6,7 +6,7 @@
 # Callees: app/services/agent_memory.py, app/models/agent.py, pathlib, shutil, re, json
 # Data In: db: Session, project: Project
 # Data Out: DeployResult
-# Last Modified: 2026-08-10 (DWB-004)
+# Last Modified: 2026-08-10 (DWB-007)
 
 import json
 import logging
@@ -372,10 +372,36 @@ _ROOT_DOC_STUBS = {
         "> Session-to-session continuity. Read at session start, "
         "update at end.\n"
     ),
+    # DWB-007: sectioned fill-in template rather than a bare stub — teams
+    # replace each prompt with the project's actual rules. The Components &
+    # Reuse rules are standing doctrine and ship pre-filled.
     "CODING_STANDARDS.md": (
         "# Coding Standards\n\n"
         "> Language conventions, naming, error handling, testing, "
-        "documentation, and code review expectations.\n"
+        "documentation, and code review expectations. Replace each prompt "
+        "below with this project's actual rules.\n\n"
+        "## Languages & Style\n\n"
+        "_Languages in use, formatting rules, lint/format tooling (or the "
+        "deliberate absence of it)._\n\n"
+        "## Naming\n\n"
+        "_Case conventions for files, functions, classes, CSS classes, DB "
+        "objects._\n\n"
+        "## Components & Reuse\n\n"
+        "- If a component can be reused, build it reusable from the start.\n"
+        "- When planning frontend work, scan the existing component tree "
+        "first to see what already fits.\n"
+        "- Borrowing a component into another view? Move it to a `common/` "
+        "directory, update both call sites, and test both uses.\n\n"
+        "## Error Handling\n\n"
+        "_Where errors are caught, how they surface to users, logging "
+        "expectations._\n\n"
+        "## Testing\n\n"
+        "_Frameworks, what must be covered before a ticket closes, how to "
+        "run the suite._\n\n"
+        "## Documentation\n\n"
+        "_Header/comment rules, which docs must stay current and when._\n\n"
+        "## Code Review\n\n"
+        "_PR size, review expectations, what blocks a merge._\n"
     ),
 }
 
