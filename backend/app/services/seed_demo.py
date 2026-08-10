@@ -379,6 +379,12 @@ _CODING_STANDARDS_MD = """\
 - Borrowing a component into another view? Move it to `common/`, update
   both call sites, and test both uses.
 
+## Styling
+
+- One stylesheet per domain (login, home, ...), linked from the main
+  stylesheet with a comment per domain describing what it covers.
+- Inline styles are discouraged.
+
 ## Testing
 
 - pytest; every endpoint gets at least a happy-path and a 4xx test.

@@ -6,7 +6,7 @@
 
 - Backend: Python 3 / FastAPI / SQLAlchemy 2.0 / Alembic. Frontend: JavaScript (not TypeScript) / React 18 / Vite.
 - There is deliberately no ruff/black/eslint/prettier config. Consistency comes from matching the surrounding code and from review. Do not add formatter configs or reformat files wholesale.
-- Plain CSS only: no Tailwind, no CSS-in-JS, no inline styles. Colors, fonts, and spacing come from the custom properties in `frontend/src/styles/theme.css`; never hard-code a color a variable exists for. Preserve the terminal aesthetic.
+- Plain CSS only: no Tailwind, no CSS-in-JS. Preserve the terminal aesthetic.
 
 ## Naming
 
@@ -20,6 +20,13 @@
 - When planning frontend work, scan the existing component tree (`frontend/src/components/`) first to see what already fits.
 - Borrowing a component into another view? Move it to `components/common/`, update both call sites, and test both uses.
 - Shared logic goes in custom hooks under `src/hooks/`; shared state in the single Zustand store (`src/store/useStore.js`) with computed getters. No new state libraries.
+
+## Styling
+
+- One stylesheet per domain in `frontend/src/styles/` (`tickets.css`, `dashboard.css`, ...); genuinely shared rules go in `common.css`.
+- Every domain sheet is linked from the main stylesheet, with a comment per domain describing what it covers.
+- Colors, fonts, and spacing come from the custom properties in `theme.css`; never hard-code a color a variable exists for.
+- Inline styles are discouraged — styles live in `.css` files.
 
 ## Error Handling
 
