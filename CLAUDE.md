@@ -96,7 +96,7 @@ Projects can optionally link to a Jira project. When enabled:
 
 ## Sprint Gates
 
-Live list: `GET /api/projects/{id}/gate-status`. Current gates: `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_consolidation`. `force_headers` reserved. Enable/disable via PATCH /api/projects/:id or the toggle switches.
+Live list: `GET /api/projects/{id}/gate-status`. Current gates: `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_coding_standards_md`, `force_consolidation`. `force_headers` reserved. Enable/disable via PATCH /api/projects/:id or the toggle switches.
 
 ## Sprint Workflow
 

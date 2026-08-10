@@ -6,7 +6,7 @@
 # Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc, git, services/activity_log
 # Data In: db: Session, SprintCreate/Update, acting_agent_id
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-06-19 (DWB-410)
+# Last Modified: 2026-08-10 (DWB-004)
 
 import logging
 import re
@@ -275,6 +275,7 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
             (project.force_initial_md, "INITIAL.md"),
             (project.force_architecture_md, "ARCHITECTURE.md"),
             (project.force_handoff_md, "HANDOFF.md"),
+            (project.force_coding_standards_md, "CODING_STANDARDS.md"),
         ]:
             if toggle:
                 path = Path(project.repo_path) / filename

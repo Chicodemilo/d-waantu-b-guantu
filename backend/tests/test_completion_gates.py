@@ -6,7 +6,7 @@
 # Callees:       POST/PATCH /api/projects, POST/PATCH /api/sprints, POST /api/test-results
 # Data In:       Factory-created projects, epics, test results via conftest fixtures
 # Data Out:      Assertions on gate-blocked 400s and successful 200 completions
-# Last Modified: 2026-03-29
+# Last Modified: 2026-08-10 (DWB-004)
 
 """Tests for sprint completion gates (DWB-087/088/089).
 
@@ -14,6 +14,9 @@ Projects have three boolean flags: force_headers, force_test_run, force_test_cov
 When enabled, they block sprint completion (PATCH to status=completed) unless
 the conditions are met.
 """
+
+import tempfile
+from pathlib import Path
 
 
 class TestProjectGateFields:
@@ -308,3 +311,61 @@ class TestGateCombinations:
         })
         assert r.status_code == 200
         assert r.json()["status"] == "planned"
+
+
+class TestForceCodingStandardsGate:
+    """DWB-004: force_coding_standards_md requires CODING_STANDARDS.md at the
+    repo root before sprint close. File-existence check, like the other doc
+    gates (force_initial_md / force_architecture_md / force_handoff_md)."""
+
+    def _make_gated_sprint(self, client, make_epic, repo_path, **gates):
+        project = client.post("/api/projects", json={
+            "prefix": "FCS",
+            "name": "Force Coding Standards",
+            "repo_path": repo_path,
+            # Isolate this gate: handoff defaults ON and would also block.
+            "force_handoff_md": False,
+            **gates,
+        }).json()
+        epic = make_epic(project_id=project["id"])
+        sprint = client.post("/api/sprints", json={
+            "project_id": project["id"],
+            "epic_id": epic["id"],
+            "sprint_number": 1,
+            "status": "active",
+        }).json()
+        return project, sprint
+
+    def test_missing_file_blocks_close(self, client, make_epic):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project, sprint = self._make_gated_sprint(
+                client, make_epic, tmpdir, force_coding_standards_md=True
+            )
+            r = client.patch(f"/api/sprints/{sprint['id']}", json={
+                "status": "completed",
+            })
+            assert r.status_code == 400
+            assert "CODING_STANDARDS.md" in r.json()["detail"]
+
+    def test_present_file_allows_close(self, client, make_epic):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "CODING_STANDARDS.md").write_text(
+                "# Coding Standards\n"
+            )
+            project, sprint = self._make_gated_sprint(
+                client, make_epic, tmpdir, force_coding_standards_md=True
+            )
+            r = client.patch(f"/api/sprints/{sprint['id']}", json={
+                "status": "completed",
+            })
+            assert r.status_code == 200
+            assert r.json()["status"] == "completed"
+
+    def test_gate_off_allows_close_without_file(self, client, make_epic):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project, sprint = self._make_gated_sprint(client, make_epic, tmpdir)
+            assert project["force_coding_standards_md"] is False
+            r = client.patch(f"/api/sprints/{sprint['id']}", json={
+                "status": "completed",
+            })
+            assert r.status_code == 200

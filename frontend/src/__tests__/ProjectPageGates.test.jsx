@@ -61,6 +61,7 @@ function project(overrides = {}) {
     force_initial_md: false,
     force_architecture_md: false,
     force_handoff_md: false,
+    force_coding_standards_md: false,
     jira_project_key: null,
     ...overrides,
   };

@@ -6,7 +6,7 @@
 # Callees: app/services/agent_memory.py, app/models/agent.py, pathlib, shutil, re, json
 # Data In: db: Session, project: Project
 # Data Out: DeployResult
-# Last Modified: 2026-06-24 (DWB-461)
+# Last Modified: 2026-08-10 (DWB-004)
 
 import json
 import logging
@@ -371,6 +371,11 @@ _ROOT_DOC_STUBS = {
         "# Handoff\n\n"
         "> Session-to-session continuity. Read at session start, "
         "update at end.\n"
+    ),
+    "CODING_STANDARDS.md": (
+        "# Coding Standards\n\n"
+        "> Language conventions, naming, error handling, testing, "
+        "documentation, and code review expectations.\n"
     ),
 }
 

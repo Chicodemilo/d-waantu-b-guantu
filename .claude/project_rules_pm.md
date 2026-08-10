@@ -27,7 +27,7 @@ PM has **NO authority** over Jira sprints (close/create/edit/delete). Pull/read 
 ## Sprint Gates
 
 Authoritative list: `GET /api/projects/1/gate-status`. Currently enabled on DWB:
-- `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_consolidation` (DWB-322).
+- `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_coding_standards_md`, `force_consolidation` (DWB-322, DWB-004).
 - `force_headers` reserved/not yet enforced.
 - `force_team_md` removed in DWB-321 (DB-authoritative roster).
 

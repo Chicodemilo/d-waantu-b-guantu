@@ -6,7 +6,7 @@
 # Callees:       GET/POST /api/playbooks, POST /api/projects/:id/deploy-playbooks
 # Data In:       Factory-created projects via conftest fixtures; temp playbook files
 # Data Out:      Assertions on HTTP status codes and deployed playbook content
-# Last Modified: 2026-06-10
+# Last Modified: 2026-08-10 (DWB-004)
 
 """Tests for /api/playbooks and /api/projects/:id/deploy-playbooks."""
 
@@ -262,10 +262,11 @@ class TestDeployScaffoldsMemoryDirs:
 
 class TestDeployScaffoldsRootDocs:
     """DWB-366: deploy-playbooks must scaffold INITIAL.md, ARCHITECTURE.md,
-    HANDOFF.md at the project repo root when missing; never overwrite when
-    present; surface created entries in response.root_docs."""
+    HANDOFF.md, CODING_STANDARDS.md (DWB-004) at the project repo root when
+    missing; never overwrite when present; surface created entries in
+    response.root_docs."""
 
-    _DOCS = ("INITIAL.md", "ARCHITECTURE.md", "HANDOFF.md")
+    _DOCS = ("INITIAL.md", "ARCHITECTURE.md", "HANDOFF.md", "CODING_STANDARDS.md")
 
     def _deploy_or_skip(self, client, project_id):
         r = client.post(f"/api/projects/{project_id}/deploy-playbooks")
@@ -275,7 +276,7 @@ class TestDeployScaffoldsRootDocs:
         assert r.status_code == 200
         return r.json()
 
-    def test_creates_all_three_when_missing(self, client, make_project):
+    def test_creates_all_when_missing(self, client, make_project):
         with tempfile.TemporaryDirectory() as tmpdir:
             project = make_project(repo_path=tmpdir, prefix="RDOC1")
             data = self._deploy_or_skip(client, project["id"])
@@ -286,7 +287,7 @@ class TestDeployScaffoldsRootDocs:
                 assert path.is_file()
                 content = path.read_text(encoding="utf-8")
                 # Minimal H1 present (may be after non-Jira banner).
-                stem = name.removesuffix(".md")
+                stem = name.removesuffix(".md").replace("_", " ")
                 assert f"# {stem.title()}" in content
 
     def test_preserves_existing_files(self, client, make_project):
@@ -298,8 +299,10 @@ class TestDeployScaffoldsRootDocs:
             project = make_project(repo_path=tmpdir, prefix="RDOC2")
             data = self._deploy_or_skip(client, project["id"])
 
-            # Only the missing one (ARCHITECTURE.md) scaffolded.
-            assert data["root_docs"] == ["ARCHITECTURE.md"]
+            # Only the missing ones scaffolded.
+            assert sorted(data["root_docs"]) == [
+                "ARCHITECTURE.md", "CODING_STANDARDS.md",
+            ]
             # Existing files untouched.
             assert (Path(tmpdir) / "HANDOFF.md").read_text(
                 encoding="utf-8"

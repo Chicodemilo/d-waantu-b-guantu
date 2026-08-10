@@ -6,7 +6,7 @@
 # Callees: app/services/project.py, app/services/project_agent.py, models (Agent, Alert, ProjectAgent)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-06-24 (DWB-458)
+# Last Modified: 2026-08-10 (DWB-004)
 
 import json
 import logging
@@ -618,6 +618,7 @@ _DOC_GATES = [
     ("force_initial_md", "INITIAL.md"),
     ("force_architecture_md", "ARCHITECTURE.md"),
     ("force_handoff_md", "HANDOFF.md"),
+    ("force_coding_standards_md", "CODING_STANDARDS.md"),
 ]
 
 

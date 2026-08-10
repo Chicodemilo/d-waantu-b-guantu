@@ -116,6 +116,7 @@ Boolean toggles gating sprint completion. All default OFF (opt-in per project):
 | `force_initial_md` | `INITIAL.md` exists at repo root |
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
 | `force_handoff_md` | `HANDOFF.md` exists at repo root |
+| `force_coding_standards_md` | `CODING_STANDARDS.md` exists at repo root |
 | `force_consolidation` | TL-owned docs within token ceiling; agent memory exempt |
 | `force_headers` | Sprint-touched `.py` files carry the code-header block; missing ones block close |
 | Failure records | Unreviewed stubs always block close |

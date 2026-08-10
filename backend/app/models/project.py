@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Project, ProjectStatus
-# Last Modified: 2026-06-10
+# Last Modified: 2026-08-10 (DWB-004)
 
 import enum
 from datetime import datetime
@@ -65,6 +65,7 @@ class Project(Base):
     force_initial_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_architecture_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_handoff_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    force_coding_standards_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_consolidation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # DWB-446: gates SendMessage agent-comms capture per project. Default TRUE;
     # when false POST /api/hooks/agent-message returns 200 and inserts nothing.

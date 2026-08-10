@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-06-24
+// Last Modified: 2026-08-10 (DWB-004)
 
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -298,6 +298,7 @@ function ProjectPage() {
                 { field: 'force_initial_md', label: 'Force INITIAL.md', file: 'INITIAL.md', tip: 'INITIAL.md must exist at the repo root. Contains project requirements, phases, and design decisions.' },
                 { field: 'force_architecture_md', label: 'Force ARCHITECTURE.md', file: 'ARCHITECTURE.md', tip: 'ARCHITECTURE.md must exist at the repo root. Contains system design, data model, and API reference.' },
                 { field: 'force_handoff_md', label: 'Force HANDOFF.md', file: 'HANDOFF.md', tip: 'HANDOFF.md must exist at the repo root. Session continuity notes — current state, decisions, gotchas.' },
+                { field: 'force_coding_standards_md', label: 'Force CODING_STANDARDS.md', file: 'CODING_STANDARDS.md', tip: 'CODING_STANDARDS.md must exist at the repo root. Language conventions, naming, error handling, testing, and review expectations.' },
               ].map(({ field, label, file, tip }) => (
                 <div key={field} className="project-tools__row">
                   <button
