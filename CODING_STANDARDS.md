@@ -14,6 +14,14 @@
 - Frontend: PascalCase component files, one component per file. kebab-case CSS classes in per-feature stylesheets (`tickets.css`, `dashboard.css`) or `common.css` when genuinely shared.
 - Alembic revisions: `<revision>_<snake_case_description>.py`, hand-written (MySQL autogenerate is not trusted).
 
+## Services & Logic
+
+- Logic is farmed out to reusable services, front end and back end — not embedded in views, routes, or components.
+- Backend: business logic lives in `backend/app/services/` (one module per domain); routers stay thin. Cross-entity rules always go in a service.
+- Frontend: shared client logic lives in `frontend/src/services/` (`logger.js`, caches, tracking); API access in `src/api/`; view-shaped logic in hooks.
+- New service files get a clear name and a header explaining usage (what calls it, what it calls).
+- When planning new system functionality, look in the `services/` directories first for something that already does the job.
+
 ## Components & Reuse
 
 - If a component can be reused, build it reusable from the start.
@@ -43,7 +51,7 @@
 
 - Every source file (`.py`, `.js`, `.jsx`, `.css`) carries the standard header block; update `Last Modified` (with the ticket key) on every edit. Format: `docs/rules/global/code-header-format.md`.
 - No docstrings by convention — the header carries the what/who-calls-this context. Inline comments only for non-obvious constraints, tagged with the ticket (`# DWB-314: ...`).
-- Business logic lives in `app/services/`; routers stay thin. Pydantic schemas use `Create`/`Read`/`Update`/`List` variants and endpoints declare `response_model=`.
+- Pydantic schemas use `Create`/`Read`/`Update`/`List` variants and endpoints declare `response_model=`.
 
 ## Code Review
 

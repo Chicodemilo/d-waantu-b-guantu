@@ -372,6 +372,11 @@ _CODING_STANDARDS_MD = """\
 - snake_case functions and variables, PascalCase classes.
 - Services own business logic; route handlers stay thin.
 
+## Services & Logic
+
+- Logic goes in reusable classes under `services/`, front end and back end.
+- Look in `services/` first when planning new functionality.
+
 ## Components & Reuse
 
 - If a component can be reused, build it reusable from the start.
