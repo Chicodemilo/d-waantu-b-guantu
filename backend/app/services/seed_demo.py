@@ -6,7 +6,7 @@
 # Callees: All ORM models, app/services/project.delete_project
 # Data In: db: Session
 # Data Out: dict with created entity counts
-# Last Modified: 2026-03-30
+# Last Modified: 2026-08-10 (DWB-005)
 
 import shutil
 from datetime import date, datetime, timedelta
@@ -37,12 +37,14 @@ DEMO_PROJECT_DESC = (
     "analytics, and API integrations. Seeded to showcase the DWB tracking system."
 )
 
+# DWB-006: _DMO suffix per agent-naming-convention — agents.name is UNIQUE
+# system-wide, and plain names collide with live rosters (e.g. a real Freddie).
 AGENTS = [
-    {"name": "Archie",  "role": "team-lead",       "description": "Team lead — orchestrator",       "api_key": "dmo-key-tl"},
-    {"name": "Pam",     "role": "pm",              "description": "Project manager — ticket ops",   "api_key": "dmo-key-pm"},
-    {"name": "Freddie", "role": "frontend-worker",  "description": "React / Vite frontend dev",     "api_key": "dmo-key-fe"},
-    {"name": "Barry",   "role": "backend-worker",   "description": "FastAPI backend dev",           "api_key": "dmo-key-be"},
-    {"name": "Chester", "role": "tester",           "description": "Test runner and QA",            "api_key": "dmo-key-qa"},
+    {"name": "Archie_DMO",  "role": "team-lead",       "description": "Team lead — orchestrator",       "api_key": "dmo-key-tl"},
+    {"name": "Pam_DMO",     "role": "pm",              "description": "Project manager — ticket ops",   "api_key": "dmo-key-pm"},
+    {"name": "Freddie_DMO", "role": "frontend-worker",  "description": "React / Vite frontend dev",     "api_key": "dmo-key-fe"},
+    {"name": "Barry_DMO",   "role": "backend-worker",   "description": "FastAPI backend dev",           "api_key": "dmo-key-be"},
+    {"name": "Chester_DMO", "role": "tester",           "description": "Test runner and QA",            "api_key": "dmo-key-qa"},
 ]
 
 EPICS = [
@@ -358,6 +360,28 @@ webhook_events  (id, source, payload, signature, verified, received_at)
 - **CI/CD**: GitHub Actions → build → test → deploy to staging on merge to main
 """
 
+_CODING_STANDARDS_MD = """\
+# Coding Standards — Demo Project
+
+> Language conventions, naming, error handling, testing, documentation, and
+> code review expectations.
+
+## Python
+
+- Type hints on all function signatures; `X | None` over `Optional[X]`.
+- snake_case functions and variables, PascalCase classes.
+- Services own business logic; route handlers stay thin.
+
+## Testing
+
+- pytest; every endpoint gets at least a happy-path and a 4xx test.
+- Factory fixtures over hand-built model instances.
+
+## Review
+
+- Small PRs, one concern each. Tests pass before review is requested.
+"""
+
 
 def _create_demo_repo(repo_dir: Path) -> None:
     """Create (or recreate) a fake repo directory with demo doc files."""
@@ -369,6 +393,7 @@ def _create_demo_repo(repo_dir: Path) -> None:
     (repo_dir / "INITIAL.md").write_text(_INITIAL_MD, encoding="utf-8")
     (repo_dir / "ARCHITECTURE.md").write_text(_ARCHITECTURE_MD, encoding="utf-8")
     (repo_dir / "HANDOFF.md").write_text("# Handoff — Demo Project\n\nDemo handoff notes.\n", encoding="utf-8")
+    (repo_dir / "CODING_STANDARDS.md").write_text(_CODING_STANDARDS_MD, encoding="utf-8")
 
 
 def seed_demo_project(db: Session) -> dict:
@@ -412,6 +437,7 @@ def seed_demo_project(db: Session) -> dict:
         force_test_coverage=False,
         force_initial_md=True,
         force_architecture_md=True,
+        force_coding_standards_md=True,
     )
     db.add(project)
     db.flush()
@@ -550,5 +576,8 @@ def seed_demo_project(db: Session) -> dict:
         "test_results": len(TEST_RESULTS),
         "failure_records": len(FAILURE_RECORDS),
         "alerts": len(ALERTS),
-        "doc_files": ["README.md", "INITIAL.md", "ARCHITECTURE.md"],
+        "doc_files": [
+            "README.md", "INITIAL.md", "ARCHITECTURE.md",
+            "HANDOFF.md", "CODING_STANDARDS.md",
+        ],
     }

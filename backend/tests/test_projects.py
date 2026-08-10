@@ -222,6 +222,22 @@ class TestCreateFromRepoDeploysBundle:
         assert (tmp_path / ".claude" / "worker_playbook.md").is_file()
         assert (tmp_path / ".claude" / "settings.json").is_file()
 
+    def test_from_repo_enables_doc_gates_and_scaffolds_standards(
+        self, client, tmp_path
+    ):
+        """DWB-005: from-repo projects get the doc gates on by default, and
+        the creation-time bundle deploy scaffolds CODING_STANDARDS.md so the
+        new gate starts out passing."""
+        r = client.post(
+            "/api/projects/from-repo", json={"repo_path": str(tmp_path)}
+        )
+        assert r.status_code == 201, r.text
+        data = r.json()
+        assert data["force_initial_md"] is True
+        assert data["force_architecture_md"] is True
+        assert data["force_coding_standards_md"] is True
+        assert (tmp_path / "CODING_STANDARDS.md").is_file()
+
     def test_deploy_failure_does_not_fail_creation(
         self, client, tmp_path, monkeypatch
     ):

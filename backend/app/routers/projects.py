@@ -156,6 +156,7 @@ def create_from_repo(data: FromRepoRequest, db: Session = Depends(get_db)):
         repo_path=str(repo),
         force_initial_md=True,
         force_architecture_md=True,
+        force_coding_standards_md=True,
     )
     project = svc.create_project(db, create_data)
     # Auto-check doc gates and raise alerts for missing docs
