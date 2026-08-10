@@ -377,6 +377,11 @@ _CODING_STANDARDS_MD = """\
 - Logic goes in reusable classes under `services/`, front end and back end.
 - Look in `services/` first when planning new functionality.
 
+## Scripts
+
+- Worker scripts (shell, Python, seeders, deploy) live in `scripts/`,
+  documented, reading config from `.env` — never hard-coded values.
+
 ## Components & Reuse
 
 - If a component can be reused, build it reusable from the start.

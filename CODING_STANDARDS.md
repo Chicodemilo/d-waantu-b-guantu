@@ -22,6 +22,12 @@
 - New service files get a clear name and a header explaining usage (what calls it, what it calls).
 - When planning new system functionality, look in the `services/` directories first for something that already does the job.
 
+## Scripts
+
+- Worker scripts live in a `scripts/` directory: repo-level scripts (git hooks installer) in `/scripts`, backend CLI scripts (`run_tests.sh`, `sync_instructions.py`, backfills) in `backend/scripts/`.
+- Anything that may run on a server or locally belongs there — shell, Python, seeders, deploy scripts — each with documentation: what it does, how to run it, and from where.
+- Scripts read configuration from `.env` even when run locally. They get committed, so no hard-coded credentials, hosts, or environment values.
+
 ## Components & Reuse
 
 - If a component can be reused, build it reusable from the start.
