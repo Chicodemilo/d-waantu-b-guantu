@@ -90,3 +90,28 @@ class StandardsAuditRead(BaseModel):
     run_at: datetime
     triggered_by: str
     created_at: datetime
+
+
+# DWB-016: result of applying an audit scorecard to the score_event ledger.
+
+
+class AppliedScore(BaseModel):
+    agent_id: int
+    agent_name: str
+    delta: int
+    trigger_type: str
+    event_id: int
+
+
+class SkippedScore(BaseModel):
+    agent: str | None = None
+    delta: int | None = None
+    reason: str
+
+
+class ScorecardApplyResult(BaseModel):
+    audit_id: int
+    # True when the audit was already applied - a no-op idempotent replay.
+    already_applied: bool
+    applied: list[AppliedScore] = []
+    skipped: list[SkippedScore] = []

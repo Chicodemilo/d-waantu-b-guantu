@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: ScoreEvent, ScoreSource, ScoreTriggerType
-# Last Modified: 2026-06-22
+# Last Modified: 2026-08-11 (DWB-016: audit source + audit_grant/audit_demerit triggers)
 
 import enum
 from datetime import datetime
@@ -22,6 +22,10 @@ class ScoreSource(str, enum.Enum):
     auto = "auto"
     human = "human"
     peer = "peer"
+    # DWB-016: a standards-audit scorecard applied to the ledger. Distinct from
+    # `human` so an auditor-origin carrot/stick is never mistaken for a human
+    # award, and distinct from `auto` so it is filterable as audit-driven.
+    audit = "audit"
 
 
 class ScoreTriggerType(str, enum.Enum):
@@ -31,6 +35,7 @@ class ScoreTriggerType(str, enum.Enum):
     zero_token_close, gate_miss, forgot.
     human tools (DWB-426): carrot, stick.
     peer economy (DWB-427): peer_grant, peer_demerit.
+    audit application (DWB-016): audit_grant, audit_demerit.
     """
     ticket_closed = "ticket_closed"
     rework = "rework"
@@ -43,6 +48,11 @@ class ScoreTriggerType(str, enum.Enum):
     stick = "stick"
     peer_grant = "peer_grant"
     peer_demerit = "peer_demerit"
+    # DWB-016: a scorecard entry from a standards audit, applied to the ledger.
+    # Direction only (grant/demerit); source=audit marks the origin, and the
+    # per-entry reason carries the worker/Archie/Pam specifics the auditor wrote.
+    audit_grant = "audit_grant"
+    audit_demerit = "audit_demerit"
 
 
 class ScoreEvent(Base):
