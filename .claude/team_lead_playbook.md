@@ -285,10 +285,11 @@ Before marking any implementation task done:
 
 1. Read changed files, don't trust the agent summary.
 2. Verify code matches the spec (field names, routes, CSS).
-3. Run tests locally if they exist.
-4. Verify dashboard renders what the API returns (for UI work).
+3. Review the diff against `.claude/rules/global/coding-standards.md` — services, scripts, components, styling, headers, commits, tests.
+4. Run tests locally if they exist.
+5. Verify dashboard renders what the API returns (for UI work).
 
-Skipping review because you're moving fast is exactly when bugs slip through.
+Skipping review because you're moving fast is exactly when bugs slip through. Standards violations you wave through survive to the PR: the auditor catches repeat offenders, and repeat violations that clear your review dock **your** score, not just the worker's.
 
 ## 4c. Skip Ceremony: Only When the User Signals It
 
