@@ -15,8 +15,8 @@ The cross-project law. The auditor enforces these on every PR. Project-specific 
 
 **Styling.** One style file per domain (login, home, ...) — plain CSS, composed/consolidated CSS, or style tokens alike. Every domain file is linked from the main stylesheet, which carries a comment per domain. Inline styles are discouraged.
 
-**Headers.** Every source file carries the standard header block; `Last Modified` updated on every edit.
+**Headers.** Every code file (`.py`, `.js`, `.jsx`, `.css`, shell, and the like) carries the standard header block; `Last Modified` updated on every edit. Markdown docs are exempt.
 
-**Commits.** No Co-Authored-By, no AI attribution, no model names.
+**Commits.** No Co-Authored-By, no AI attribution, no model names in commit messages or PR text. (Config values like a model id in `.env` files are configuration, not attribution.)
 
 **Tests.** Changed code keeps its tests green in every call site; new endpoints get at least a happy-path and a 4xx test before the ticket closes.

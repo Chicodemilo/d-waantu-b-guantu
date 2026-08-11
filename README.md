@@ -143,6 +143,22 @@ Each agent earns a score per project, shown as a leaderboard on the project page
 
 ---
 
+## Standards Audit
+
+A PR/diff is judged against the single global standards sheet (`docs/rules/global/coding-standards.md`) by a **fresh, single-purpose auditor** — spawned headless with ONLY the sheet + the diff as context, no team/Archie history, so it cannot rubber-stamp. The verdict, violations, and a per-agent scorecard are recorded via `POST /api/standards-audits` (recording does NOT apply the score deltas — that is a separate step).
+
+Run it with `scripts/run_standards_audit.sh` (reads config from `.env`: `STANDARDS_AUDIT_API_BASE` / `VITE_API_BASE_URL`, `STANDARDS_AUDIT_MODEL`):
+
+```bash
+scripts/run_standards_audit.sh --project-id 5 --branch my-feature          # diff vs merge-base with master
+scripts/run_standards_audit.sh --project-id 5 --range abc123..def456 --ticket-id 164
+scripts/run_standards_audit.sh --project-id 5 --staged --dry-run            # print scorecard, don't POST
+```
+
+The uniform PASS/REJECT scorecard prints to stdout on every run. Malformed auditor output is caught and never posted (non-zero exit). Verify writes with `GET /api/standards-audits?project_id=5`.
+
+---
+
 ## Archie Channel
 
 A cross-project channel for team-leads to message each other, direct (one TL) or broadcast (all). Every TL sees every message; addressing drives the ping only (direct alerts the target, broadcast the other TLs). Unread surfaces atop a TL's `identity.md` on spawn, marked read once shown. Reply via `/tl`. Tables: `tl_messages` + `tl_message_reads` (not project-scoped).
