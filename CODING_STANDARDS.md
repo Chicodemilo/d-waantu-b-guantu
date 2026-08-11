@@ -1,66 +1,35 @@
-# Coding Standards
+# Coding standards
 
-> Language conventions, naming, error handling, testing, documentation, and code review expectations for the DWB codebase. The atomic rules in `docs/rules/global/` are the enforceable source of truth; when this doc and a rule file disagree, the rule file wins.
+The cross-project law. The auditor enforces these on every PR. Project-specific extensions live below the marker in each repo's `CODING_STANDARDS.md` — they add, never override.
 
-## Languages & Style
+**Services.** Logic is farmed out to reusable classes — front end and back end — never embedded in views, routes, or components. When in doubt: `services/` near the top of the tree, class in a subdirectory, named for what it does, usage explained in the file. Look there first when planning new functionality.
 
-- Backend: Python 3 / FastAPI / SQLAlchemy 2.0 / Alembic. Frontend: JavaScript (not TypeScript) / React 18 / Vite.
-- There is deliberately no ruff/black/eslint/prettier config. Consistency comes from matching the surrounding code and from review. Do not add formatter configs or reformat files wholesale.
-- Plain CSS only: no Tailwind, no CSS-in-JS. Preserve the terminal aesthetic.
+**Scripts.** Anything that may run on a server or locally — shell, Python, PHP, seeders, deploys — lives in a top-level `scripts/` directory, documented (what, how to run, from where). Scripts read config from `.env` even when run locally: they get committed, so no hard-coded credentials or environment values.
 
-## Naming
+**Components.** If a component can be reused, build it reusable from the start. Scan the existing component tree before planning new UI. Borrowing a component into another view: move it to `common/`, update both call sites, test both uses.
 
-- Python: snake_case functions/variables, PascalCase classes. Type hints on all signatures, modern syntax (`int | None`, not `Optional[int]`).
-- Frontend: PascalCase component files, one component per file. kebab-case CSS classes in per-feature stylesheets (`tickets.css`, `dashboard.css`) or `common.css` when genuinely shared.
-- Alembic revisions: `<revision>_<snake_case_description>.py`, hand-written (MySQL autogenerate is not trusted).
+**Styling.** One style file per domain (login, home, ...) — plain CSS, composed/consolidated CSS, or style tokens alike. Every domain file is linked from the main stylesheet, which carries a comment per domain. Inline styles are discouraged.
 
-## Services & Logic
+**Headers.** Every code file (`.py`, `.js`, `.jsx`, `.css`, shell, and the like) carries the standard header block; `Last Modified` updated on every edit. Markdown docs are exempt.
 
-- Logic is farmed out to reusable services, front end and back end — not embedded in views, routes, or components.
-- Backend: business logic lives in `backend/app/services/` (one module per domain); routers stay thin. Cross-entity rules always go in a service.
-- Frontend: shared client logic lives in `frontend/src/services/` (`logger.js`, caches, tracking); API access in `src/api/`; view-shaped logic in hooks.
-- New service files get a clear name and a header explaining usage (what calls it, what it calls).
-- When planning new system functionality, look in the `services/` directories first for something that already does the job.
+**Commits.** No Co-Authored-By, no AI attribution, no model names in commit messages or PR text. (Config values like a model id in `.env` files are configuration, not attribution.)
 
-## Scripts
+**Tests.** Changed code keeps its tests green in every call site; new endpoints get at least a happy-path and a 4xx test before the ticket closes.
 
-- Worker scripts live in a `scripts/` directory: repo-level scripts (git hooks installer) in `/scripts`, backend CLI scripts (`run_tests.sh`, `sync_instructions.py`, backfills) in `backend/scripts/`.
-- Anything that may run on a server or locally belongs there — shell, Python, seeders, deploy scripts — each with documentation: what it does, how to run it, and from where.
-- Scripts read configuration from `.env` even when run locally. They get committed, so no hard-coded credentials, hosts, or environment values.
+---
 
-## Components & Reuse
+## Project Extensions
 
-- If a component can be reused, build it reusable from the start.
-- When planning frontend work, scan the existing component tree (`frontend/src/components/`) first to see what already fits.
-- Borrowing a component into another view? Move it to `components/common/`, update both call sites, and test both uses.
-- Shared logic goes in custom hooks under `src/hooks/`; shared state in the single Zustand store (`src/store/useStore.js`) with computed getters. No new state libraries.
+_Project-specific additions below; they add to the global sheet, never override it._
 
-## Styling
+**Stack.** Backend: Python 3 / FastAPI / SQLAlchemy 2.0 / Alembic / MySQL. Frontend: JavaScript (not TypeScript) / React 18 / Vite. Plain CSS off `frontend/src/styles/theme.css` variables, linked through `styles/index.css`. Deliberately no linter/formatter configs - match the surrounding code; don't reformat wholesale.
 
-- One stylesheet per domain in `frontend/src/styles/` (`tickets.css`, `dashboard.css`, ...); genuinely shared rules go in `common.css`.
-- Every domain sheet is linked from the main stylesheet, with a comment per domain describing what it covers.
-- Colors, fonts, and spacing come from the custom properties in `theme.css`; never hard-code a color a variable exists for.
-- Inline styles are discouraged — styles live in `.css` files.
+**Backend shape.** Typed Python everywhere (`int | None` style); no docstrings by convention - the file header carries the what/who-calls-this context. Thin routers; business logic in `app/services/`; Pydantic schemas as `Create`/`Read`/`Update`/`List` variants with `response_model=` declared. Services raise their own exceptions; routers convert to `HTTPException`.
 
-## Error Handling
+**Migrations.** Hand-written only (MySQL autogenerate is not trusted). Revision ids follow `dwbNNNa1b2c3` after the ticket; single head; migrations carry the standard code header.
 
-- Routers raise `HTTPException` directly. Services raise their own exception classes; the router catches and converts. Services never import FastAPI.
-- Frontend: never call `fetch` directly from components — use `src/api/client.js` via the per-entity module. The client already handles error reporting to `/errors` and request logging; don't duplicate either. Pass an `AbortController` signal for requests tied to component lifetime.
+**Frontend shape.** Single Zustand store (`src/store/useStore.js`); never raw `fetch` in components - go through `src/api/` modules over `src/api/client.js` (it already handles error reporting and request logging); shared logic in `src/hooks/`; shared client services in `src/services/`.
 
-## Testing
+**Tests.** Backend: pytest with the `conftest.py` factory fixtures against the `lat_test` DB (per-test rollback; respect the flock - a hung-looking suite is another run in progress). Run `./backend/scripts/run_tests.sh` (`--post --project-id N` to report to the dashboard). Frontend: vitest + Testing Library in `src/__tests__/`.
 
-- Backend: pytest in `backend/tests/`, using the `conftest.py` factory fixtures (`make_project`, `make_ticket`, ...) over hand-built models. Runs against the separate `lat_test` DB with per-test rollback; don't work around the flock serialization. Run via `./backend/scripts/run_tests.sh` (add `--post --project-id N` to report to the dashboard).
-- Frontend: vitest + Testing Library in `src/__tests__/`. Mock with `vi.spyOn()`, clean up in `afterEach`. Run with `npm test`.
-- Every new endpoint gets at least a happy-path and a 4xx test; changed components keep their tests green in both old and new call sites.
-
-## Documentation
-
-- Every source file (`.py`, `.js`, `.jsx`, `.css`) carries the standard header block; update `Last Modified` (with the ticket key) on every edit. Format: `docs/rules/global/code-header-format.md`.
-- No docstrings by convention — the header carries the what/who-calls-this context. Inline comments only for non-obvious constraints, tagged with the ticket (`# DWB-314: ...`).
-- Pydantic schemas use `Create`/`Read`/`Update`/`List` variants and endpoints declare `response_model=`.
-
-## Code Review
-
-- The TL reviews and commits; workers do not commit unless told to.
-- Commits: no Co-Authored-By lines, no AI attribution, no model names. DWB ticket keys are fine in this repo's commits, never in external-facing repos.
-- Small, one-concern changes; the full suite passes before review is requested.
+**Review & commits.** The TL reviews, audits (scripts/run_standards_audit.sh on the staged batch), and commits; workers never commit. DWB ticket keys are fine in this repo's commits, never in external-facing repos.
