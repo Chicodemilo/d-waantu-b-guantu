@@ -152,8 +152,11 @@ Run it with `scripts/run_standards_audit.sh` (reads config from `.env`: `STANDAR
 ```bash
 scripts/run_standards_audit.sh --project-id 5 --branch my-feature          # diff vs merge-base with master
 scripts/run_standards_audit.sh --project-id 5 --range abc123..def456 --ticket-id 164
+scripts/run_standards_audit.sh --project-id 5 --staged --author Barry_DWB   # explicit author for the scorecard
 scripts/run_standards_audit.sh --project-id 5 --staged --dry-run            # print scorecard, don't POST
 ```
+
+**Scorecard attribution.** With `--ticket-id` (author = the ticket's assigned agent) or `--author <name>` (explicit override), the runner injects a facts-only ATTRIBUTION block — author + team-lead + PM **names/roles only, no opinions**, so fresh-eyes judgement is preserved — and the auditor names those exact agents in the scorecard (worker deltas on the author; TL only on repeat-survival; PM only on a clear ticketing signal). Returned names are validated against that roster set; an unknown name **fails loudly before POST** so the ledger can never be mis-attributed. Without either flag, entries fall back to the generic `author`.
 
 The uniform PASS/REJECT scorecard prints to stdout on every run. Malformed auditor output is caught and never posted (non-zero exit). Verify writes with `GET /api/standards-audits?project_id=5`.
 

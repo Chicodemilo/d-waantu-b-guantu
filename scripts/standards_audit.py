@@ -10,10 +10,14 @@
 # Callees: git (diff gathering), `claude -p` (the fresh auditor), the DWB API
 #   POST /api/standards-audits.
 # Data In: CLI flags (--project-id, one of --branch/--range/--staged, optional
-#   --ticket-id/--sprint-id/--dry-run). Config from .env only.
+#   --ticket-id/--author/--sprint-id/--dry-run). Config from .env only. When
+#   --ticket-id or --author is given, resolves real roster names (author from the
+#   ticket's assigned agent or --author; reviewer/PM from the project team) and
+#   injects a facts-only ATTRIBUTION block so scorecards name real agents.
 # Data Out: Exit 0 + a stored audit (or, with --dry-run, the payload printed).
-#   Non-zero exit + a clear message on malformed auditor output or API failure.
-# Last Modified: 2026-08-11 (DWB-015)
+#   Non-zero exit + a clear message on malformed auditor output, an unknown
+#   scorecard name (DWB-023 pre-POST guard), or API failure.
+# Last Modified: 2026-08-11 (DWB-023)
 #
 # Design note: the auditor is deliberately context-starved. It runs from a
 #   throwaway temp directory (so it cannot auto-load this repo's CLAUDE.md or any
@@ -73,6 +77,90 @@ def resolve_config(env):
     return api_base.rstrip("/"), model, agent_id
 
 
+# --- Attribution: resolve real roster names for the scorecard (DWB-023) --------
+def api_get_json(api_base, path):
+    """GET {api_base}{path} and return parsed JSON, or fail loudly."""
+    url = f"{api_base}{path}"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")
+        fail(f"GET {url} -> {e.code}: {detail[:300]}")
+    except (urllib.error.URLError, json.JSONDecodeError, ValueError) as e:
+        fail(f"GET {url} failed: {e}")
+
+
+def resolve_team(api_base, project_id):
+    """Return (by_id, tl_name, pm_name) from the project roster.
+
+    by_id maps agent_id -> {"name", "role"}. tl_name/pm_name are the first
+    team-lead / pm on the roster (or None). Names are facts, not opinions.
+    """
+    team = api_get_json(api_base, f"/projects/{project_id}/team")
+    by_id, tl_name, pm_name = {}, None, None
+    for a in team.get("agents", []):
+        by_id[a["agent_id"]] = {"name": a["name"], "role": a["role"]}
+        if a["role"] == "team-lead" and tl_name is None:
+            tl_name = a["name"]
+        elif a["role"] == "pm" and pm_name is None:
+            pm_name = a["name"]
+    return by_id, tl_name, pm_name
+
+
+def resolve_attribution(api_base, args):
+    """Derive author/reviewer/pm names for the scorecard, or None if not requested.
+
+    Attribution is attempted only when --author or --ticket-id is supplied. The
+    author comes from --author (explicit) or the ticket's assigned agent. TL/PM
+    come from the project roster as optional review/scoping context.
+
+    Returns {"author", "author_role", "reviewer", "pm"} (values may be None for
+    reviewer/pm) or None when no attribution was requested. Fails loudly if
+    attribution is requested but the author cannot be resolved.
+    """
+    if not args.author and args.ticket_id is None:
+        return None  # backward-compatible: no names, generic "author"
+
+    by_id, tl_name, pm_name = resolve_team(api_base, args.project_id)
+
+    author_name, author_role = args.author, None
+    if author_name:
+        # Prefer the roster role if the explicit name is on the team.
+        for info in by_id.values():
+            if info["name"] == author_name:
+                author_role = info["role"]
+                break
+    else:
+        ticket = api_get_json(api_base, f"/tickets/{args.ticket_id}")
+        assignee_id = ticket.get("assigned_agent_id")
+        if not assignee_id or assignee_id not in by_id:
+            fail(f"ticket {args.ticket_id} has no resolvable assigned agent; "
+                 f"pass --author <agent_name> explicitly")
+        author_name = by_id[assignee_id]["name"]
+        author_role = by_id[assignee_id]["role"]
+
+    return {
+        "author": author_name,
+        "author_role": author_role or "worker",
+        "reviewer": tl_name,
+        "pm": pm_name,
+    }
+
+
+def allowed_scorecard_names(attribution):
+    """The exact set of names the auditor may use in scorecard entries."""
+    if attribution is None:
+        return {"author"}  # generic fallback, matches the no-attribution prompt
+    names = {attribution["author"]}
+    if attribution["reviewer"]:
+        names.add(attribution["reviewer"])
+    if attribution["pm"]:
+        names.add(attribution["pm"])
+    return names
+
+
 # --- Diff gathering -----------------------------------------------------------
 def git(repo_root, *args):
     proc = subprocess.run(
@@ -103,15 +191,45 @@ def gather_diff(repo_root, args):
 
 
 # --- The fresh auditor --------------------------------------------------------
-def build_prompt(sheet_text, diff_text):
-    """Auditor prompt: ONLY the sheet + diff + strict output instructions."""
+def build_attribution_block(attribution):
+    """Facts-only ATTRIBUTION block (names/roles). No opinions -> fresh eyes kept."""
+    if attribution is None:
+        return "", 'If author identity is unknown, use "author" as the agent name.'
+    lines = ["=== ATTRIBUTION (facts only — names and roles; no opinions) ===",
+             "The people associated with this change. Use these EXACT names in "
+             "scorecard entries; do not invent names or use generic labels.",
+             f"- Author (worker who made the change): {attribution['author']} "
+             f"[role: {attribution['author_role']}]"]
+    if attribution["reviewer"]:
+        lines.append(f"- Reviewer (team lead): {attribution['reviewer']}")
+    if attribution["pm"]:
+        lines.append(f"- Project manager: {attribution['pm']}")
+    block = "\n".join(lines) + "\n"
+    rules = (
+        "Scorecard attribution rules (use ONLY the names listed in ATTRIBUTION):\n"
+        f"- Put worker deltas (for the change itself) on the Author "
+        f"({attribution['author']}).\n"
+        "- Add a Reviewer entry ONLY if a violation survived into already-reviewed "
+        "work (repeat survival); otherwise omit the reviewer.\n"
+        "- Add a PM entry ONLY on a clear ticketing/scoping signal in the diff; "
+        "otherwise omit the PM.\n"
+        "- Any name not listed in ATTRIBUTION is invalid."
+    )
+    return block, rules
+
+
+def build_prompt(sheet_text, diff_text, attribution=None):
+    """Auditor prompt: the sheet + diff + facts-only attribution + strict output."""
+    attribution_block, scorecard_rule = build_attribution_block(attribution)
     return f"""You are a standards auditor. You have NO context beyond what is in this \
-message: a coding-standards sheet and a code diff. Judge the diff ONLY against \
-the sheet. Do not assume any team, author, project history, or prior discussion.
+message: a coding-standards sheet{', a facts-only attribution block,' if attribution else ''} and a code diff. \
+Judge the diff ONLY against the sheet. Do not assume any project history or prior \
+discussion. The attribution block, if present, lists names/roles ONLY — it is not \
+an opinion about the work and must not sway your verdict.
 
 === CODING STANDARDS SHEET (the single source of law) ===
 {sheet_text}
-
+{attribution_block}
 === CODE DIFF UNDER AUDIT ===
 {diff_text if diff_text.strip() else "(empty diff)"}
 
@@ -119,8 +237,8 @@ the sheet. Do not assume any team, author, project history, or prior discussion.
 Return a verdict of "pass" (no violations) or "reject" (one or more violations).
 List every violation you find, each tied to a specific section of the sheet.
 Suggest a per-agent scorecard: a signed integer delta (carrot for good practice,
-stick for a violation) with a one-line reason. If author identity is unknown,
-use "author" as the agent name.
+stick for a violation) with a one-line reason.
+{scorecard_rule}
 
 === OUTPUT FORMAT — CRITICAL ===
 Respond with STRICT JSON and NOTHING ELSE. No markdown, no code fences, no prose
@@ -178,8 +296,13 @@ def parse_auditor_json(raw):
         return None
 
 
-def validate_audit(obj):
-    """Enforce required keys/types. Returns a normalized dict or fails loudly."""
+def validate_audit(obj, allowed_names=None):
+    """Enforce required keys/types. Returns a normalized dict or fails loudly.
+
+    If allowed_names is given, every scorecard agent name must be in that set
+    (unknown names fail loudly, pre-POST) — this is the DWB-023 guarantee that
+    apply-scorecard can resolve every entry to the ledger.
+    """
     if not isinstance(obj, dict):
         fail("auditor output is not a JSON object")
     for key in ("verdict", "violations", "scorecard", "summary"):
@@ -210,8 +333,12 @@ def validate_audit(obj):
             delta = int(s.get("delta", 0))
         except (TypeError, ValueError):
             fail(f"scorecard delta not an integer: {s.get('delta')!r}")
+        agent_name = str(s.get("agent", "author"))
+        if allowed_names is not None and agent_name not in allowed_names:
+            fail(f"scorecard names an unknown agent '{agent_name}'; "
+                 f"allowed: {sorted(allowed_names)}. Not posting (would mis-attribute the ledger).")
         norm_scorecard.append({
-            "agent": str(s.get("agent", "author")),
+            "agent": agent_name,
             "delta": delta,
             "reason": str(s.get("reason", "")),
         })
@@ -313,7 +440,11 @@ def parse_args(argv):
     mode.add_argument("--branch", help="diff this branch vs merge-base with master")
     mode.add_argument("--range", help="diff an explicit git range a..b")
     mode.add_argument("--staged", action="store_true", help="diff the staged changes")
-    p.add_argument("--ticket-id", type=int, default=None)
+    p.add_argument("--ticket-id", type=int, default=None,
+                   help="associate the audit with a ticket; also derives the author agent")
+    p.add_argument("--author", default=None,
+                   help="explicit author agent name for scorecard attribution "
+                        "(overrides the ticket's assigned agent)")
     p.add_argument("--sprint-id", type=int, default=None)
     p.add_argument("--dry-run", action="store_true", help="print payload + scorecard; do NOT POST")
     return p.parse_args(argv)
@@ -332,11 +463,20 @@ def main(argv):
     with open(sheet_path, "r") as fh:
         sheet_text = fh.read()
 
+    # Resolve real roster names so scorecards attribute to the ledger (DWB-023).
+    attribution = resolve_attribution(api_base, args)
+    allowed_names = allowed_scorecard_names(attribution)
+    if attribution:
+        who = attribution["author"]
+        extras = [n for n in (attribution["reviewer"], attribution["pm"]) if n]
+        print(f"standards_audit: attribution -> author={who}"
+              + (f", context={extras}" if extras else ""), file=sys.stderr)
+
     diff_text, pr_ref, diff_range = gather_diff(repo_root, args)
     if not diff_text.strip():
         fail("empty diff — nothing to audit for the selected ref/range/staged set", code=2)
 
-    prompt = build_prompt(sheet_text, diff_text)
+    prompt = build_prompt(sheet_text, diff_text, attribution)
 
     raw = run_auditor(prompt, model)
     audit = parse_auditor_json(raw)
@@ -347,7 +487,7 @@ def main(argv):
         audit = parse_auditor_json(raw)
         if audit is None:
             fail("auditor returned non-JSON twice; not posting. Raw output:\n" + raw[:1000])
-    audit = validate_audit(audit)
+    audit = validate_audit(audit, allowed_names)
 
     uniform_block = render_uniform_block(audit, pr_ref, diff_range)
     # The uniform human block prints on EVERY run — this is what humans read.
