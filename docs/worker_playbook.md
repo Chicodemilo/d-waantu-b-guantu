@@ -148,6 +148,10 @@ API endpoints take the **database id**, not the number suffix of the ticket_key:
 
 When you receive a ticket assignment, the TL or PM gives you both forms: `DWB-285 (id=762)`. Use the `id` in API paths. If you only have the key, look it up: `GET /api/tickets?project_id={pid}` and filter by `ticket_key`.
 
+## Coding Standards: Read Before You Write
+
+Read `.claude/rules/global/coding-standards.md` before writing any code — it is the cross-project law (services, scripts, components, styling, headers, commits, tests). The Standards Auditor checks every PR against it and **rejects** violators. Rejections dock your reputation on the scorecard, so conform the first time.
+
 ## Code Headers: Mandatory
 
 Every new file MUST have a code header. See `.claude/rules/global/code-header-format.md` for the format. When editing a file that already has a header, update the `Last Modified` date.

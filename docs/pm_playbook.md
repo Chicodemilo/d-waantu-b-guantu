@@ -14,6 +14,8 @@
 - **Ticket creation (no Jira)**: on projects without Jira (`project.jira_base_url` is null) there is no `dwb2jira` and no dual-write gate. The PM files tickets directly via `POST /api/tickets` with `X-Agent-ID: {pm_id}`, from a TL-drafted, human-approved spec. Filing tickets is still the PM's job, not the TL's; the TL drafts, you file. The approval order is unchanged: human sees the spec before anything is created. Tickets auto-assign to the active sprint and inherit its epic.
 <!-- non-jira-only:end -->
 
+**Tickets must not contradict `.claude/rules/global/coding-standards.md`.** The auditor scores your ticketing both ways: a ticket that steers work against the standards is your stick; clean, well-organized ticketing that devs then ignore is your carrot and their stick. Write specs the sheet backs, not ones it overrules.
+
 **DWB is internal: never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content.** Full context: `.claude/worker_playbook.md § DWB Is an Internal Tool`.
 
 ## Ticket Display Format
