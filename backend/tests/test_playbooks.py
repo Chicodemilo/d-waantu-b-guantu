@@ -286,6 +286,16 @@ class TestDeployScaffoldsRootDocs:
                 path = Path(tmpdir) / name
                 assert path.is_file()
                 content = path.read_text(encoding="utf-8")
+                if name == "CODING_STANDARDS.md":
+                    # DWB-013: this doc is now a copy of the global sheet body
+                    # plus a project-extensions section, not a title-cased stub.
+                    assert "# Coding standards" in content
+                    # Distinctive phrase from the global sheet (docs/rules/
+                    # global/coding-standards.md).
+                    assert "The cross-project law." in content
+                    # Project extensions marker present for team additions.
+                    assert "## Project Extensions" in content
+                    continue
                 # Minimal H1 present (may be after non-Jira banner).
                 stem = name.removesuffix(".md").replace("_", " ")
                 assert f"# {stem.title()}" in content
@@ -362,6 +372,150 @@ class TestDeployScaffoldsRootDocs:
         for name in self._DOCS:
             content = (tmp_path / name).read_text(encoding="utf-8")
             assert "THIS PROJECT IS NOT LINKED TO JIRA" not in content
+
+
+class TestDeployCodingStandardsSheet:
+    """DWB-013: the global coding-standards sheet is mirrored into each target's
+    .claude/rules/global/coding-standards.md (AUX_DOCS), and the repo-root
+    CODING_STANDARDS.md is a copy of the sheet body plus a project-extensions
+    section that re-deploy refreshes (global) while preserving (extensions)."""
+
+    _SHEET_REL = ".claude/rules/global/coding-standards.md"
+
+    def _deploy_or_skip(self, client, project_id):
+        import pytest
+        r = client.post(f"/api/projects/{project_id}/deploy-playbooks")
+        if r.status_code == 500:
+            pytest.skip("docs/ has no playbook files in this env")
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_aux_doc_lands_in_rules_global(self, client, make_project):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="CSSHEET")
+            self._deploy_or_skip(client, project["id"])
+            sheet = Path(tmpdir) / self._SHEET_REL
+            assert sheet.is_file(), "coding-standards.md not mirrored under .claude/rules/global/"
+            content = sheet.read_text(encoding="utf-8")
+            assert "The cross-project law." in content
+
+    def test_root_doc_matches_sheet_body(self, client, make_project):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="CSBODY")
+            self._deploy_or_skip(client, project["id"])
+            root = (Path(tmpdir) / "CODING_STANDARDS.md").read_text(encoding="utf-8")
+            # Global section is a copy of the sheet body; distinctive phrases
+            # from docs/rules/global/coding-standards.md are present.
+            assert "The cross-project law." in root
+            assert "Logic is farmed out to reusable classes" in root
+            # The sheet's YAML frontmatter is stripped from the copy.
+            assert "scope: global" not in root
+            # Project extensions marker present and after the global section.
+            assert "## Project Extensions" in root
+            assert root.index("The cross-project law.") < root.index("## Project Extensions")
+
+    def test_redeploy_refreshes_global_preserves_extensions(
+        self, client, make_project
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="CSREDEP")
+            self._deploy_or_skip(client, project["id"])
+            root_path = Path(tmpdir) / "CODING_STANDARDS.md"
+
+            # Team adds a project-specific rule under the marker, and mangles
+            # the global section to prove the refresh restores it.
+            original = root_path.read_text(encoding="utf-8")
+            marker_idx = original.index("## Project Extensions")
+            team_addition = (
+                original[:marker_idx]
+                + "## Project Extensions\n\n"
+                + "- Ports: backend 8000, frontend 5173.\n"
+                + "- Never touch the vendored SDK.\n"
+            )
+            # Corrupt the global body to confirm it gets rewritten.
+            team_addition = team_addition.replace(
+                "The cross-project law.", "STALE GLOBAL - SHOULD BE REFRESHED"
+            )
+            root_path.write_text(team_addition, encoding="utf-8")
+
+            # Re-deploy.
+            data = self._deploy_or_skip(client, project["id"])
+            # Not re-reported as a freshly created root doc.
+            assert "CODING_STANDARDS.md" not in data["root_docs"]
+
+            refreshed = root_path.read_text(encoding="utf-8")
+            # Global section restored from the sheet.
+            assert "The cross-project law." in refreshed
+            assert "STALE GLOBAL - SHOULD BE REFRESHED" not in refreshed
+            # Team's project extensions preserved verbatim.
+            assert "Ports: backend 8000, frontend 5173." in refreshed
+            assert "Never touch the vendored SDK." in refreshed
+
+    def test_redeploy_preserves_banner_with_marker_and_extensions(
+        self, client, tmp_path
+    ):
+        """DWB-013 review item 2: on a non-Jira project, a marker-carrying file
+        must still lead with the banner after a refresh - not dropped, not
+        duplicated - while the global body is refreshed and the team's
+        extensions survive."""
+        project = client.post(
+            "/api/projects",
+            json={
+                "prefix": "CSBAN",
+                "name": "Non-Jira CS Banner",
+                "repo_path": str(tmp_path),
+                "jira_base_url": None,
+            },
+        ).json()
+        self._deploy_or_skip(client, project["id"])
+        root_path = tmp_path / "CODING_STANDARDS.md"
+
+        first = root_path.read_text(encoding="utf-8")
+        # Banner is present after first deploy (non-Jira).
+        assert "THIS PROJECT IS NOT LINKED TO JIRA" in first
+        # Add a real project extension under the marker.
+        marker_idx = first.index("## Project Extensions")
+        root_path.write_text(
+            first[:marker_idx]
+            + "## Project Extensions\n\n- Palette: plain CSS only.\n",
+            encoding="utf-8",
+        )
+
+        # Re-deploy.
+        self._deploy_or_skip(client, project["id"])
+        after = root_path.read_text(encoding="utf-8")
+
+        # Banner survives, exactly once, at the very top.
+        assert after.count("THIS PROJECT IS NOT LINKED TO JIRA") == 1
+        assert after.startswith("> THIS PROJECT IS NOT LINKED TO JIRA")
+        # Global body refreshed, team extension preserved.
+        assert "The cross-project law." in after
+        assert "Palette: plain CSS only." in after
+
+    def test_redeploy_leaves_markerless_file_untouched(
+        self, client, make_project
+    ):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # A human-authored CODING_STANDARDS.md with no Project Extensions
+            # marker must never be clobbered.
+            human = "# Our Standards\n\nWe do it our way. No marker here.\n"
+            (Path(tmpdir) / "CODING_STANDARDS.md").write_text(human, encoding="utf-8")
+            project = make_project(repo_path=tmpdir, prefix="CSHUMAN")
+            # Spy the module logger directly - caplog is unreliable here because
+            # the app installs a custom root-log handler (server_log_handler).
+            with patch("app.services.playbook_deploy.logger") as mock_logger:
+                data = self._deploy_or_skip(client, project["id"])
+            # Pre-existing file: not scaffolded, not reported.
+            assert "CODING_STANDARDS.md" not in data["root_docs"]
+            after = (Path(tmpdir) / "CODING_STANDARDS.md").read_text(encoding="utf-8")
+            assert after == human
+            # DWB-013 review item 3: the skip is visible, not silent.
+            assert any(
+                call.args
+                and "no Project Extensions marker" in str(call.args[0])
+                for call in mock_logger.info.call_args_list
+            )
 
 
 class TestDeployHooksSettings:
