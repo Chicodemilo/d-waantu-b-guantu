@@ -4,7 +4,7 @@
 
 ## DWB Agent Roster
 
-Live roster: `GET /api/projects/1/team`. DB-authoritative; do not hard-code names or IDs in this file. Your `agent_id` is **14** (Pam_DWB). Use `X-Agent-ID: 14` on every mutation.
+Live roster: `GET /api/projects/5/team`. DB-authoritative; do not hard-code names or IDs in this file. Confirm your `agent_id` via `POST /api/agents/identify` at spawn (currently **12**, Pam_DWB) and use it in `X-Agent-ID` on every mutation.
 
 ## Hard Limits — Jira Sprint Authority (DWB-323)
 
