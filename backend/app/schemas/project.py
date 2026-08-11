@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: ProjectCreate, ProjectUpdate, ProjectRead, ProjectOverheadIncrement
-# Last Modified: 2026-08-10 (DWB-004)
+# Last Modified: 2026-08-11 (DWB-017: force_standards_audit gate)
 
 from datetime import datetime
 
@@ -30,6 +30,7 @@ class ProjectCreate(BaseModel):
     force_architecture_md: bool = False
     force_handoff_md: bool = True
     force_coding_standards_md: bool = False
+    force_standards_audit: bool = False
     force_consolidation: bool = False
 
 
@@ -51,6 +52,7 @@ class ProjectUpdate(BaseModel):
     force_architecture_md: bool | None = None
     force_handoff_md: bool | None = None
     force_coding_standards_md: bool | None = None
+    force_standards_audit: bool | None = None
     force_consolidation: bool | None = None
     # DWB-446: per-project SendMessage agent-comms capture gate.
     capture_agent_comms: bool | None = None
@@ -84,6 +86,7 @@ class ProjectRead(BaseModel):
     force_architecture_md: bool
     force_handoff_md: bool
     force_coding_standards_md: bool
+    force_standards_audit: bool
     force_consolidation: bool
     capture_agent_comms: bool
     playbooks_deployed_at: datetime | None

@@ -1,12 +1,12 @@
 // Path: src/__tests__/ProjectPageGates.test.jsx
 // File: ProjectPageGates.test.jsx
 // Created: 2026-06-19
-// Purpose: Tests for DWB-400 force_consolidation, DWB-403 force_headers gate toggles, and DWB-405 force_headers missing_files[] list on ProjectPage. Covers: toggle ON/OFF state, persists via updateProject PATCH on click, token-cost warning visibility, and the missing-header file list (shown only when force_headers is ON and failing).
+// Purpose: Tests for DWB-400 force_consolidation, DWB-403 force_headers gate toggles, DWB-405 force_headers missing_files[] list, and DWB-017 force_standards_audit gate toggle on ProjectPage. Covers: toggle ON/OFF state, persists via updateProject PATCH on click, token-cost warning visibility, and the missing-header file list (shown only when force_headers is ON and failing).
 // Caller: vitest test runner
 // Callees: ../pages/ProjectPage, ../store/useStore (mocked), ../api/projects (mocked, incl. getGateStatus), ../api/alerts (mocked), child components (mocked), react-router-dom (MemoryRouter)
 // Data In: Mocked store project + mocked api modules
 // Data Out: Test assertions
-// Last Modified: 2026-06-22
+// Last Modified: 2026-08-11 (DWB-017: force_standards_audit gate toggle tests)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
@@ -57,6 +57,7 @@ function project(overrides = {}) {
     force_headers: false,
     force_test_coverage: false,
     force_test_run: false,
+    force_standards_audit: false,
     force_consolidation: false,
     force_initial_md: false,
     force_architecture_md: false,
@@ -133,6 +134,48 @@ describe('ProjectPage force_consolidation gate (DWB-400)', () => {
     );
     await waitFor(() => {
       expect(updateProject).toHaveBeenCalledWith('1', { force_consolidation: true });
+    });
+  });
+});
+
+describe('ProjectPage force_standards_audit gate (DWB-017)', () => {
+  beforeEach(() => {
+    updateProject.mockReset();
+    updateProject.mockResolvedValue({});
+    getGateStatus.mockReset();
+    getGateStatus.mockResolvedValue({ gates: [] });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renders the Force Standards Audit toggle reflecting OFF state', () => {
+    seed(project({ force_standards_audit: false }));
+    renderPage();
+    expect(
+      screen.getByRole('button', { name: /Force Standards Audit \[OFF\]/i })
+    ).toBeInTheDocument();
+  });
+
+  it('renders the Force Standards Audit toggle reflecting ON state', () => {
+    seed(project({ force_standards_audit: true }));
+    renderPage();
+    expect(
+      screen.getByRole('button', { name: /Force Standards Audit \[ON\]/i })
+    ).toBeInTheDocument();
+  });
+
+  it('persists via updateProject PATCH (OFF -> ON) on click', async () => {
+    seed(project({ force_standards_audit: false }));
+    renderPage();
+    fireEvent.click(
+      screen.getByRole('button', { name: /Force Standards Audit \[OFF\]/i })
+    );
+    await waitFor(() => {
+      expect(updateProject).toHaveBeenCalledWith('1', {
+        force_standards_audit: true,
+      });
     });
   });
 });

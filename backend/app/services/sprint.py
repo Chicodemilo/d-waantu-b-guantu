@@ -3,10 +3,10 @@
 # Created: 2026-03-29
 # Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), post-close automation, semantic activity events (DWB-410), gate_miss auto-scoring on blocked close (DWB-425)
 # Caller: app/routers/sprints.py
-# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, project), agent_consolidation svc, git, services/activity_log
+# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, standards_audit, project), agent_consolidation svc, git, services/activity_log
 # Data In: db: Session, SprintCreate/Update, acting_agent_id
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-08-10 (DWB-004)
+# Last Modified: 2026-08-11 (DWB-017: force_standards_audit completion gate)
 
 import logging
 import re
@@ -24,6 +24,7 @@ from app.models.failure_record import FailureRecord
 from app.models.project import Project
 from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
+from app.models.standards_audit import AuditVerdict, StandardsAudit
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket, TicketStatus, TicketType
 from app.schemas.sprint import SprintCreate, SprintUpdate
@@ -258,6 +259,28 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                 f"found for project '{project.prefix}'"
                 + (f" since sprint start ({sprint.start_date})" if sprint.start_date else "")
                 + ". Run tests before closing the sprint.",
+            )
+
+    # DWB-017: standards-audit gate. When on, require at least one PASSING
+    # standards audit recorded for the project since the sprint started (same
+    # "since sprint start" window force_test_run uses). Reject-only or no-audit
+    # blocks the close. Complements force_coding_standards_md (file existence);
+    # this asserts the code actually conforms.
+    if project.force_standards_audit:
+        stmt = select(func.count()).select_from(StandardsAudit).where(
+            StandardsAudit.project_id == project.id,
+            StandardsAudit.verdict == AuditVerdict.passed,
+        )
+        if sprint.start_date:
+            stmt = stmt.where(StandardsAudit.created_at >= sprint.start_date)
+        count = db.scalar(stmt) or 0
+        if count == 0:
+            raise HTTPException(
+                400,
+                "Cannot complete sprint: force_standards_audit is enabled but no "
+                f"passing standards audit found for project '{project.prefix}'"
+                + (f" since sprint start ({sprint.start_date})" if sprint.start_date else "")
+                + ". Record a passing standards audit before closing the sprint.",
             )
 
     if project.force_test_coverage:

@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Project detail page with tools (archive, delete, capture-agent-comms toggle), sprint gates (incl. force_consolidation), doc gates (incl. force_handoff_md), alerts, consolidation status panel, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
-// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
+// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-08-10 (DWB-004)
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -23,7 +23,6 @@ import ActivityFeed from '../components/project/ActivityFeed';
 import LiveSessions from '../components/project/LiveSessions';
 import TokenBudget from '../components/project/TokenBudget';
 import ConsolidationStatus from '../components/project/ConsolidationStatus';
-import '../styles/dashboard.css';
 
 function ProjectPage() {
   const { id } = useParams();
@@ -253,6 +252,7 @@ function ProjectPage() {
                 { field: 'force_headers', label: 'Force Headers', tip: 'When ON, sprint close is blocked (HTTP 400) if any source (.py) file added or changed during the sprint is missing the mandatory code-header block. Default OFF = no scan, no cost.', cost: 'Token cost: a code-header block is required on every new or changed source file.' },
                 { field: 'force_test_coverage', label: 'Force Coverage', tip: 'Every API router must have a corresponding test file before sprint close.' },
                 { field: 'force_test_run', label: 'Force Tests', tip: 'At least one test run must be recorded during the sprint before it can be closed.' },
+                { field: 'force_standards_audit', label: 'Force Standards Audit', tip: 'A PASSING standards audit must be recorded for the sprint (since it started) before it can be closed. Complements Force CODING_STANDARDS.md: the file gate asserts the standards doc exists; this gate asserts the code actually conforms.' },
                 { field: 'force_consolidation', label: 'Consolidation at sprint close', tip: 'Every project agent must acknowledge consolidation of their owned over-ceiling docs before the sprint can be closed. Agents POST to /api/agents/:id/consolidate-complete; gate status is shown in the Consolidation panel.', cost: 'Token cost: every project agent runs a consolidation pass at sprint close.' },
               ].map(({ field, label, tip, cost }) => (
                 <div key={field}>

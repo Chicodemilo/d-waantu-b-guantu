@@ -7,7 +7,7 @@
 #                GET /api/projects/:id/team (DWB-313, DWB-387)
 # Data In:       Factory-created projects, tickets, test results via conftest fixtures
 # Data Out:      Assertions on HTTP status codes, JSON shapes, and cascade deletes
-# Last Modified: 2026-08-10 (DWB-004)
+# Last Modified: 2026-08-11 (DWB-017: force_standards_audit in response-shape keys)
 
 """Tests for /api/projects CRUD and filtering."""
 
@@ -60,6 +60,7 @@ class TestGetProject:
             "force_headers", "force_test_coverage", "force_test_run",
             "force_initial_md", "force_architecture_md",
             "force_handoff_md", "force_coding_standards_md",
+            "force_standards_audit",
             "force_consolidation",
             "capture_agent_comms",
             "playbooks_deployed_at",

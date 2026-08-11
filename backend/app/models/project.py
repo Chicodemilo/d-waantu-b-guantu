@@ -6,12 +6,12 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Project, ProjectStatus
-# Last Modified: 2026-08-10 (DWB-004)
+# Last Modified: 2026-08-11 (DWB-017: force_standards_audit gate)
 
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, String, Text, func, true
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, String, Text, false, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -66,6 +66,13 @@ class Project(Base):
     force_architecture_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     force_handoff_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     force_coding_standards_md: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # DWB-017: sprint gate requiring a PASSING standards audit for the sprint
+    # before close. COMPLEMENTS force_coding_standards_md (which only asserts the
+    # standards DOC exists) - this asserts the code actually conforms. Keep both.
+    # Default OFF (opt-in).
+    force_standards_audit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     force_consolidation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # DWB-446: gates SendMessage agent-comms capture per project. Default TRUE;
     # when false POST /api/hooks/agent-message returns 200 and inserts nothing.
