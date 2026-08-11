@@ -1,3 +1,7 @@
+> THIS PROJECT IS NOT LINKED TO JIRA.
+> Do not invoke `dwb2jira` tools or reference Jira issue keys.
+> All ticket transitions go through the DWB API directly: `PATCH /api/tickets/{id}` with `{"status": "..."}` and the `X-Agent-ID` header.
+
 # Coding standards
 
 The cross-project law. The auditor enforces these on every PR. Project-specific extensions live below the marker in each repo's `CODING_STANDARDS.md` — they add, never override.
