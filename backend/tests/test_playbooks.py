@@ -6,7 +6,7 @@
 # Callees:       GET/POST /api/playbooks, POST /api/projects/:id/deploy-playbooks
 # Data In:       Factory-created projects via conftest fixtures; temp playbook files
 # Data Out:      Assertions on HTTP status codes and deployed playbook content
-# Last Modified: 2026-08-10 (DWB-004)
+# Last Modified: 2026-08-11 (DWB-027)
 
 """Tests for /api/playbooks and /api/projects/:id/deploy-playbooks."""
 
@@ -33,9 +33,26 @@ class TestListPlaybooks:
     def test_playbook_names(self, client):
         playbooks = client.get("/api/playbooks").json()
         names = [pb["name"] for pb in playbooks]
-        # These should exist if docs/ has the playbook files
+        # The three canonical playbooks plus the DWB-027 coding-standards sheet.
         for name in names:
-            assert name in ("team_lead", "pm", "worker")
+            assert name in ("team_lead", "pm", "worker", "coding_standards")
+
+    def test_coding_standards_sheet_in_listing(self, client):
+        """DWB-027: the global coding-standards sheet is surfaced alongside the
+        playbooks with a non-empty, frontmatter-stripped body."""
+        playbooks = client.get("/api/playbooks").json()
+        by_name = {pb["name"]: pb for pb in playbooks}
+        # Skip only if docs/ has no playbook/sheet files in this env.
+        if not playbooks:
+            import pytest
+            pytest.skip("docs/ has no playbook files in this env")
+        assert "coding_standards" in by_name, "coding-standards sheet missing from listing"
+        sheet = by_name["coding_standards"]
+        assert sheet["title"] == "Coding Standards"
+        assert len(sheet["content"]) > 0
+        # Frontmatter fence stripped; distinctive sheet phrase present.
+        assert "scope: global" not in sheet["content"]
+        assert "The cross-project law." in sheet["content"]
 
 
 class TestDeployPlaybooks:

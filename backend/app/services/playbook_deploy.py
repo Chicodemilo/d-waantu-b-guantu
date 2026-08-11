@@ -6,7 +6,7 @@
 # Callees: app/services/agent_memory.py, app/models/agent.py, pathlib, shutil, re, json
 # Data In: db: Session, project: Project
 # Data Out: DeployResult
-# Last Modified: 2026-08-11 (DWB-013)
+# Last Modified: 2026-08-11 (DWB-027)
 
 import json
 import logging
@@ -412,6 +412,18 @@ def _global_standards_body() -> str:
     text is never duplicated as a Python literal (DWB-013)."""
     sheet = (DOCS_DIR / _CODING_STANDARDS_SHEET_REL).read_text(encoding="utf-8")
     return _strip_frontmatter(sheet).rstrip("\n")
+
+
+def coding_standards_sheet_body() -> str | None:
+    """The global coding-standards sheet body (frontmatter stripped) for display,
+    or None when the sheet is absent (DWB-027).
+
+    Wraps _global_standards_body with the graceful-skip the playbook listing
+    needs, so the read + strip + existence logic lives in this service rather
+    than inline in the router (services doctrine)."""
+    if not (DOCS_DIR / _CODING_STANDARDS_SHEET_REL).is_file():
+        return None
+    return _global_standards_body()
 
 
 def _build_coding_standards_doc(existing_extensions: str | None = None) -> str:
