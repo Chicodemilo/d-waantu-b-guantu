@@ -3,16 +3,14 @@
 // Created: 2026-06-10
 // Purpose: Thin host page for the SessionPanel live current-session view at /projects/:id/sessions/current. Moved off SessionsPage in DWB-349 after the user re-prioritized the sessions TABLE as the primary content; SessionPanel still has a home but is now a side trip rather than the dominant block.
 // Caller: App.jsx (route: /projects/:id/sessions/current)
-// Callees: react-router-dom (useParams, Link), store/useStore, ../components/project/SessionPanel, ../styles/dashboard.css, ../styles/sessions.css
+// Callees: react-router-dom (useParams, Link), store/useStore, ../components/project/SessionPanel
 // Data In: Route param id (project id), project from store
 // Data Out: Default export SessionCurrentPage component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import SessionPanel from '../components/project/SessionPanel';
-import '../styles/dashboard.css';
-import '../styles/sessions.css';
 
 function SessionCurrentPage() {
   const { id } = useParams();

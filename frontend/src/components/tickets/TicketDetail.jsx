@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Full ticket detail view with metadata, description, stats, status history, and comments
 // Caller: TicketDetailPage.jsx
-// Callees: react (useState, useEffect), useStore, StatusBadge, TicketComments, api/tickets (getTicketHistory), tickets.css
+// Callees: react (useState, useEffect), useStore, StatusBadge, TicketComments, api/tickets (getTicketHistory)
 // Data In: ticketId prop
 // Data Out: default export TicketDetail component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
@@ -15,8 +15,6 @@ import StatusBadge from '../common/StatusBadge';
 import TicketComments from './TicketComments';
 import { getTicketHistory, updateTicket } from '../../api/tickets';
 import { getJiraConfig, getJiraIssue } from '../../api/jira';
-import '../../styles/tickets.css';
-import '../../styles/jira.css';
 
 function StatusHistory({ ticketId }) {
   const [history, setHistory] = useState([]);

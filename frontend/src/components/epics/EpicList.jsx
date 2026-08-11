@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Renders expandable list of epics with progress bars and nested sprint breakdowns
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect), react-router-dom (Link), useStore, services/tracking, utils/format, StatusBadge, AsciiProgressBar, common.css
+// Callees: react (useState, useEffect), react-router-dom (Link), useStore, services/tracking, utils/format, StatusBadge, AsciiProgressBar
 // Data In: projectId prop
 // Data Out: default export EpicList component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
@@ -16,7 +16,6 @@ import { formatTime, formatTokens } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import AsciiProgressBar from '../common/AsciiProgressBar';
 import { updateEpic, getEpics } from '../../api/epics';
-import '../../styles/common.css';
 
 function EpicList({ projectId }) {
   const epics = useStore((s) => s.getEpicsByProject(projectId));

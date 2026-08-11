@@ -11,9 +11,8 @@
 //          className (string), id (string - set on the section element so a parent
 //          can scroll it into view, DWB-496)
 // Data Out: default export CollapsibleSection; fires onToggle(!open) on header click
-// Last Modified: 2026-06-25
+// Last Modified: 2026-08-11 (DWB-009)
 
-import '../../styles/help.css';
 
 function CollapsibleSection({
   title,

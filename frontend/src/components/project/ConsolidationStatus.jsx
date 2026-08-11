@@ -3,15 +3,14 @@
 // Created: 2026-06-04
 // Purpose: Sprint-close consolidation gate panel — per-agent ack status + over-ceiling owned files. Hidden unless project.force_consolidation is true and there is an active sprint.
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect), useStore, api/client (get), styles/dashboard.css
+// Callees: react (useState, useEffect), useStore, api/client (get)
 // Data In: projectId prop
 // Data Out: default export ConsolidationStatus component
-// Last Modified: 2026-06-08
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useEffect, useState } from 'react';
 import useStore from '../../store/useStore';
 import { get } from '../../api/client';
-import '../../styles/dashboard.css';
 
 const POLL_MS = 10000;
 

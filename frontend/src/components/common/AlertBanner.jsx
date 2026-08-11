@@ -3,13 +3,12 @@
 // Created: 2026-03-29
 // Purpose: Renders a dismissible alert banner with severity styling, category badge (DWB-464), agent/project source, and relative timestamp
 // Caller: DashboardPage.jsx, ProjectPage.jsx
-// Callees: useStore, common.css
+// Callees: useStore
 // Data In: props { alert } (alert object with severity, category, title, body, raised_by_agent_id, project_id, created_at)
 // Data Out: default export AlertBanner component
-// Last Modified: 2026-06-24
+// Last Modified: 2026-08-11 (DWB-009)
 
 import useStore from '../../store/useStore';
-import '../../styles/common.css';
 
 function relativeTime(ts) {
   if (!ts) return '';

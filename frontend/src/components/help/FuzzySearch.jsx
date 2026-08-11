@@ -10,9 +10,8 @@
 // Data In: value (string), onChange (fn), placeholder (string), resultCount (number|null),
 //          totalCount (number|null), label (string)
 // Data Out: default export FuzzySearch component; fires onChange(nextValue)
-// Last Modified: 2026-06-25
+// Last Modified: 2026-08-11 (DWB-009)
 
-import '../../styles/help.css';
 
 function FuzzySearch({
   value,

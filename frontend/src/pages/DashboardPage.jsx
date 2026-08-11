@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Main dashboard showing project cards, alerts table (read-only), token usage summary, and agent list
 // Caller: App.jsx (route: /)
-// Callees: react, react-router-dom (useNavigate, Link), ../store/useStore, ../components/dashboard/CrossProjectSummary, ../components/dashboard/ProjectCard, ../components/dashboard/TokenOverview, ../components/agents/AgentList, ../components/dashboard/TokenAudit, ../api/projects, ../styles/dashboard.css
+// Callees: react, react-router-dom (useNavigate, Link), ../store/useStore, ../components/dashboard/CrossProjectSummary, ../components/dashboard/ProjectCard, ../components/dashboard/TokenOverview, ../components/agents/AgentList, ../components/dashboard/TokenAudit, ../api/projects
 // Data In: Projects, alerts, and agents from Zustand store
 // Data Out: Default export DashboardPage component
-// Last Modified: 2026-04-17
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -17,7 +17,6 @@ import TimeTokens from '../components/dashboard/TimeTokens';
 import AgentList from '../components/agents/AgentList';
 import TokenAudit from '../components/dashboard/TokenAudit';
 import { createProjectFromRepo, seedDemoProject } from '../api/projects';
-import '../styles/dashboard.css';
 
 function DashboardPage() {
   const navigate = useNavigate();

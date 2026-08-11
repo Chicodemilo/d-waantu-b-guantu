@@ -3,14 +3,13 @@
 // Created: 2026-04-17
 // Purpose: Collapsible token budget panel showing per-file token counts grouped by category, with Memory subgrouped by agent
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect, useMemo), config (API_BASE_URL), styles/dashboard.css
+// Callees: react (useState, useEffect, useMemo), config (API_BASE_URL)
 // Data In: projectId prop
 // Data Out: default export TokenBudget component
-// Last Modified: 2026-06-19 (DWB-401)
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useMemo } from 'react';
 import { API_BASE_URL } from '../../config';
-import '../../styles/dashboard.css';
 
 // Section ordering + which categories roll up into each section.
 // Agent defs intentionally excluded — they are 8-line stubs post-DWB-331 and don't merit UI surface area.

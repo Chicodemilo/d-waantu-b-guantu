@@ -3,15 +3,13 @@
 // Created: 2026-03-29
 // Purpose: Displays test performance dashboard with duration bar chart, sparkline trends, summary stats, and per-test drill-down
 // Caller: ProjectTestsPage.jsx
-// Callees: react (useState, useEffect), api/testResults (getTestPerformance, getProjectTestRuns), tests.css, charts.css
+// Callees: react (useState, useEffect), api/testResults (getTestPerformance, getProjectTestRuns)
 // Data In: projectId prop
 // Data Out: default export TestPerformance component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { getTestPerformance, getProjectTestRuns } from '../../api/testResults';
-import '../../styles/tests.css';
-import '../../styles/charts.css';
 
 const SPARKLINE_CHARS = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
 const MAX_BAR_HEIGHT = 8;

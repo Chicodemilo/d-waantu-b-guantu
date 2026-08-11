@@ -3,10 +3,10 @@
 // Created: 2026-04-09
 // Purpose: Team status panel - per-project agent roster rendered as a scoring leaderboard (DWB-428, ranking columns DWB-433). Liveness is driven by the DB-authoritative GET /api/projects/{id}/team endpoint (presumed_live + last_seen, shipped in DWB-387). Scoring (rank, reputation, this-sprint delta, influence remaining, tier) is joined in from GET /api/projects/{id}/scores (DWB-424), which already returns the full roster sorted top-first; rows are reordered to preserve that leaderboard order. Columns: status dot from presumed_live, rank #, name, role-bucket, reputation, sprint delta, influence, tier label, last_seen ("3m ago"), current ticket (from store tickets where status === 'in_progress'). The #1 and last-place rows are visually accented. The stale-ticket POST to /api/tickets/stale-check remains here (10/20/30 min thresholds) since it's tightly coupled to this view's agent/ticket join.
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect, useRef), react-router-dom (Link), store/useStore, api/projectAgents (getProjectTeam), api/scores (getProjectScores), utils/scoring, config (API_BASE_URL), styles/hooks.css
+// Callees: react (useState, useEffect, useRef), react-router-dom (Link), store/useStore, api/projectAgents (getProjectTeam), api/scores (getProjectScores), utils/scoring, config (API_BASE_URL)
 // Data In: projectId prop
 // Data Out: Default export LiveSessions component
-// Last Modified: 2026-06-23
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
@@ -15,7 +15,6 @@ import { getProjectTeam } from '../../api/projectAgents';
 import { getProjectScores } from '../../api/scores';
 import { tierLabel, rowRank, isTopRow, isBottomRow } from '../../utils/scoring';
 import { API_BASE_URL } from '../../config';
-import '../../styles/hooks.css';
 
 const TICK_MS = 1000;
 const TEAM_REFRESH_MS = 30_000;

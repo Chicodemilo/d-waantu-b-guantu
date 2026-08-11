@@ -3,15 +3,14 @@
 // Created: 2026-03-29
 // Purpose: Collapsible token audit panel that fetches and displays token totals by project/agent with discrepancy detection
 // Caller: DashboardPage.jsx
-// Callees: react (useState, useEffect), useStore, getTokenAudit API, dashboard.css
+// Callees: react (useState, useEffect), useStore, getTokenAudit API
 // Data In: agents, projects, projectAgents from store; audit data from API
 // Data Out: default export TokenAudit component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
 import { getTokenAudit } from '../../api/tokens';
-import '../../styles/dashboard.css';
 
 function TokenAudit() {
   const agents = useStore((s) => s.agents);

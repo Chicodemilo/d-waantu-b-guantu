@@ -3,14 +3,13 @@
 // Created: 2026-03-29
 // Purpose: Displays DWB system documentation from the repo root via GET /api/system/docs
 // Caller: App.jsx (route: /docs)
-// Callees: react (useState, useEffect), api/docs (getSystemDocs), styles/docs.css
+// Callees: react (useState, useEffect), api/docs (getSystemDocs)
 // Data In: System docs from API
 // Data Out: Default export SystemDocsPage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { getSystemDocs } from '../api/docs';
-import '../styles/docs.css';
 
 function DocCard({ doc }) {
   const [expanded, setExpanded] = useState(false);

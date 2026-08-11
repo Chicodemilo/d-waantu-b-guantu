@@ -3,16 +3,14 @@
 // Created: 2026-06-10
 // Purpose: Primary DWB sessions page for a project. Phrase-help teaching block sits at the top (under the page heading, before the table) and explains how to open/close a session (regex phrases plus the /dwb-open and /dwb-close slash commands; idle sweeper auto-closes), with an inline `(info)` affordance that expands a longer description via <details>. The SessionsTable is the dominant primary content (every session, scannable). A small `view current session ->` link in the header points at /projects/:id/sessions/current for the live SessionPanel drill-down.
 // Caller: App.jsx (route: /projects/:id/sessions)
-// Callees: react-router-dom (useParams, Link), store/useStore, ../components/project/SessionsTable, ../styles/dashboard.css, ../styles/sessions.css
+// Callees: react-router-dom (useParams, Link), store/useStore, ../components/project/SessionsTable
 // Data In: Route param id (project id), project from store
 // Data Out: Default export SessionsPage component
-// Last Modified: 2026-06-25 (DWB-487: SessionsTable rendered with searchable fuzzy filter)
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import SessionsTable from '../components/project/SessionsTable';
-import '../styles/dashboard.css';
-import '../styles/sessions.css';
 
 function SessionsPage() {
   const { id } = useParams();

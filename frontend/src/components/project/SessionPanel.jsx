@@ -3,14 +3,13 @@
 // Created: 2026-06-10
 // Purpose: Live view of the current DWB session for a project — header (open/closed state, method, headline), totals, by_role + by_ticket mini-tables, TL/PM/Ad Hoc overhead (ad_hoc_overhead_tokens null-guarded to 0 pending DWB-353). Polls every 10s while open, freezes on close. Does NOT render captured open_phrase / close_phrase text (privacy: user-typed text is not surfaced).
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect, useRef), api/sessions (getProjectSessions, getSession), styles/sessions.css
+// Callees: react (useState, useEffect, useRef), api/sessions (getProjectSessions, getSession)
 // Data In: projectId prop
 // Data Out: Default export SessionPanel component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getProjectSessions, getSession } from '../../api/sessions';
-import '../../styles/sessions.css';
 
 const POLL_INTERVAL_MS = 10000;
 const TRUNCATE_DEFAULT = 80;

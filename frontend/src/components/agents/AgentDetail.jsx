@@ -3,17 +3,15 @@
 // Created: 2026-03-29
 // Purpose: Displays detailed view of an agent including metrics and assigned tickets
 // Caller: AgentPage.jsx
-// Callees: react-router-dom (Link), useStore, StatusBadge, AgentMetrics, agents.css, tickets.css
+// Callees: react-router-dom (Link), useStore, StatusBadge, AgentMetrics
 // Data In: agentId prop
 // Data Out: default export AgentDetail component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import StatusBadge from '../common/StatusBadge';
 import AgentMetrics from './AgentMetrics';
-import '../../styles/agents.css';
-import '../../styles/tickets.css';
 
 function AgentDetail({ agentId }) {
   const agent = useStore((s) => s.getAgent(agentId));

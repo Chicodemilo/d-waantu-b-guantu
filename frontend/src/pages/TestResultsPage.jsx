@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Global test results view with run system tests button, test run list with detail drill-down, and test coverage
 // Caller: App.jsx (route: /tests, /tests/:runId)
-// Callees: react, react-router-dom, ../store/useStore, ../api/system, ../components/common/StatusBadge, ../components/common/TerminalOutput, ../components/tests/TestCoverage, ../styles/tests.css
+// Callees: react, react-router-dom, ../store/useStore, ../api/system, ../components/common/StatusBadge, ../components/common/TerminalOutput, ../components/tests/TestCoverage
 // Data In: Route param (runId), testRuns from Zustand store
 // Data Out: Default export TestResultsPage component
-// Last Modified: 2026-04-09
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -15,7 +15,6 @@ import { runSystemTests } from '../api/system';
 import StatusBadge from '../components/common/StatusBadge';
 import TerminalOutput from '../components/common/TerminalOutput';
 import TestCoverage from '../components/tests/TestCoverage';
-import '../styles/tests.css';
 
 function formatTime(ts) {
   if (!ts) return '';

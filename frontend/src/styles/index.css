@@ -1,0 +1,64 @@
+/* Path: src/styles/index.css */
+/* File: index.css */
+/* Created: 2026-08-11 */
+/* Purpose: Main stylesheet — links theme + every domain sheet in one place, per CODING_STANDARDS § Styling (DWB-009). Imported once from main.jsx; components no longer import CSS directly. */
+/* Caller: src/main.jsx */
+/* Callees: All stylesheets in src/styles/ */
+/* Last Modified: 2026-08-11 (DWB-009) */
+
+/* Theme first: CSS custom properties (colors, fonts) + base reset — every sheet below relies on these variables */
+@import './theme.css';
+
+/* Shared component styles: data tables, status badges, activity feed, alerts, instructions, sprints, epics, project header */
+@import './common.css';
+
+/* App shell grid: sidebar, header, main content, footers, mobile responsive breakpoints */
+@import './layout.css';
+
+/* Project-level Inter-Agent Comms glance view — dense single-line message log */
+@import './agent-comms.css';
+
+/* Agent list table, agent detail view, and agent metrics panels */
+@import './agents.css';
+
+/* ASCII horizontal bar charts, progress bars, sparklines, and vertical bar (VU meter) charts */
+@import './charts.css';
+
+/* Dashboard page — project cards, cross-project summary, token overview/audit, time-tokens tables */
+@import './dashboard.css';
+
+/* Project and system docs pages — doc cards, expand/collapse, plus the team page tab bar */
+@import './docs.css';
+
+/* ErrorBoundary fallback UI — red-accented error frame, monospace label, reload affordance */
+@import './error-boundary.css';
+
+/* Error log page — filters, log entries, severity badges, detail view */
+@import './errors.css';
+
+/* Reusable help components — FuzzySearch, summary header, collapsible sections */
+@import './help.css';
+
+/* Team Status panel — agent roster with live/offline indicators and scoring leaderboard columns */
+@import './hooks.css';
+
+/* Unified Jira table page plus legacy list/sprint-board/detail-panel styles */
+@import './jira.css';
+
+/* Per-agent score ledger panel and the full per-project Scoreboard leaderboard */
+@import './score.css';
+
+/* Persistent SessionFooter — single-line session bar with dot color states */
+@import './session-footer.css';
+
+/* SessionPanel live view, RecentSessionsStrip, and SessionsPage breadcrumb/title */
+@import './sessions.css';
+
+/* Test results pages — test runs, detail, coverage, performance, failure analysis */
+@import './tests.css';
+
+/* Ticket list, ticket detail, status history, comments, and filter controls */
+@import './tickets.css';
+
+/* Cross-project Archie Channel view — columnar message table with DIRECT/BROADCAST accents */
+@import './tl-channel.css';

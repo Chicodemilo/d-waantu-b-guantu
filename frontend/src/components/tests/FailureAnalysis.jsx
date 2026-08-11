@@ -3,17 +3,15 @@
 // Created: 2026-03-29
 // Purpose: Multi-view failure analysis dashboard with summary, by-type/agent/sprint charts, trends, logging form, and pending review
 // Caller: ProjectTestsPage.jsx
-// Callees: react (useState, useEffect, useCallback), useStore, api/failureRecords (getFailureSummary, getFailureRecords, createFailureRecord, updateFailureRecord), AsciiChart, tests.css, charts.css
+// Callees: react (useState, useEffect, useCallback), useStore, api/failureRecords (getFailureSummary, getFailureRecords, createFailureRecord, updateFailureRecord), AsciiChart
 // Data In: projectId prop
 // Data Out: default export FailureAnalysis component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useCallback } from 'react';
 import useStore from '../../store/useStore';
 import { getFailureSummary, getFailureRecords, createFailureRecord, updateFailureRecord } from '../../api/failureRecords';
 import AsciiChart from '../common/AsciiChart';
-import '../../styles/tests.css';
-import '../../styles/charts.css';
 
 const FAILURE_TYPES = {
   context_degradation: 'Context Degradation',

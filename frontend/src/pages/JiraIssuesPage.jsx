@@ -3,10 +3,10 @@
 // Created: 2026-05-27
 // Purpose: Unified Jira table for a project (DWB-342). Renders the snapshot-backed view (DWB id/sprint/status + Jira id/sprint/status/type + DWB-side parent + Jira parent + epic + assignee + created/updated + title), with a debounced fuzzy search box, sortable column headers, a manual sync button + canonical .tooltip-trigger info affordance describing the read-only ingestion, and row navigation to the DWB ticket detail page. The DWB Parent column (DWB-457) sits left of the Jira Parent column so the two parent references line up; it reads row.dwb_parent_key resolved server-side from tickets.parent_ticket_id (DWB-456). Created/Updated columns format as dd-mm-yy hh:mm (24h, local TZ). Read-only Jira ingestion - nothing in this page modifies Jira. Null-guards jira_sprint and jira_reporter pending DWB-356 normalizer fix.
 // Caller: App.jsx (route: /projects/:id/jira)
-// Callees: react, react-router-dom (useParams, useNavigate), store/useStore, api/jira (getProjectJiraTickets, triggerProjectJiraSync, getProjectJiraSyncStatus), api/client (ApiError), styles/jira.css
+// Callees: react, react-router-dom (useParams, useNavigate), store/useStore, api/jira (getProjectJiraTickets, triggerProjectJiraSync, getProjectJiraSyncStatus), api/client (ApiError)
 // Data In: Route param :id (DWB project id)
 // Data Out: Default export JiraIssuesPage component
-// Last Modified: 2026-06-12
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -17,7 +17,6 @@ import {
   getProjectJiraSyncStatus,
 } from '../api/jira';
 import { ApiError } from '../api/client';
-import '../styles/jira.css';
 
 const DASH = '-';
 const PAGE_LIMIT = 200;

@@ -3,10 +3,10 @@
 // Created: 2026-06-10
 // Purpose: Per-session drill-down at /projects/:pid/sessions/:sid. Renders GET /api/sessions/{id} payload: header (id, status, methods, reasons, headline), open/close datetimes, totals, by_role table, by_ticket table (linked to ticket detail pages), TL/PM/Ad Hoc overhead (always visible on this drill-down, all three null-guarded to 0; ad_hoc_overhead_tokens ships in DWB-353). Polls every 10s while the session is live, freezes when closed. Returns a Session not found view with a back link on 404. Does NOT render captured open_phrase / close_phrase text (privacy: user-typed text is not surfaced).
 // Caller: App.jsx (route: /projects/:id/sessions/:sid)
-// Callees: react (useState, useEffect, useRef, useCallback), react-router-dom (useParams, Link), store/useStore, api/sessions (getSession), api/client (ApiError), components/project/SessionSummary, styles/dashboard.css, styles/sessions.css
+// Callees: react (useState, useEffect, useRef, useCallback), react-router-dom (useParams, Link), store/useStore, api/sessions (getSession), api/client (ApiError), components/project/SessionSummary
 // Data In: Route params id (project id) and sid (session id), project from store
 // Data Out: Default export SessionDetailPage component
-// Last Modified: 2026-06-25 (DWB-486: render summary write-up + keyword tags)
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -14,8 +14,6 @@ import useStore from '../store/useStore';
 import { getSession } from '../api/sessions';
 import { ApiError } from '../api/client';
 import SessionSummary from '../components/project/SessionSummary';
-import '../styles/dashboard.css';
-import '../styles/sessions.css';
 
 const POLL_INTERVAL_MS = 10000;
 

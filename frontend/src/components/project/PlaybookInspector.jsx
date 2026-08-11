@@ -3,14 +3,13 @@
 // Created: 2026-04-16
 // Purpose: Split view of playbook files (3 generic playbooks + 3 project rules) with expandable content, tooltips, path, and date
 // Caller: ProjectAgentsPage.jsx
-// Callees: react (useState, useEffect), api/projects (getPlaybookFiles), styles/docs.css
+// Callees: react (useState, useEffect), api/projects (getPlaybookFiles)
 // Data In: props { projectId }
 // Data Out: Default export PlaybookInspector component
-// Last Modified: 2026-04-16
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { getPlaybookFiles } from '../../api/projects';
-import '../../styles/docs.css';
 
 function PlaybookFile({ file }) {
   const [expanded, setExpanded] = useState(false);

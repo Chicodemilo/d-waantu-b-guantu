@@ -3,15 +3,14 @@
 // Created: 2026-06-24
 // Purpose: Project-level Inter-Agent Comms glance view (DWB-451). Dense, newest-first log of captured inter-agent messages: from -> to, timestamp, and a body truncated to a single line. Inline-text-confirm Clear wipes the project's rows. Polls the GET list endpoint every 3s. Backend: Barry DWB-447/448.
 // Caller: App.jsx (route: /projects/:id/comms)
-// Callees: react (useState, useEffect, useRef), react-router-dom (useParams), api/agentMessages (getAgentMessages, clearAgentMessages), ../styles/agent-comms.css
+// Callees: react (useState, useEffect, useRef), react-router-dom (useParams), api/agentMessages (getAgentMessages, clearAgentMessages)
 // Data In: Route param (id)
 // Data Out: Default export InterAgentCommsPage component
-// Last Modified: 2026-06-24
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { getAgentMessages, clearAgentMessages } from '../api/agentMessages';
-import '../styles/agent-comms.css';
 
 const POLL_MS = 3000;
 const PAGE_LIMIT = 50;

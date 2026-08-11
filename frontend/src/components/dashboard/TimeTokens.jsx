@@ -3,16 +3,15 @@
 // Created: 2026-03-30
 // Purpose: Tabbed "Time & Tokens" section with data tables (by project, by agent, overhead) and expandable per-ticket breakdowns. Overhead section includes Team Lead + PM rows (per agent) plus an Ad Hoc row sourced from project_total.ad_hoc_overhead_tokens / ad_hoc_overhead_seconds (DWB-353/354). Ad Hoc fields are null-guarded to 0 so the row renders even before the backend ships them. Tracking summaries come from the shared cache hook so all dashboard consumers share one fetch per project (DWB fan-out dedup).
 // Caller: DashboardPage.jsx, ProjectPage.jsx
-// Callees: react (useState), useStore, hooks/useTrackingSummary, utils/format, dashboard.css
+// Callees: react (useState), useStore, hooks/useTrackingSummary, utils/format
 // Data In: Optional projectId prop (single project mode); projects from store; tracking summaries from shared cache
 // Data Out: default export TimeTokens component
-// Last Modified: 2026-06-12
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState } from 'react';
 import useStore from '../../store/useStore';
 import { useTrackingSummaries } from '../../hooks/useTrackingSummary';
 import { formatTokens, formatTime } from '../../utils/format';
-import '../../styles/dashboard.css';
 
 function TTSection({ title, tooltip, columns, rows, tickets }) {
   const [expanded, setExpanded] = useState(null);

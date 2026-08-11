@@ -3,13 +3,12 @@
 // Created: 2026-03-29
 // Purpose: Reusable sortable data table with column definitions, click-to-sort headers, and optional row click handler
 // Caller: None currently (available for use)
-// Callees: react (useState), common.css
+// Callees: react (useState)
 // Data In: props { columns[], data[], onRowClick }
 // Data Out: default export DataTable component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState } from 'react';
-import '../../styles/common.css';
 
 function DataTable({ columns, data, onRowClick }) {
   const [sortKey, setSortKey] = useState(null);

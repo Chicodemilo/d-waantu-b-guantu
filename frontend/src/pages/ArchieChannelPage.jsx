@@ -3,14 +3,13 @@
 // Created: 2026-06-23
 // Purpose: Cross-project team-lead (Archie) messaging channel view (DWB-440). Read-only table of DIRECT and BROADCAST messages between team-lead agents across every project. Polls the GET list endpoint every 3s. Sending happens via slash command / API (archie-only), not here. Backend: Barry DWB-436/437/438.
 // Caller: App.jsx (route: /archie-channel, global nav)
-// Callees: react (useState, useEffect, useRef), api/tlChannel (getTLChannel), ../styles/tl-channel.css
+// Callees: react (useState, useEffect, useRef), api/tlChannel (getTLChannel)
 // Data In: None (global page)
 // Data Out: Default export ArchieChannelPage component
-// Last Modified: 2026-06-23
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useRef } from 'react';
 import { getTLChannel } from '../api/tlChannel';
-import '../styles/tl-channel.css';
 
 const POLL_MS = 3000;
 

@@ -9,15 +9,14 @@
 //          navigated here to read) and are individually collapsible. Graceful
 //          empty state for legacy sessions where summary is null/empty.
 // Caller: pages/SessionDetailPage.jsx
-// Callees: react (useState), components/help/CollapsibleSection, components/help/SummaryHeader, styles/sessions.css
+// Callees: react (useState), components/help/CollapsibleSection, components/help/SummaryHeader
 // Data In: summary ({ lead, sections: [{ title, bullets }] } | null), keywords ([{ keyword, weight }] | undefined)
 // Data Out: default export SessionSummary component
-// Last Modified: 2026-06-25
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState } from 'react';
 import CollapsibleSection from '../help/CollapsibleSection';
 import SummaryHeader from '../help/SummaryHeader';
-import '../../styles/sessions.css';
 
 function SessionSummary({ summary, keywords }) {
   // Track which sections the user has collapsed; default is open.

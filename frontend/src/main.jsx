@@ -3,16 +3,16 @@
 // Created: 2026-03-29
 // Purpose: Application entry point; mounts the React app with BrowserRouter into the DOM
 // Caller: index.html (Vite entry point)
-// Callees: react, react-dom, react-router-dom, App.jsx, styles/theme.css
+// Callees: react, react-dom, react-router-dom, App.jsx, styles/index.css
 // Data In: None
 // Data Out: None (renders root React component)
-// Last Modified: 2026-06-10
+// Last Modified: 2026-08-11 (DWB-009)
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
-import './styles/theme.css';
+import './styles/index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

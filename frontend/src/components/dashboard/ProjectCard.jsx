@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Dashboard card displaying a project summary with ticket stats, token usage, time spent, current-session info (IDEAS Tier 1 #3), and progress bar. Tracking summary and current-session both come from shared cache hooks so the dashboard mount stays at one fetch per project for each data source.
 // Caller: DashboardPage.jsx
-// Callees: react-router-dom (Link), useStore, hooks/useTrackingSummary, hooks/useProjectSessions, utils/format, StatusBadge, SessionInfoLine, AsciiProgressBar, dashboard.css
+// Callees: react-router-dom (Link), useStore, hooks/useTrackingSummary, hooks/useProjectSessions, utils/format, StatusBadge, SessionInfoLine, AsciiProgressBar
 // Data In: props { project }; tickets from store; tracking summary + current session from shared caches
 // Data Out: default export ProjectCard component
-// Last Modified: 2026-06-12
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
@@ -16,7 +16,6 @@ import { formatTime, formatTokens } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import SessionInfoLine from '../common/SessionInfoLine';
 import AsciiProgressBar from '../common/AsciiProgressBar';
-import '../../styles/dashboard.css';
 
 function ProjectCard({ project }) {
   const tickets = useStore((s) => s.getTicketsByProject(project.id));

@@ -3,17 +3,16 @@
 // Created: 2026-03-29
 // Purpose: Dashboard section with three AsciiCharts showing token usage by project, by agent, and overhead breakdown. Tracking summary fetches use AbortController to cancel on unmount (DWB-370).
 // Caller: DashboardPage.jsx
-// Callees: react (useState, useEffect), useStore, services/tracking, utils/format, AsciiChart, dashboard.css
+// Callees: react (useState, useEffect), useStore, services/tracking, utils/format, AsciiChart
 // Data In: projects from store; tracking summaries from API
 // Data Out: default export TokenOverview component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
 import { getTrackingSummary } from '../../services/tracking';
 import { formatTokens } from '../../utils/format';
 import AsciiChart from '../common/AsciiChart';
-import '../../styles/dashboard.css';
 
 function TokenOverview() {
   const projects = useStore((s) => s.projects).filter((p) => p.status === 'active');

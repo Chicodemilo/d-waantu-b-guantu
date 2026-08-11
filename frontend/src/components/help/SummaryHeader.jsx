@@ -8,9 +8,8 @@
 // Callees: none
 // Data In: why (node), how (node), where (node), bullets (string[]|node[])
 // Data Out: default export SummaryHeader component
-// Last Modified: 2026-06-25
+// Last Modified: 2026-08-11 (DWB-009)
 
-import '../../styles/help.css';
 
 function Row({ label, children }) {
   if (!children) return null;

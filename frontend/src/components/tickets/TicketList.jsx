@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Filterable ticket table with backlog toggle, status/type/sprint/epic/agent filters, navigable rows, and sub-task nesting under parents (DWB-457)
 // Caller: TicketsPage.jsx
-// Callees: react (useState), react-router-dom (useNavigate), useStore, TicketFilters, StatusBadge, tickets.css
+// Callees: react (useState), react-router-dom (useNavigate), useStore, TicketFilters, StatusBadge
 // Data In: projectId prop
 // Data Out: default export TicketList component
-// Last Modified: 2026-06-24
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -15,8 +15,6 @@ import { formatTime, formatTokens } from '../../utils/format';
 import { getJiraConfig, searchJiraIssues } from '../../api/jira';
 import TicketFilters from './TicketFilters';
 import StatusBadge from '../common/StatusBadge';
-import '../../styles/tickets.css';
-import '../../styles/jira.css';
 
 function TicketList({ projectId }) {
   const navigate = useNavigate();
