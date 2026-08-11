@@ -40,6 +40,7 @@ from app.models.agent_score import AgentScore
 from app.models.tl_message import TlMessage, TlMessageRead
 from app.models.inter_agent_message import InterAgentMessage
 from app.models.entity_keyword import EntityKeyword
+from app.models.standards_audit import AuditVerdict, StandardsAudit
 
 __all__ = [
     "Project", "ProjectStatus", "JiraSyncStatus",
@@ -69,4 +70,5 @@ __all__ = [
     "TlMessage", "TlMessageRead",
     "InterAgentMessage",
     "EntityKeyword",
+    "StandardsAudit", "AuditVerdict",
 ]
