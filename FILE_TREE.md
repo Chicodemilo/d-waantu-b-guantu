@@ -40,13 +40,17 @@ backend/
 │   ├── database.py     Engine, SessionLocal, get_db
 │   ├── config/         Settings plus tuning tables (session phrases, scoring,
 │   │                   memory rules, token budget)
-│   ├── models/         SQLAlchemy ORM classes (~27): relationships, enums, constraints
-│   ├── schemas/        Pydantic v2 Create/Update/Read models (~26)
+│   ├── models/         SQLAlchemy ORM classes (~28): relationships, enums, constraints
+│   │                   (incl. standards_audit)
+│   ├── schemas/        Pydantic v2 Create/Update/Read models (~27)
 │   ├── routers/        HTTP endpoints (~25): one module per domain
-│   ├── services/       Business logic (~36): all cross-entity rules live here
+│   │                   (incl. standards_audits)
+│   ├── services/       Business logic (~39): all cross-entity rules live here
+│   │                   (incl. standards_audit + standards_audit_scoring)
 │   └── middleware/     Activity logging and error logging middleware
 ├── alembic/            Migrations
-│   └── versions/       Migration revisions (~54)
+│   └── versions/       Migration revisions (~61): dwb-prefixed set through
+│                       dwb028 (standards-audit: table, enums, gate, The_Auditor)
 ├── scripts/            Backend CLI scripts (run_tests.sh, sync_instructions.py,
 │                       one-off backfills and migrations)
 ├── tests/              pytest suite (test DB lat_test, transaction rollback per test)
@@ -66,10 +70,12 @@ frontend/
 │   ├── main.jsx        App entry point
 │   ├── App.jsx         Route table
 │   ├── config.js       Frontend config (API base URL)
-│   ├── api/            API client wrappers (~25), one per domain
+│   ├── api/            API client wrappers (~26), one per domain
+│   │                   (incl. standardsAudits.js)
 │   ├── components/     UI components grouped by domain
 │   │   ├── agents/
-│   │   ├── common/
+│   │   ├── common/         Shared pieces incl. AuditVerdictBadge /
+│   │   │                   AuditViolations / AuditScorecard
 │   │   ├── dashboard/
 │   │   ├── epics/
 │   │   ├── help/           Help Center UI
@@ -90,13 +96,16 @@ frontend/
 │   │   └── sections/       One file per domain (dashboard, tickets, team,
 │   │                       sessions, tests, docs, system_docs, error_log,
 │   │                       archie_channel, comms, jira, system_tests)
-│   ├── hooks/          Custom hooks (~14): useAppData master loader,
-│   │   │               useFuzzyFilter.js (Help Center search), polling, etc.
+│   ├── hooks/          Custom hooks (~15): useAppData master loader,
+│   │   │               useFuzzyFilter.js (Help Center search),
+│   │   │               useStandardsAudits.js, polling, etc.
 │   │   └── useFuzzyFilter.js   Fuzzy filtering for help sections
-│   ├── pages/          Route-level pages (~21), thin wrappers over components,
-│   │                   includes HelpPage.jsx (the /help route)
+│   ├── pages/          Route-level pages (~22), thin wrappers over components,
+│   │                   includes HelpPage.jsx (/help) and AuditsPage.jsx
+│   │                   (/projects/:id/audits)
 │   ├── store/          Zustand store (useStore.js)
-│   ├── styles/         All CSS (~19), theme in theme.css, help.css for Help Center
+│   ├── styles/         All CSS (~20), theme in theme.css, help.css for Help
+│   │                   Center, audits.css for the Standards Audits page
 │   └── data/           Static data placeholder
 ├── public/             Static assets (favicon)
 ├── index.html          Vite HTML entry
@@ -167,6 +176,8 @@ docs/
 
 ```
 scripts/
+├── run_standards_audit.sh  Standards-audit runner: shell wrapper (forwards to the .py)
+├── standards_audit.py      Spawns the fresh headless auditor, POSTs the verdict
 ├── install-git-hooks.sh    Installs the repo git hooks
 └── hooks/
     └── post-commit         Post-commit hook

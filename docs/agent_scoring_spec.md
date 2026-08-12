@@ -14,7 +14,7 @@ and peer judgement, never by an agent's self-report.
 
 An **append-only ledger is the source of truth**; the per-agent score is
 derived and cached (same pattern as `tracking_log` for time/tokens). Every
-point change - auto, human, or peer - is one immutable row carrying a reason.
+point change - auto, human, peer, or audit - is one immutable row carrying a reason.
 Nothing is silently mutated: corrections append a reverting row, so the whole
 history stays auditable and reversible.
 
@@ -40,9 +40,9 @@ ledger carries `sprint_id`, so the per-sprint rollup is a clean filter).
 | `sprint_id` | FK sprints, nullable | the sprint the event falls in; enables per-sprint view |
 | `subject_agent_id` | FK agents | who is scored |
 | `delta` | INT signed | +N / -N applied to subject reputation |
-| `source` | enum(`auto`,`human`,`peer`) | who initiated |
-| `trigger_type` | enum | `ticket_closed`, `rework`, `test_failure`, `stale`, `zero_token_close`, `gate_miss`, `forgot`, `carrot`, `stick`, `peer_grant`, `peer_demerit` |
-| `actor_agent_id` | FK agents, nullable | peer who awarded it (null for auto/human) |
+| `source` | enum(`auto`,`human`,`peer`,`audit`) | who initiated (`audit` = a standards-audit scorecard, DWB-016) |
+| `trigger_type` | enum | `ticket_closed`, `rework`, `test_failure`, `stale`, `zero_token_close`, `gate_miss`, `forgot`, `carrot`, `stick`, `peer_grant`, `peer_demerit`, `audit_grant`, `audit_demerit` |
+| `actor_agent_id` | FK agents, nullable | peer who awarded it, or The_Auditor for `source=audit` (null for auto/human) |
 | `actor_cost` | INT default 0 | influence the actor spent (peer economy) |
 | `reason` | VARCHAR(500), nullable | optional note; auto-generated for system triggers, optional for human/peer |
 | `ref_type` / `ref_id` | str / BIGINT, nullable | link to triggering ticket / tool_action / failure_record |

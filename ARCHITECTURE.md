@@ -68,7 +68,7 @@ Agent (standalone)
 
 ### Tables
 
-24 model files in `app/models/`. See individual model files for full column definitions.
+28 model files in `app/models/`. See individual model files for full column definitions.
 
 | Table | Key Columns | Notes |
 |-------|-------------|-------|
@@ -84,7 +84,8 @@ Agent (standalone)
 | **comments** | ticket_id, author_agent_id, body, created_at | |
 | **alerts** | project_id, raised_by_agent_id, ticket_id, title, body, severity, status, created_at, resolved_at, user_sent_at, recipient_agent_id | Severity: info/warning/critical. Status: open/acknowledged/resolved. `recipient_agent_id` (DWB-426) targets a per-agent broadcast (e.g. scoring carrot/stick); null = project-wide |
 | **tool_actions** | agent_id, session_id, dwb_session_id, ticket_id, tool_name, target, event_type, tool_metadata, created_at | DWB-417: one row per captured agent action (PostToolUse / lifecycle hook). Context resolved from `session_id` like session-end attribution; all FKs nullable (delivery-gap tolerant). event_type: file_written/message_sent/agent_spawned/notification/context_compaction |
-| **score_event** | project_id, sprint_id, subject_agent_id, delta, source, trigger_type, actor_agent_id, actor_cost, reason, ref_type/ref_id, reverted_by, created_at | DWB-424 append-only scoring ledger (source of truth). source: auto/human/peer. Corrections append a reverting row; rows are never deleted |
+| **score_event** | project_id, sprint_id, subject_agent_id, delta, source, trigger_type, actor_agent_id, actor_cost, reason, ref_type/ref_id, reverted_by, created_at | DWB-424 append-only scoring ledger (source of truth). source: auto/human/peer/**audit** (DWB-016; audit triggers `audit_grant`/`audit_demerit`, actor = The_Auditor, bypasses peer caps). Corrections append a reverting row; rows are never deleted |
+| **standards_audit** | project_id, sprint_id, ticket_id, pr_ref, diff_range, verdict, violations, scorecard, summary (MEDIUMTEXT), run_at, triggered_by, created_at | DWB-014 fresh-auditor verdict store. verdict: pass/reject; `violations`/`scorecard` JSON. Recording raises an alert + feed entry; `apply-scorecard` is a separate, idempotent ledger write. Surfaced at `/projects/:id/audits` |
 | **agent_score** | (agent_id, project_id) PK, reputation, influence, updated_at | DWB-424 derived cache, rebuildable from score_event. `reputation` = all-time rank; `influence` = per-sprint peer budget (ledger-derived, auto-resets) |
 | **tl_messages** | from_agent_id, to_agent_id (NULL=broadcast), from_project_id, body, created_at | DWB-436 cross-project team-lead channel. NOT project-scoped; from_project_id only records the sender's home project |
 | **tl_message_reads** | (message_id, agent_id) PK, read_at | DWB-436 per-(message, agent) read receipt; message_id FK ON DELETE CASCADE |
@@ -112,9 +113,9 @@ Request -> ActivityLoggerMiddleware -> Router -> Service -> Model -> DB
          (auto-populated)
 ```
 
-- **Routers** (`app/routers/`): Define endpoints, validate input via Pydantic, inject DB session via `Depends(get_db)`. 23 router files.
-- **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution, tracking events, action capture, scoring, demo seeding). 32 service files.
-- **Models** (`app/models/`): SQLAlchemy 2.0 ORM classes with Mapped types and relationships. 18 model files.
+- **Routers** (`app/routers/`): Define endpoints, validate input via Pydantic, inject DB session via `Depends(get_db)`. 25 router files.
+- **Services** (`app/services/`): Business logic, cross-entity operations, auto-triggers (status history, rework detection, time computation, failure records, token attribution, tracking events, action capture, scoring, standards audits, demo seeding). 39 service files.
+- **Models** (`app/models/`): SQLAlchemy 2.0 ORM classes with Mapped types and relationships. 28 model files.
 - **Schemas** (`app/schemas/`): Pydantic v2 models with ConfigDict(from_attributes=True) for Create, Update, Read per entity. List endpoints use slim schemas that strip heavy fields (e.g., `TestResultListRead` omits `details`, `AgentListRead` omits `api_key`). Tickets, alerts, and sprints support `?fields=slim` for minimal payloads.
 - **Middleware** (`app/middleware/`): ActivityLoggerMiddleware auto-logs all mutations.
 
@@ -128,7 +129,7 @@ Disabled during testing (`TESTING=1` env var).
 
 ### Endpoint Reference
 
-Full OpenAPI reference at http://localhost:8000/docs (138 endpoints, 23 routers). The non-obvious / automation endpoints are catalogued in `README.md`. Notes that matter for the data model:
+Full OpenAPI reference at http://localhost:8000/docs (149 endpoints, 25 routers). The non-obvious / automation endpoints are catalogued in `README.md`. Notes that matter for the data model:
 
 - `GET /api/projects/{id}/team` (single-roundtrip roster) returns `{project_id, project_prefix, agents: [{agent_id, name, role, is_active, assigned_at, last_seen, presumed_live}]}`, active-only unless `?include_inactive=true`.
 - `GET /api/tracking/summary` `per_agent` rows aggregate `token_report` + `overhead_token_report` (a `tokens` total plus a separate `overhead_tokens`); `project_total.overhead_tokens` is the project-wide overhead figure.
@@ -139,6 +140,7 @@ Full OpenAPI reference at http://localhost:8000/docs (138 endpoints, 23 routers)
 - DWB session detection (DWB-402, Layer-2 Haiku retired): Layer-1 regex on open/close phrases, a SessionEnd transcript scan, slash commands (`/dwb-open`, `/dwb-close`), a 60-min idle sweeper. `ai_classifier` enum kept as a tombstone. Full reference: `docs/session_lifecycle.md`.
 - Action capture (DWB-417/421): `POST /api/hooks/tool-use` (matcher-scoped PostToolUse) and `POST /api/hooks/lifecycle-event` (Notification / PreCompact) are fire-and-forget, always return 200, and write `tool_actions` rows.
 - Scoring (epic 28): `GET .../scores` (leaderboard), `GET /api/agents/{id}/score` + `.../scores/agent?agent=NAME` (ledger), `POST .../scores/award` (human), `.../scores/peer` (peer, `X-Agent-ID`), `.../scores/rebuild`. See § 8.
+- Standards audits (epic 10): `GET`/`POST /api/standards-audits` (list / record verdict + scorecard), `POST /api/standards-audits/{id}/apply-scorecard` (idempotent ledger write). See § 8.
 - Team-lead channel (DWB-436/437): `GET /api/tl-channel` (cross-project, with `read_by` roster), `.../unread?agent_id=`, `POST /api/tl-channel` (role-guarded send), `.../mark-read`. See § 8.
 - Inter-agent comms (DWB-446..449): `POST /api/hooks/agent-message` (capture), `GET`/`DELETE /api/projects/{id}/agent-messages` (log/clear). See § 8.
 
@@ -170,6 +172,7 @@ Full OpenAPI reference at http://localhost:8000/docs (138 endpoints, 23 routers)
 /projects/:id/sessions/current       -> SessionCurrentPage
 /projects/:id/sessions/:sid          -> SessionDetailPage
 /projects/:id/docs                   -> DocsPage
+/projects/:id/audits                 -> AuditsPage
 /docs                                -> SystemDocsPage
 /instructions                        -> InstructionsPage
 /tests                               -> TestResultsPage
@@ -217,6 +220,7 @@ Plain CSS with custom properties. No frameworks, no CSS-in-JS.
 | charts.css    | AsciiChart, AsciiProgressBar, SprintVelocity          |
 | tests.css     | Test run listings, detail views, sparklines           |
 | help.css      | Help Center page, fuzzy search, collapsible sections  |
+| audits.css    | Standards Audits page, verdict badges, scorecard rows  |
 
 Font: JetBrains Mono / Fira Code (monospace). BEM-inspired naming (`component__element`, `component--variant`).
 
@@ -228,7 +232,7 @@ Font: JetBrains Mono / Fira Code (monospace). BEM-inspired naming (`component__e
 
 ## 5. Scripts and Hooks
 
-All scripts in `backend/scripts/`. Three files: `migrate.sh`, `run_tests.sh`, `sync_instructions.py`.
+Backend CLI scripts in `backend/scripts/`: `migrate.sh`, `run_tests.sh`, `sync_instructions.py`. Repo-root `scripts/` holds the standards-audit runner (`run_standards_audit.sh` → `standards_audit.py`, § 8) and the git-hook installer.
 
 ### run_tests.sh
 
@@ -388,7 +392,7 @@ Projects enforce up to 7 gates via `force_test_run`, `force_test_coverage`, `for
 
 ### Token Tracking
 - **Primary (passive):** lifecycle hooks capture tokens/time (§5); they increment `ticket.tokens_used` and project overhead fields directly. Worker priority: `in_progress` > `todo` > `in_review` > recently `done` (5 min).
-- **Per-ticket:** `POST /api/tracking/tokens` (or legacy `POST /api/tickets/{id}/tokens`) inserts event + increments ticket.
+- **Per-ticket:** `POST /api/tracking/tokens` (or legacy `POST /api/tickets/{id}/tokens`) inserts event + increments ticket **atomically** (ledger event + cache in one commit — DWB-022 fixed the old path that bumped `tokens_used` with no `tracking_log` row and left `token_source='unknown'`). Attributed to `X-Agent-ID` else the ticket assignee (400 if neither); `token_source` reflects the real path. Migration dwb022 reconciled 10 orphan tickets (~550k phantom tokens → `source='reconciled'`), so rollups are trustworthy going forward.
 - **Per-project overhead:** `POST /api/projects/{id}/overhead` increments `tl_`/`pm_overhead_tokens`.
 - **Audit/detail:** `GET /api/tokens/audit` (flags discrepancies), `GET /api/tickets/{id}/token-attribution`, `GET /api/tracking/summary` (per-ticket/agent/sprint rollups).
 
@@ -401,6 +405,9 @@ Per-agent-per-project scoring (epic 28, DWB-424..428). Append-only `score_event`
 - **Human tools** (free): `/carrot` `/stick` `/score` `/leaderboard` -> `POST .../scores/award`.
 - **Peer economy:** `POST .../scores/peer` (`X-Agent-ID`). Flat - any agent may carrot/stick any other; only self-scoring is barred.
 - **Broadcast:** human + peer carrot/sticks notify all project agents via per-agent alerts (`alert.recipient_agent_id`); human critical, peer info. Auto-triggers do not broadcast.
+
+### Standards Audit
+Epic 10 (DWB-014..031). A diff is judged against the global standards sheet (`docs/rules/global/coding-standards.md`) plus the repo's `## Project Extensions` by a **fresh, context-starved auditor** — `scripts/run_standards_audit.sh` → `standards_audit.py` spawns a headless `claude -p` from a tempdir with ONLY the law + a facts-only attribution block + diff + a strict-JSON contract, so it can't rubber-stamp. Malformed output is never posted. `POST /api/standards-audits` records the verdict/violations/scorecard and raises an alert (info=pass, warning=reject) + a feed entry; `POST /{id}/apply-scorecard` is the separate idempotent step that writes deltas to `score_event` (`source=audit`). **The_Auditor** is a seeded system agent (id 51, role `auditor`, `project_id` NULL — migration dwb028) that owns those ledger rows and the feed attribution; `STANDARDS_AUDIT_AGENT_ID` in `.env` points at it, else the service resolves it by name. `force_standards_audit` (dwb017) gates sprint close on a passing audit in-window. UI: `/projects/:id/audits` (`AuditsPage`). How-to: README § Standards Audit.
 
 ### Archie Channel (Cross-Project TL Messaging)
 `tl_messages` (DWB-436/437) is a cross-project team-lead channel: a message is direct (`to_agent_id` set) or broadcast (NULL = all other TLs); `tl_message_reads` tracks per-(message, agent) read state. Sender and any named recipient must be `role=team-lead` (else 400). A send pings the target or every other active TL via `alert.recipient_agent_id`. On spawn, unread renders atop `identity.md` and is marked read once shown; `/tl` replies. NOT project-scoped; `delete_project` clears messages sent from it.

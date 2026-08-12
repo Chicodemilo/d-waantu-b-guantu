@@ -96,7 +96,7 @@ Projects can optionally link to a Jira project. When enabled:
 
 ## Sprint Gates
 
-Live list: `GET /api/projects/{id}/gate-status`. Current gates: `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_coding_standards_md`, `force_consolidation`. `force_headers` reserved. Enable/disable via PATCH /api/projects/:id or the toggle switches.
+Live list: `GET /api/projects/{id}/gate-status`. Nine boolean gates (test run + coverage, four `*_md` doc-exists checks, `force_standards_audit`, `force_headers`, `force_consolidation`), all default OFF. Enable via PATCH /api/projects/:id or the toggles. Full table with each check: README § Sprint Gates.
 
 ## Sprint Workflow
 
@@ -104,8 +104,9 @@ Live list: `GET /api/projects/{id}/gate-status`. Current gates: `force_test_run`
 2. Team lead assigns tickets to agents
 3. Agents work tickets, PM monitors
 4. Tester runs tests: `./backend/scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"`
-5. PM closes sprint (gates checked automatically)
-6. Sprint close auto-creates: test ticket for next sprint, alerts to team
+5. Standards audit (if `force_standards_audit` ON): stage the diff, run `scripts/run_standards_audit.sh --project-id 1 --staged --ticket-id N --sprint-id M`; REJECT → back to worker, PASS → commit. See README § Standards Audit.
+6. PM closes sprint (gates checked automatically)
+7. Sprint close auto-creates: test ticket for next sprint, alerts to team
 
 ## Tracking (Time & Tokens)
 
@@ -166,5 +167,8 @@ Failure types: A–G (manual taxonomy), rework (auto-detected), test_failure (au
 | Hook session end | POST /api/hooks/session-end |
 | List hook sessions | GET /api/hooks/sessions |
 | Deploy playbooks | POST /api/projects/:id/deploy-playbooks |
+| List standards audits | GET /api/standards-audits?project_id=X |
+| Record standards audit | POST /api/standards-audits |
+| Apply audit scorecard | POST /api/standards-audits/:id/apply-scorecard |
 
-See README.md for the full 93-endpoint reference.
+See README.md for the full 149-endpoint reference.

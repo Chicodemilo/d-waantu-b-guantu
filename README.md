@@ -117,6 +117,7 @@ Boolean toggles gating sprint completion. All default OFF (opt-in per project):
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
 | `force_handoff_md` | `HANDOFF.md` exists at repo root |
 | `force_coding_standards_md` | `CODING_STANDARDS.md` exists at repo root |
+| `force_standards_audit` | A **passing** standards audit recorded in the sprint window (see [Standards Audit](#standards-audit)) |
 | `force_consolidation` | TL-owned docs within token ceiling; agent memory exempt |
 | `force_headers` | Sprint-touched `.py` files carry the code-header block; missing ones block close |
 | Failure records | Unreviewed stubs always block close |
@@ -159,6 +160,12 @@ scripts/run_standards_audit.sh --project-id 5 --staged --dry-run            # pr
 **Scorecard attribution.** With `--ticket-id` (author = the ticket's assigned agent) or `--author <name>` (explicit override), the runner injects a facts-only ATTRIBUTION block — author + team-lead + PM **names/roles only, no opinions**, so fresh-eyes judgement is preserved — and the auditor names those exact agents in the scorecard (worker deltas on the author; TL only on repeat-survival; PM only on a clear ticketing signal). Returned names are validated against that roster set; an unknown name **fails loudly before POST** so the ledger can never be mis-attributed. Without either flag, entries fall back to the generic `author`.
 
 The uniform PASS/REJECT scorecard prints to stdout on every run. Malformed auditor output is caught and never posted (non-zero exit). Verify writes with `GET /api/standards-audits?project_id=5`.
+
+**Applying the scorecard.** Recording an audit does *not* move scores. `POST /api/standards-audits/{id}/apply-scorecard` is the explicit, idempotent second step: it writes the deltas to the `score_event` ledger (`source=audit`, trigger `audit_grant`/`audit_demerit`), attributed to **The_Auditor** (a seeded system agent), bypassing peer influence caps by design.
+
+**Visibility.** Every recorded audit raises an alert (info=pass, warning=reject) and an activity-feed entry attributed to The_Auditor. The **Audits page** at `/projects/:id/audits` shows pass/fail stats and expandable rows (ref, date, verdict → author, violations, scorecard), linked from a ProjectPage summary section; verdict/violations/scorecard render from shared `components/common/` pieces.
+
+**As a gate.** With `force_standards_audit` ON (see [Sprint Gates](#sprint-gates)), sprint close requires a *passing* audit inside the sprint window.
 
 ---
 
@@ -225,7 +232,7 @@ Run history: `GET /api/test-results/performance`
 
 ## API Reference
 
-138 endpoints across 23 routers. Full interactive docs at http://localhost:8000/docs.
+149 endpoints across 25 routers. Full interactive docs at http://localhost:8000/docs.
 
 **Slim responses:** List endpoints strip heavy fields by default (test-results omit `details`, agents omit `api_key`); tickets/alerts/sprints support `?fields=slim`.
 
@@ -253,6 +260,9 @@ Standard CRUD exists for all resources; the non-obvious and automation ones:
 | GET | `/api/projects/{id}/scores` | Scoring leaderboard |
 | POST | `/api/projects/{id}/scores/award` | Human carrot/stick |
 | POST | `/api/projects/{id}/scores/peer` | Peer carrot/stick (`X-Agent-ID` header) |
+| GET | `/api/standards-audits` | List standards audits (`?project_id=`); slim rows |
+| POST | `/api/standards-audits` | Record an audit verdict + scorecard (does not apply deltas) |
+| POST | `/api/standards-audits/{id}/apply-scorecard` | Apply the scorecard to the score ledger (idempotent) |
 | GET | `/api/tl-channel` | Cross-project team-lead channel; each message carries a `read_by` roster |
 | GET | `/api/tl-channel/unread` | A team-lead's unread channel messages (`?agent_id`) |
 | POST | `/api/tl-channel` | Send a channel message, direct or broadcast (TL only) |
