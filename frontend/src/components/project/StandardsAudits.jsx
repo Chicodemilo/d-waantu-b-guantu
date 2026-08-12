@@ -1,17 +1,14 @@
 // Path: src/components/project/StandardsAudits.jsx
 // File: StandardsAudits.jsx
 // Created: 2026-08-12
-// Purpose: Project-page section listing stored standards-audit scorecards. Each audit renders its verdict (PASS/REJECT, plain text), branch/PR ref, run time, violations (rule + file:line + note), and the per-agent scorecard (agent, delta, reason). Self-fetches on mount and refreshes on an interval; renders loading, error, and empty states.
+// Purpose: Render-only project-page section listing stored standards-audit scorecards. Each audit renders its verdict (PASS/REJECT, plain text), branch/PR ref, run time, violations (rule + file:line + note), and the per-agent scorecard (agent, delta, reason). Fetch + polling + loading/error state live in the useStandardsAudits hook.
 // Caller: pages/ProjectPage.jsx
-// Callees: react (useState, useEffect), api/standardsAudits (getStandardsAudits)
+// Callees: hooks/useStandardsAudits
 // Data In: projectId prop
 // Data Out: Default export StandardsAudits component
 // Last Modified: 2026-08-12 (DWB-018)
 
-import { useState, useEffect } from 'react';
-import { getStandardsAudits } from '../../api/standardsAudits';
-
-const REFRESH_MS = 30_000;
+import useStandardsAudits from '../../hooks/useStandardsAudits';
 
 function formatRunAt(iso) {
   if (!iso) return '-';
@@ -39,38 +36,9 @@ function fileLine(v) {
 }
 
 function StandardsAudits({ projectId }) {
-  const [audits, setAudits] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState(false);
+  const { audits, loading, error } = useStandardsAudits(projectId);
 
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-
-    async function refresh() {
-      try {
-        const data = await getStandardsAudits(projectId, { signal: controller.signal });
-        if (cancelled) return;
-        setAudits(Array.isArray(data) ? data : []);
-        setError(false);
-      } catch (err) {
-        if (cancelled || err.name === 'AbortError') return;
-        setError(true);
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    }
-
-    refresh();
-    const timer = setInterval(refresh, REFRESH_MS);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [projectId]);
-
-  if (!loaded) {
+  if (loading) {
     return (
       <div className="audits">
         <div className="audits__empty">Loading audits...</div>
