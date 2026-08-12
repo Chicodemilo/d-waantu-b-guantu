@@ -4,7 +4,7 @@
 /* Purpose: Main stylesheet — links theme + every domain sheet in one place, per CODING_STANDARDS § Styling (DWB-009). Imported once from main.jsx; components no longer import CSS directly. */
 /* Caller: src/main.jsx */
 /* Callees: All stylesheets in src/styles/ */
-/* Last Modified: 2026-08-11 (DWB-009) */
+/* Last Modified: 2026-08-12 (DWB-018) */
 
 /* Theme first: CSS custom properties (colors, fonts) + base reset — every sheet below relies on these variables */
 @import './theme.css';
@@ -20,6 +20,9 @@
 
 /* Agent list table, agent detail view, and agent metrics panels */
 @import './agents.css';
+
+/* Standards Audits section on the project page: audit cards, verdict badges, violations lists, per-agent scorecards */
+@import './audits.css';
 
 /* ASCII horizontal bar charts, progress bars, sparklines, and vertical bar (VU meter) charts */
 @import './charts.css';

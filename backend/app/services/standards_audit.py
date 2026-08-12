@@ -7,21 +7,36 @@
 #          500. Recording an audit does NOT apply its scorecard (that is DWB-016).
 #          Also owns the force_standards_audit gate-status computation (DWB-017)
 #          so the router stays thin (logic in services, per our standards).
+#          DWB-028: raises a visible Alert on every audit create + attributes the
+#          audit to the fixed The_Auditor agent in the activity feed.
 # Caller: app/routers/standards_audits.py, app/routers/projects.py (gate-status)
-# Callees: app/models (standards_audit, project, sprint, ticket)
+# Callees: app/models (standards_audit, project, sprint, ticket, agent, alert, project_agent), services/activity_log, config.settings
 # Data In: db: Session, StandardsAuditCreate
 # Data Out: list[StandardsAudit], StandardsAudit, audit-gate state dict
-# Last Modified: 2026-08-11 (DWB-017: audit_gate_status service)
+# Last Modified: 2026-08-12 (DWB-028: audit visibility - alert + auditor attribution)
+
+import logging
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
+from app.models.agent import Agent
+from app.models.alert import Alert, AlertCategory, AlertSeverity, AlertStatus
 from app.models.project import Project
+from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
 from app.models.standards_audit import AuditVerdict, StandardsAudit
 from app.models.ticket import Ticket
 from app.schemas.standards_audit import StandardsAuditCreate
+from app.services.activity_log import log_activity
+
+logger = logging.getLogger(__name__)
+
+# DWB-028: the fixed system agent audit writes attribute to. Created by the
+# DWB-028 data migration; resolved by name when STANDARDS_AUDIT_AGENT_ID is unset.
+AUDITOR_AGENT_NAME = "The_Auditor"
 
 
 def list_standards_audits(
@@ -74,9 +89,112 @@ def create_standards_audit(db: Session, data: StandardsAuditCreate) -> Standards
         audit.run_at = data.run_at
 
     db.add(audit)
+    db.flush()  # populate audit.id for the alert + activity attribution
+
+    # DWB-028: make the audit visible. Attribute to the fixed auditor agent and
+    # raise an alert (info on pass / warning on reject). Best-effort - never let
+    # visibility wiring fail the audit write.
+    auditor_id = resolve_auditor_agent_id(db)
+    _raise_audit_alert(db, audit, auditor_id)
+    if auditor_id is not None:
+        log_activity(
+            db,
+            audit.project_id,
+            auditor_id,
+            "standards_audit",
+            audit.id,
+            "standards_audit_recorded",
+            {
+                "verdict": audit.verdict.value,
+                "violations": len(audit.violations or []),
+                "pr_ref": audit.pr_ref,
+            },
+        )
+
     db.commit()
     db.refresh(audit)
     return audit
+
+
+def resolve_auditor_agent_id(db: Session) -> int | None:
+    """Resolve the agent audit writes attribute to (DWB-028).
+
+    Prefers the configured STANDARDS_AUDIT_AGENT_ID when set and the agent
+    exists; otherwise falls back to the fixed ``The_Auditor`` agent by name
+    (created by the DWB-028 data migration). None when neither resolves - the
+    caller degrades gracefully (alert skipped, no attribution) rather than
+    failing the audit write.
+    """
+    configured = settings.STANDARDS_AUDIT_AGENT_ID
+    if configured is not None and db.get(Agent, configured) is not None:
+        return configured
+    agent = db.scalar(select(Agent).where(Agent.name == AUDITOR_AGENT_NAME))
+    return agent.id if agent else None
+
+
+def _fallback_alert_raiser(db: Session, project_id: int) -> int | None:
+    """When no auditor agent resolves, use the project's TL (else any roster
+    agent) as the alert's raised_by. None when the project has no agents - the
+    alert is then skipped (raised_by is NOT NULL)."""
+    tl = db.scalar(
+        select(Agent.id)
+        .join(ProjectAgent, ProjectAgent.agent_id == Agent.id)
+        .where(ProjectAgent.project_id == project_id)
+        .where(Agent.role == "team-lead")
+        .limit(1)
+    )
+    if tl:
+        return tl
+    return db.scalar(
+        select(ProjectAgent.agent_id)
+        .where(ProjectAgent.project_id == project_id)
+        .limit(1)
+    )
+
+
+def _raise_audit_alert(db: Session, audit: StandardsAudit, auditor_id: int | None) -> None:
+    """DWB-028: raise a visible Alert for a recorded audit - info on pass,
+    warning on reject. Title carries the audit id, verdict, linked ticket key,
+    and violation count. Best-effort: if no agent can be the raiser, skip rather
+    than fail the create (raised_by_agent_id is NOT NULL)."""
+    raised_by = auditor_id or _fallback_alert_raiser(db, audit.project_id)
+    if raised_by is None:
+        logger.warning(
+            "standards audit %s: no agent to attribute the alert to; skipping alert",
+            audit.id,
+        )
+        return
+
+    n = len(audit.violations or [])
+    plural = "s" if n != 1 else ""
+    ticket_key = audit.ticket.ticket_key if audit.ticket is not None else None
+    verdict = audit.verdict.value.upper()
+
+    title_parts = [f"Standards audit #{audit.id}: {verdict}"]
+    if ticket_key:
+        title_parts.append(ticket_key)
+    title_parts.append(f"{n} violation{plural}")
+    title = " - ".join(title_parts)
+
+    body = (
+        f"Standards audit #{audit.id} recorded for {audit.pr_ref}: verdict "
+        f"{verdict}, {n} violation{plural}."
+        + (f" Ticket {ticket_key}." if ticket_key else "")
+    )
+
+    is_pass = audit.verdict == AuditVerdict.passed
+    db.add(Alert(
+        project_id=audit.project_id,
+        raised_by_agent_id=raised_by,
+        recipient_agent_id=None,  # project-wide, no specific recipient
+        ticket_id=audit.ticket_id,
+        title=title,
+        body=body,
+        severity=AlertSeverity.info if is_pass else AlertSeverity.warning,
+        status=AlertStatus.open,
+        category=AlertCategory.actionable,
+    ))
+    db.flush()
 
 
 def audit_gate_status(db: Session, project) -> dict:

@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Project detail page with tools (archive, delete, capture-agent-comms toggle), sprint gates (incl. force_consolidation), doc gates (incl. force_handoff_md), alerts, consolidation status panel, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
-// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner
+// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/StandardsAudits, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-08-12 (DWB-018)
 
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -21,6 +21,7 @@ import EpicList from '../components/epics/EpicList';
 import AlertBanner from '../components/common/AlertBanner';
 import ActivityFeed from '../components/project/ActivityFeed';
 import LiveSessions from '../components/project/LiveSessions';
+import StandardsAudits from '../components/project/StandardsAudits';
 import TokenBudget from '../components/project/TokenBudget';
 import ConsolidationStatus from '../components/project/ConsolidationStatus';
 
@@ -522,6 +523,11 @@ function ProjectPage() {
       <div>
         <div className="dashboard__section-title">Team Status</div>
         <LiveSessions projectId={id} />
+      </div>
+
+      <div>
+        <div className="dashboard__section-title">Standards Audits</div>
+        <StandardsAudits projectId={id} />
       </div>
 
       <div>
