@@ -11,7 +11,7 @@
 // Data In: section modules (default-exported objects per CONTRACT.md)
 // Data Out: helpGroups (ordered groups of existing sections), allSections,
 //           NAV_GROUPS (the canonical ordering), quickStart
-// Last Modified: 2026-06-25
+// Last Modified: 2026-08-12 (DWB-036: added 'audits' canonical key, after 'tests')
 
 import quickStart from './quickStart';
 
@@ -25,7 +25,7 @@ export const NAV_GROUPS = [
   {
     id: 'project',
     label: 'Per-project',
-    keys: ['tickets', 'team', 'sessions', 'tests', 'docs', 'comms', 'jira'],
+    keys: ['tickets', 'team', 'sessions', 'tests', 'audits', 'docs', 'comms', 'jira'],
   },
 ];
 

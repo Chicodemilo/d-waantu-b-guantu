@@ -15,7 +15,7 @@
 // Callees: ../index (allSections, NAV_GROUPS via import.meta.glob)
 // Data In: real authored section modules
 // Data Out: test assertions
-// Last Modified: 2026-06-25
+// Last Modified: 2026-08-12 (DWB-036: added 'audits' to the canonical vocabulary)
 
 import { describe, it, expect } from 'vitest';
 import { allSections, NAV_GROUPS } from '../index';
@@ -31,6 +31,7 @@ describe('help cross-link integrity (DWB-496/497)', () => {
     expect([...CANONICAL_KEYS].sort()).toEqual(
       [
         'archie_channel',
+        'audits',
         'comms',
         'dashboard',
         'docs',
