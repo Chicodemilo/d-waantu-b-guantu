@@ -1,12 +1,12 @@
 # Path: app/routers/projects.py
 # File: projects.py
 # Created: 2026-03-29
-# Purpose: Project HTTP endpoints - CRUD, from-repo, gates, overhead, docs, activity-feed, token-budget, team, scaffold-agents (DWB-341), Jira table + sync (DWB-342)
+# Purpose: Project HTTP endpoints - CRUD, from-repo, seed-demo, gates, overhead, docs, tests, playbook-files, activity-feed, agent-messages, token-budget, consolidation-status, team, scaffold-agents (DWB-341), Jira table + sync + disable (DWB-342)
 # Caller: app/main.py
-# Callees: app/services/project.py, app/services/project_agent.py, app/services/standards_audit.py, models (Agent, Alert, ProjectAgent)
+# Callees: app/services (project, project_agent, standards_audit, test_result, seed_demo, playbook_deploy, activity_log), models (ActivityLog, Agent, Alert, InterAgentMessage, ProjectAgent, Ticket)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-08-11 (DWB-017: audit gate-status via service)
+# Last Modified: 2026-08-12 (DWB-034: reconcile Purpose/Callees with current routes + imports)
 
 import json
 import logging

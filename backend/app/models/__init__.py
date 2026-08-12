@@ -6,7 +6,7 @@
 # Callees: All model modules
 # Data In: None
 # Data Out: All model classes
-# Last Modified: 2026-06-10
+# Last Modified: 2026-08-12 (DWB-034: date sync; last content change was DWB-014's StandardsAudit re-export)
 
 from app.models.project import JiraSyncStatus, Project, ProjectStatus
 from app.models.sprint import Sprint, SprintStatus

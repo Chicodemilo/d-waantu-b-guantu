@@ -6,7 +6,7 @@
 # Callees: pydantic_settings, app.config.session_phrases
 # Data In: .env file (settings)
 # Data Out: Settings instance, re-exported submodules
-# Last Modified: 2026-08-12 (DWB-028)
+# Last Modified: 2026-08-12 (DWB-034: correct the STANDARDS_AUDIT_AGENT_ID cross-ref to standards_audit.py)
 
 """DWB-336 introduced `app/config/` as a versioned-data package
 (session_phrases.py lives here). To keep `from app.config import settings`
@@ -75,8 +75,9 @@ class Settings(BaseSettings):
     # DWB-028: agent id the standards-audit create service attributes audit
     # alerts + activity-feed events to. Optional - when unset (or blank in .env),
     # the service falls back to the fixed 'The_Auditor' agent by name (created by
-    # the DWB-028 data migration). Also read by scripts/run_standards_audit.sh as
-    # the X-Agent-ID header on the POST (DWB-015).
+    # the DWB-028 data migration). Also read by scripts/standards_audit.py (via
+    # the run_standards_audit.sh wrapper) and sent as the X-Agent-ID header on
+    # the audit POST (DWB-015).
     STANDARDS_AUDIT_AGENT_ID: int | None = None
 
     @field_validator("STANDARDS_AUDIT_AGENT_ID", mode="before")
