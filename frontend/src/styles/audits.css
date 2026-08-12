@@ -1,9 +1,115 @@
 /* Path: src/styles/audits.css */
 /* File: audits.css */
 /* Created: 2026-08-12 */
-/* Purpose: Styles for the Standards Audits section on the project page: audit cards with a PASS/REJECT verdict badge, PR ref + run metadata, a violations list (rule, severity, file:line, note), and a per-agent scorecard (agent, delta, reason). Terminal aesthetic, colors from theme.css. */
-/* Last Modified: 2026-08-12 (DWB-018) */
+/* Purpose: Styles for standards-audit views: the ProjectPage StandardsAudits section (audit cards) and the project-level AuditsPage (summary header + expandable table). Shared pieces (verdict badge, violations list, scorecard list) use neutral audit-verdict / audit-block / audit-violations / audit-scorecard classes so both views render identically. Terminal aesthetic, colors from theme.css. */
+/* Last Modified: 2026-08-12 (DWB-031) */
 
+/* ---- Shared: verdict badge (common/AuditVerdictBadge) ---- */
+.audit-verdict {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+}
+
+.audit-verdict--pass {
+  color: var(--green);
+}
+
+.audit-verdict--reject {
+  color: var(--orange);
+}
+
+/* ---- Shared: findings + scorecard blocks (common/AuditViolations, common/AuditScorecard) ---- */
+.audit-block {
+  padding-top: 10px;
+}
+
+.audit-block__title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+  margin-bottom: 6px;
+}
+
+.audit-none {
+  color: var(--gray);
+  font-size: 12px;
+}
+
+.audit-violations,
+.audit-scorecard {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.audit-violations__item,
+.audit-scorecard__item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-violations__rule {
+  color: var(--orange);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 10px;
+}
+
+.audit-violations__sev {
+  color: var(--yellow);
+  font-size: 11px;
+}
+
+.audit-violations__loc {
+  color: var(--blue-dim);
+}
+
+.audit-violations__note {
+  color: var(--gray-light);
+  flex: 1 1 100%;
+  line-height: 1.5;
+}
+
+.audit-scorecard__item {
+  gap: 10px;
+}
+
+.audit-scorecard__agent {
+  color: var(--green-bright);
+  min-width: 120px;
+}
+
+.audit-scorecard__delta {
+  color: var(--gray-light);
+  min-width: 36px;
+}
+
+.audit-scorecard__delta--up {
+  color: var(--green);
+}
+
+.audit-scorecard__delta--down {
+  color: var(--red);
+}
+
+.audit-scorecard__reason {
+  color: var(--gray-light);
+  flex: 1 1 60%;
+  line-height: 1.5;
+}
+
+/* ---- ProjectPage section: audit cards ---- */
 .audits {
   display: flex;
   flex-direction: column;
@@ -37,29 +143,11 @@
   border-bottom: 1px solid var(--border);
 }
 
-.audit-card__verdict {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  padding: 2px 8px;
-  border: 1px solid currentColor;
-}
-
-.audit-card__verdict--pass {
-  color: var(--green);
-}
-
-.audit-card__verdict--reject {
-  color: var(--orange);
-}
-
 .audit-card__ref {
   color: var(--blue);
   font-size: 13px;
 }
 
-.audit-card__range,
 .audit-card__time,
 .audit-card__by {
   color: var(--gray-light);
@@ -70,99 +158,149 @@
   margin-left: auto;
 }
 
-.audit-card__block {
-  padding-top: 10px;
+/* ---- AuditsPage: summary header ---- */
+.audit-summary {
+  border: 1px solid var(--border);
+  background-color: var(--bg-alt);
+  padding: 14px 16px;
+  margin-bottom: 16px;
 }
 
-.audit-card__block-title {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--gray-light);
-  margin-bottom: 6px;
-}
-
-.audit-card__none {
-  color: var(--gray);
-  font-size: 12px;
-}
-
-.audit-violations {
-  list-style: none;
+.audit-summary__meta {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.audit-violations__item {
-  display: flex;
-  align-items: baseline;
   flex-wrap: wrap;
-  gap: 8px;
-  font-size: 12px;
-  padding: 4px 0;
+  gap: 16px;
+  align-items: baseline;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
 
-.audit-violations__rule {
-  color: var(--orange);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  font-size: 10px;
-}
-
-.audit-violations__sev {
-  color: var(--yellow);
-  font-size: 11px;
-}
-
-.audit-violations__loc {
-  color: var(--blue-dim);
-}
-
-.audit-violations__note {
-  color: var(--gray-light);
-  flex: 1 1 100%;
-  line-height: 1.5;
-}
-
-.audit-scorecard {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.audit-scorecard__item {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 12px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.audit-scorecard__agent {
+.audit-summary__name {
   color: var(--green-bright);
-  min-width: 120px;
+  font-size: 14px;
 }
 
-.audit-scorecard__delta {
+.audit-summary__repo {
   color: var(--gray-light);
-  min-width: 36px;
+  font-size: 12px;
 }
 
-.audit-scorecard__delta--up {
+.audit-summary__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  padding-top: 12px;
+}
+
+.audit-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.audit-stat__value {
+  font-size: 20px;
   color: var(--green);
 }
 
-.audit-scorecard__delta--down {
-  color: var(--red);
+.audit-stat__value--pass {
+  color: var(--green);
 }
 
-.audit-scorecard__reason {
+.audit-stat__value--reject {
+  color: var(--orange);
+}
+
+.audit-stat__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
   color: var(--gray-light);
-  flex: 1 1 60%;
-  line-height: 1.5;
+}
+
+/* ---- AuditsPage: expandable table ---- */
+.audit-table {
+  border: 1px solid var(--border);
+}
+
+.audit-table__head {
+  display: flex;
+  gap: 16px;
+  padding: 8px 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+  border-bottom: 1px solid var(--border);
+  background-color: var(--bg-alt);
+}
+
+.audit-table__group {
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-table__group:last-child {
+  border-bottom: none;
+}
+
+.audit-table__row {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  align-items: center;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.audit-table__row:hover {
+  background-color: var(--bg-hover);
+}
+
+.audit-table__group--open .audit-table__row {
+  background-color: var(--bg-hover);
+}
+
+.audit-table__col-ref {
+  flex: 1 1 55%;
+  color: var(--blue);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-table__col-time {
+  flex: 1 1 25%;
+  color: var(--gray-light);
+}
+
+.audit-table__col-verdict {
+  flex: 0 0 90px;
+}
+
+.audit-table__caret {
+  color: var(--gray-light);
+  width: 12px;
+  display: inline-block;
+}
+
+.audit-table__detail {
+  padding: 4px 12px 14px 32px;
+  background-color: var(--bg-alt);
+}
+
+.audit-detail__who {
+  font-size: 12px;
+  color: var(--gray-light);
+  padding: 8px 0;
+}
+
+.audits-page__back {
+  margin-top: 16px;
+  font-size: 12px;
 }
