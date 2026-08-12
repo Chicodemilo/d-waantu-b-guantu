@@ -145,7 +145,7 @@ Each agent earns a score per project, shown as a leaderboard on the project page
 
 ## Standards Audit
 
-A PR/diff is judged against the single global standards sheet (`docs/rules/global/coding-standards.md`) by a **fresh, single-purpose auditor** — spawned headless with ONLY the sheet + the diff as context, no team/Archie history, so it cannot rubber-stamp. The verdict, violations, and a per-agent scorecard are recorded via `POST /api/standards-audits` (recording does NOT apply the score deltas — that is a separate step).
+A PR/diff is judged against the single global standards sheet (`docs/rules/global/coding-standards.md`) — plus the audited repo's own **Project Extensions** (the `## Project Extensions` section of its root `CODING_STANDARDS.md`, which *adds to* the global sheet, never overrides it) — by a **fresh, single-purpose auditor** spawned headless with ONLY that law + the diff as context, no team/Archie history, so it cannot rubber-stamp. The verdict, violations, and a per-agent scorecard are recorded via `POST /api/standards-audits` (recording does NOT apply the score deltas — that is a separate step).
 
 Run it with `scripts/run_standards_audit.sh` (reads config from `.env`: `STANDARDS_AUDIT_API_BASE` / `VITE_API_BASE_URL`, `STANDARDS_AUDIT_MODEL`):
 

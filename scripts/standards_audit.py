@@ -4,8 +4,9 @@
 # Created: 2026-08-11
 # Purpose: Standards-audit runner. Gathers a diff, spawns a FRESH headless
 #   auditor (claude -p) whose ONLY context is the global coding-standards sheet
-#   + the diff, validates the auditor's strict JSON, prints a uniform human
-#   scorecard, and POSTs the audit to the DWB standards-audit API (DWB-014).
+#   (plus the audited repo's Project Extensions section, if any) + the diff,
+#   validates the auditor's strict JSON, prints a uniform human scorecard, and
+#   POSTs the audit to the DWB standards-audit API (DWB-014).
 # Caller: scripts/run_standards_audit.sh (thin wrapper); may also run directly.
 # Callees: git (diff gathering), `claude -p` (the fresh auditor), the DWB API
 #   POST /api/standards-audits.
@@ -17,7 +18,7 @@
 # Data Out: Exit 0 + a stored audit (or, with --dry-run, the payload printed).
 #   Non-zero exit + a clear message on malformed auditor output, an unknown
 #   scorecard name (DWB-023 pre-POST guard), or API failure.
-# Last Modified: 2026-08-11 (DWB-023)
+# Last Modified: 2026-08-12 (DWB-029)
 #
 # Design note: the auditor is deliberately context-starved. It runs from a
 #   throwaway temp directory (so it cannot auto-load this repo's CLAUDE.md or any
@@ -40,6 +41,8 @@ from datetime import datetime, timezone
 AUDIT_ENDPOINT_PATH = "/standards-audits"   # appended to the API base
 TRIGGERED_BY = "auditor_script"             # identifies THIS runner, not "manual"
 STANDARDS_SHEET_REL = "docs/rules/global/coding-standards.md"
+PROJECT_STANDARDS_REL = "CODING_STANDARDS.md"       # repo-root project sheet (DWB-029)
+PROJECT_EXTENSIONS_MARKER = "## Project Extensions"  # section to EOF = added law
 VALID_VERDICTS = ("pass", "reject")
 CLAUDE_TIMEOUT_SECONDS = 300
 
@@ -75,6 +78,27 @@ def resolve_config(env):
         fail("no STANDARDS_AUDIT_MODEL in .env (the auditor model is not hard-coded)")
     agent_id = env.get("STANDARDS_AUDIT_AGENT_ID")  # optional write attribution
     return api_base.rstrip("/"), model, agent_id
+
+
+# --- Project extensions: per-repo law that ADDS to the global sheet (DWB-029) --
+def load_project_extensions(repo_root):
+    """Return the repo's '## Project Extensions' section (marker to EOF), or None.
+
+    The audited repo may specialize/add law in its root CODING_STANDARDS.md below
+    the marker (e.g. DWB sanctions hooks-for-view-logic). Without this the auditor
+    only sees the global sheet and falsely rejects sanctioned patterns (audit 15).
+    No file or no marker -> None, so the prompt is unchanged.
+    """
+    path = os.path.join(repo_root, PROJECT_STANDARDS_REL)
+    if not os.path.isfile(path):
+        return None
+    with open(path, "r") as fh:
+        text = fh.read()
+    idx = text.find(PROJECT_EXTENSIONS_MARKER)
+    if idx == -1:
+        return None
+    section = text[idx:].strip()
+    return section or None
 
 
 # --- Attribution: resolve real roster names for the scorecard (DWB-023) --------
@@ -218,24 +242,45 @@ def build_attribution_block(attribution):
     return block, rules
 
 
-def build_prompt(sheet_text, diff_text, attribution=None):
-    """Auditor prompt: the sheet + diff + facts-only attribution + strict output."""
+def build_extensions_block(extensions_text):
+    """Labeled additional-law block for this project's extensions (DWB-029)."""
+    if not extensions_text:
+        return ""
+    return (
+        "\n=== THIS PROJECT'S EXTENSIONS (additional law — they ADD to the global "
+        "sheet above, never override it) ===\n"
+        "Treat these as binding law alongside the global sheet. A pattern this "
+        "section explicitly sanctions is NOT a violation, even if it looks unusual.\n"
+        f"{extensions_text}\n"
+    )
+
+
+def build_prompt(sheet_text, diff_text, attribution=None, extensions_text=None):
+    """Auditor prompt: the sheet (+ project extensions) + diff + attribution."""
     attribution_block, scorecard_rule = build_attribution_block(attribution)
+    extensions_block = build_extensions_block(extensions_text)
+    sources = "a coding-standards sheet"
+    if extensions_text:
+        sources += ", this project's standards extensions"
+    if attribution:
+        sources += ", a facts-only attribution block,"
     return f"""You are a standards auditor. You have NO context beyond what is in this \
-message: a coding-standards sheet{', a facts-only attribution block,' if attribution else ''} and a code diff. \
-Judge the diff ONLY against the sheet. Do not assume any project history or prior \
-discussion. The attribution block, if present, lists names/roles ONLY — it is not \
-an opinion about the work and must not sway your verdict.
+message: {sources} and a code diff. \
+Judge the diff ONLY against the sheet and this project's extensions (if present). \
+Do not assume any project history or prior discussion. The attribution block, if \
+present, lists names/roles ONLY — it is not an opinion about the work and must not \
+sway your verdict.
 
 === CODING STANDARDS SHEET (the single source of law) ===
 {sheet_text}
-{attribution_block}
+{extensions_block}{attribution_block}
 === CODE DIFF UNDER AUDIT ===
 {diff_text if diff_text.strip() else "(empty diff)"}
 
 === YOUR TASK ===
 Return a verdict of "pass" (no violations) or "reject" (one or more violations).
-List every violation you find, each tied to a specific section of the sheet.
+List every violation you find, each tied to a specific section of the sheet or
+this project's extensions. Do not flag a pattern the extensions explicitly allow.
 Suggest a per-agent scorecard: a signed integer delta (carrot for good practice,
 stick for a violation) with a one-line reason.
 {scorecard_rule}
@@ -472,11 +517,17 @@ def main(argv):
         print(f"standards_audit: attribution -> author={who}"
               + (f", context={extras}" if extras else ""), file=sys.stderr)
 
+    # Project extensions add per-repo law so sanctioned patterns aren't false-rejected (DWB-029).
+    extensions_text = load_project_extensions(repo_root)
+    if extensions_text:
+        print(f"standards_audit: including project extensions from {PROJECT_STANDARDS_REL} "
+              f"({len(extensions_text)} chars)", file=sys.stderr)
+
     diff_text, pr_ref, diff_range = gather_diff(repo_root, args)
     if not diff_text.strip():
         fail("empty diff — nothing to audit for the selected ref/range/staged set", code=2)
 
-    prompt = build_prompt(sheet_text, diff_text, attribution)
+    prompt = build_prompt(sheet_text, diff_text, attribution, extensions_text)
 
     raw = run_auditor(prompt, model)
     audit = parse_auditor_json(raw)
