@@ -120,6 +120,10 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 
 **Side-ticket lane awareness:** sprints can carry 1-3 small polish tickets (CSS/UI nudges, copy fixes) alongside the main goal. These are pass-throughs for the PM; do not gate them, do not flag them as scope drift. If a side ticket balloons (multiple files, hours of work, ambiguous spec), THEN flag it and ask the TL whether to pull it from the sprint. See `.claude/team_lead_playbook.md` § 4d.
 
+**Stand down on serial stretches (DWB-033).** Your slot exists for 3+ parallel workers. When the live worker count drops below that — one queued worker grinding a serial slate — go dormant: no polling, no per-event pings; tell the TL you're standing down and resume the instant the slate fans out, a worker goes stale, or the TL pings. A PM watching one worker is overhead the sprint pays for nothing.
+
+**Lane-sharding when you cut tickets (DWB-033).** Parallel speed comes from ticket shape. Decompose the sprint into file-disjoint lanes (backend/ vs frontend/ vs scripts/ vs docs/) so workers never collide in the tree. Two tickets that must touch the same files get an explicit dependency note and sequential assignment — never parallel. Alembic migrations are single-holder: at most ONE ticket per sprint mints migrations (single-head rule); if two need schema changes, sequence them under one worker.
+
 ---
 
 ## 2. First-Run Checks (New Projects)

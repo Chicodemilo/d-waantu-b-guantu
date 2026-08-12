@@ -249,6 +249,10 @@ Don't let open alerts accumulate, an ignored queue trains everyone to ignore ale
 
 **No PM for small teams (1-2 workers).** TL drives directly. PM only earns a slot at 3+ parallel workers. Keep teams alive across sprints, only shut down when the user explicitly says.
 
+**Dynamic sizing — the slot rule is continuous, not spawn-time only (DWB-033).** A sprint's parallelism changes mid-flight; the team must follow it. When active workers drop below 3, an already-spawned PM STANDS DOWN (dormant, zero polling) until the slate fans out again — a PM monitoring one serial worker is pure overhead. Same discipline for workers: nobody idles awake polling a board that isn't moving.
+
+**Ticket queues over spawn-per-ticket (DWB-033).** A hot worker with a queue beats a fresh spawn every time: brief once, then feed tickets sequentially (013→014→016 pattern). Respawn only on death or role change. The re-brief tax and the permission-dialog risk are both zero for a queued follow-on.
+
 ### How spawning works (CC 2.1.178+)
 
 Spawn teammates with the **Agent tool**; that is the whole mechanism. `TeamCreate`/`TeamDelete` were removed in 2.1.178, so the spawned agent joins this session's team automatically (the old `team_name` arg is accepted but ignored, so passing it is harmless and unnecessary). Spawning didn't change in capability: teammates still SendMessage each other, claim shared tasks, and report back. Only the setup step went away.
