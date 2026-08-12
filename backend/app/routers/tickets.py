@@ -6,7 +6,7 @@
 # Callees: app/services/ticket.py
 # Data In: HTTP requests
 # Data Out: JSON responses (TicketRead, StatusHistoryRead, attribution dict, StaleCheckResponse)
-# Last Modified: 2026-06-19 (DWB-409: thread X-Agent-ID as acting_agent_id into update_ticket)
+# Last Modified: 2026-08-12 (DWB-022: thread X-Agent-ID into token increment for ledger attribution)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -91,12 +91,24 @@ def get_ticket_history(ticket_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{ticket_id}/tokens", response_model=TicketRead)
 def increment_ticket_tokens(
-    ticket_id: int, data: TicketTokenIncrement, db: Session = Depends(get_db)
+    ticket_id: int,
+    data: TicketTokenIncrement,
+    db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None),
 ):
     ticket = svc.get_ticket(db, ticket_id)
     if not ticket:
         raise HTTPException(404, "Ticket not found")
-    return svc.increment_tokens(db, ticket, data.tokens_used, data.time_spent_seconds, source=data.source)
+    # DWB-022: thread X-Agent-ID so the token increment emits a ledger event
+    # attributed to the reporting agent (falls back to the ticket's assignee).
+    return svc.increment_tokens(
+        db,
+        ticket,
+        data.tokens_used,
+        data.time_spent_seconds,
+        source=data.source,
+        acting_agent_id=x_agent_id,
+    )
 
 
 @router.get("/{ticket_id}/token-attribution")

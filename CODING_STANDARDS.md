@@ -28,7 +28,7 @@ _Project-specific additions below; they add to the global sheet, never override 
 
 **Stack.** Backend: Python 3 / FastAPI / SQLAlchemy 2.0 / Alembic / MySQL. Frontend: JavaScript (not TypeScript) / React 18 / Vite. Plain CSS off `frontend/src/styles/theme.css` variables, linked through `styles/index.css`. Deliberately no linter/formatter configs - match the surrounding code; don't reformat wholesale.
 
-**Backend shape** (governs `backend/app/` code; standalone `scripts/` follow the global Scripts rule and may use docstrings and their own idiom). Typed Python everywhere (`int | None` style); no docstrings by convention - the file header carries the what/who-calls-this context. Thin routers; business logic in `app/services/`; Pydantic schemas as `Create`/`Read`/`Update`/`List` variants with `response_model=` declared. Services raise their own exceptions; routers convert to `HTTPException`.
+**Backend shape** (governs `backend/app/` code; standalone `scripts/` follow the global Scripts rule and may use docstrings and their own idiom). Typed Python everywhere (`int | None` style); no docstrings by convention - the file header carries the what/who-calls-this context. Thin routers; business logic in `app/services/`; Pydantic schemas as `Create`/`Read`/`Update`/`List` variants with `response_model=` declared. New services prefer raising domain exceptions with routers converting to `HTTPException`; extending an existing service may follow that file's established pattern (much of `app/services/` raises `HTTPException` directly — acceptable, not preferred).
 
 **Migrations.** Hand-written only (MySQL autogenerate is not trusted). Revision ids follow `dwbNNNa1b2c3` after the ticket; single head; migrations carry the standard code header.
 

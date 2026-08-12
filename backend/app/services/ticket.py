@@ -6,7 +6,7 @@
 # Callees: models (ticket, status_history, alert, failure_record, agent, project_agent), services/tracking, services/activity_log, services/scoring_triggers
 # Data In: db: Session, TicketCreate/Update, acting_agent_id
 # Data Out: list[Ticket], Ticket
-# Last Modified: 2026-06-25 (DWB-476: dup jira_issue_key -> 409 not 500 on update/PATCH)
+# Last Modified: 2026-08-12 (DWB-022: increment_tokens emits a ledger event + real token_source)
 
 import logging
 from datetime import datetime
@@ -584,12 +584,50 @@ def _recompute_time_in_progress(db: Session, ticket: Ticket) -> None:
 
 
 def increment_tokens(
-    db: Session, ticket: Ticket, tokens_used: int, time_spent_seconds: int, source: str | None = None
+    db: Session,
+    ticket: Ticket,
+    tokens_used: int,
+    time_spent_seconds: int,
+    source: str | None = None,
+    acting_agent_id: int | None = None,
 ) -> Ticket:
-    ticket.tokens_used += tokens_used
+    # DWB-022: any token increment MUST also emit a matching tracking_log
+    # token_report event (the source of truth per CLAUDE.md) and stamp a real
+    # token_source - never a phantom count with no ledger row, never left at the
+    # 'unknown' default. Mirrors what the hook attribution path
+    # (services/hook_tracking) already does, so the explicit report endpoint and
+    # the SessionEnd/SubagentStop path stay consistent. Attribution is credited
+    # to acting_agent_id (the X-Agent-ID caller) when present, else the ticket's
+    # assigned owner; an increment with no attributable agent is rejected (400)
+    # rather than written as a phantom (no valid agent_id for the ledger row).
+    if tokens_used:
+        agent_id = acting_agent_id or ticket.assigned_agent_id
+        if agent_id is None:
+            raise HTTPException(
+                400,
+                "Cannot attribute tokens: provide X-Agent-ID or assign the "
+                "ticket to an agent before reporting tokens.",
+            )
+        # The honest source of THIS event: the caller's declared source, else
+        # the explicit-report path label. Never 'unknown'.
+        event_source = source or "ticket_report"
+        # Ledger event + cache update land atomically in the single commit below
+        # (commit=False), so a token_report event never exists without its
+        # tokens_used increment or vice versa.
+        tracking_svc.log_tokens(
+            db, ticket.id, agent_id, tokens_used, source=event_source, commit=False
+        )
+        ticket.tokens_used += tokens_used
+        # Ticket summary source: a declared source wins; otherwise keep an
+        # existing meaningful label rather than clobber it, and only stamp the
+        # event source when the current value is absent / the 'unknown' default -
+        # so a token-bearing ticket is never left at 'unknown'.
+        if source:
+            ticket.token_source = source
+        elif not ticket.token_source or ticket.token_source == "unknown":
+            ticket.token_source = event_source
+
     ticket.time_spent_seconds += time_spent_seconds
-    if source:
-        ticket.token_source = source
     db.commit()
     db.refresh(ticket)
     return ticket
