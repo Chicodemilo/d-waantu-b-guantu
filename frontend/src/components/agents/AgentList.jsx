@@ -3,16 +3,15 @@
 // Created: 2026-03-29
 // Purpose: Renders agents across active projects as a sortable table (DWB-460) with Project/Agent/Role/Rep/Status/Description columns, default sorted by reputation descending, scrollable body under a sticky header
 // Caller: DashboardPage.jsx
-// Callees: react (useState, useEffect, useMemo), react-router-dom (useNavigate), useStore, api/scores (getProjectScores), agents.css
+// Callees: react (useState, useEffect, useMemo), react-router-dom (useNavigate), useStore, api/scores (getProjectScores)
 // Data In: None (reads agents, projectAgents, projects from store; fetches per-project scores)
 // Data Out: default export AgentList component
-// Last Modified: 2026-06-24
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import { getProjectScores } from '../../api/scores';
-import '../../styles/agents.css';
 
 function AgentList() {
   const navigate = useNavigate();

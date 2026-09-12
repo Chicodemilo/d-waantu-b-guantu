@@ -3,15 +3,14 @@
 // Created: 2026-04-09
 // Purpose: System-wide error log viewer with source/project filters and stack trace expansion
 // Caller: App.jsx (route: /errors)
-// Callees: react, ../api/errors, ../store/useStore, ../styles/errors.css
+// Callees: react, ../api/errors, ../store/useStore
 // Data In: Error logs from API, projects from store
 // Data Out: Default export ErrorLogPage component
-// Last Modified: 2026-04-09
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { getErrorLogs } from '../api/errors';
 import useStore from '../store/useStore';
-import '../styles/errors.css';
 
 function formatTime(ts) {
   if (!ts) return '';

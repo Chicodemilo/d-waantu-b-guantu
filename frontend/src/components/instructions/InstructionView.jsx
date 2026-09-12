@@ -3,14 +3,13 @@
 // Created: 2026-03-29
 // Purpose: Expandable card displaying a single instruction with scope label resolution
 // Caller: InstructionList.jsx, AgentPage.jsx
-// Callees: react (useState), useStore, common.css
+// Callees: react (useState), useStore
 // Data In: instruction prop (object with scope, title, body, project_id, agent_id)
 // Data Out: default export InstructionView component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState } from 'react';
 import useStore from '../../store/useStore';
-import '../../styles/common.css';
 
 function InstructionView({ instruction }) {
   const [expanded, setExpanded] = useState(false);

@@ -3,16 +3,15 @@
 // Created: 2026-06-10
 // Purpose: Single persistent app-shell footer row. LEFT: session dot + title + open-since label for the current project's DWB session (or "no DWB session" / "no project context"). RIGHT: global polling status (polling | idle, interval, last-updated) + infra warning count if any. Pulls the right-side polling info from the Zustand store, replacing the standalone polling Footer component. Whole bar is a Link to /projects/:id/sessions when scoped to a project; renders an inert strip on non-project routes. Five session dot states: active (green pulse), closed (slate), error (red pulse), idle-warning (amber pulse), none (hollow gray). Does NOT render captured open_phrase / close_phrase text.
 // Caller: AppShell.jsx
-// Callees: react (useState, useEffect, useRef, useCallback), react-router-dom (Link, useMatch), api/sessions (getProjectSessions), store/useStore (polling + infraWarnings), styles/session-footer.css
+// Callees: react (useState, useEffect, useRef, useCallback), react-router-dom (Link, useMatch), api/sessions (getProjectSessions), store/useStore (polling + infraWarnings)
 // Data In: Resolves project_id from the route; pulls polling + infraWarnings from the Zustand store
 // Data Out: Default export SessionFooter component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useMatch } from 'react-router-dom';
 import { getProjectSessions } from '../../api/sessions';
 import useStore from '../../store/useStore';
-import '../../styles/session-footer.css';
 
 const POLL_INTERVAL_MS = 10000;
 const IDLE_WARNING_THRESHOLD_MS = 50 * 60 * 1000; // 50 min, sweeper auto-closes at 60

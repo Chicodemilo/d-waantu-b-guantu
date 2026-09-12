@@ -84,6 +84,10 @@ The Claude Code permission dialog for editing files under `.claude/` crashes sub
 - Memory updates go through the API only: see Memory Writes below.
 - If your work requires a `.claude/settings.json` (or other harness-config) change, flag it to the TL; they'll handle the edit directly from the main CC window where a user is attached for the permission dialog.
 
+## Shared Code: Grep Callers Before You Delete
+
+Before deleting or refactoring shared code another agent owns — especially the session close path (`services/dwb_session.py`) — grep ALL callers/importers FIRST, and give the owner a heads-up. A module deleted while something still imports it crashes the API on reload (this is exactly how the backend went down during a live keyword-dedup). On a hot shared file, ask the owner to diff-review your change and run the suite before you commit, and don't refactor it live under concurrent edits — coordinate, then make one clean change.
+
 ## Memory Writes: When and How
 
 DWB-401 collapsed memory to a single free-form `memory.md` (identity.md is still system-generated). Write it through the API: the FastAPI process applies the ISO heading and the passive size-trim consistently. Two endpoints, one for in-flight notes and one for wrap-up.
@@ -130,6 +134,10 @@ API endpoints take the **database id**, not the number suffix of the ticket_key:
 - `PATCH /api/tickets/285`: wrong, hits a different ticket (likely in a different project) and can cause cross-project corruption
 
 When you receive a ticket assignment, the TL or PM gives you both forms: `DWB-285 (id=762)`. Use the `id` in API paths. If you only have the key, look it up: `GET /api/tickets?project_id={pid}` and filter by `ticket_key`.
+
+## Coding Standards: Read Before You Write
+
+Read `.claude/rules/global/coding-standards.md` before writing any code — it is the cross-project law (services, scripts, components, styling, headers, commits, tests). The Standards Auditor checks every PR against it and **rejects** violators. Rejections dock your reputation on the scorecard, so conform the first time.
 
 ## Code Headers: Mandatory
 

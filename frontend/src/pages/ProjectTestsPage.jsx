@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Displays project test runs with detail drill-down, performance tab, and failure analysis tab
 // Caller: App.jsx (route: /projects/:id/tests)
-// Callees: react, react-router-dom, ../store/useStore, ../api/testResults, ../api/alerts, ../components/common/StatusBadge, ../components/tests/TestPerformance, ../components/tests/FailureAnalysis, ../styles/tests.css
+// Callees: react, react-router-dom, ../store/useStore, ../api/testResults, ../api/alerts, ../components/common/StatusBadge, ../components/tests/TestPerformance, ../components/tests/FailureAnalysis
 // Data In: Route param (id), project from Zustand store, test runs from API
 // Data Out: Default export ProjectTestsPage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
@@ -17,7 +17,6 @@ import StatusBadge from '../components/common/StatusBadge';
 import TerminalOutput from '../components/common/TerminalOutput';
 import TestPerformance from '../components/tests/TestPerformance';
 import FailureAnalysis from '../components/tests/FailureAnalysis';
-import '../styles/tests.css';
 
 function formatTime(ts) {
   if (!ts) return '';

@@ -14,6 +14,8 @@
 - **Ticket creation (no Jira)**: on projects without Jira (`project.jira_base_url` is null) there is no `dwb2jira` and no dual-write gate. The PM files tickets directly via `POST /api/tickets` with `X-Agent-ID: {pm_id}`, from a TL-drafted, human-approved spec. Filing tickets is still the PM's job, not the TL's; the TL drafts, you file. The approval order is unchanged: human sees the spec before anything is created. Tickets auto-assign to the active sprint and inherit its epic.
 <!-- non-jira-only:end -->
 
+**Tickets must not contradict `.claude/rules/global/coding-standards.md`.** The auditor scores your ticketing both ways: a ticket that steers work against the standards is your stick; clean, well-organized ticketing that devs then ignore is your carrot and their stick. Write specs the sheet backs, not ones it overrules.
+
 **DWB is internal: never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content.** Full context: `.claude/worker_playbook.md § DWB Is an Internal Tool`.
 
 ## Ticket Display Format
@@ -117,6 +119,10 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 - DM the human via alerts when something needs their attention
 
 **Side-ticket lane awareness:** sprints can carry 1-3 small polish tickets (CSS/UI nudges, copy fixes) alongside the main goal. These are pass-throughs for the PM; do not gate them, do not flag them as scope drift. If a side ticket balloons (multiple files, hours of work, ambiguous spec), THEN flag it and ask the TL whether to pull it from the sprint. See `.claude/team_lead_playbook.md` § 4d.
+
+**Stand down on serial stretches (DWB-033).** Your slot exists for 3+ parallel workers. When the live worker count drops below that — one queued worker grinding a serial slate — go dormant: no polling, no per-event pings; tell the TL you're standing down and resume the instant the slate fans out, a worker goes stale, or the TL pings. A PM watching one worker is overhead the sprint pays for nothing.
+
+**Lane-sharding when you cut tickets (DWB-033).** Parallel speed comes from ticket shape. Decompose the sprint into file-disjoint lanes (backend/ vs frontend/ vs scripts/ vs docs/) so workers never collide in the tree. Two tickets that must touch the same files get an explicit dependency note and sequential assignment — never parallel. Alembic migrations are single-holder: at most ONE ticket per sprint mints migrations (single-head rule); if two need schema changes, sequence them under one worker.
 
 ---
 

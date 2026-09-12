@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Project detail page with tools (archive, delete, capture-agent-comms toggle), sprint gates (incl. force_consolidation), doc gates (incl. force_handoff_md), alerts, consolidation status panel, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
-// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner, ../styles/dashboard.css
+// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/StandardsAudits, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-06-24
+// Last Modified: 2026-08-12 (DWB-018)
 
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -21,9 +21,9 @@ import EpicList from '../components/epics/EpicList';
 import AlertBanner from '../components/common/AlertBanner';
 import ActivityFeed from '../components/project/ActivityFeed';
 import LiveSessions from '../components/project/LiveSessions';
+import StandardsAudits from '../components/project/StandardsAudits';
 import TokenBudget from '../components/project/TokenBudget';
 import ConsolidationStatus from '../components/project/ConsolidationStatus';
-import '../styles/dashboard.css';
 
 function ProjectPage() {
   const { id } = useParams();
@@ -253,6 +253,7 @@ function ProjectPage() {
                 { field: 'force_headers', label: 'Force Headers', tip: 'When ON, sprint close is blocked (HTTP 400) if any source (.py) file added or changed during the sprint is missing the mandatory code-header block. Default OFF = no scan, no cost.', cost: 'Token cost: a code-header block is required on every new or changed source file.' },
                 { field: 'force_test_coverage', label: 'Force Coverage', tip: 'Every API router must have a corresponding test file before sprint close.' },
                 { field: 'force_test_run', label: 'Force Tests', tip: 'At least one test run must be recorded during the sprint before it can be closed.' },
+                { field: 'force_standards_audit', label: 'Force Standards Audit', tip: 'A PASSING standards audit must be recorded for the sprint (since it started) before it can be closed. Complements Force CODING_STANDARDS.md: the file gate asserts the standards doc exists; this gate asserts the code actually conforms.' },
                 { field: 'force_consolidation', label: 'Consolidation at sprint close', tip: 'Every project agent must acknowledge consolidation of their owned over-ceiling docs before the sprint can be closed. Agents POST to /api/agents/:id/consolidate-complete; gate status is shown in the Consolidation panel.', cost: 'Token cost: every project agent runs a consolidation pass at sprint close.' },
               ].map(({ field, label, tip, cost }) => (
                 <div key={field}>
@@ -298,6 +299,7 @@ function ProjectPage() {
                 { field: 'force_initial_md', label: 'Force INITIAL.md', file: 'INITIAL.md', tip: 'INITIAL.md must exist at the repo root. Contains project requirements, phases, and design decisions.' },
                 { field: 'force_architecture_md', label: 'Force ARCHITECTURE.md', file: 'ARCHITECTURE.md', tip: 'ARCHITECTURE.md must exist at the repo root. Contains system design, data model, and API reference.' },
                 { field: 'force_handoff_md', label: 'Force HANDOFF.md', file: 'HANDOFF.md', tip: 'HANDOFF.md must exist at the repo root. Session continuity notes — current state, decisions, gotchas.' },
+                { field: 'force_coding_standards_md', label: 'Force CODING_STANDARDS.md', file: 'CODING_STANDARDS.md', tip: 'CODING_STANDARDS.md must exist at the repo root. Language conventions, naming, error handling, testing, and review expectations.' },
               ].map(({ field, label, file, tip }) => (
                 <div key={field} className="project-tools__row">
                   <button
@@ -521,6 +523,11 @@ function ProjectPage() {
       <div>
         <div className="dashboard__section-title">Team Status</div>
         <LiveSessions projectId={id} />
+      </div>
+
+      <div>
+        <div className="dashboard__section-title">Standards Audits</div>
+        <StandardsAudits projectId={id} />
       </div>
 
       <div>

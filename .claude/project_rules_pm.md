@@ -4,7 +4,7 @@
 
 ## DWB Agent Roster
 
-Live roster: `GET /api/projects/1/team`. DB-authoritative; do not hard-code names or IDs in this file. Your `agent_id` is **14** (Pam_DWB). Use `X-Agent-ID: 14` on every mutation.
+Live roster: `GET /api/projects/5/team`. DB-authoritative; do not hard-code names or IDs in this file. Confirm your `agent_id` via `POST /api/agents/identify` at spawn (currently **12**, Pam_DWB) and use it in `X-Agent-ID` on every mutation.
 
 ## Hard Limits — Jira Sprint Authority (DWB-323)
 
@@ -27,7 +27,7 @@ PM has **NO authority** over Jira sprints (close/create/edit/delete). Pull/read 
 ## Sprint Gates
 
 Authoritative list: `GET /api/projects/1/gate-status`. Currently enabled on DWB:
-- `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_consolidation` (DWB-322).
+- `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_coding_standards_md`, `force_consolidation` (DWB-322, DWB-004).
 - `force_headers` reserved/not yet enforced.
 - `force_team_md` removed in DWB-321 (DB-authoritative roster).
 

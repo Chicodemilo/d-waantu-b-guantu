@@ -3,14 +3,13 @@
 // Created: 2026-03-29
 // Purpose: Displays token usage, time spent, and ticket status breakdown chart for an agent
 // Caller: AgentDetail.jsx
-// Callees: useStore, AsciiChart, agents.css
+// Callees: useStore, AsciiChart
 // Data In: agentId prop
 // Data Out: default export AgentMetrics component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import useStore from '../../store/useStore';
 import AsciiChart from '../common/AsciiChart';
-import '../../styles/agents.css';
 
 function AgentMetrics({ agentId }) {
   const tickets = useStore((s) => s.getTicketsByAgent(agentId));

@@ -7,7 +7,7 @@
 #                GET /api/projects/:id/team (DWB-313, DWB-387)
 # Data In:       Factory-created projects, tickets, test results via conftest fixtures
 # Data Out:      Assertions on HTTP status codes, JSON shapes, and cascade deletes
-# Last Modified: 2026-06-12
+# Last Modified: 2026-08-11 (DWB-017: force_standards_audit in response-shape keys)
 
 """Tests for /api/projects CRUD and filtering."""
 
@@ -59,7 +59,9 @@ class TestGetProject:
             "tl_overhead_time_seconds", "pm_overhead_time_seconds",
             "force_headers", "force_test_coverage", "force_test_run",
             "force_initial_md", "force_architecture_md",
-            "force_handoff_md", "force_consolidation",
+            "force_handoff_md", "force_coding_standards_md",
+            "force_standards_audit",
+            "force_consolidation",
             "capture_agent_comms",
             "playbooks_deployed_at",
             "created_at", "updated_at",
@@ -220,6 +222,22 @@ class TestCreateFromRepoDeploysBundle:
         # commands-only shortcut): playbooks + hooks settings.json.
         assert (tmp_path / ".claude" / "worker_playbook.md").is_file()
         assert (tmp_path / ".claude" / "settings.json").is_file()
+
+    def test_from_repo_enables_doc_gates_and_scaffolds_standards(
+        self, client, tmp_path
+    ):
+        """DWB-005: from-repo projects get the doc gates on by default, and
+        the creation-time bundle deploy scaffolds CODING_STANDARDS.md so the
+        new gate starts out passing."""
+        r = client.post(
+            "/api/projects/from-repo", json={"repo_path": str(tmp_path)}
+        )
+        assert r.status_code == 201, r.text
+        data = r.json()
+        assert data["force_initial_md"] is True
+        assert data["force_architecture_md"] is True
+        assert data["force_coding_standards_md"] is True
+        assert (tmp_path / "CODING_STANDARDS.md").is_file()
 
     def test_deploy_failure_does_not_fail_creation(
         self, client, tmp_path, monkeypatch

@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Team page — tabbed Roster | Scoreboard. Roster tab: deploy playbooks button, agent roster table (with a per-agent reputation Score column, DWB-435), and playbook inspector. Scoreboard tab (DWB-433): full per-project scoring leaderboard.
 // Caller: App.jsx (route: /projects/:id/agents)
-// Callees: react, react-router-dom, ../store/useStore, ../api/projects (deployPlaybooks), ../api/scores (getProjectScores), ../components/common/StatusBadge, ../components/project/PlaybookInspector, ../components/project/Scoreboard, ../styles/docs.css
+// Callees: react, react-router-dom, ../store/useStore, ../api/projects (deployPlaybooks), ../api/scores (getProjectScores), ../components/common/StatusBadge, ../components/project/PlaybookInspector, ../components/project/Scoreboard
 // Data In: Route param (id), project and agents from Zustand store
 // Data Out: Default export ProjectAgentsPage component
-// Last Modified: 2026-06-23
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -16,7 +16,6 @@ import { getProjectScores } from '../api/scores';
 import StatusBadge from '../components/common/StatusBadge';
 import PlaybookInspector from '../components/project/PlaybookInspector';
 import Scoreboard from '../components/project/Scoreboard';
-import '../styles/docs.css';
 
 function ProjectAgentsPage() {
   const { id } = useParams();

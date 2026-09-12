@@ -3,13 +3,12 @@
 // Created: 2026-04-09
 // Purpose: Terminal-style output display with ASCII box borders, animated open/close, scrollable content
 // Caller: TestResultsPage.jsx
-// Callees: tests.css
+// Callees: react (useRef, useState, useEffect)
 // Data In: props { output, isOpen, isLoading }
 // Data Out: default export TerminalOutput component
-// Last Modified: 2026-04-09
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useRef, useState, useEffect } from 'react';
-import '../../styles/tests.css';
 
 function TerminalOutput({ output, isOpen, isLoading = false }) {
   const contentRef = useRef(null);

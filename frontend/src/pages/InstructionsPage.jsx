@@ -3,17 +3,15 @@
 // Created: 2026-03-29
 // Purpose: Manages CLI instruction syncing, displays instruction list, playbooks, and code standards
 // Caller: App.jsx (route: /instructions)
-// Callees: react, ../components/instructions/InstructionList, ../api/instructions, ../api/status, ../styles/dashboard.css, ../styles/common.css
+// Callees: react, ../components/instructions/InstructionList, ../api/instructions, ../api/status
 // Data In: Instructions sync status, playbooks, and code standards from API
 // Data Out: Default export InstructionsPage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useCallback } from 'react';
 import InstructionList from '../components/instructions/InstructionList';
 import { syncCheck, syncInstructions, getPlaybooks } from '../api/instructions';
 import { getCodeStandards } from '../api/status';
-import '../styles/dashboard.css';
-import '../styles/common.css';
 
 function InstructionsPage() {
   const [unsynced, setUnsynced] = useState(null);

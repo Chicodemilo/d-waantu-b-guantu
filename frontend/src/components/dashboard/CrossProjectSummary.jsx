@@ -3,15 +3,14 @@
 // Created: 2026-03-29
 // Purpose: Dashboard summary panels showing aggregate counts and token/time totals across active projects. Tracking summaries come from the shared cache hook so all dashboard consumers share one fetch per project (DWB fan-out dedup).
 // Caller: DashboardPage.jsx
-// Callees: useStore, hooks/useTrackingSummary, utils/format, dashboard.css
+// Callees: useStore, hooks/useTrackingSummary, utils/format
 // Data In: projects, tickets, alerts from store; tracking summaries from shared cache
 // Data Out: default export CrossProjectSummary component
-// Last Modified: 2026-06-12
+// Last Modified: 2026-08-11 (DWB-009)
 
 import useStore from '../../store/useStore';
 import { useTrackingSummaries } from '../../hooks/useTrackingSummary';
 import { formatTokens, formatTime } from '../../utils/format';
-import '../../styles/dashboard.css';
 
 function CrossProjectSummary() {
   const projects = useStore((s) => s.projects).filter((p) => p.status === 'active');

@@ -105,8 +105,15 @@ def upgrade() -> None:
     if not _has_index(bind, 'agents', 'ix_agents_project_id'):
         op.create_index('ix_agents_project_id', 'agents', ['project_id'])
 
-    # 2. Assign DWB keepers their project_id (only if the DWB project exists)
-    if _exists(bind, 'projects', DWB_PROJECT_ID):
+    # 2-5. Data fix is DWB-roster-specific (hardcoded agent IDs that map to
+    # roles on the work-machine DB). Skip the entire block on any DB that
+    # isn't the DWB work DB. Fingerprint: a project with prefix='DWB'.
+    is_dwb_db = bind.execute(
+        sa.text("SELECT 1 FROM projects WHERE prefix = 'DWB' LIMIT 1")
+    ).first()
+
+    if is_dwb_db:
+        # 2. Assign DWB keepers their project_id
         for agent_id, _name in DWB_KEEPERS:
             bind.execute(
                 sa.text("UPDATE agents SET project_id = :pid WHERE id = :aid"),

@@ -6,7 +6,7 @@
 # Callees: app/services/agent_memory.py, app/models/agent.py, pathlib, shutil, re, json
 # Data In: db: Session, project: Project
 # Data Out: DeployResult
-# Last Modified: 2026-06-24 (DWB-461)
+# Last Modified: 2026-08-11 (DWB-027)
 
 import json
 import logging
@@ -65,6 +65,10 @@ AGENT_DEF_FILES = [
 AUX_DOCS = [
     "session_lifecycle.md",
     "rules/global/code-header-format.md",
+    # DWB-013: the global coding-standards sheet (instruction id 9, authored in
+    # DWB-012). Mirrored to each target's .claude/rules/global/coding-standards.md
+    # so the auditor + agents read the same cross-project law on every repo.
+    "rules/global/coding-standards.md",
 ]
 
 
@@ -372,7 +376,77 @@ _ROOT_DOC_STUBS = {
         "> Session-to-session continuity. Read at session start, "
         "update at end.\n"
     ),
+    # DWB-013: CODING_STANDARDS.md is no longer a static fill-in template. It is
+    # now deployed as a live copy of the global coding-standards sheet body plus
+    # a preserved project-extensions section - see _build_coding_standards_doc
+    # and the dedicated deploy step in deploy_bundle. The other three stubs above
+    # remain plain "create if missing, never overwrite" skeletons.
 }
+
+
+# DWB-013: the deployed repo-root CODING_STANDARDS.md is the global sheet's body
+# followed by a clearly delimited project-extensions section. Teams add
+# project-specific rules below the marker; they add to the global sheet, never
+# override it. Re-deploy refreshes the global portion and preserves whatever the
+# team wrote under the marker.
+_CODING_STANDARDS_SHEET_REL = "rules/global/coding-standards.md"
+_PROJECT_EXT_HEADING = "## Project Extensions"
+_PROJECT_EXT_SEPARATOR = "\n\n---\n\n"
+_PROJECT_EXT_SECTION = (
+    f"{_PROJECT_EXT_HEADING}\n\n"
+    "_Project-specific additions below; they add to the global sheet, "
+    "never override it._\n"
+)
+# Frontmatter fence at the very top of the sheet: --- ... --- then a blank line.
+_FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n+", re.DOTALL)
+
+
+def _strip_frontmatter(text: str) -> str:
+    """Drop a leading YAML frontmatter block if present; return the body."""
+    return _FRONTMATTER_RE.sub("", text, count=1)
+
+
+def _global_standards_body() -> str:
+    """Read the global coding-standards sheet and return its body (frontmatter
+    stripped, trailing whitespace normalized). Single source of truth: the sheet
+    text is never duplicated as a Python literal (DWB-013)."""
+    sheet = (DOCS_DIR / _CODING_STANDARDS_SHEET_REL).read_text(encoding="utf-8")
+    return _strip_frontmatter(sheet).rstrip("\n")
+
+
+def coding_standards_sheet_body() -> str | None:
+    """The global coding-standards sheet body (frontmatter stripped) for display,
+    or None when the sheet is absent (DWB-027).
+
+    Wraps _global_standards_body with the graceful-skip the playbook listing
+    needs, so the read + strip + existence logic lives in this service rather
+    than inline in the router (services doctrine)."""
+    if not (DOCS_DIR / _CODING_STANDARDS_SHEET_REL).is_file():
+        return None
+    return _global_standards_body()
+
+
+def _build_coding_standards_doc(existing_extensions: str | None = None) -> str:
+    """Assemble the repo-root CODING_STANDARDS.md content.
+
+    The global section is always the current sheet body. The project-extensions
+    section is either the default blurb (fresh deploy) or ``existing_extensions``
+    (a re-deploy preserving what the team already wrote under the marker).
+    ``existing_extensions`` must start at the ``## Project Extensions`` heading.
+    """
+    body = _global_standards_body()
+    ext = existing_extensions if existing_extensions is not None else _PROJECT_EXT_SECTION
+    return body + _PROJECT_EXT_SEPARATOR + ext
+
+
+def _extract_project_extensions(content: str) -> str | None:
+    """Return the project-extensions block (from the ``## Project Extensions``
+    heading to EOF) if the file carries our marker, else None. A None result
+    means the file is human- or legacy-authored and must be left untouched."""
+    idx = content.find(_PROJECT_EXT_HEADING)
+    if idx == -1:
+        return None
+    return content[idx:]
 
 
 def deploy_bundle(db: Session, project) -> DeployResult:
@@ -463,6 +537,55 @@ def deploy_bundle(db: Session, project) -> DeployResult:
         logger.info(
             "deploy-playbooks: scaffolded %s at %s", filename, path
         )
+
+    # DWB-013: CODING_STANDARDS.md is deployed as a copy of the global sheet body
+    # plus a project-extensions section. Behavior:
+    #   - missing: write global body + default extensions section; report it in
+    #     root_docs (a fresh scaffold, same as the stubs above).
+    #   - exists WITH our marker: refresh the global body, preserve whatever the
+    #     team wrote under the marker, rewrite in place. Not re-reported in
+    #     root_docs (root_docs = created-this-deploy). A no-op when unchanged.
+    #   - exists WITHOUT our marker: a human/legacy file - left fully untouched.
+    # Non-Jira projects get the banner prepended on both create and refresh so
+    # the visibility signal survives. force_coding_standards_md is satisfied
+    # either way (the file always exists after this step when it existed before
+    # or was missing).
+    cs_path = repo / "CODING_STANDARDS.md"
+    if not cs_path.exists():
+        content = _build_coding_standards_doc()
+        if not jira_enabled:
+            content = _NON_JIRA_BANNER + content
+        cs_path.write_text(content, encoding="utf-8")
+        root_docs.append("CODING_STANDARDS.md")
+        logger.info(
+            "deploy-playbooks: scaffolded CODING_STANDARDS.md at %s", cs_path
+        )
+    else:
+        current = cs_path.read_text(encoding="utf-8")
+        existing_ext = _extract_project_extensions(current)
+        if existing_ext is not None:
+            refreshed = _build_coding_standards_doc(existing_extensions=existing_ext)
+            if not jira_enabled:
+                refreshed = _prepend_banner_if_needed(
+                    refreshed, jira_enabled=jira_enabled
+                )
+            if refreshed != current:
+                cs_path.write_text(refreshed, encoding="utf-8")
+                logger.info(
+                    "deploy-playbooks: refreshed global section of "
+                    "CODING_STANDARDS.md at %s", cs_path
+                )
+        else:
+            # No marker: a hand-authored or pre-DWB-013 file. Left fully
+            # untouched, but logged so a TL knows this repo is riding an
+            # old/hand-rolled standards file rather than the current global
+            # sheet (visibility per DWB-013 review, item 3).
+            logger.info(
+                "deploy-playbooks: CODING_STANDARDS.md at %s has "
+                "no Project Extensions marker "
+                "- left untouched (hand-authored or legacy)",
+                cs_path,
+            )
 
     # Deploy canonical role agent definitions to the target project's
     # `.claude/agents/`. Overwritten on each deploy. Project-specific defs

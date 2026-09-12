@@ -1,12 +1,12 @@
 # Path: app/routers/projects.py
 # File: projects.py
 # Created: 2026-03-29
-# Purpose: Project HTTP endpoints - CRUD, from-repo, gates, overhead, docs, activity-feed, token-budget, team, scaffold-agents (DWB-341), Jira table + sync (DWB-342)
+# Purpose: Project HTTP endpoints - CRUD, from-repo, seed-demo, gates, overhead, docs, tests, playbook-files, activity-feed, agent-messages, token-budget, consolidation-status, team, scaffold-agents (DWB-341), Jira table + sync + disable (DWB-342)
 # Caller: app/main.py
-# Callees: app/services/project.py, app/services/project_agent.py, models (Agent, Alert, ProjectAgent)
+# Callees: app/services (project, project_agent, standards_audit, test_result, seed_demo, playbook_deploy, activity_log), models (ActivityLog, Agent, Alert, InterAgentMessage, ProjectAgent, Ticket)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-06-24 (DWB-458)
+# Last Modified: 2026-08-12 (DWB-034: reconcile Purpose/Callees with current routes + imports)
 
 import json
 import logging
@@ -38,6 +38,7 @@ from app.schemas.project_agent import ProjectTeamRead
 from app.schemas.test_result import TestResultRead
 from app.services import project as svc
 from app.services import project_agent as pa_svc
+from app.services import standards_audit as standards_audit_svc
 from app.services import test_result as test_svc
 from app.services.playbook_deploy import deploy_bundle
 from app.services.activity_log import (
@@ -156,6 +157,7 @@ def create_from_repo(data: FromRepoRequest, db: Session = Depends(get_db)):
         repo_path=str(repo),
         force_initial_md=True,
         force_architecture_md=True,
+        force_coding_standards_md=True,
     )
     project = svc.create_project(db, create_data)
     # Auto-check doc gates and raise alerts for missing docs
@@ -618,6 +620,7 @@ _DOC_GATES = [
     ("force_initial_md", "INITIAL.md"),
     ("force_architecture_md", "ARCHITECTURE.md"),
     ("force_handoff_md", "HANDOFF.md"),
+    ("force_coding_standards_md", "CODING_STANDARDS.md"),
 ]
 
 
@@ -719,6 +722,8 @@ def get_gate_status(project_id: int, db: Session = Depends(get_db)):
 
     gates = _check_doc_gates(db, project)
     gates.append(_check_header_gate(db, project))
+    # DWB-017: audit-gate DB access + logic live in the service (thin router).
+    gates.append(standards_audit_svc.audit_gate_status(db, project))
 
     return {
         "project_id": project_id,

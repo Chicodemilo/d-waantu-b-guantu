@@ -3,14 +3,13 @@
 // Created: 2026-03-29
 // Purpose: Fetches and displays test coverage table showing which routers have test files
 // Caller: TestResultsPage.jsx
-// Callees: react (useState, useEffect), api/status (getTestCoverage), tests.css
+// Callees: react (useState, useEffect), api/status (getTestCoverage)
 // Data In: None (fetches coverage data from API)
 // Data Out: default export TestCoverage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { getTestCoverage } from '../../api/status';
-import '../../styles/tests.css';
 
 function TestCoverage() {
   const [coverage, setCoverage] = useState(null);

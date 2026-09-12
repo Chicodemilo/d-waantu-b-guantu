@@ -3,14 +3,13 @@
 // Created: 2026-06-10
 // Purpose: React class-component error boundary that catches render-time exceptions in its subtree and renders a terminal-styled fallback instead of letting the whole app blank (DWB-370). Routes the catch through services/logger as a `render` category event (DWB-371) so the TL sees it in the lifecycle trail at /api/client-logs with route + componentStack context. Replaces the earlier direct POST to /api/errors so the catch surfaces in the same feed as the surrounding nav/fetch events.
 // Caller: AppShell.jsx (wraps main content / Routes)
-// Callees: react (Component), services/logger (log), error-boundary.css
+// Callees: react (Component), services/logger (log)
 // Data In: props { children, fallback? } - optional render-prop fallback (error, reset) => ReactNode
 // Data Out: default export ErrorBoundary class component
-// Last Modified: 2026-06-10
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { Component } from 'react';
 import { log } from '../../services/logger';
-import '../../styles/error-boundary.css';
 
 class ErrorBoundary extends Component {
   constructor(props) {

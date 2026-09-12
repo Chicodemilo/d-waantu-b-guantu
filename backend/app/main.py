@@ -38,6 +38,7 @@ from app.routers import (
     scores,
     server_logs,
     sprints,
+    standards_audits,
     status,
     test_results,
     tickets,
@@ -128,3 +129,4 @@ app.include_router(client_logs.router)
 app.include_router(server_logs.router)
 app.include_router(scores.router)
 app.include_router(tl_channel.router)
+app.include_router(standards_audits.router)

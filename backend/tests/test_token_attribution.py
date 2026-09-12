@@ -6,7 +6,7 @@
 # Callees:       GET /api/tickets/:id/token-attribution, POST /api/tickets/:id/tokens
 # Data In:       Factory-created tickets via conftest fixtures
 # Data Out:      Assertions on attribution shape, source values, and token accumulation
-# Last Modified: 2026-03-29
+# Last Modified: 2026-08-12 (DWB-022: token reports need an attributable agent + never leave source 'unknown')
 
 """Tests for token attribution endpoint and token_source field."""
 
@@ -23,8 +23,10 @@ class TestTokenAttribution:
         expected_keys = {"ticket_key", "tokens_used", "time_spent_seconds", "source", "history"}
         assert set(data.keys()) == expected_keys
 
-    def test_attribution_reflects_ticket_data(self, client, make_ticket):
-        ticket = make_ticket()
+    def test_attribution_reflects_ticket_data(self, client, make_agent, make_ticket):
+        # DWB-022: a token report needs an attributable agent (the assignee here).
+        agent = make_agent()
+        ticket = make_ticket(project_id=agent["project_id"], assigned_agent_id=agent["id"])
         client.post(f"/api/tickets/{ticket['id']}/tokens", json={
             "tokens_used": 500,
             "time_spent_seconds": 30,
@@ -57,8 +59,9 @@ class TestTokenSource:
         data = client.get(f"/api/tickets/{ticket['id']}").json()
         assert data["token_source"] == "unknown"
 
-    def test_tokens_endpoint_sets_source(self, client, make_ticket):
-        ticket = make_ticket()
+    def test_tokens_endpoint_sets_source(self, client, make_agent, make_ticket):
+        agent = make_agent()
+        ticket = make_ticket(project_id=agent["project_id"], assigned_agent_id=agent["id"])
         r = client.post(f"/api/tickets/{ticket['id']}/tokens", json={
             "tokens_used": 100,
             "source": "claude-api",
@@ -66,17 +69,20 @@ class TestTokenSource:
         assert r.status_code == 200
         assert r.json()["token_source"] == "claude-api"
 
-    def test_tokens_endpoint_without_source(self, client, make_ticket):
-        ticket = make_ticket()
+    def test_tokens_endpoint_without_source(self, client, make_agent, make_ticket):
+        # DWB-022: with no declared source the write stamps the explicit-report
+        # label 'ticket_report' - NEVER the 'unknown' default (the phantom bug).
+        agent = make_agent()
+        ticket = make_ticket(project_id=agent["project_id"], assigned_agent_id=agent["id"])
         r = client.post(f"/api/tickets/{ticket['id']}/tokens", json={
             "tokens_used": 100,
         })
         assert r.status_code == 200
-        # source not provided — stays at default "unknown"
-        assert r.json()["token_source"] == "unknown"
+        assert r.json()["token_source"] == "ticket_report"
 
-    def test_source_updated_on_subsequent_call(self, client, make_ticket):
-        ticket = make_ticket()
+    def test_source_updated_on_subsequent_call(self, client, make_agent, make_ticket):
+        agent = make_agent()
+        ticket = make_ticket(project_id=agent["project_id"], assigned_agent_id=agent["id"])
         client.post(f"/api/tickets/{ticket['id']}/tokens", json={
             "tokens_used": 100,
             "source": "claude-api",
@@ -89,15 +95,19 @@ class TestTokenSource:
         assert data["token_source"] == "openai-api"
         assert data["tokens_used"] == 150
 
-    def test_source_preserved_when_not_provided(self, client, make_ticket):
-        ticket = make_ticket()
+    def test_source_preserved_when_not_provided(self, client, make_agent, make_ticket):
+        # A meaningful existing source is kept when a later report omits source
+        # (we don't clobber 'claude-api' with the generic 'ticket_report').
+        agent = make_agent()
+        ticket = make_ticket(project_id=agent["project_id"], assigned_agent_id=agent["id"])
         client.post(f"/api/tickets/{ticket['id']}/tokens", json={
             "tokens_used": 100,
             "source": "claude-api",
         })
-        # Second call without source — should preserve existing
+        # Second call without source — existing meaningful source preserved.
         client.post(f"/api/tickets/{ticket['id']}/tokens", json={
             "tokens_used": 50,
         })
         data = client.get(f"/api/tickets/{ticket['id']}").json()
         assert data["token_source"] == "claude-api"
+        assert data["tokens_used"] == 150

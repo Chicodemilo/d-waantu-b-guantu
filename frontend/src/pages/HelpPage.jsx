@@ -16,7 +16,7 @@
 //          SummaryHeader; hooks/useFuzzyFilter; helpContent (helpGroups, quickStart)
 // Data In: static help content from helpContent/index.js
 // Data Out: default export HelpPage component
-// Last Modified: 2026-06-25
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
@@ -25,7 +25,6 @@ import CollapsibleSection from '../components/help/CollapsibleSection';
 import SummaryHeader from '../components/help/SummaryHeader';
 import useFuzzyFilter from '../hooks/useFuzzyFilter';
 import { helpGroups, quickStart } from '../helpContent';
-import '../styles/help.css';
 
 // Build the searchable text for a section: title + summary + bullets, so the
 // fuzzy matcher hits content, not just headings.

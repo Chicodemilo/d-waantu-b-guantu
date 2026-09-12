@@ -7,7 +7,7 @@
 // Callees: none (plain data)
 // Data In: none
 // Data Out: default export: one help section object { key, title, summary, bullets }
-// Last Modified: 2026-06-25
+// Last Modified: 2026-08-12 (DWB-036: note standards-audit close gates + audits cross-link)
 
 export default {
   key: 'tests',
@@ -23,11 +23,13 @@ export default {
     'The canonical workflow is the run_tests.sh script: ./backend/scripts/run_tests.sh --post --project-id N --triggered-by "tester" runs pytest and posts the result back to the project.',
     'You can also post a result straight to the API, or trigger a run from the page; every path lands a record on this page.',
     'Two gates read these runs at sprint close: force_test_run blocks the close unless at least one run exists since the sprint started, and force_test_coverage blocks it if any router lacks a test file. Run tests before closing.',
+    'The test gates are not the only close gates: force_standards_audit blocks the close unless a passing standards audit was recorded since the sprint started, and force_coding_standards_md blocks it unless CODING_STANDARDS.md exists at the repo root. See the Audits page for those.',
     'The failures tab maps to the failure taxonomy: seven named manual types (Context Degradation, Spec Drift, Sycophantic Confirmation, Tool Selection Error, Cascading Failure, Silent Failure, Integration Failure) plus the auto-detected rework and test_failure categories.',
   ],
-  // DWB-497: cross-links to related sections.
+  // DWB-497: cross-links to related sections. DWB-036: audits share close-gate duty.
   links: [
     { to: 'system_tests', label: 'System Tests' },
+    { to: 'audits', label: 'Audits' },
     { to: 'tickets', label: 'Tickets' },
   ],
 };

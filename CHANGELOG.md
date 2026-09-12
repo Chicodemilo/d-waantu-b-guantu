@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2026-08-12 — Standards Auditor (sprints 23–24)
+
+The self-enforcing standards-audit system, end to end.
+
+- **Fresh-auditor pipeline:** `scripts/run_standards_audit.sh` → `standards_audit.py` spawns a context-starved headless `claude -p` judged only on the global standards sheet + the repo's `## Project Extensions` + the diff, against a strict-JSON contract. Malformed output is never posted.
+- **Storage + API:** new `standards_audit` table and `/api/standards-audits` (record verdict/violations/scorecard), plus an explicit idempotent `/{id}/apply-scorecard` that writes to the `score_event` ledger (`source=audit`, `audit_grant`/`audit_demerit`, bypassing peer caps).
+- **The_Auditor** system agent (id 51, `project_id` NULL) seeded via migration dwb028; owns audit ledger rows and activity-feed attribution.
+- **Visibility:** every audit raises an alert (info=pass, warning=reject) + feed entry; new **Audits page** at `/projects/:id/audits` with pass/fail stats and expandable rows; shared verdict/violations/scorecard components under `components/common/`.
+- **Gate:** `force_standards_audit` blocks sprint close without a passing audit in-window. `force_coding_standards_md` (doc-exists) enabled across projects.
+- **Token attribution fix (DWB-022):** per-ticket token writes are now atomic (ledger event + cache in one commit), attributed via `X-Agent-ID`/assignee, with a real `token_source`. Migration dwb022 reconciled 10 orphan tickets (~550k phantom tokens → `source='reconciled'`).
+
 ## 2026-04-09 — BREAKING: Directory + Repo Rename
 
 ### READ THIS FIRST IF ANYTHING LOOKS WRONG

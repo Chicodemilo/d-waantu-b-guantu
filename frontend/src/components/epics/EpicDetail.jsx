@@ -3,18 +3,16 @@
 // Created: 2026-03-29
 // Purpose: Displays epic details with progress bar, token/time stats, and linked ticket list
 // Caller: EpicPage.jsx
-// Callees: react-router-dom (Link), useStore, StatusBadge, AsciiProgressBar, common.css, tickets.css
+// Callees: react-router-dom (Link), useStore, StatusBadge, AsciiProgressBar
 // Data In: epicId and projectId props
 // Data Out: default export EpicDetail component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import { formatTime } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import AsciiProgressBar from '../common/AsciiProgressBar';
-import '../../styles/common.css';
-import '../../styles/tickets.css';
 
 function EpicDetail({ epicId, projectId }) {
   const epic = useStore((s) => s.getEpic(epicId));

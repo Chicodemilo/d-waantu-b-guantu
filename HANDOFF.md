@@ -2,30 +2,46 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current State (end of 2026-07-28, DWB session 69)
+## Merge note (2026-09-12)
 
-- **Repo is on branch `fix/session-close-overflow-dwb505-506`** (tree clean, pushed). PR #3 open against master with all of this session's code; Miles merges. After merge, next session should checkout master + pull.
-- S77 (Session Tracking Reliability, epic 48) closed: DWB-505 + DWB-506 both done, backend 1501 passing (posted as test run 187). Stale S76 + epics 33/40-era leftovers were closed at startup; epic 48 completed.
-- DWB session 69 closed explicit (1.27M tokens, 3h39m - honest post-fix numbers).
-- **Team shut down**: Barry_DWB wrapped (session-complete posted) and was sent shutdown after both tickets accepted. RESPAWN before use next session: spawn-prepare + pending marker + Agent tool; verify live names; never SendMessage cold roster names.
+- PR #3 (branch `fix/session-close-overflow-dwb505-506`) merged to master today: DWB-505 BIGINT token columns + close-path hardening + idle sweeper savepoint isolation, DWB-506 cache_read exclusion from totals. Details in git history (05d3d59).
+- Still-true carry-forwards from that work: total_tokens = input+output+cache_creation (cache_read excluded, kept in breakdown); pre-2026-07-28 external notes quote ~33x inflated numbers; `dwb506_bak_*` rollback snapshot tables still exist, drop on Miles sign-off.
+- The state below (Standards Auditor era, 2026-08-12 wrap) was written against a freshly seeded DB; verify which DB is live before trusting ids/numbering.
 
-## Shipped this session (all settled, in PR #3)
+## Current State (end of 2026-08-12, DWB session 2 closed)
 
-- **DWB-505**: `dwb_sessions.total_tokens` INT overflow (5.47B rollup) 500'd every close of CI session 65 for 12 days. BIGINT migration `dwb505a1b2c3` (dwb_sessions/hook_sessions total_tokens, tracking_log.tokens); close_session clamps + warns instead of aborting; idle sweeper closes now savepoint-isolated (one failing close was rolling back the ENTIRE sweep batch every cycle - that was the "sweeper dead since 7-17" mystery). Session 65 closed live, verified from CI side.
-- **DWB-506**: token totals summed `cache_read_input_tokens` every turn (re-counting the whole cached context; ~33x inflation ALL projects). Totals now = input+output+cache_creation. Miles-approved Tier A recompute EXECUTED across all 5 layers from stored token_breakdown JSON: 10.58B -> 320M canonical (session 65: 159.4M). Verified zero diff vs breakdowns, DWB-305 invariant 0 on all projects. **Rollback snapshots in `dwb506_bak_*` tables - drop once Miles is comfortable.**
+- Working tree committed + pushed to origin/master through the session-2 wrap. Backend 1544 passing, frontend 266 passing.
+- **DWB session 2 (doc freshness sweep)**: three file-disjoint lanes landed in ~11 min under reduced ceremony (human-directed: no per-lane audits, commit+push per lane) — DWB-034 (backend header accuracy, 3 real fixes, ~30 harmless date-lags correctly left), DWB-035 (root+docs refresh: force_standards_audit in README gates table, endpoint counts unified at 149/25, scoring enums current, Standards Audit consolidated to README-as-home), DWB-036 (Help Center: new audits section — NOTE new sections need registering in index.js NAV_GROUPS + linkIntegrity vocab — gates + The_Auditor across sections). One range audit (#21 PASS, S25-linked) satisfies the force_standards_audit gate for S25's eventual close.
+- **Open flags from the sweep** (untick'd, human-aware): README.md is 4373/3500 tokens OVER its ceiling (~90% pre-existing); token-tracking explanation duplicated across 4 docs (candidate: collapse to ARCHITECTURE-as-home). Dolores's memory wrap has the detail.
+- **Sprint 25 is ACTIVE with its hardening backlog untouched**: DWB-024 (Sage black-box audit-system verification), 020 (score-broadcast severity), 025 (Docs page gap), 030 (runner type hints), 032 (auto S3 tests), 001/002/003 (aggregator debt), 019 (deferred). Close gate already satisfied (audit #21).
+- **Team fully shut down this time** (all four approved shutdown after writing session-complete wraps — Pam/Barry/Freddie/Dolores memory.md all current). Session-1 note about the headline synthesizer overriding a supplied headline did NOT recur on session 2's close — may be conditional; observe before ticketing.
+- NOTE: this DB was seeded fresh (seed_personal_dwb) — ticket numbering restarted at DWB-001; git history's DWB-49x/50x keys predate the reset (human confirmed: don't care about collision risk). Current sequence is at DWB-033; sprint-close automation mints tickets too (024/032 were auto), so always check max ticket_number before creating.
+- Sprints this run, both closed: **S23 "Standards Auditor Phase 1"** (9 done) + **S24 "Auditor Phase 2 + tracking debt"** (7 done). Epic 10 (Standards Auditor). **Sprint 25 (id 25) is PLANNED, not active** — 10 backlog tickets: DWB-024 (rescoped: Sage black-box audit-system verification), 020 (score-broadcast severity bug), 025 (Docs page missing CODING_STANDARDS.md), 030 (runner type hints), 001/002/003 (aggregator/precision/dedup debt), 019 (deferred S1 tests), 032 (auto S3 test ticket, Sage).
+- **Team NOT shut down but CC teams don't survive sessions** — all teammates (Pam_DWB ag12, Barry_DWB ag13, Freddie ag14 [ran as Freddie_DWB-2 teammate name], Sylvie_DWB ag15, Dolores_DWB ag17) are dead processes next session. RESPAWN per playbook: spawn-prepare + pending marker + Agent tool. All wrote session-complete memory blocks.
+- DWB session 1 closed (6.23M tokens rolled up). The_Auditor = agent 51 (system agent, role auditor, seeded by migration dwb028).
 
-## Open items (genuinely open)
+## Shipped this run: the Standards Auditor system (end-to-end, self-enforcing)
 
-- **Playbook 9-col ticket table** (Archie_CI request, Miles authored the change on CI): update `pm_playbook § Ticket Display Format` to `DWB # | Jira # | Type | DWB Sprint | Jira Epic | Jira Sprint | Title | Owner | Status`, redeploy. Proposed twice, NOT yet approved - don't file without a go.
-- **create_test_result enum bug**: "Data truncated for column 'status'" recurring in error_logs since 7-21 (some project posts a bad status value). Unfiled side-lane candidate.
-- Drop `dwb506_bak_*` snapshot tables after Miles signs off on corrected numbers.
-- Old backlog unchanged: DWB-492 (ticket_key filter), DWB-502 (help portal fallback), DWB-503 (TF-IDF df perf), auto-created test tickets (DWB-504 = S76 tests, plus the S77 one). Check max ticket_number before filing new tickets.
+- **Global law**: `docs/rules/global/coding-standards.md` (instruction id 9) — THE cross-project sheet. Deploys with the playbook bundle everywhere: `.claude/rules/global/` mirror + repo-root `CODING_STANDARDS.md` built from it (global body + preserved `## Project Extensions`; marker-based refresh; markerless human files untouched+logged; non-Jira banner). DWB's own root doc converted to this format. Edit the sheet → sync (`sync_instructions.py --import`) → deploy propagates.
+- **Auditor**: `scripts/run_standards_audit.sh` / `standards_audit.py` — spawns a FRESH headless `claude -p` from a tempdir (provably context-starved), prompt = sheet + project extensions (DWB-029) + facts-only attribution block (DWB-023, names scorecards to real roster agents w/ fail-loud guard) + diff + strict-JSON contract. Config from `.env` (`STANDARDS_AUDIT_MODEL` required, `STANDARDS_AUDIT_AGENT_ID` optional → falls back to The_Auditor by name).
+- **Storage/API**: `standards_audit` table + `/api/standards-audits` (verdict pass/reject, violations[], scorecard[], MEDIUMTEXT details) + explicit idempotent `/{id}/apply-scorecard` → score_event ledger (source=audit, audit_grant/audit_demerit; bypasses peer caps by design).
+- **Visibility (DWB-028)**: every audit POST raises an alert (info=pass, warning=reject) + activity-feed attribution to The_Auditor. **Audits page** `/projects/:id/audits` (DWB-031): summary stats (pass/fail %), expandable rows (ref/date/verdict → who/violations/scorecard). ProjectPage section (DWB-018). Shared render pieces promoted to `components/common/` (AuditVerdictBadge/AuditViolations/AuditScorecard).
+- **Gate**: `force_standards_audit` (DWB-017) — sprint close requires a PASSING audit in-window. ON for project 5. `force_coding_standards_md` ON for all 5 projects (doc-exists gate; complements, both kept).
+- **Token attribution FIXED (DWB-022)**: root cause was `increment_tokens` (ticket token-report endpoint) writing tokens with no tracking_log event + token_source left 'unknown' — NOT SubagentStop. Now atomic (ledger event + cache in one commit), attributed (X-Agent-ID else assignee, 400 if neither), real token_source. Migration dwb022 reconciled 10 orphan tickets (~550k phantoms → source='reconciled'). Rollups now PARTIALLY TRUSTWORTHY: reconciled history + correct future. Case B (Sylvie/Dolores 0-token closes) = unmeasurable, documented, not fixable retroactively.
+- **Overhead doctrine (DWB-033, system-wide via playbooks)**: PM stands down on serial stretches (<3 active workers); workers get ticket queues not spawn-per-ticket; PM lane-shards tickets file-disjoint; migrations single-holder per sprint. Piloting worktree-twins for same-lane parallelism = future work, not yet doctrine.
+
+## The cadence (now proven, keep it)
+Worker builds → in_review → TL reviews → stage → `run_standards_audit.sh --staged --ticket-id N --sprint-id M` → REJECT: findings back to worker (or TL for trivia); false positives ADJUDICATED on the record (uphold / waive-with-law-amendment / overrule) → PASS → TL commits/pushes → done → carrots/sticks. 20 audits recorded; every reject remediated same-day. Law precision improved 5x through adjudication (Commits scope, Headers scope, fixture-identifier carve-out, hooks-are-services-for-React, Backend-shape-governs-app/, services-exception reality amendment).
 
 ## Gotchas (carry forward)
+- **Teammate permission dialogs freeze workers invisibly** — silent worker + no tree/ticket movement = check the human's agent panel FIRST, respawn LAST (memory: stalled-teammate-check-permission-dialog). Respawn-over-frozen-pane: new teammate gets -2 name suffix, same agent_id (marker is id-aware); brief replacements to VERIFY-not-clobber partial work; stand down the original immediately.
+- **One-off DB scripts must run from backend/** (cwd-relative .env resolution; from repo root you get connection-refused on 3306).
+- **Session-close headline may be overridden by the synthesizer** even on ai_confident close with a supplied headline (observed on session 1 close; playbook says supplied wins — possible DWB-500 regression, worth a ticket).
+- Score/carrot broadcasts land at CRITICAL severity → alert-board noise (bug ticket DWB-020, backlog). PM triage: audit alerts = signal, broadcast carrots = ack-and-move-on.
+- Ticket ids ≠ ticket keys; demo project occupies ids 126-155. Use ids in API paths.
+- Auditor runs cost ~1 claude -p call (~30-90s); batch small diffs into one audit where sensible; audits 2-20 exist — the trail is real history, don't delete.
+- Message timing crosses constantly (Pam's snapshots often stale vs TL actions); verify before concluding a teammate missed something.
 
-- **Token semantics changed 2026-07-28**: total_tokens = distinct work (input+output+cache_creation), cache_read excluded (still in breakdown). ALL history was recomputed, so cross-session comparisons are consistent - but any external notes quoting pre-fix numbers are ~33x inflated.
-- Sprint close AUTO-CREATES the next test ticket and consumes the next ticket_number (ate DWB-504 this session). Reserve numbers after closing, not before.
-- error_logs middleware only sees HTTP-path exceptions; background tasks (sweeper) log to the in-memory ring buffer (DWB-372) only. No error rows != healthy.
-- uvicorn now runs WITH --reload (nohup, log at /tmp/dwb-uvicorn.log); it had run without --reload since 7-14, silently serving stale code. Check `ps aux | grep uvicorn` args when live behavior contradicts the diff.
-- Message timing crosses constantly; teammate bodies often don't reach the TL - require key facts in the one-line summary.
-- `.claude/` edits crash subagents; root `.md`, `docs/`, `frontend/src`, backend are safe.
+## Housekeeping
+- Uvicorn + Vite dev servers were left RUNNING (ports 8000/5173); MySQL container up. Docker disk-high warning (35GB) persists — infra, unactioned.
+- `.env` has STANDARDS_AUDIT_MODEL set locally (deliberately not committed).

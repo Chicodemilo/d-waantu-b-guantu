@@ -5,8 +5,8 @@
 # Caller: app/main.py
 # Callees: app/services/playbook_deploy.py, app/services/project.py
 # Data In: HTTP requests
-# Data Out: JSON responses (playbook list, deploy status incl. scaffolded memory dirs)
-# Last Modified: 2026-06-24 (DWB-461: deploy body extracted to service)
+# Data Out: JSON responses (playbook list incl. the global coding-standards sheet, deploy status incl. scaffolded memory dirs)
+# Last Modified: 2026-08-11 (DWB-027: surface coding-standards sheet in the listing)
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -22,6 +22,11 @@ from app.services.playbook_deploy import (
     DeployResult,
     deploy_bundle,
 )
+
+# DWB-027: the service owns reading + frontmatter-stripping the global sheet
+# (body-or-None for the graceful skip) so the UI listing never drifts from what
+# gets deployed (single source of truth, DWB-013) and the router stays thin.
+from app.services.playbook_deploy import coding_standards_sheet_body
 
 # DWB-461: re-exported so the existing test imports
 # (`from app.routers.playbooks import _HOOKS_SETTINGS_BLOCK` / `DWB_COMMANDS_DIR`)
@@ -59,6 +64,19 @@ def list_playbooks():
                 title = line.lstrip("# ").strip()
                 break
         results.append(PlaybookRead(name=key, title=title, content=content))
+
+    # DWB-027: surface the global coding-standards sheet alongside the playbooks
+    # so it renders wherever playbooks render (Instructions page). The service
+    # returns the frontmatter-stripped body, or None to skip gracefully when the
+    # sheet is absent.
+    sheet_body = coding_standards_sheet_body()
+    if sheet_body is not None:
+        results.append(PlaybookRead(
+            name="coding_standards",
+            title="Coding Standards",
+            content=sheet_body,
+        ))
+
     return results
 
 

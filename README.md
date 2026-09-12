@@ -1,12 +1,12 @@
 # D'Waantu B'Guantu (DWB)
 
-A multi-agent workflow dashboard that makes Claude Code teams **cheaper, clearer, and smarter**.
+A multi-agent workflow dashboard for Claude Code teams: ticket tracking, token accounting, and session continuity for a roster of agents.
 
-- **Token efficiency** — structured playbooks + slim API responses keep agents on work; budget monitoring warns before bloat.
-- **Team visibility** — real-time insight into what every agent is doing and where things are stuck.
-- **Session continuity** — HANDOFF.md, playbooks, and project rules carry knowledge between sessions.
+- **Token efficiency:** structured playbooks and slim API responses keep agent context spent on work, and budget monitoring warns when context files grow past their ceilings.
+- **Team visibility:** see what every agent is doing, which tickets are moving, and where things are stuck.
+- **Session continuity:** HANDOFF.md, playbooks, and project rules carry knowledge between sessions.
 
-**Contributing** — DWB is open source. If something's broken, inefficient, or could be better, open a PR. No ceremony — just make it better.
+**Contributing:** DWB is open source. If something is broken or could work better, open a PR.
 
 ---
 
@@ -21,7 +21,7 @@ claude
 Then paste:
 
 ```
-You are Archie, the Team Lead. You report to me. Read this repo — it's
+You are Archie, the Team Lead. You report to me. Read this repo. It's
 D'Waantu B'Guantu, our project management system. We'll be using it to
 track our projects. Do the quick start setup and report back when
 running.
@@ -37,9 +37,9 @@ Archie reads the repo, runs setup, creates your first project, and reports back.
 React UI (Vite/5173) ──▶ FastAPI (:8000) ──▶ MySQL 8 (:23847)
 ```
 
-- **Backend** — FastAPI, SQLAlchemy 2.0, Pydantic v2; routers → services → models, Alembic migrations.
-- **Frontend** — React 18, Vite, Zustand, React Router; plain CSS, dark terminal aesthetic (JetBrains Mono); adaptive polling 2s/10s.
-- **Database** — MySQL 8.0 via Docker (PyMySQL).
+- **Backend:** FastAPI, SQLAlchemy 2.0, Pydantic v2; routers → services → models, Alembic migrations.
+- **Frontend:** React 18, Vite, Zustand, React Router; plain CSS, dark terminal aesthetic (JetBrains Mono); adaptive polling 2s/10s.
+- **Database:** MySQL 8.0 via Docker (PyMySQL).
 
 ---
 
@@ -51,7 +51,7 @@ React UI (Vite/5173) ──▶ FastAPI (:8000) ──▶ MySQL 8 (:23847)
 Project → Epic → Sprint → Ticket
 ```
 
-Enforced at the API — every ticket needs a sprint, every sprint an epic, every epic a project. Missing parents return 400.
+Enforced at the API: every ticket needs a sprint, every sprint an epic, every epic a project. Missing parents return 400.
 
 **Auto-assignment:** Tickets without `sprint_id` get the active sprint and inherit its epic; sprints without `epic_id` get the latest open epic.
 
@@ -87,13 +87,13 @@ Master playbooks in `docs/` deploy to other repos via `POST /api/projects/{id}/d
 
 The `tracking_log` table is the source of truth, recording discrete events: `start`, `stop`, `token_report`, `overhead_start`, `overhead_stop`.
 
-**Time** — start/stop event pairs per ticket; status transitions auto-insert them (e.g., moving to `in_progress` logs a `start`).
+**Time:** start/stop event pairs per ticket; status transitions auto-insert them (e.g., moving to `in_progress` logs a `start`).
 
-**Tokens** — captured passively via Claude Code lifecycle hooks: `SessionStart` → `/api/hooks/session-start` (logs start); `SessionEnd` → `/api/hooks/session-end` (parses JSONL, logs stop + tokens, increments `ticket.tokens_used`); `SubagentStop` → same endpoint for teammate transcripts.
+**Tokens:** captured passively via Claude Code lifecycle hooks: `SessionStart` → `/api/hooks/session-start` (logs start); `SessionEnd` → `/api/hooks/session-end` (parses JSONL, logs stop + tokens, increments `ticket.tokens_used`); `SubagentStop` → same endpoint for teammate transcripts.
 
-**Attribution priority:** Workers get tokens on their active ticket: `in_progress` > `todo` > `in_review` > recently `done` (5 min). Unmatched TL/PM sessions go to project overhead (`tl_overhead_tokens`, `pm_overhead_tokens`). Hook config lives in `.claude/settings.json`; zero manual intervention.
+**Attribution priority:** Workers get tokens on their active ticket: `in_progress` > `todo` > `in_review` > recently `done` (5 min). Unmatched TL/PM sessions go to project overhead (`tl_overhead_tokens`, `pm_overhead_tokens`). Hook config lives in `.claude/settings.json` and runs without manual steps.
 
-**Overhead** — TL/PM coordination tracks at project level via `overhead_start`/`overhead_stop` into per-role buckets; `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total plus a separate `overhead_tokens`.
+**Overhead:** TL/PM coordination tracks at project level via `overhead_start`/`overhead_stop` into per-role buckets; `GET /api/tracking/summary` `per_agent` rows carry a `tokens` total plus a separate `overhead_tokens`.
 
 Hooks handle backfill and recovery automatically; no separate scan script is needed.
 
@@ -116,6 +116,8 @@ Boolean toggles gating sprint completion. All default OFF (opt-in per project):
 | `force_initial_md` | `INITIAL.md` exists at repo root |
 | `force_architecture_md` | `ARCHITECTURE.md` exists at repo root |
 | `force_handoff_md` | `HANDOFF.md` exists at repo root |
+| `force_coding_standards_md` | `CODING_STANDARDS.md` exists at repo root |
+| `force_standards_audit` | A **passing** standards audit recorded in the sprint window (see [Standards Audit](#standards-audit)) |
 | `force_consolidation` | TL-owned docs within token ceiling; agent memory exempt |
 | `force_headers` | Sprint-touched `.py` files carry the code-header block; missing ones block close |
 | Failure records | Unreviewed stubs always block close |
@@ -142,6 +144,31 @@ Each agent earns a score per project, shown as a leaderboard on the project page
 
 ---
 
+## Standards Audit
+
+A PR/diff is judged against the single global standards sheet (`docs/rules/global/coding-standards.md`) — plus the audited repo's own **Project Extensions** (the `## Project Extensions` section of its root `CODING_STANDARDS.md`, which *adds to* the global sheet, never overrides it) — by a **fresh, single-purpose auditor** spawned headless with ONLY that law + the diff as context, no team/Archie history, so it cannot rubber-stamp. The verdict, violations, and a per-agent scorecard are recorded via `POST /api/standards-audits` (recording does NOT apply the score deltas — that is a separate step).
+
+Run it with `scripts/run_standards_audit.sh` (reads config from `.env`: `STANDARDS_AUDIT_API_BASE` / `VITE_API_BASE_URL`, `STANDARDS_AUDIT_MODEL`):
+
+```bash
+scripts/run_standards_audit.sh --project-id 5 --branch my-feature          # diff vs merge-base with master
+scripts/run_standards_audit.sh --project-id 5 --range abc123..def456 --ticket-id 164
+scripts/run_standards_audit.sh --project-id 5 --staged --author Barry_DWB   # explicit author for the scorecard
+scripts/run_standards_audit.sh --project-id 5 --staged --dry-run            # print scorecard, don't POST
+```
+
+**Scorecard attribution.** With `--ticket-id` (author = the ticket's assigned agent) or `--author <name>` (explicit override), the runner injects a facts-only ATTRIBUTION block — author + team-lead + PM **names/roles only, no opinions**, so fresh-eyes judgement is preserved — and the auditor names those exact agents in the scorecard (worker deltas on the author; TL only on repeat-survival; PM only on a clear ticketing signal). Returned names are validated against that roster set; an unknown name **fails loudly before POST** so the ledger can never be mis-attributed. Without either flag, entries fall back to the generic `author`.
+
+The uniform PASS/REJECT scorecard prints to stdout on every run. Malformed auditor output is caught and never posted (non-zero exit). Verify writes with `GET /api/standards-audits?project_id=5`.
+
+**Applying the scorecard.** Recording an audit does *not* move scores. `POST /api/standards-audits/{id}/apply-scorecard` is the explicit, idempotent second step: it writes the deltas to the `score_event` ledger (`source=audit`, trigger `audit_grant`/`audit_demerit`), attributed to **The_Auditor** (a seeded system agent), bypassing peer influence caps by design.
+
+**Visibility.** Every recorded audit raises an alert (info=pass, warning=reject) and an activity-feed entry attributed to The_Auditor. The **Audits page** at `/projects/:id/audits` shows pass/fail stats and expandable rows (ref, date, verdict → author, violations, scorecard), linked from a ProjectPage summary section; verdict/violations/scorecard render from shared `components/common/` pieces.
+
+**As a gate.** With `force_standards_audit` ON (see [Sprint Gates](#sprint-gates)), sprint close requires a *passing* audit inside the sprint window.
+
+---
+
 ## Archie Channel
 
 A cross-project channel for team-leads to message each other, direct (one TL) or broadcast (all). Every TL sees every message; addressing drives the ping only (direct alerts the target, broadcast the other TLs). Unread surfaces atop a TL's `identity.md` on spawn, marked read once shown. Reply via `/tl`. Tables: `tl_messages` + `tl_message_reads` (not project-scoped).
@@ -158,9 +185,9 @@ Native Claude Code SendMessage traffic is captured per project (DWB-446..449): a
 
 Alerts are flags raised by agents or automation that need human attention. Severities: info, warning, critical.
 
-**Dashboard** — read-only table (Project, Severity, Title, Created).
+**Dashboard:** read-only table (Project, Severity, Title, Created).
 
-**Project page** — full alert cards with actions: `$ dismiss all` (bulk dismiss open alerts) and `$ send to team` (writes `ALERTS_PENDING.md` to the project repo for teammates).
+**Project page:** full alert cards with actions: `$ dismiss all` (bulk dismiss open alerts) and `$ send to team` (writes `ALERTS_PENDING.md` to the project repo for teammates).
 
 ---
 
@@ -195,9 +222,9 @@ Run history: `GET /api/test-results/performance`
 
 ## Adding a Project
 
-**Demo:** `POST /api/projects/seed-demo` — fully-populated demo (prefix `DMO`) with agents, epics, sprints, tickets, test results. Idempotent.
+**Demo:** `POST /api/projects/seed-demo` creates a fully-populated demo (prefix `DMO`) with agents, epics, sprints, tickets, and test results. Idempotent.
 
-**From repo:** `POST /api/projects/from-repo` with `{"repo_path": "..."}` — auto-detects name, prefix, description.
+**From repo:** `POST /api/projects/from-repo` with `{"repo_path": "..."}` auto-detects name, prefix, and description.
 
 **Then:** assign agents, create epic + sprint (with a goal), deploy playbooks, tickets.
 
@@ -205,7 +232,7 @@ Run history: `GET /api/test-results/performance`
 
 ## API Reference
 
-138 endpoints across 23 routers. Full interactive docs at http://localhost:8000/docs.
+149 endpoints across 25 routers. Full interactive docs at http://localhost:8000/docs.
 
 **Slim responses:** List endpoints strip heavy fields by default (test-results omit `details`, agents omit `api_key`); tickets/alerts/sprints support `?fields=slim`.
 
@@ -233,13 +260,16 @@ Standard CRUD exists for all resources; the non-obvious and automation ones:
 | GET | `/api/projects/{id}/scores` | Scoring leaderboard |
 | POST | `/api/projects/{id}/scores/award` | Human carrot/stick |
 | POST | `/api/projects/{id}/scores/peer` | Peer carrot/stick (`X-Agent-ID` header) |
+| GET | `/api/standards-audits` | List standards audits (`?project_id=`); slim rows |
+| POST | `/api/standards-audits` | Record an audit verdict + scorecard (does not apply deltas) |
+| POST | `/api/standards-audits/{id}/apply-scorecard` | Apply the scorecard to the score ledger (idempotent) |
 | GET | `/api/tl-channel` | Cross-project team-lead channel; each message carries a `read_by` roster |
 | GET | `/api/tl-channel/unread` | A team-lead's unread channel messages (`?agent_id`) |
 | POST | `/api/tl-channel` | Send a channel message, direct or broadcast (TL only) |
 | POST | `/api/tl-channel/mark-read` | Mark channel messages read (one or all) |
 | GET | `/api/hooks/sessions` | List hook sessions (`status=orphan` for cleanup) |
-| POST | `/api/sessions/open` | Open a DWB session — OMIT `opened_at` (server-stamped) |
-| POST | `/api/sessions/{id}/close` | Close a DWB session — `headline` required on AI methods (422 otherwise); consolidation gate opt-in (`force_consolidation`, default OFF), TL-owned docs only |
+| POST | `/api/sessions/open` | Open a DWB session; omit `opened_at` (server-stamped) |
+| POST | `/api/sessions/{id}/close` | Close a DWB session; `headline` required on AI methods (422 otherwise); consolidation gate opt-in (`force_consolidation`, default OFF), TL-owned docs only |
 | GET | `/api/projects/{id}/sessions` | List DWB sessions, most recent first |
 | GET | `/api/sessions/{id}` | DWB session detail rollup (by_role/by_ticket/overhead) |
 | POST | `/api/agents/identify` | Resolve identity from `(role, name, project_prefix)`; short or `_<PREFIX>` form |

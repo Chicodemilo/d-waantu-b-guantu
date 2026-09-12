@@ -3,16 +3,15 @@
 // Created: 2026-03-29
 // Purpose: Displays project documentation files with expandable cards; detects DWB project and redirects to system docs
 // Caller: App.jsx (route: /projects/:id/docs)
-// Callees: react (useState, useEffect), react-router-dom (useParams, Link), useStore, api/docs (getProjectDocs), styles/docs.css
+// Callees: react (useState, useEffect), react-router-dom (useParams, Link), useStore, api/docs (getProjectDocs)
 // Data In: Route param (id), project from Zustand store, docs from API
 // Data Out: Default export DocsPage component
-// Last Modified: 2026-03-29
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { getProjectDocs } from '../api/docs';
-import '../styles/docs.css';
 
 function DocCard({ doc }) {
   const [expanded, setExpanded] = useState(false);

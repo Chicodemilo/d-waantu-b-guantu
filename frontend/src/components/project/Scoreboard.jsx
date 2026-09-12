@@ -3,16 +3,15 @@
 // Created: 2026-06-23
 // Purpose: Full per-project scoring leaderboard (DWB-433) with inline carrot/stick controls (DWB-434), shown under the Scoreboard tab on ProjectAgentsPage. Renders one row per agent with rank #, name (links to that agent's ledger on AgentPage), reputation, signed sprint delta, influence, a tier label, and fixed-amount carrot +10 / stick -10 buttons. Clicking a button expands the row in place to an optional reason field plus an inline "carrot +10? confirm / cancel" (no modal); on confirm it POSTs the award and refreshes the leaderboard, on error it shows the API detail inline beside the row. Top (#1) and last-place rows are visually accented. Data from GET /api/projects/{id}/scores (DWB-424), already sorted top-first; rank + tier read from DWB-432 fields with a position-based fall-back.
 // Caller: pages/ProjectAgentsPage.jsx (Scoreboard tab)
-// Callees: react (useState, useEffect, useCallback), react-router-dom (Link), api/scores (getProjectScores, awardScore), utils/scoring, styles/score.css
+// Callees: react (useState, useEffect, useCallback), react-router-dom (Link), api/scores (getProjectScores, awardScore), utils/scoring
 // Data In: projectId prop
 // Data Out: Default export Scoreboard component
-// Last Modified: 2026-06-23
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { getProjectScores, awardScore } from '../../api/scores';
 import { tierLabel, rowRank, formatDelta, deltaDirection, isTopRow, isBottomRow } from '../../utils/scoring';
-import '../../styles/score.css';
 
 const CARROT_DELTA = 10;
 const STICK_DELTA = -10;

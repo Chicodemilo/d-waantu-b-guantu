@@ -6,11 +6,11 @@
 # Callees: app/models/tracking_log.py, app/models/ticket.py
 # Data In: db: Session, ticket_id, agent_id, tokens, source
 # Data Out: TrackingLog, computed summaries
-# Last Modified: 2026-06-10
+# Last Modified: 2026-08-12 (DWB-022: log_tokens commit flag + reconcile_orphan_ticket_tokens)
 
 """Service layer for the tracking_log table — time and token event logging."""
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
@@ -55,9 +55,17 @@ def log_stop(db: Session, ticket_id: int, agent_id: int) -> TrackingLog:
 
 
 def log_tokens(
-    db: Session, ticket_id: int, agent_id: int, tokens: int, source: str = "manual"
+    db: Session,
+    ticket_id: int,
+    agent_id: int,
+    tokens: int,
+    source: str = "manual",
+    commit: bool = True,
 ) -> TrackingLog:
-    """Insert a 'token_report' event for a ticket."""
+    # Insert a 'token_report' event for a ticket. DWB-022: commit=False folds the
+    # insert into a caller-owned transaction so the ledger event and the ticket's
+    # denormalized tokens_used cache land atomically in one commit (never a ledger
+    # event without its cache, or vice versa).
     ticket = db.get(Ticket, ticket_id)
     entry = TrackingLog(
         ticket_id=ticket_id,
@@ -69,9 +77,57 @@ def log_tokens(
         source=source,
     )
     db.add(entry)
-    db.commit()
-    db.refresh(entry)
+    if commit:
+        db.commit()
+        db.refresh(entry)
     return entry
+
+
+# DWB-022: source stamped on tickets + ledger rows backfilled by the reconcile.
+RECONCILED_TOKEN_SOURCE = "reconciled"
+
+
+def reconcile_orphan_ticket_tokens(
+    db: Session, source: str = RECONCILED_TOKEN_SOURCE
+) -> int:
+    # DWB-022: backfill a token_report ledger event for every ticket whose
+    # tokens_used was written WITHOUT a backing tracking_log event - the pre-fix
+    # phantom (tokens_used > 0, token_source 'unknown'/NULL, no token_report
+    # event, an assigned agent to attribute to). tracking_log is the source of
+    # truth (CLAUDE.md); a token count with no ledger event breaks per-agent/
+    # per-ticket rollups + scoring auto-triggers, so this makes the ledger match
+    # the cache retroactively. Runs WITHOUT waiting on SessionEnd (Pam's DWB-022
+    # constraint): keys off the ticket's current state, not a session lifecycle.
+    # Idempotent - a ticket that already has a token_report event is skipped, so
+    # re-running (or a periodic sweep) never double-counts. Returns the count
+    # reconciled. Tickets with tokens_used > 0 but NO assigned agent can't back a
+    # tracking_log row (agent_id is NOT NULL); they're left untouched.
+    orphans = list(db.scalars(
+        select(Ticket).where(
+            Ticket.tokens_used > 0,
+            or_(Ticket.token_source == "unknown", Ticket.token_source.is_(None)),
+            Ticket.assigned_agent_id.isnot(None),
+            ~exists().where(
+                (TrackingLog.ticket_id == Ticket.id)
+                & (TrackingLog.event_type == "token_report")
+            ),
+        )
+    ).all())
+
+    for t in orphans:
+        db.add(TrackingLog(
+            ticket_id=t.id,
+            agent_id=t.assigned_agent_id,
+            project_id=t.project_id,
+            sprint_id=t.sprint_id,
+            event_type="token_report",
+            tokens=t.tokens_used,
+            source=source,
+        ))
+        t.token_source = source
+
+    db.commit()
+    return len(orphans)
 
 
 def log_overhead_start(db: Session, project_id: int, agent_id: int) -> TrackingLog:

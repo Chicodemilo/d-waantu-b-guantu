@@ -3,15 +3,14 @@
 // Created: 2026-06-22
 // Purpose: Per-agent score ledger panel (DWB-428). Shows the agent's current rank + tier (DWB-434 part 2, from DWB-432 fields), reputation / influence / this-sprint delta, then the append-only score_event history (newest first): signed delta colored up/down, trigger_type, reason, and for peer events the actor name + influence cost. Reverted rows are visually marked. Data from GET /api/agents/:id/score?project_id= (DWB-424).
 // Caller: pages/AgentPage.jsx
-// Callees: react (useState, useEffect), api/scores (getAgentScore), utils/scoring (tierLabel), styles/score.css
+// Callees: react (useState, useEffect), api/scores (getAgentScore), utils/scoring (tierLabel)
 // Data In: agentId, projectId props
 // Data Out: Default export AgentScoreLedger component
-// Last Modified: 2026-06-23
+// Last Modified: 2026-08-11 (DWB-009)
 
 import { useState, useEffect } from 'react';
 import { getAgentScore } from '../../api/scores';
 import { tierLabel } from '../../utils/scoring';
-import '../../styles/score.css';
 
 function formatDelta(delta) {
   const n = Number(delta) || 0;
