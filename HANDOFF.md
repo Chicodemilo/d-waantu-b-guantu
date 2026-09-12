@@ -2,6 +2,12 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
+## Merge note (2026-09-12)
+
+- PR #3 (branch `fix/session-close-overflow-dwb505-506`) merged to master today: DWB-505 BIGINT token columns + close-path hardening + idle sweeper savepoint isolation, DWB-506 cache_read exclusion from totals. Details in git history (05d3d59).
+- Still-true carry-forwards from that work: total_tokens = input+output+cache_creation (cache_read excluded, kept in breakdown); pre-2026-07-28 external notes quote ~33x inflated numbers; `dwb506_bak_*` rollback snapshot tables still exist, drop on Miles sign-off.
+- The state below (Standards Auditor era, 2026-08-12 wrap) was written against a freshly seeded DB; verify which DB is live before trusting ids/numbering.
+
 ## Current State (end of 2026-08-12, DWB session 2 closed)
 
 - Working tree committed + pushed to origin/master through the session-2 wrap. Backend 1544 passing, frontend 266 passing.

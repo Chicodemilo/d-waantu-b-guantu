@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: HookSession, HookSessionStatus, HookSessionType
-# Last Modified: 2026-06-09
+# Last Modified: 2026-07-28
 
 import enum
 from datetime import datetime
@@ -58,7 +58,9 @@ class HookSession(Base):
         DateTime, nullable=False, server_default=func.now()
     )
     end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # BigInteger (DWB-505): summand of the dwb_sessions token rollup; widened
+    # from INT so a large per-session figure can never overflow the column.
+    total_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     token_breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[HookSessionStatus] = mapped_column(
         Enum(HookSessionStatus), nullable=False, default=HookSessionStatus.active

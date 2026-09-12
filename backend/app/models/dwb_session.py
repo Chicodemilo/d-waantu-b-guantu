@@ -1,12 +1,12 @@
 # Path: app/models/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone], DWB-481 structured summary JSON column)
+# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone], DWB-481 structured summary JSON column, DWB-505 total_tokens widened to BIGINT)
 # Caller: app/services/dwb_session.py (DWB-337), app/routers/dwb_sessions.py (DWB-338)
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: DwbSession, DwbOpenMethod, DwbCloseMethod, DwbCloseReason
-# Last Modified: 2026-06-25
+# Last Modified: 2026-07-28
 
 import enum
 from datetime import datetime
@@ -111,7 +111,10 @@ class DwbSession(Base):
         Enum(DwbCloseReason), nullable=True
     )
 
-    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # BigInteger (DWB-505): rollup of linked hook_sessions.total_tokens. Was INT
+    # and overflowed on a 5.47B-token session (MySQL 1264), 500-ing every close;
+    # widened so a large rollup can never overflow the close UPDATE again.
+    total_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     total_time_seconds: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0
     )

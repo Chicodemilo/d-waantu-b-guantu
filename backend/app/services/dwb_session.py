@@ -6,7 +6,7 @@
 # Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.models.entity_keyword, app.models.ticket, app.models.comment, app.models.inter_agent_message, app.services.dwb_session_rollup, app.services.keyword_extraction, app.services.session_synthesizer, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-06-25 (DWB-500: TF-IDF re-rank of keywords in _assemble_rollup via rank_tfidf + df/N from rollup helper)
+# Last Modified: 2026-07-28 (DWB-505: clamp rollup to BIGINT ceiling in close_session + per-session SAVEPOINT isolation in sweep_idle_sessions so one overflowing session cannot 500 the close or poison the idle sweep)
 
 """DWB session business logic.
 
@@ -68,6 +68,15 @@ from app.services.keyword_extraction import rank_tfidf
 from app.services.session_synthesizer import synthesize_session_summary
 
 logger = logging.getLogger(__name__)
+
+# DWB-505: defensive ceiling for the persisted token rollup. total_tokens is
+# BIGINT after the DWB-505 migration (signed max below). Even so, close_session
+# clamps the rollup to this value before writing so a pathological rollup can
+# NEVER raise MySQL 1264 (out of range) and 500 the close / poison the idle
+# sweep. Clamping is expected to be dead weight in practice (a real token sum
+# will not approach 9.2e18); it exists purely so the close path degrades
+# gracefully instead of aborting.
+_MAX_TOKEN_VALUE = 9_223_372_036_854_775_807  # signed BIGINT max
 
 # DWB-484: keywords mined at session close are tagged with this source label
 # on their EntityKeyword rows (entity_type='dwb_session').
@@ -528,7 +537,25 @@ def close_session(
     session.close_phrase = close_phrase
     if headline is not None:
         session.headline = headline
-    session.total_tokens = _rollup_tokens(db, session)
+    # DWB-505: clamp the rollup before persisting. total_tokens is BIGINT, but
+    # clamping to the column ceiling guarantees the close UPDATE can never raise
+    # MySQL 1264 regardless of how pathological the rollup is. When a clamp
+    # actually fires we log a warning (the flag) with the true value so the
+    # over-attribution can be investigated (see DWB-506) without the close ever
+    # aborting.
+    raw_tokens = _rollup_tokens(db, session)
+    if raw_tokens > _MAX_TOKEN_VALUE:
+        logger.warning(
+            "DWB-505: session %s rollup %d exceeds column ceiling; clamping "
+            "total_tokens to %d on close (close_method=%s)",
+            session.id,
+            raw_tokens,
+            _MAX_TOKEN_VALUE,
+            close_method.value,
+        )
+        session.total_tokens = _MAX_TOKEN_VALUE
+    else:
+        session.total_tokens = raw_tokens
     session.total_time_seconds = max(
         0, int((closed_at - session.opened_at).total_seconds())
     )
@@ -634,16 +661,37 @@ def sweep_idle_sessions(
     now: datetime | None = None,
 ) -> int:
     """Close every open DwbSession whose last activity is older than the idle
-    threshold. Returns the count closed. The caller owns the commit."""
+    threshold. Returns the count closed. The caller owns the outer commit.
+
+    DWB-505: each close runs inside its own SAVEPOINT (nested transaction) so a
+    single failing session can no longer poison the whole batch. Before this,
+    one session whose close raised (e.g. session 65's INT overflow) propagated
+    out of the loop, the caller rolled back the ENTIRE sweep, and NOTHING got
+    closed cycle after cycle - which is exactly why the sweeper closed nothing
+    while session 65 sat open. Now a failing session is rolled back to its
+    savepoint and logged, and the remaining idle sessions still close. The
+    token clamp in close_session removes the overflow failure mode itself; this
+    isolation is defense in depth for any future per-session failure.
+    """
     closed_count = 0
     for s in find_idle_sessions(db, idle_minutes=idle_minutes, now=now):
-        close_session(
-            db,
-            s,
-            close_method=DwbCloseMethod.idle_timeout,
-            close_reason=DwbCloseReason.idle,
-            close_phrase=None,
-            now=now,
-        )
-        closed_count += 1
+        try:
+            with db.begin_nested():
+                close_session(
+                    db,
+                    s,
+                    close_method=DwbCloseMethod.idle_timeout,
+                    close_reason=DwbCloseReason.idle,
+                    close_phrase=None,
+                    now=now,
+                )
+            closed_count += 1
+        except Exception:
+            # Savepoint already rolled back by the context manager on exception;
+            # the outer transaction (and the other sessions closed this pass)
+            # stays intact. Never propagate - one bad session must not starve
+            # the sweep.
+            logger.exception(
+                "idle sweeper: failed to close session %s; skipping", s.id
+            )
     return closed_count
