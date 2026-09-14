@@ -199,6 +199,42 @@ class TestTlChannelSend:
         assert recipients == {tl2["id"], tl3["id"]}
         assert data["alert_count"] == 2
 
+    def test_send_response_exposes_top_level_id_and_created_at(
+        self, client, make_agent
+    ):
+        """DWB-508: the send response mirrors id + created_at to the TOP LEVEL
+        so a naive parse (res["id"]) resolves the persisted row. Both must be
+        present, non-null, and match the nested message."""
+        sender = _tl(make_agent)
+        target = _tl(make_agent)
+        r = client.post("/api/tl-channel", json={
+            "from_agent_id": sender["id"],
+            "to_agent_id": target["id"],
+            "body": "verify id lands",
+        })
+        assert r.status_code == 201, r.text
+        data = r.json()
+        # Top-level id: present, an int, matches the nested message id.
+        assert isinstance(data["id"], int)
+        assert data["id"] == data["message"]["id"]
+        # Top-level created_at: present, non-null, matches the nested message.
+        assert data["created_at"] is not None
+        assert data["created_at"] == data["message"]["created_at"]
+
+    def test_broadcast_response_exposes_top_level_id(self, client, make_agent):
+        """DWB-508: the top-level id contract holds for broadcasts too."""
+        sender = _tl(make_agent)
+        _tl(make_agent)
+        r = client.post("/api/tl-channel", json={
+            "from_agent_id": sender["id"],
+            "body": "broadcast id check",
+        })
+        assert r.status_code == 201, r.text
+        data = r.json()
+        assert isinstance(data["id"], int)
+        assert data["id"] == data["message"]["id"]
+        assert data["created_at"] is not None
+
     def test_send_rejected_when_sender_not_team_lead(self, client, make_agent):
         sender = make_agent(role="backend-worker")
         target = _tl(make_agent)

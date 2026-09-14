@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: service dicts from app.services.tl_channel, send/mark-read request bodies
 # Data Out: TlMessageCreate, TlChannelMessage, TlChannelList, MarkReadRequest, MarkReadResponse, SendResponse
-# Last Modified: 2026-06-23
+# Last Modified: 2026-09-14
 
 from pydantic import BaseModel
 
@@ -73,7 +73,16 @@ class MarkReadResponse(BaseModel):
 class SendResponse(BaseModel):
     """Result of a send: the created message plus how many team-leads were
     pinged via an alert (1 for a direct send, one per OTHER team-lead for a
-    broadcast)."""
+    broadcast).
+
+    DWB-508: ``id`` and ``created_at`` are mirrored to the TOP LEVEL (they also
+    live on ``message``) so a naive send-script parse - ``res["id"]`` - resolves
+    the persisted row rather than silently reading None from a place the id was
+    never at. The send path treats a missing/None top-level ``id`` as a hard
+    failure, so the contract must always carry it on success.
+    """
     status: str
+    id: int
+    created_at: str | None
     message: TlChannelMessage
     alert_count: int

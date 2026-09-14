@@ -6,7 +6,7 @@
 # Callees: app/services/tl_channel.py, app/models/agent.py
 # Data In: HTTP GET/POST
 # Data Out: TlChannelMessage[], SendResponse, MarkReadResponse
-# Last Modified: 2026-06-23
+# Last Modified: 2026-09-14
 
 """Team-lead channel API (DWB-437). All routes under /api/tl-channel."""
 
@@ -87,7 +87,16 @@ def send_message(data: TlMessageCreate, db: Session = Depends(get_db)):
         db, from_agent=sender, to_agent=recipient, body=data.body
     )
     message = svc.serialize_message(db, msg)
-    return {"status": "ok", "message": message, "alert_count": alert_count}
+    # DWB-508: mirror id + created_at to the top level so a naive send-script
+    # parse (res["id"]) resolves the persisted row instead of silently reading
+    # None. Both also remain on `message`.
+    return {
+        "status": "ok",
+        "id": message["id"],
+        "created_at": message["created_at"],
+        "message": message,
+        "alert_count": alert_count,
+    }
 
 
 @router.post("/mark-read", response_model=MarkReadResponse)
