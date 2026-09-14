@@ -259,7 +259,14 @@ Don't let open alerts accumulate, an ignored queue trains everyone to ignore ale
 
 Spawn teammates with the **Agent tool**; that is the whole mechanism. `TeamCreate`/`TeamDelete` were removed in 2.1.178, so the spawned agent joins this session's team automatically (the old `team_name` arg is accepted but ignored, so passing it is harmless and unnecessary). Spawning didn't change in capability: teammates still SendMessage each other, claim shared tasks, and report back. Only the setup step went away.
 
-**Seeing your team.** Teammates show in the in-session agent panel (up/down to select, Enter to open a transcript, Esc to interrupt) or, with `"teammateMode": "tmux"` in `~/.claude/settings.json`, each in its own iTerm/tmux pane. The display default flipped to `in-process` (one panel) in 2.1.179, and on 2.1.181 **idle teammates auto-hide after ~30s** and reappear on activity. An empty panel does NOT mean the team is gone. Confirm liveness via `GET /api/projects/{id}/team` or `ls ~/.claude/teams/<team>/inboxes/` before concluding a worker died.
+**Seeing your team: check teammateMode BEFORE your first spawn (hard rule, 2026-09-14).** The human must be able to SEE workers in the in-session agent panel. Whether they can is decided by `teammateMode`, read once at each agent's SPAWN time:
+
+- `in-process` (required): teammates render as live tiles in the panel. This is what the human expects.
+- `tmux`: teammates run headless expecting external tmux/iTerm panes. If the human is not running that integration, the whole team is INVISIBLE while working at full speed - the human concludes nothing was launched. This exact failure burned DWB on 2026-09-14 (a stale June experiment left `"teammateMode": "tmux"` in `~/.claude/settings.json`).
+
+Before the FIRST spawn of any session: check `teammateMode` in `~/.claude/settings.json` and the project's `.claude/settings.local.json`. If it resolves to anything but `in-process`, fix it (TL-only settings edit) BEFORE spawning and tell the human. Fixing it mid-session does NOT retile already-spawned agents - the mode is read at spawn - so a crew spawned under `tmux` stays invisible until cycled; surface that trade-off to the human instead of silently continuing.
+
+**Panel behavior once visible:** up/down to select, Enter to open a transcript, Esc to interrupt. **Idle teammates auto-hide after ~30s** (since 2.1.181) and reappear on activity - an empty panel does NOT mean the team is gone. Confirm liveness via `GET /api/projects/{id}/team`, ticket movement, or `ls ~/.claude/teams/<team>/inboxes/` before concluding a worker died.
 
 ### Spawn-Prepare (REQUIRED before every spawn)
 
