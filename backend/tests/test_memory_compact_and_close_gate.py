@@ -1,19 +1,24 @@
 # Path: tests/test_memory_compact_and_close_gate.py
 # File: test_memory_compact_and_close_gate.py
 # Created: 2026-06-17
-# Purpose: Tests for POST /api/agents/{id}/memory/compact (replace + passive trim) and that memory NEVER blocks a session close (DWB-401).
+# Purpose: Tests for POST /api/agents/{id}/memory/compact (replace, hard ceiling) and that memory NEVER blocks a session close (DWB-401). DWB-518: the ceiling is a hard refusal, not a passive trim.
 # Caller: pytest
 # Callees: /api/agents/{id}/memory/compact, /api/agents/{id}/memory/append, /api/sessions/open, /api/sessions/{id}/close
 # Data In: tmp_path filesystem, factory project + agent
-# Data Out: assertions on replace semantics, passive trim, and that memory is gate-exempt at close
-# Last Modified: 2026-06-19
+# Data Out: assertions on replace semantics, over-ceiling refusal, and that memory is gate-exempt at close
+# Last Modified: 2026-09-14 (DWB-518: over-ceiling append/compact refuse; no passive trim)
 
-"""Memory compaction + the session-close compaction gate (DWB-401 model).
+"""Memory compaction + the session-close compaction gate.
 
 DWB-401: the memory model is 2 files (identity.md + the single free-form
-memory.md). memory.md's 4500-token ceiling is a PASSIVE TRIM threshold, not a
-gate: the server trims oldest blocks past it and memory NEVER blocks a session
-or sprint close (it is gate-exempt). These tests pin both behaviors.
+memory.md), memory.md ceiling = 4500 tokens.
+
+DWB-518 (Miles ruling: no silent eviction): the ceiling is a HARD gate on the
+WRITE path, not a passive trim - an over-ceiling append/compact is REFUSED 400
+and nothing is dropped; the agent condenses first. Note this is orthogonal to
+the session-CLOSE gate: memory is still gate-EXEMPT at close (an over-ceiling
+memory.md on disk never blocks a close), which the TestCloseNotBlockedByMemory
+class below still pins.
 
 estimate_tokens = max(len//4, words). memory.md ceiling = 4500 tokens, so a
 ~20000-char blob (~5000 tokens) is reliably over; a short string is under.
@@ -42,19 +47,23 @@ def _project_and_agent(client, tmp_path, prefix, name="Memo"):
 
 
 class TestCompactEndpoint:
-    def test_over_ceiling_not_refused_passively_trimmed(self, client, tmp_path):
-        # DWB-401: no over-ceiling REJECTION. A multi-block over-ceiling submit
-        # is accepted (200); the server trims oldest blocks to <= ceiling.
+    def test_over_ceiling_refused_400_not_trimmed(self, client, tmp_path):
+        # DWB-518: no silent trim. A multi-block over-ceiling submit is REFUSED
+        # 400 (nothing written), not accepted-and-trimmed.
         _, agent = _project_and_agent(client, tmp_path, "CMP1")
         blocks = "".join(
             f"## 2026-06-1{i}T00:00:00+00:00\n{'data ' * 600}\n" for i in range(6)
         )
+        path = _mem_dir(tmp_path, "CMP1", "Memo") / "memory.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("## seed\nkeep this\n", encoding="utf-8")
         r = client.post(f"/api/agents/{agent['id']}/memory/compact", json={
             "file": "memory", "content": blocks,
         })
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["tokens"] <= body["ceiling"]  # trimmed under ceiling
+        assert r.status_code == 400, r.text
+        assert "ceiling" in r.json()["detail"].lower()
+        # Nothing written: the prior file is untouched.
+        assert path.read_text(encoding="utf-8") == "## seed\nkeep this\n"
 
     def test_within_ceiling_overwrites_not_appends(self, client, tmp_path):
         _, agent = _project_and_agent(client, tmp_path, "CMP2")
@@ -97,12 +106,12 @@ class TestCompactEndpoint:
             assert r.status_code == 422, f"{retired}: {r.text}"
 
 
-class TestPassiveTrim:
-    """DWB-401: memory.md is bounded by a passive trim, not a gate. An append
-    that pushes it over 4500 tokens drops the OLDEST blocks, keeps the newest,
-    and never errors."""
+class TestAppendCeilingRefusal:
+    """DWB-518: memory.md's ceiling is a HARD gate. An append that would push it
+    over the ceiling is REFUSED 400 - nothing is dropped, no entry evicted. The
+    agent must condense first, then retry."""
 
-    def test_append_past_ceiling_trims_oldest_keeps_newest(self, client, tmp_path):
+    def test_append_past_ceiling_refused_and_nothing_dropped(self, client, tmp_path):
         _, agent = _project_and_agent(client, tmp_path, "TRIM1")
         path = _mem_dir(tmp_path, "TRIM1", "Memo") / "memory.md"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,22 +123,22 @@ class TestPassiveTrim:
         )
         path.write_text(seed, encoding="utf-8")
 
-        # Append a fresh, identifiable block.
         r = client.post(f"/api/agents/{agent['id']}/memory/append", json={
             "file": "memory", "content": "NEWEST distinctive marker line",
         })
-        assert r.status_code == 201, r.text  # never errors
+        # Refused, actionable body naming the ceiling + condense instruction.
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"].lower()
+        assert "ceiling" in detail
+        assert "condense" in detail
 
-        from app.config.token_budget import ceiling_for_file, estimate_tokens
+        # No silent drop: the file is byte-for-byte unchanged, oldest block kept.
         text = path.read_text(encoding="utf-8")
-        # Trimmed under ceiling.
-        assert estimate_tokens(text) <= ceiling_for_file("memory.md")
-        # Newest content retained.
-        assert "NEWEST distinctive marker line" in text
-        # Oldest block dropped.
-        assert "OLDBLOCK1" not in text
+        assert text == seed
+        assert "OLDBLOCK1" in text
+        assert "NEWEST distinctive marker line" not in text
 
-    def test_small_append_not_trimmed(self, client, tmp_path):
+    def test_small_append_not_refused(self, client, tmp_path):
         _, agent = _project_and_agent(client, tmp_path, "TRIM2")
         path = _mem_dir(tmp_path, "TRIM2", "Memo") / "memory.md"
         path.parent.mkdir(parents=True, exist_ok=True)

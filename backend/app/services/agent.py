@@ -1,16 +1,15 @@
 # Path: app/services/agent.py
 # File: agent.py
 # Created: 2026-03-29
-# Purpose: Agent CRUD operations + identity lookup (DWB-289) + memory append (DWB-358) + project_agents bridge invariant (DWB-365)
+# Purpose: Agent CRUD operations + identity lookup (DWB-289) + memory append/compact/condense (DWB-358/518) + full-memory read for spawn/hook injection (DWB-517) + project_agents bridge invariant (DWB-365)
 # Caller: app/routers/agents.py
 # Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
-# Last Modified: 2026-06-10
+# Last Modified: 2026-09-14 (DWB-517: full memory.md in spawn-prepare + TL-memory helper for SessionStart injection)
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -212,6 +211,46 @@ def _read_scratchpad(memory_dir: str) -> str:
     return ""
 
 
+def _read_memory_full(memory_dir: str) -> str:
+    """DWB-517: the agent's FULL memory.md, verbatim (no truncation).
+
+    Powers passive memory injection - spawn-prepare hands the TL the whole
+    file to paste into the spawn prompt, and the SessionStart hook injects a
+    TL's own memory into context. Degrades to an empty string when the file is
+    missing or unreadable; never raises (the callers are a spawn helper and a
+    fire-and-forget hook, neither of which may 500 on a filesystem hiccup)."""
+    path = Path(memory_dir) / "memory.md"
+    try:
+        if path.is_file():
+            return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+    return ""
+
+
+def tl_memory_for_project(db: Session, project_id: int) -> str:
+    """DWB-517: full memory.md of a project's team-lead, or "" when there is no
+    TL, no repo_path, or no memory yet.
+
+    Used by the SessionStart hook lane so an archie's own memory lands in
+    context at session start with zero action. Best-effort and non-raising:
+    the hook endpoint must never 5xx, so any resolution/read miss degrades to
+    an empty string (which the caller treats as "inject nothing")."""
+    project = db.get(Project, project_id)
+    if project is None or not project.repo_path:
+        return ""
+    tl = db.scalar(
+        select(Agent)
+        .join(ProjectAgent, ProjectAgent.agent_id == Agent.id)
+        .where(ProjectAgent.project_id == project_id)
+        .where(Agent.role == "team-lead")
+        .limit(1)
+    )
+    if tl is None:
+        return ""
+    return _read_memory_full(_memory_dir(project, tl))
+
+
 def _agent_visible_instructions(
     db: Session, project_id: int, agent_id: int
 ) -> list[Instruction]:
@@ -335,6 +374,9 @@ def spawn_prepare_payload(
         "## Recent Scratchpad\n"
         + (scratchpad_raw if scratchpad_raw else "(no entries yet)\n")
     )
+    # DWB-517: the FULL memory.md, verbatim, so the TL injects it into the spawn
+    # prompt without the agent having to read it. Empty string when none yet.
+    memory_full = _read_memory_full(memory_dir)
 
     rules = _boundary_instructions(db, project.id, agent.id)
     if rules:
@@ -349,6 +391,9 @@ def spawn_prepare_payload(
         "agent_id": agent.id,
         "identity_prompt": identity_prompt,
         "scratchpad_excerpt": scratchpad_section,
+        # DWB-517: full memory.md verbatim (kept alongside the excerpt for
+        # compat) so the TL can inject the whole file into the spawn prompt.
+        "memory_full": memory_full,
         "boundary_rules": boundary_section,
         # DWB-341: absolute memory_dir path so callers can reason about
         # where the agent's files live without having to rebuild it.
@@ -363,12 +408,33 @@ def spawn_prepare_payload(
 
 
 class SessionCompleteError(Exception):
-    """Raised when session-complete can't resolve or write."""
+    """Raised when session-complete can't resolve or write.
 
-    def __init__(self, code: str, detail: str):
+    DWB-518: adds the ``over_ceiling`` code (the wrap-up block would push
+    memory.md past its token ceiling) carrying tokens + ceiling for the
+    actionable refusal message.
+    """
+
+    def __init__(self, code: str, detail: str, *, tokens: int | None = None,
+                 ceiling: int | None = None):
         super().__init__(detail)
         self.code = code
         self.detail = detail
+        self.tokens = tokens
+        self.ceiling = ceiling
+
+
+# DWB-518: the memory ceiling is a HARD gate now, not a silent trim. When a
+# write would exceed it the server refuses and tells the agent to condense
+# first and retry - refusal is the signal, never "wait".
+def _memory_over_ceiling_detail(agent_id: int, tokens: int, ceiling: int) -> str:
+    return (
+        f"memory.md would be ~{tokens} tokens, over its {ceiling}-token ceiling. "
+        f"The write was refused: nothing was dropped. Condense first, then retry - "
+        f"POST /api/agents/{agent_id}/memory/condense with a rewritten memory.md "
+        f"under {ceiling} tokens (the server stamps a condensed-at heading and "
+        f"replaces the file). Do not wait; condense and resend."
+    )
 
 
 def record_session_complete(
@@ -423,6 +489,18 @@ def record_session_complete(
         tokens_used=tokens_used,
     )
 
+    # DWB-518: no silent trim. Refuse if the wrap-up block would push memory.md
+    # over its ceiling; the agent must condense first, then re-call.
+    ceiling = ceiling_for_file("memory.md")
+    projected = estimate_tokens(_read_text_safe(target) + payload)
+    if projected > ceiling:
+        raise SessionCompleteError(
+            "over_ceiling",
+            _memory_over_ceiling_detail(agent.id, projected, ceiling),
+            tokens=projected,
+            ceiling=ceiling,
+        )
+
     paths_written: list[str] = []
     bytes_written = 0
     try:
@@ -430,9 +508,6 @@ def record_session_complete(
             f.write(payload)
         paths_written.append(str(target))
         bytes_written += len(payload.encode("utf-8"))
-        # Passive trim (DWB-401): keep memory.md under its ceiling by dropping
-        # oldest blocks. Never blocks a close; purely mechanical.
-        _passive_trim_memory(target)
     except OSError as e:
         raise SessionCompleteError(
             "memory_dir_unwritable",
@@ -476,47 +551,10 @@ def _read_text_safe(path: Path) -> str:
         return ""
 
 
-def _passive_trim_memory(path: Path) -> bool:
-    """DWB-401 passive trim for memory.md.
-
-    Keeps memory.md within its token ceiling by dropping the OLDEST blocks
-    (segments delimited by '## ' headings), always retaining the newest block
-    and any pre-heading preamble (the file title). This is purely mechanical,
-    server-side, and NEVER blocks a session or sprint close - the ceiling is a
-    trim threshold, not a gate (DWB-400/401). Best-effort: read/write errors
-    are swallowed so a trim hiccup never fails the caller's write.
-
-    Returns True if it trimmed.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    ceiling = ceiling_for_file("memory.md")
-    if estimate_tokens(text) <= ceiling:
-        return False
-    lines = text.splitlines(keepends=True)
-    starts = [i for i, ln in enumerate(lines) if ln.startswith("## ")]
-    if len(starts) <= 1:
-        return False  # zero or one block: nothing safe to drop
-    preamble = "".join(lines[: starts[0]])
-    blocks = [
-        "".join(lines[starts[k] : starts[k + 1]]) for k in range(len(starts) - 1)
-    ]
-    blocks.append("".join(lines[starts[-1] :]))
-    while len(blocks) > 1 and estimate_tokens(preamble + "".join(blocks)) > ceiling:
-        blocks.pop(0)  # drop oldest
-    new_text = preamble + "".join(blocks)
-    if new_text == text:
-        return False
-    try:
-        tmp = path.with_suffix(path.suffix + ".trim.tmp")
-        tmp.write_text(new_text, encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError:
-        return False
-    logger.info("DWB-401 passive trim: %s trimmed to <=%d tokens", path, ceiling)
-    return True
+# DWB-518: the passive oldest-entry trim (_passive_trim_memory) was removed.
+# Per the Miles ruling there is no silent eviction: an over-ceiling write is
+# refused (append / session-complete -> 400) and the agent condenses via the
+# condense endpoint. No code path drops memory entries anymore.
 
 
 # --- /{id}/memory/append (DWB-358) -------------------------------------------
@@ -544,14 +582,18 @@ class MemoryAppendError(Exception):
       - invalid_file         (file name not in the whitelist)
       - file_protected       (caller targeted identity.md)
       - empty_content        (content empty or whitespace-only)
+      - over_ceiling         (DWB-518: the append would exceed memory.md's ceiling)
       - memory_dir_unwritable
       - memory_file_unwritable
     """
 
-    def __init__(self, code: str, detail: str):
+    def __init__(self, code: str, detail: str, *, tokens: int | None = None,
+                 ceiling: int | None = None):
         super().__init__(detail)
         self.code = code
         self.detail = detail
+        self.tokens = tokens
+        self.ceiling = ceiling
 
 
 def _format_memory_append_block(
@@ -665,11 +707,22 @@ def append_memory(
         session_id=session_id,
     )
 
+    # DWB-518: no silent trim. If appending this block would push memory.md over
+    # its ceiling, refuse (nothing is dropped); the agent condenses first, then
+    # retries. Refusal is the signal.
+    ceiling = ceiling_for_file(f"{file}.md")
+    projected = estimate_tokens(_read_text_safe(target) + block)
+    if projected > ceiling:
+        raise MemoryAppendError(
+            "over_ceiling",
+            _memory_over_ceiling_detail(agent.id, projected, ceiling),
+            tokens=projected,
+            ceiling=ceiling,
+        )
+
     try:
         with target.open("a", encoding="utf-8") as f:
             f.write(block)
-        # DWB-401: passive trim keeps memory.md under ceiling; never gates.
-        _passive_trim_memory(target)
     except OSError as e:
         raise MemoryAppendError(
             "memory_file_unwritable",
@@ -704,6 +757,123 @@ class MemoryCompactError(Exception):
         self.ceiling = ceiling
 
 
+class MemoryCondenseError(Exception):
+    """Raised when the memory-condense (DWB-518) endpoint cannot validate or write.
+
+    Same code set as MemoryCompactError; ``still_over_ceiling`` carries the
+    submitted content's tokens + the ceiling for the actionable refusal.
+    """
+
+    def __init__(self, code: str, detail: str, *, tokens: int | None = None,
+                 ceiling: int | None = None):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+        self.tokens = tokens
+        self.ceiling = ceiling
+
+
+def _replace_memory(
+    db: Session,
+    *,
+    agent_id: int,
+    file: str,
+    content: str,
+    heading: str | None,
+    err_cls: type,
+) -> dict:
+    """Shared full-file REPLACE for the compact + condense endpoints.
+
+    DWB-518: the memory ceiling is a HARD gate, not a silent trim. The final
+    text (optional ``heading`` prepended + the submitted body) is measured; if
+    it exceeds the file's ceiling the write is REFUSED with ``still_over_ceiling``
+    and nothing is written - the agent must trim further and resubmit. identity.md
+    is protected; empty content is refused so the file cannot be blanked to pass.
+    ``err_cls`` is the exception type the caller wants raised (MemoryCompactError
+    or MemoryCondenseError) so each endpoint keeps its own typed errors.
+    """
+    if file in _PROTECTED_FILES:
+        raise err_cls(
+            "file_protected",
+            f"file '{file}.md' is system-generated and cannot be replaced "
+            f"(scaffold regenerates it)",
+        )
+    if file not in _APPENDABLE_FILES:
+        raise err_cls(
+            "invalid_file",
+            f"file '{file}' is not a rewritable memory file; "
+            f"allowed: {sorted(_APPENDABLE_FILES)}",
+        )
+    if not content or not content.strip():
+        raise err_cls(
+            "empty_content",
+            "content is empty or whitespace-only; refusing to blank the file "
+            "to pass the ceiling — the rewrite must preserve real content",
+        )
+
+    fname = f"{file}.md"
+    ceiling = ceiling_for_file(fname)
+
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        raise err_cls("agent_not_found", f"agent id {agent_id} not found")
+    if agent.project_id is None:
+        raise err_cls(
+            "agent_unscoped",
+            f"agent id {agent_id} has no project_id - cannot resolve memory_dir",
+        )
+    project = db.get(Project, agent.project_id)
+    if project is None:
+        raise err_cls(
+            "project_not_found",
+            f"agent id {agent_id} references project {agent.project_id} which is missing",
+        )
+    if not project.repo_path:
+        raise err_cls(
+            "repo_path_missing",
+            f"project '{project.prefix}' has no repo_path - cannot resolve memory_dir",
+        )
+
+    body = content.rstrip("\n") + "\n"
+    final_text = (heading + body) if heading else body
+
+    # DWB-518: hard ceiling. A rewrite that is still over is refused, not trimmed.
+    tokens = estimate_tokens(final_text)
+    if tokens > ceiling:
+        raise err_cls(
+            "still_over_ceiling",
+            f"the rewritten memory.md is still ~{tokens} tokens, over its "
+            f"{ceiling}-token ceiling. Nothing was written. Trim further and "
+            f"resubmit under {ceiling} tokens.",
+            tokens=tokens,
+            ceiling=ceiling,
+        )
+
+    memory_dir = Path(_memory_dir(project, agent))
+    try:
+        memory_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise err_cls(
+            "memory_dir_unwritable",
+            f"could not create memory dir {memory_dir}: {e}",
+        )
+
+    target = memory_dir / fname
+    try:
+        target.write_text(final_text, encoding="utf-8")
+    except OSError as e:
+        raise err_cls("memory_file_unwritable", f"could not write {target}: {e}")
+
+    return {
+        "agent_id": agent.id,
+        "file": file,
+        "path": str(target),
+        "tokens": tokens,
+        "ceiling": ceiling,
+        "bytes_written": len(final_text.encode("utf-8")),
+    }
+
+
 def compact_memory(
     db: Session,
     *,
@@ -711,94 +881,48 @@ def compact_memory(
     file: str,
     content: str,
 ) -> dict:
-    """Replace (compact) one of the agent's memory files with a leaner version.
+    """Replace (compact) the agent's memory.md with a leaner version, verbatim.
 
-    The memory-append endpoint is append-only by design; compaction is a
-    *rewrite*, so this is its own endpoint. The agent reads its bloated file,
-    produces a compacted full-file replacement, and submits it here. The
-    server overwrites the file on the agent's behalf (same .claude/-write
-    workaround as append_memory) — but ONLY if the compacted content is within
-    the file's token ceiling. If it is still over, the write is refused with
-    ``still_over_ceiling`` so the gate cannot be satisfied by a no-op; the
-    agent must trim further and resubmit. This refusal is the hard gate.
-
-    identity.md is protected (scaffold owns it). Empty content is refused so a
-    file cannot be blanked to pass the ceiling.
+    Full-file REPLACE (not append): the agent submits the rewritten content and
+    the server overwrites the file (same .claude/-write workaround as append) -
+    ONLY if it is within the token ceiling. DWB-518: over-ceiling is REFUSED with
+    ``still_over_ceiling`` (was a silent trim under DWB-401); nothing is dropped.
+    identity.md is protected; empty content is refused. No heading is stamped
+    (the agent's content is written as-is); the condense endpoint is the
+    heading-stamped sibling.
     """
-    if file in _PROTECTED_FILES:
-        raise MemoryCompactError(
-            "file_protected",
-            f"file '{file}.md' is system-generated and cannot be compacted "
-            f"(scaffold regenerates it)",
-        )
-    if file not in _APPENDABLE_FILES:
-        raise MemoryCompactError(
-            "invalid_file",
-            f"file '{file}' is not a compactable memory file; "
-            f"allowed: {sorted(_APPENDABLE_FILES)}",
-        )
-    if not content or not content.strip():
-        raise MemoryCompactError(
-            "empty_content",
-            "content is empty or whitespace-only; refusing to blank the file "
-            "to pass the ceiling — compaction must preserve real content",
-        )
+    return _replace_memory(
+        db, agent_id=agent_id, file=file, content=content,
+        heading=None, err_cls=MemoryCompactError,
+    )
 
-    fname = f"{file}.md"
-    ceiling = ceiling_for_file(fname)
-    # DWB-401: no over-ceiling REJECTION. memory.md's ceiling is a passive trim
-    # threshold, never a gate; if the submitted content is over, the server
-    # trims oldest blocks after writing rather than refusing.
 
-    agent = db.get(Agent, agent_id)
-    if agent is None:
-        raise MemoryCompactError("agent_not_found", f"agent id {agent_id} not found")
-    if agent.project_id is None:
-        raise MemoryCompactError(
-            "agent_unscoped",
-            f"agent id {agent_id} has no project_id - cannot resolve memory_dir",
-        )
-    project = db.get(Project, agent.project_id)
-    if project is None:
-        raise MemoryCompactError(
-            "project_not_found",
-            f"agent id {agent_id} references project {agent.project_id} which is missing",
-        )
-    if not project.repo_path:
-        raise MemoryCompactError(
-            "repo_path_missing",
-            f"project '{project.prefix}' has no repo_path - cannot resolve memory_dir",
-        )
+def condense_memory(
+    db: Session,
+    *,
+    agent_id: int,
+    file: str,
+    content: str,
+) -> dict:
+    """DWB-518: the sanctioned memory rewrite. Full-file REPLACE of memory.md
+    with a server-stamped ISO condensed-at heading, validated under the ceiling.
 
-    memory_dir = Path(_memory_dir(project, agent))
-    try:
-        memory_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        raise MemoryCompactError(
-            "memory_dir_unwritable",
-            f"could not create memory dir {memory_dir}: {e}",
-        )
-
-    target = memory_dir / fname
-    normalized = content.rstrip("\n") + "\n"
-    try:
-        target.write_text(normalized, encoding="utf-8")
-        # DWB-401: passive trim after replace; keeps memory.md under ceiling.
-        _passive_trim_memory(target)
-    except OSError as e:
-        raise MemoryCompactError(
-            "memory_file_unwritable", f"could not write {target}: {e}"
-        )
-
-    final_text = _read_text_safe(target)
-    return {
-        "agent_id": agent.id,
-        "file": file,
-        "path": str(target),
-        "tokens": estimate_tokens(final_text),
-        "ceiling": ceiling,
-        "bytes_written": len(final_text.encode("utf-8")),
-    }
+    This is the path the over-ceiling append/session-complete refusal points at:
+    the agent reads its full memory (now force-injected at spawn, DWB-517),
+    rewrites it leaner, and submits here. The server prepends
+    ``## <ISO8601> - condensed`` so the provenance of the rewrite is on the
+    record, then replaces the file. Refused with ``still_over_ceiling`` if the
+    submission is itself over ceiling (trim more and resubmit); identity.md is
+    protected; empty content is refused.
+    """
+    condensed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    heading = f"## {condensed_at} - condensed\n"
+    result = _replace_memory(
+        db, agent_id=agent_id, file=file, content=content,
+        heading=heading, err_cls=MemoryCondenseError,
+    )
+    result["condensed_at"] = condensed_at
+    return result
 
 
 # --- /{id}/marker ------------------------------------------------------------

@@ -225,10 +225,12 @@ class TestSpawnPrepareHappyPath:
         })
         assert r.status_code == 200
         data = r.json()
-        # DWB-341 added memory_dir; DWB-352 added memory_usage_rules.
+        # DWB-341 added memory_dir; DWB-352 added memory_usage_rules;
+        # DWB-517 added memory_full (the full memory.md verbatim).
         assert set(data.keys()) == {
             "agent_id", "identity_prompt", "scratchpad_excerpt",
             "boundary_rules", "memory_dir", "memory_usage_rules",
+            "memory_full",
         }
         assert data["agent_id"] == agent["id"]
         assert data["identity_prompt"].startswith("## Identity")

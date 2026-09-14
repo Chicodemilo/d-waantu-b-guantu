@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AgentCreate, AgentUpdate, AgentRead
-# Last Modified: 2026-06-24 (DWB-466: drop api_key from AgentRead - never echo the secret back)
+# Last Modified: 2026-09-14 (DWB-517 memory_full; DWB-518 MemoryCondenseRequest/Response)
 
 from datetime import datetime
 
@@ -111,6 +111,10 @@ class SpawnPrepareResponse(BaseModel):
     agent_id: int
     identity_prompt: str
     scratchpad_excerpt: str
+    # DWB-517: the agent's FULL memory.md verbatim (empty string when none yet).
+    # The excerpt above is kept for compat; this is the whole file so the TL
+    # injects the agent's complete memory into the spawn prompt with no read.
+    memory_full: str
     boundary_rules: str
     # DWB-341: absolute memory_dir path. The endpoint guarantees this dir +
     # its core files (identity.md, scratchpad.md, lessons.md,
@@ -215,3 +219,32 @@ class MemoryCompactResponse(BaseModel):
     tokens: int
     ceiling: int
     bytes_written: int
+
+
+class MemoryCondenseRequest(BaseModel):
+    """POST /api/agents/{agent_id}/memory/condense body (DWB-518).
+
+    The sanctioned memory rewrite: a full-file REPLACE of memory.md. The server
+    stamps an ISO ``## <timestamp> - condensed`` heading and writes the result
+    only if it is within the file's token ceiling (refused otherwise; nothing is
+    silently dropped). identity.md is system-generated and not accepted.
+
+    content: the COMPLETE rewritten memory.md body (the server prepends the
+             condensed-at heading). Refused if empty or if the stamped result
+             still exceeds the ceiling.
+    """
+
+    file: Literal["memory"]
+    content: str
+
+
+class MemoryCondenseResponse(BaseModel):
+    agent_id: int
+    file: str
+    path: str
+    tokens: int
+    ceiling: int
+    bytes_written: int
+    # DWB-518: ISO 8601 UTC timestamp the server stamped into the condensed-at
+    # heading it prepended to the rewritten file.
+    condensed_at: str

@@ -3,10 +3,10 @@
 # Created: 2026-04-09
 # Purpose: HTTP endpoints for Claude Code lifecycle hooks (SessionStart, SessionEnd, SubagentStop, UserPromptSubmit, PostToolUse, Notification/PreCompact) + git post-commit hook auto-close (DWB-345); DWB-402 retired the UserPromptSubmit Layer-2 Haiku classifier; DWB-417 added the PostToolUse tool-action capture endpoint; DWB-421 added the lifecycle-event endpoint
 # Caller: app/main.py
-# Callees: app/services/hook_tracking.py, app/services/failed_hook.py, app/services/git_hook.py, app/models/hook_session.py, app/schemas/tool_action.py
+# Callees: app/services/hook_tracking.py, app/services/agent.py, app/services/failed_hook.py, app/services/git_hook.py, app/models/hook_session.py, app/schemas/tool_action.py
 # Data In: HTTP POST from curl hook commands
-# Data Out: JSON responses (HookSession data, tool-action + lifecycle capture result, post-commit close result)
-# Last Modified: 2026-06-22 (DWB-418..421)
+# Data Out: JSON responses (HookSession data + DWB-517 SessionStart additionalContext, tool-action + lifecycle capture result, post-commit close result)
+# Last Modified: 2026-09-14 (DWB-517: SessionStart injects TL memory as additionalContext)
 
 """Hook endpoints for passive tracking.
 
@@ -32,6 +32,7 @@ from app.schemas.tool_action import (
     ToolActionRead,
     ToolUseInput,
 )
+from app.services import agent as agent_svc
 from app.services import git_hook as git_hook_svc
 from app.services import hook_tracking as svc
 from app.services.failed_hook import log_failed_hook
@@ -43,14 +44,35 @@ router = APIRouter(prefix="/api/hooks", tags=["hooks"])
 
 @router.post("/session-start", status_code=200)
 def hook_session_start(data: HookEventInput, db: Session = Depends(get_db)):
-    """Receive a SessionStart hook event from Claude Code."""
+    """Receive a SessionStart hook event from Claude Code.
+
+    DWB-517: also injects the resolved project team-lead's FULL memory.md into
+    the starting session as SessionStart ``additionalContext`` (Claude Code
+    reads ``hookSpecificOutput.additionalContext`` from the hook's stdout, which
+    is this response body). This lands an archie's own memory in context at
+    session start with zero action. Best-effort: the memory read is guarded
+    separately so a filesystem miss never disturbs token tracking, and the
+    block is omitted entirely when there is no TL memory to inject.
+    """
     try:
         session = svc.handle_session_start(db, data.model_dump())
-        return {
+        response = {
             "status": "ok",
             "session_id": session.session_id,
             "hook_session_id": session.id,
         }
+        # DWB-517: attach the project TL's memory as additionalContext. Fully
+        # guarded - a read failure degrades to no injection, never an error.
+        try:
+            tl_memory = agent_svc.tl_memory_for_project(db, session.project_id)
+            if tl_memory and tl_memory.strip():
+                response["hookSpecificOutput"] = {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": tl_memory,
+                }
+        except Exception:
+            logger.exception("hook_session_start memory injection failed")
+        return response
     except Exception as e:
         logger.exception("hook_session_start error")
         log_failed_hook(

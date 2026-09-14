@@ -6,7 +6,7 @@
 # Callees: app/services/agent.py, app/services/agent_consolidation.py
 # Data In: HTTP requests
 # Data Out: JSON responses (AgentRead, AgentIdentifyResponse, AgentConsolidationAckRead)
-# Last Modified: 2026-06-10
+# Last Modified: 2026-09-14 (DWB-518: memory append/session-complete refuse over-ceiling 400; new condense endpoint; compact hard-gates)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -26,6 +26,8 @@ from app.schemas.agent import (
     MemoryAppendResponse,
     MemoryCompactRequest,
     MemoryCompactResponse,
+    MemoryCondenseRequest,
+    MemoryCondenseResponse,
     SessionCompleteRequest,
     SessionCompleteResponse,
     SpawnPrepareRequest,
@@ -151,7 +153,13 @@ def session_complete(
             tokens_used=data.tokens_used,
         )
     except svc.SessionCompleteError as e:
-        status = 500 if e.code == "memory_dir_unwritable" else 404
+        if e.code == "memory_dir_unwritable":
+            status = 500
+        elif e.code == "over_ceiling":
+            # DWB-518: over_ceiling is an actionable refusal (condense first).
+            status = 400
+        else:
+            status = 404
         raise HTTPException(status, e.detail)
 
 
@@ -306,6 +314,9 @@ def append_agent_memory(
             "empty_content",
             "agent_unscoped",
             "repo_path_missing",
+            # DWB-518: append refused because it would exceed the ceiling. The
+            # detail names tokens + ceiling and tells the agent to condense.
+            "over_ceiling",
         ):
             status = 400
         elif e.code in ("memory_dir_unwritable", "memory_file_unwritable"):
@@ -325,15 +336,16 @@ def compact_agent_memory(
     data: MemoryCompactRequest,
     db: Session = Depends(get_db),
 ):
-    """Compact (full-file replace) one of the agent's memory files.
+    """Compact (full-file replace) the agent's memory.md, verbatim.
 
     The agent submits a leaner rewrite of the whole file; the server
     overwrites it ONLY if the result is within the file's token ceiling. A
-    result still over ceiling is refused 422 — that refusal is the hard
-    compaction gate (it cannot be satisfied by a no-op, and empty content is
-    rejected so the file cannot be blanked to pass).
+    result still over ceiling is refused (DWB-518: 400, was a silent trim under
+    DWB-401) - that refusal is the hard gate (it cannot be satisfied by a no-op,
+    and empty content is rejected so the file cannot be blanked to pass). No
+    heading is stamped; see the condense endpoint for the heading-stamped rewrite.
 
-    Errors: 404 agent/project missing; 422 still over ceiling; 400 bad file /
+    Errors: 404 agent/project missing; 400 still over ceiling / bad file /
     empty content / unscoped agent / no repo_path; 500 disk write failure.
     """
     try:
@@ -343,9 +355,53 @@ def compact_agent_memory(
     except svc.MemoryCompactError as e:
         if e.code in ("agent_not_found", "project_not_found"):
             status = 404
-        elif e.code == "still_over_ceiling":
-            status = 422
         elif e.code in (
+            "still_over_ceiling",
+            "file_protected",
+            "invalid_file",
+            "empty_content",
+            "agent_unscoped",
+            "repo_path_missing",
+        ):
+            # DWB-518: still_over_ceiling is now an actionable 400 (trim more),
+            # consistent with the append/session-complete/condense refusals.
+            status = 400
+        else:
+            status = 500
+        raise HTTPException(status, e.detail)
+
+
+@router.post(
+    "/{agent_id}/memory/condense",
+    response_model=MemoryCondenseResponse,
+    status_code=200,
+)
+def condense_agent_memory(
+    agent_id: int,
+    data: MemoryCondenseRequest,
+    db: Session = Depends(get_db),
+):
+    """DWB-518: condense (full-file replace) the agent's memory.md.
+
+    The sanctioned rewrite path the over-ceiling append/session-complete refusal
+    points at. The agent submits the leaner full-file content; the server stamps
+    an ISO ``## <timestamp> - condensed`` heading, validates the result is under
+    the ceiling, and replaces the file. A submission still over ceiling is
+    refused 400 (trim more and resubmit). identity.md is refused; empty content
+    is refused so the file cannot be blanked to pass.
+
+    Errors: 404 agent/project missing; 400 still over ceiling / bad file /
+    empty content / unscoped agent / no repo_path; 500 disk write failure.
+    """
+    try:
+        return svc.condense_memory(
+            db, agent_id=agent_id, file=data.file, content=data.content
+        )
+    except svc.MemoryCondenseError as e:
+        if e.code in ("agent_not_found", "project_not_found"):
+            status = 404
+        elif e.code in (
+            "still_over_ceiling",
             "file_protected",
             "invalid_file",
             "empty_content",
