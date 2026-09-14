@@ -6,7 +6,7 @@
 # Callees:       GET/POST /api/playbooks, POST /api/projects/:id/deploy-playbooks
 # Data In:       Factory-created projects via conftest fixtures; temp playbook files
 # Data Out:      Assertions on HTTP status codes and deployed playbook content
-# Last Modified: 2026-08-11 (DWB-027)
+# Last Modified: 2026-09-14 (DWB-511: /sprint-post skill deploy + drift-guard tests)
 
 """Tests for /api/playbooks and /api/projects/:id/deploy-playbooks."""
 
@@ -142,6 +142,103 @@ class TestDeployMirrorsCommands:
             deployed = r.json()["deployed"]
             for name in src_names:
                 assert f"commands/{name} (unchanged)" in deployed
+
+
+class TestDeploySprintPostSkill:
+    """DWB-511: deploy-playbooks must mirror the /sprint-post skill (Sprint
+    Warehouse recap generator) into each target repo's .claude/commands/. The
+    canonical text lives in the docs/ bundle (docs/commands/sprint-post.md,
+    byte-for-byte the IND specimen from TL-channel #245). DWB's own copy under
+    .claude/commands/ is kept in sync by a drift guard."""
+
+    def test_bundle_source_exists_and_is_verbatim(self):
+        """The bundled skill text is present and carries the canonical headings
+        from the approved specimen (byte-level fidelity is asserted against the
+        deployed copy below; here we sanity-check the source shape)."""
+        from app.routers.playbooks import SPRINT_POST_COMMAND_SRC
+
+        assert SPRINT_POST_COMMAND_SRC.is_file(), (
+            "docs/commands/sprint-post.md (bundle source) is missing"
+        )
+        text = SPRINT_POST_COMMAND_SRC.read_text(encoding="utf-8")
+        assert text.startswith("# Sprint Warehouse post generator (any project)")
+        # Notes section must be kept (spec: verbatim, including Notes).
+        assert "## Notes" in text
+        # No em dashes anywhere in the shipped skill.
+        assert "—" not in text and "–" not in text
+
+    def test_skill_deployed_to_target_and_byte_matches_bundle(
+        self, client, make_project
+    ):
+        from app.routers.playbooks import (
+            SPRINT_POST_COMMAND_NAME,
+            SPRINT_POST_COMMAND_SRC,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="SPOST1")
+            r = client.post(f"/api/projects/{project['id']}/deploy-playbooks")
+            assert r.status_code == 200, r.text
+            data = r.json()
+
+            dst = Path(tmpdir) / ".claude" / "commands" / SPRINT_POST_COMMAND_NAME
+            assert dst.is_file(), "sprint-post.md not deployed to target"
+            # Byte-for-byte match against the bundled canonical text.
+            assert (
+                dst.read_text(encoding="utf-8")
+                == SPRINT_POST_COMMAND_SRC.read_text(encoding="utf-8")
+            )
+            # First deploy reports it copied.
+            assert f"commands/{SPRINT_POST_COMMAND_NAME} (copied)" in data["deployed"]
+            # Exactly one deployed entry for the skill (single writer; the glob
+            # lane skips it so there is no duplicate).
+            skill_entries = [
+                e for e in data["deployed"]
+                if e.startswith(f"commands/{SPRINT_POST_COMMAND_NAME}")
+            ]
+            assert len(skill_entries) == 1
+
+    def test_second_deploy_reports_skill_unchanged(self, client, make_project):
+        from app.routers.playbooks import SPRINT_POST_COMMAND_NAME
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = make_project(repo_path=tmpdir, prefix="SPOST2")
+            client.post(f"/api/projects/{project['id']}/deploy-playbooks")
+            r = client.post(f"/api/projects/{project['id']}/deploy-playbooks")
+            assert r.status_code == 200
+            assert (
+                f"commands/{SPRINT_POST_COMMAND_NAME} (unchanged)"
+                in r.json()["deployed"]
+            )
+
+    def test_dwb_own_copy_matches_bundle(self):
+        """Drift guard: DWB's own .claude/commands/sprint-post.md (what DWB's
+        CC loads) MUST byte-match the deployed bundle text docs/commands/
+        sprint-post.md, so a deploy into DWB reports 'unchanged' and DWB runs
+        the same skill every sibling repo gets. If this fails, sync the two:
+        copy docs/commands/sprint-post.md over .claude/commands/sprint-post.md.
+
+        Skipped until DWB's mirror exists (it is written by the TL, since
+        subagents cannot write under .claude/). Once present, this is a hard
+        byte-match enforced on every run."""
+        from app.routers.playbooks import (
+            DWB_SPRINT_POST_COMMAND,
+            SPRINT_POST_COMMAND_SRC,
+        )
+
+        if not DWB_SPRINT_POST_COMMAND.is_file():
+            import pytest
+            pytest.skip(
+                "DWB .claude/commands/sprint-post.md mirror not written yet "
+                "(TL-owned write); drift guard activates once it exists"
+            )
+        assert (
+            DWB_SPRINT_POST_COMMAND.read_text(encoding="utf-8")
+            == SPRINT_POST_COMMAND_SRC.read_text(encoding="utf-8")
+        ), (
+            "DWB's .claude/commands/sprint-post.md has drifted from the deployed "
+            "bundle docs/commands/sprint-post.md"
+        )
 
 
 class TestDeployScaffoldsMemoryDirs:

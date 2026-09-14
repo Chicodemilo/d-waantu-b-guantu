@@ -1,12 +1,12 @@
 # Path: app/services/playbook_deploy.py
 # File: playbook_deploy.py
 # Created: 2026-06-24 (DWB-461)
-# Purpose: Shared .claude/ bundle deploy logic (playbooks, project rules, root-doc stubs, agent defs, aux docs, slash commands, hooks, memory scaffold). One implementation used by the manual deploy-playbooks endpoint AND project creation.
+# Purpose: Shared .claude/ bundle deploy logic (playbooks, project rules, root-doc stubs, agent defs, aux docs, slash commands, the /sprint-post skill, hooks, memory scaffold). One implementation used by the manual deploy-playbooks endpoint AND project creation.
 # Caller: app/routers/playbooks.py (manual deploy), app/routers/projects.py (deploy-on-create)
 # Callees: app/services/agent_memory.py, app/models/agent.py, pathlib, shutil, re, json
 # Data In: db: Session, project: Project
 # Data Out: DeployResult
-# Last Modified: 2026-08-11 (DWB-027)
+# Last Modified: 2026-09-14 (DWB-511: ship the /sprint-post skill fleet-wide)
 
 import json
 import logging
@@ -34,6 +34,19 @@ DWB_AGENT_DEFS_DIR = DWB_REPO_ROOT / ".claude" / "agents"
 # commands from the cwd repo or user-level, so sibling-repo Archies need their
 # own copy. Mirrored to each target's `.claude/commands/` on deploy.
 DWB_COMMANDS_DIR = DWB_REPO_ROOT / ".claude" / "commands"
+
+# DWB-511: the /sprint-post slash command (Sprint Warehouse recap generator,
+# Miles ruling 2026-09-10, TL-channel #245). Standardized fleet-wide so every
+# project's Archie builds the biweekly recap the same way. The canonical text
+# lives in the docs/ bundle (writable, byte-for-byte from the IND specimen)
+# rather than under .claude/, so the deploy sources it the same way the
+# coding-standards sheet + aux docs are sourced from docs/. Mirrored to every
+# target repo's `.claude/commands/sprint-post.md`. DWB's own copy under
+# `.claude/commands/` is kept in sync by a drift guard (test_playbooks.py),
+# the same pattern as the hooks block vs the shipped settings.json.
+SPRINT_POST_COMMAND_NAME = "sprint-post.md"
+SPRINT_POST_COMMAND_SRC = DOCS_DIR / "commands" / SPRINT_POST_COMMAND_NAME
+DWB_SPRINT_POST_COMMAND = DWB_COMMANDS_DIR / SPRINT_POST_COMMAND_NAME
 
 PLAYBOOK_FILES = {
     "team_lead": "team_lead_playbook.md",
@@ -630,6 +643,11 @@ def deploy_bundle(db: Session, project) -> DeployResult:
     ):
         commands_target_dir.mkdir(parents=True, exist_ok=True)
         for src in sorted(DWB_COMMANDS_DIR.glob("*.md")):
+            # DWB-511: sprint-post.md is owned by the dedicated bundled-source
+            # step below (sourced from docs/, not .claude/commands/), so skip it
+            # here to keep exactly one writer and one deployed[] entry.
+            if src.name == SPRINT_POST_COMMAND_NAME:
+                continue
             src_text = src.read_text(encoding="utf-8")
             dst = commands_target_dir / src.name
             if dst.is_file() and dst.read_text(encoding="utf-8") == src_text:
@@ -637,6 +655,29 @@ def deploy_bundle(db: Session, project) -> DeployResult:
                 continue
             shutil.copy2(src, dst)
             deployed.append(f"commands/{src.name} (copied)")
+
+    # DWB-511: mirror the /sprint-post skill into each target repo's
+    # `.claude/commands/`. Sourced from the docs/ bundle (the canonical,
+    # version-controlled text) rather than DWB's `.claude/commands/`, so the
+    # deploy does not depend on DWB's own mirror existing and the content is
+    # byte-for-byte the specimen Miles approved. The glob loop above skips
+    # sprint-post.md so this is the single writer. Skipped when the target is
+    # DWB itself (DWB keeps its own copy under .claude/commands/, kept in sync
+    # by the drift-guard test). Reported copied/unchanged like the other
+    # commands so redeploys are idempotent.
+    if (
+        SPRINT_POST_COMMAND_SRC.is_file()
+        and target_dir.resolve() != (DWB_REPO_ROOT / ".claude").resolve()
+    ):
+        commands_target_dir = target_dir / "commands"
+        commands_target_dir.mkdir(parents=True, exist_ok=True)
+        skill_text = SPRINT_POST_COMMAND_SRC.read_text(encoding="utf-8")
+        dst = commands_target_dir / SPRINT_POST_COMMAND_NAME
+        if dst.is_file() and dst.read_text(encoding="utf-8") == skill_text:
+            deployed.append(f"commands/{SPRINT_POST_COMMAND_NAME} (unchanged)")
+        else:
+            dst.write_text(skill_text, encoding="utf-8")
+            deployed.append(f"commands/{SPRINT_POST_COMMAND_NAME} (copied)")
 
     # DWB-298: Scaffold memory dirs for every active agent on the project.
     # Best-effort per agent — a single failure is captured as an `error`

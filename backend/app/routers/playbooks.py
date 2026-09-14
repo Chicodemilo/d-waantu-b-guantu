@@ -6,7 +6,7 @@
 # Callees: app/services/playbook_deploy.py, app/services/project.py
 # Data In: HTTP requests
 # Data Out: JSON responses (playbook list incl. the global coding-standards sheet, deploy status incl. scaffolded memory dirs)
-# Last Modified: 2026-08-11 (DWB-027: surface coding-standards sheet in the listing)
+# Last Modified: 2026-09-14 (DWB-511: re-export /sprint-post skill deploy names for tests)
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -35,6 +35,14 @@ from app.services.playbook_deploy import coding_standards_sheet_body
 from app.services.playbook_deploy import (  # noqa: F401  (re-export for tests/back-compat)
     DWB_COMMANDS_DIR,
     _HOOKS_SETTINGS_BLOCK,
+)
+
+# DWB-511: re-exported so the /sprint-post deploy + drift-guard tests can import
+# the bundle source and DWB's own mirror path from the router module.
+from app.services.playbook_deploy import (  # noqa: F401  (re-export for tests)
+    DWB_SPRINT_POST_COMMAND,
+    SPRINT_POST_COMMAND_NAME,
+    SPRINT_POST_COMMAND_SRC,
 )
 
 router = APIRouter(prefix="/api", tags=["playbooks"])
