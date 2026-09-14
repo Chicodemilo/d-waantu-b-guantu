@@ -38,6 +38,7 @@ from app.schemas.project_agent import ProjectTeamRead
 from app.schemas.test_result import TestResultRead
 from app.services import project as svc
 from app.services import project_agent as pa_svc
+from app.services import recap as recap_svc
 from app.services import standards_audit as standards_audit_svc
 from app.services import test_result as test_svc
 from app.services.playbook_deploy import deploy_bundle
@@ -976,6 +977,26 @@ def get_project_activity_feed(
             "created_at": row.created_at.isoformat() if row.created_at else None,
         })
     return feed
+
+
+@router.get("/{project_id}/recap-draft")
+def get_project_recap_draft(
+    project_id: int,
+    window_days: int = Query(14, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Auto-generated sprint-recap draft over a trailing window (DWB-512).
+
+    Sweeps closed/worked tickets, DWB session headlines, git/PR activity, and
+    this project's tl-channel traffic in the window, then renders a markdown
+    draft in the Sprint Warehouse post format (TL-channel #245). Draft is built
+    ONLY from live queried data; no claims are invented. v1 returns the markdown
+    string plus window metadata and counts. No UI.
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return recap_svc.build_recap_draft(db, project, window_days=window_days)
 
 
 # --- Token budget ---
