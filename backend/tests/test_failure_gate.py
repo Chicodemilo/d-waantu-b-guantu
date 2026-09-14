@@ -139,6 +139,71 @@ class TestFailureRecordGate:
         })
         assert r.status_code == 200
 
+    def test_reviewed_rework_with_boilerplate_notes_intact_does_not_block(
+        self, client, gated_setup
+    ):
+        """DWB-510 regression: a rework record the PM has reviewed must clear the
+        gate even when its notes STILL contain the 'Auto-detected' boilerplate.
+        The old heuristic matched that literal string in notes and wrongly kept
+        the sprint blocked; the structured `reviewed` flag fixes it."""
+        s = gated_setup
+        # Trigger auto rework detection (done -> in_progress).
+        client.patch(f"/api/tickets/{s['ticket']['id']}", json={"status": "in_progress"})
+        client.patch(f"/api/tickets/{s['ticket']['id']}", json={"status": "done"})
+        client.patch(f"/api/tickets/{s['ticket']['id']}", json={"status": "in_progress"})
+
+        records = client.get("/api/failure-records", params={
+            "project_id": s["project"]["id"],
+            "failure_type": "rework",
+        }).json()
+        fr = next(r for r in records if r.get("ticket_id") == s["ticket"]["id"])
+        # Preconditions that the OLD heuristic keyed on: the boilerplate string
+        # is present in notes, and the record starts unreviewed.
+        assert "Auto-detected" in (fr["notes"] or "")
+        assert fr["reviewed"] is False
+
+        # PM reviews by adding analysis but does NOT rewrite the notes, so the
+        # 'Auto-detected' boilerplate the old heuristic matched is still there.
+        updated = client.patch(f"/api/failure-records/{fr['id']}", json={
+            "root_cause": "Requirements changed after sign-off",
+        }).json()
+        assert updated["reviewed"] is True
+        assert "Auto-detected" in (updated["notes"] or "")
+
+        # Ticket back to done so it isn't itself blocking; then close must pass.
+        client.patch(f"/api/tickets/{s['ticket']['id']}", json={"status": "done"})
+        r = client.patch(f"/api/sprints/{s['sprint']['id']}", json={
+            "status": "completed",
+        })
+        assert r.status_code == 200, r.text
+
+    def test_explicit_reviewed_flag_clears_rework_gate(self, client, gated_setup):
+        """DWB-510: a PM can clear the gate by setting reviewed=True explicitly,
+        with no other edit and the boilerplate notes untouched."""
+        s = gated_setup
+        client.patch(f"/api/tickets/{s['ticket']['id']}", json={"status": "in_progress"})
+        client.patch(f"/api/tickets/{s['ticket']['id']}", json={"status": "done"})
+        client.patch(f"/api/tickets/{s['ticket']['id']}", json={"status": "in_progress"})
+
+        records = client.get("/api/failure-records", params={
+            "project_id": s["project"]["id"],
+            "failure_type": "rework",
+        }).json()
+        fr = next(r for r in records if r.get("ticket_id") == s["ticket"]["id"])
+
+        # Still blocks while unreviewed.
+        client.patch(f"/api/tickets/{s['ticket']['id']}", json={"status": "done"})
+        blocked = client.patch(f"/api/sprints/{s['sprint']['id']}", json={
+            "status": "completed",
+        })
+        assert blocked.status_code == 400
+
+        client.patch(f"/api/failure-records/{fr['id']}", json={"reviewed": True})
+        r = client.patch(f"/api/sprints/{s['sprint']['id']}", json={
+            "status": "completed",
+        })
+        assert r.status_code == 200, r.text
+
     def test_no_failure_records_allows_close(self, client, gated_setup):
         s = gated_setup
         # No failure records — should close fine

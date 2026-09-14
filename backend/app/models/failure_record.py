@@ -6,11 +6,11 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: FailureRecord
-# Last Modified: 2026-04-16
+# Last Modified: 2026-09-14 (DWB-510: reviewed flag for the sprint-close failure gate)
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -42,6 +42,14 @@ class FailureRecord(Base):
     root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # DWB-510: structured "a PM has reviewed this record" signal, replacing the
+    # fragile notes-text heuristic in the sprint-close failure gate. Auto-created
+    # stubs (rework, TBD) start unreviewed; any PM edit via the update service
+    # flips this True. The gate blocks close while an auto-stub is still
+    # unreviewed - decided by this flag, never by matching boilerplate in notes.
+    reviewed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

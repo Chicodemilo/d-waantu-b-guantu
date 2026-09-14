@@ -122,7 +122,7 @@ class TestGetFailureRecord:
             "id", "project_id", "ticket_id", "sprint_id", "agent_id",
             "logged_by_agent_id", "failure_type", "severity",
             "attempt_number", "notes", "root_cause", "resolution",
-            "resolved", "created_at", "updated_at",
+            "resolved", "reviewed", "created_at", "updated_at",
         }
         assert set(data.keys()) == expected_keys
 

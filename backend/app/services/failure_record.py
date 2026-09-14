@@ -6,7 +6,7 @@
 # Callees: app/models/failure_record.py
 # Data In: db: Session, filters
 # Data Out: list[FailureRecord], FailureRecord
-# Last Modified: 2026-03-29
+# Last Modified: 2026-09-14 (DWB-510: PM edit marks record reviewed)
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -53,8 +53,14 @@ def create_failure_record(db: Session, data: FailureRecordCreate) -> FailureReco
 def update_failure_record(
     db: Session, record: FailureRecord, data: FailureRecordUpdate
 ) -> FailureRecord:
-    for key, value in data.model_dump(exclude_unset=True).items():
+    fields = data.model_dump(exclude_unset=True)
+    for key, value in fields.items():
         setattr(record, key, value)
+    # DWB-510: a PM editing a failure record IS the review. When the caller did
+    # not set `reviewed` explicitly, mark it reviewed so the sprint-close gate
+    # clears - structurally, not by matching boilerplate text in notes.
+    if "reviewed" not in fields:
+        record.reviewed = True
     db.commit()
     db.refresh(record)
     return record

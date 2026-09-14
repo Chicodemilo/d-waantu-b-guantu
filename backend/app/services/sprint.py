@@ -6,7 +6,7 @@
 # Callees: models (sprint, ticket, alert, agent, failure_record, test_result, standards_audit, project), agent_consolidation svc, git, services/activity_log
 # Data In: db: Session, SprintCreate/Update, acting_agent_id
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-08-11 (DWB-017: force_standards_audit completion gate)
+# Last Modified: 2026-09-14 (DWB-510: failure-gate stub check uses reviewed flag, not notes text)
 
 import logging
 import re
@@ -349,7 +349,18 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                 f"agents have not acked ({', '.join(a.name for a in unacked)})",
             )
 
-    # Unreviewed failure records gate — block if stubs exist for sprint tickets
+    # Unreviewed failure records gate — block if stubs exist for sprint tickets.
+    # DWB-510: stub-ness is a STRUCTURED signal on the row, not a notes-text
+    # match. An auto-created stub blocks close until a PM reviews it:
+    #   - failure_type == "TBD": an explicit placeholder, unreviewed by
+    #     definition - blocks until the PM sets a real type.
+    #   - failure_type == "rework" AND NOT reviewed: the auto-detected rework
+    #     stub, unreviewed until the `reviewed` flag is flipped by any PM edit
+    #     (see failure_record service).
+    # The old heuristic matched the "Auto-detected" boilerplate in notes, which
+    # misclassified a reviewed rework record whose notes still carried that
+    # string (and, inversely, let an unreviewed record slip through once its
+    # notes were rewritten). The reviewed flag removes that fragility.
     sprint_ticket_ids = list(db.scalars(
         select(Ticket.id).where(Ticket.sprint_id == sprint.id)
     ).all())
@@ -362,7 +373,7 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                 (FailureRecord.failure_type == "TBD")
                 | (
                     (FailureRecord.failure_type == "rework")
-                    & (FailureRecord.notes.like("%Auto-detected%"))
+                    & (FailureRecord.reviewed.is_(False))
                 )
             )
         ).all())

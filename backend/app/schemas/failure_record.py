@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: FailureRecordCreate, FailureRecordUpdate, FailureRecordRead
-# Last Modified: 2026-03-29
+# Last Modified: 2026-09-14 (DWB-510: reviewed flag)
 
 from datetime import datetime
 
@@ -26,6 +26,9 @@ class FailureRecordCreate(BaseModel):
     root_cause: str | None = None
     resolution: str | None = None
     resolved: bool = False
+    # DWB-510: a record may be created already-reviewed (e.g. a PM logging a
+    # fully-analysed failure). Auto-created stubs leave this False.
+    reviewed: bool = False
 
 
 class FailureRecordUpdate(BaseModel):
@@ -37,6 +40,10 @@ class FailureRecordUpdate(BaseModel):
     root_cause: str | None = None
     resolution: str | None = None
     resolved: bool | None = None
+    # DWB-510: PM can set review state explicitly; when omitted, any edit via
+    # the update service implicitly marks the record reviewed (a PM touching a
+    # record IS the review), so a notes-only edit clears the gate.
+    reviewed: bool | None = None
 
 
 class FailureRecordRead(BaseModel):
@@ -55,5 +62,6 @@ class FailureRecordRead(BaseModel):
     root_cause: str | None
     resolution: str | None
     resolved: bool
+    reviewed: bool
     created_at: datetime
     updated_at: datetime
