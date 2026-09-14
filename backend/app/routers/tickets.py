@@ -5,8 +5,8 @@
 # Caller: app/main.py
 # Callees: app/services/ticket.py
 # Data In: HTTP requests
-# Data Out: JSON responses (TicketRead, StatusHistoryRead, attribution dict, StaleCheckResponse)
-# Last Modified: 2026-08-12 (DWB-022: thread X-Agent-ID into token increment for ledger attribution)
+# Data Out: JSON responses (TicketRead, TicketTokenIncrementResult, StatusHistoryRead, attribution dict, StaleCheckResponse)
+# Last Modified: 2026-09-14 (DWB-509: token increment requires tokens_used, forbids extras, echoes applied amount)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.ticket import TicketStatus, TicketType
 from app.schemas.status_history import StatusHistoryRead
-from app.schemas.ticket import StaleCheckInput, StaleCheckResponse, TicketCreate, TicketRead, TicketSlimRead, TicketTokenIncrement, TicketUpdate
+from app.schemas.ticket import StaleCheckInput, StaleCheckResponse, TicketCreate, TicketRead, TicketSlimRead, TicketTokenIncrement, TicketTokenIncrementResult, TicketUpdate
 from app.services import ticket as svc
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -89,7 +89,7 @@ def get_ticket_history(ticket_id: int, db: Session = Depends(get_db)):
     return svc.get_ticket_history(db, ticket_id)
 
 
-@router.post("/{ticket_id}/tokens", response_model=TicketRead)
+@router.post("/{ticket_id}/tokens", response_model=TicketTokenIncrementResult)
 def increment_ticket_tokens(
     ticket_id: int,
     data: TicketTokenIncrement,
@@ -101,13 +101,21 @@ def increment_ticket_tokens(
         raise HTTPException(404, "Ticket not found")
     # DWB-022: thread X-Agent-ID so the token increment emits a ledger event
     # attributed to the reporting agent (falls back to the ticket's assignee).
-    return svc.increment_tokens(
+    updated = svc.increment_tokens(
         db,
         ticket,
         data.tokens_used,
         data.time_spent_seconds,
         source=data.source,
         acting_agent_id=x_agent_id,
+    )
+    # DWB-509: echo the increment ACTUALLY applied by this call alongside the
+    # ticket's cumulative fields, so a zero-effect call is visible in the body.
+    base = TicketRead.model_validate(updated)
+    return TicketTokenIncrementResult(
+        **base.model_dump(),
+        applied_tokens=data.tokens_used,
+        applied_time_spent_seconds=data.time_spent_seconds,
     )
 
 

@@ -5,8 +5,8 @@
 # Caller: app/routers/tickets.py
 # Callees: pydantic
 # Data In: JSON request body
-# Data Out: TicketCreate, TicketUpdate, TicketRead, TicketTokenIncrement, StaleCheckInput, StaleCheckResponse
-# Last Modified: 2026-06-24 (DWB-455: parent_ticket_id + embedded subtasks)
+# Data Out: TicketCreate, TicketUpdate, TicketRead, TicketTokenIncrement, TicketTokenIncrementResult, StaleCheckInput, StaleCheckResponse
+# Last Modified: 2026-09-14 (DWB-509: token increment requires tokens_used, forbids extras, echoes applied amount)
 
 from datetime import datetime
 
@@ -56,7 +56,14 @@ class TicketUpdate(BaseModel):
 
 
 class TicketTokenIncrement(BaseModel):
-    tokens_used: int = 0
+    # DWB-509: tokens_used is REQUIRED (no default) and unknown keys are
+    # forbidden, so a payload with a mistyped/absent key 422s instead of
+    # silently binding 0 and returning 200 (a zero-effect call the sender
+    # believes landed). Explicit tokens_used=0 remains valid: a time-only
+    # report posts {tokens_used: 0, time_spent_seconds: N}.
+    model_config = ConfigDict(extra="forbid")
+
+    tokens_used: int
     time_spent_seconds: int = 0
     source: str | None = None
 
@@ -116,3 +123,12 @@ class TicketRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
+
+
+class TicketTokenIncrementResult(TicketRead):
+    """DWB-509: the token-increment response. Extends TicketRead (so every
+    existing consumer that reads the ticket's cumulative fields still works)
+    with an echo of the increment ACTUALLY applied by this call, making a
+    zero-effect increment visible (applied_tokens == 0)."""
+    applied_tokens: int
+    applied_time_spent_seconds: int
