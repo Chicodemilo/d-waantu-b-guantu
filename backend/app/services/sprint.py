@@ -349,6 +349,56 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                 f"agents have not acked ({', '.join(a.name for a in unacked)})",
             )
 
+    # Write-on-close gate (DWB-519) — Miles ruling: "you write for your shit on
+    # close, no exceptions." Every ACTIVE sprint participant must have written to
+    # their memory.md at least once within the sprint window. Always on (not a
+    # per-project toggle), but skipped when the project has no repo_path: memory
+    # files live under repo_path/.dwb, so with no repo nobody could have written
+    # and the gate would wrongly block every close. Detection reads each agent's
+    # ISO write-headings (memory_trace), so it stays decoupled from the memory
+    # write endpoints. participants_for_sprint already drops the DWB-329
+    # consolidation-ack overcount, so a non-working agent pulled in by an ack row
+    # is not required to write here.
+    if project.repo_path:
+        from datetime import datetime as _dt
+
+        from app.services import agent_consolidation as consolidation_svc
+        from app.services import memory_trace
+
+        window_start = (
+            _dt.combine(sprint.start_date, _dt.min.time())
+            if sprint.start_date
+            else None
+        )
+        participant_ids = consolidation_svc.participants_for_sprint(db, sprint)
+        if participant_ids:
+            active_participants = db.scalars(
+                select(Agent).where(
+                    Agent.project_id == project.id,
+                    Agent.is_active.is_(True),
+                    Agent.id.in_(participant_ids),
+                )
+            ).all()
+            non_writers = sorted(
+                a.name
+                for a in active_participants
+                if not memory_trace.agent_wrote_since(db, a, window_start)
+            )
+            if non_writers:
+                raise HTTPException(
+                    400,
+                    "write-on-close gate failed: these sprint participants have "
+                    "no memory write "
+                    + (
+                        f"since sprint start ({sprint.start_date})"
+                        if sprint.start_date
+                        else "on record"
+                    )
+                    + f": {', '.join(non_writers)}. Each must write to their "
+                    "memory.md (POST /api/agents/{id}/memory/append or "
+                    "/session-complete) before the sprint can close.",
+                )
+
     # Unreviewed failure records gate — block if stubs exist for sprint tickets.
     # DWB-510: stub-ness is a STRUCTURED signal on the row, not a notes-text
     # match. An auto-created stub blocks close until a PM reviews it:

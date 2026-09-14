@@ -190,6 +190,45 @@ def close_dwb_session(
             ),
         )
 
+    # Write-on-close gate (DWB-519) — Miles ruling: "you write for your shit on
+    # close, no exceptions." On an EXPLICIT close (a live actor drove it: the
+    # conscious-bot ai_confident / ai_asked closes and the deterministic /dwb-close
+    # slash escape hatch) the project's team-lead must have written to their own
+    # memory.md within the session window (since opened_at). idle_timeout and the
+    # regex sweeper are EXEMPT and must stay so: they fire on a dead/abandoned
+    # session where no live TL is present to write, so gating them would strand
+    # sessions open forever. The ai_classifier tombstone is likewise machine-driven
+    # and exempt. If no active TL resolves for the project we cannot attribute the
+    # write, so the gate no-ops rather than blocking on an unresolvable actor.
+    _EXPLICIT_CLOSE_METHODS = (
+        DwbCloseMethod.ai_confident,
+        DwbCloseMethod.ai_asked,
+        DwbCloseMethod.slash,
+    )
+    if not was_already_closed and body.close_method in _EXPLICIT_CLOSE_METHODS:
+        from app.models.agent import Agent
+        from app.services import memory_trace
+
+        tl = db.scalars(
+            select(Agent).where(
+                Agent.project_id == row.project_id,
+                Agent.role.in_(("team-lead", "team_lead")),
+                Agent.is_active.is_(True),
+            )
+        ).first()
+        if tl is not None and not memory_trace.agent_wrote_since(db, tl, row.opened_at):
+            start = row.opened_at.strftime("%Y-%m-%d %H:%M UTC")
+            raise HTTPException(
+                422,
+                (
+                    f"Write-on-close: you ({tl.name}) have no memory write in this "
+                    f"session (since {start}). Append what this session was about to "
+                    f"your memory.md via POST /api/agents/{tl.id}/memory/append (or "
+                    f"/session-complete), then retry the close. This is the "
+                    f"write-on-close rule, not a wait: write, then close."
+                ),
+            )
+
     # Compaction gate (parallel, autonomous, HARD). On the conscious-bot
     # closes the whole project's spawn-loaded docs must be within ceiling
     # before the session can close. The TL fans this out: every agent compacts
