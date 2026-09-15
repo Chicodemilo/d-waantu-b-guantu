@@ -6,7 +6,7 @@
 # Callees: app/models/tl_message.py, app/models/agent.py, app/models/project.py, app/models/alert.py
 # Data In: db: Session, agents/ids, message body
 # Data Out: TlMessage, serialized channel-message dicts, counts
-# Last Modified: 2026-06-23
+# Last Modified: 2026-09-15
 
 """The "Archie Channel" (DWB-437).
 
@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 # Chars of the message body echoed into a ping alert.
 _PING_BODY_MAX = 160
+# DWB-528: marker appended to a cut snippet so the reader knows it is partial.
+_PING_TRUNCATION_MARKER = " [...]"
 
 _TEAM_LEAD_ROLES = ("team-lead", "team_lead")
 
@@ -109,12 +111,27 @@ def send_message(
     return msg, alert_count
 
 
+def ping_snippet(body: str, message_id: int) -> str:
+    """The body excerpt echoed into a ping alert (DWB-528).
+
+    Cuts to ``_PING_BODY_MAX`` chars, marks a cut visibly with
+    ``_PING_TRUNCATION_MARKER``, and ALWAYS appends a pointer back to the
+    channel row (``full message: tl-channel #<id>``) so a reader of the alert
+    queue can fetch the full text. The full body lives only in tl_messages.
+    """
+    truncated = len(body) > _PING_BODY_MAX
+    snippet = body[:_PING_BODY_MAX]
+    if truncated:
+        snippet = snippet.rstrip() + _PING_TRUNCATION_MARKER
+    return f"{snippet} (full message: tl-channel #{message_id})"
+
+
 def _ping(
     db: Session, msg: TlMessage, from_agent: Agent, to_agent: Agent | None
 ) -> int:
     """Write per-agent alert rows for a channel message. Guarded so a ping
     failure never loses the message."""
-    snippet = msg.body[:_PING_BODY_MAX]
+    snippet = ping_snippet(msg.body, msg.id)
     try:
         if to_agent is not None:
             recipients = [to_agent.id]
@@ -229,6 +246,11 @@ def _serialize_rows(db: Session, rows) -> list[dict]:
 def serialize_message(db: Session, msg: TlMessage) -> dict:
     """Serialize a single message into the TlChannelMessage dict shape."""
     return _serialize_rows(db, [msg])[0]
+
+
+def get_message(db: Session, message_id: int) -> TlMessage | None:
+    """One channel row by id, or None (DWB-530). Router maps None -> 404."""
+    return db.get(TlMessage, message_id)
 
 
 def list_channel(db: Session, limit: int = 200) -> list[dict]:

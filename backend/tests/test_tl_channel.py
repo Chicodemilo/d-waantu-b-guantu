@@ -6,7 +6,7 @@
 # Callees: app.models.tl_message, /api/tl-channel
 # Data In: pytest fixtures
 # Data Out: assertions
-# Last Modified: 2026-06-23
+# Last Modified: 2026-09-15
 
 from datetime import datetime
 
@@ -275,6 +275,89 @@ class TestTlChannelSend:
             "body": "   ",
         })
         assert r.status_code == 400
+
+
+class TestTlChannelPingPointer:
+    """DWB-528: ping alert bodies carry a pointer to the channel message id and
+    a visible truncation marker when the snippet is cut. The full text lives
+    only in tl_messages."""
+
+    def _alert_for(self, db_session, recipient_id):
+        alerts = db_session.query(Alert).filter(
+            Alert.recipient_agent_id == recipient_id
+        ).all()
+        assert len(alerts) == 1
+        return alerts[0]
+
+    def test_ping_snippet_short_body_has_pointer_no_marker(self):
+        from app.services.tl_channel import _PING_TRUNCATION_MARKER, ping_snippet
+        out = ping_snippet("short body", 258)
+        assert out == "short body (full message: tl-channel #258)"
+        assert _PING_TRUNCATION_MARKER not in out
+
+    def test_ping_snippet_long_body_is_cut_and_marked(self):
+        from app.services.tl_channel import (
+            _PING_BODY_MAX, _PING_TRUNCATION_MARKER, ping_snippet,
+        )
+        body = "x" * (_PING_BODY_MAX + 50)
+        out = ping_snippet(body, 7)
+        assert out.startswith("x" * _PING_BODY_MAX + _PING_TRUNCATION_MARKER)
+        assert out.endswith("(full message: tl-channel #7)")
+        assert "x" * (_PING_BODY_MAX + 1) not in out
+
+    def test_ping_snippet_exactly_at_limit_not_marked(self):
+        from app.services.tl_channel import (
+            _PING_BODY_MAX, _PING_TRUNCATION_MARKER, ping_snippet,
+        )
+        body = "y" * _PING_BODY_MAX
+        out = ping_snippet(body, 1)
+        assert _PING_TRUNCATION_MARKER not in out
+        assert out.startswith(body)
+
+    def test_direct_ping_under_limit_carries_message_id(
+        self, client, db_session, make_agent
+    ):
+        sender = _tl(make_agent)
+        target = _tl(make_agent)
+        r = client.post("/api/tl-channel", json={
+            "from_agent_id": sender["id"],
+            "to_agent_id": target["id"],
+            "body": "under the limit",
+        })
+        assert r.status_code == 201, r.text
+        mid = r.json()["id"]
+        alert = self._alert_for(db_session, target["id"])
+        assert "under the limit" in alert.body
+        assert f"full message: tl-channel #{mid}" in alert.body
+        from app.services.tl_channel import _PING_TRUNCATION_MARKER
+        assert _PING_TRUNCATION_MARKER not in alert.body
+
+    def test_broadcast_ping_over_200_chars_is_truncated_marked_and_pointed(
+        self, client, db_session, make_agent
+    ):
+        """Repro from VTC feedback B3: a body over 200 chars used to land as a
+        mid-word cut with no way back to the channel row."""
+        from app.services.tl_channel import _PING_BODY_MAX, _PING_TRUNCATION_MARKER
+        sender = _tl(make_agent)
+        tl2 = _tl(make_agent)
+        words = " ".join(f"word{i}" for i in range(60))  # ~400 chars
+        assert len(words) > 200
+        r = client.post("/api/tl-channel", json={
+            "from_agent_id": sender["id"],
+            "body": words,
+        })
+        assert r.status_code == 201, r.text
+        mid = r.json()["id"]
+        alert = self._alert_for(db_session, tl2["id"])
+        assert _PING_TRUNCATION_MARKER in alert.body
+        assert f"full message: tl-channel #{mid}" in alert.body
+        # Only the first _PING_BODY_MAX chars of the body are echoed.
+        assert words[:_PING_BODY_MAX].rstrip() in alert.body
+        assert words not in alert.body
+        # The full text remains only in the channel table.
+        assert db_session.get(TlMessage, mid).body == words
+        listed = next(x for x in client.get("/api/tl-channel").json() if x["id"] == mid)
+        assert listed["body"] == words
 
 
 class TestTlChannelList:

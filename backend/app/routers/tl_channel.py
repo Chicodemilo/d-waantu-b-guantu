@@ -1,18 +1,18 @@
 # Path: app/routers/tl_channel.py
 # File: tl_channel.py
 # Created: 2026-06-23
-# Purpose: HTTP API for the cross-project team-lead channel (DWB-437) - send (role-guarded, with alert ping), list whole channel with read-state, list unread per agent, mark-read.
+# Purpose: HTTP API for the cross-project team-lead channel (DWB-437) - send (role-guarded, with alert ping), list whole channel with read-state, get one message by id (DWB-530), list unread per agent, mark-read.
 # Caller: app/main.py
-# Callees: app/services/tl_channel.py, app/models/agent.py
+# Callees: app/services/tl_channel.py, app/services/query_shape.py, app/models/agent.py
 # Data In: HTTP GET/POST
 # Data Out: TlChannelMessage[], SendResponse, MarkReadResponse
-# Last Modified: 2026-09-14
+# Last Modified: 2026-09-15
 
 """Team-lead channel API (DWB-437). All routes under /api/tl-channel."""
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -24,6 +24,7 @@ from app.schemas.tl_channel import (
     TlChannelMessage,
     TlMessageCreate,
 )
+from app.services import query_shape
 from app.services import tl_channel as svc
 
 logger = logging.getLogger(__name__)
@@ -33,25 +34,44 @@ router = APIRouter(prefix="/api/tl-channel", tags=["tl-channel"])
 
 @router.get("", response_model=list[TlChannelMessage])
 def list_channel(
+    request: Request,
     limit: int = Query(200, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
     """The whole channel, most-recent-first, across all projects. Every
     team-lead sees every message; each carries the full ``read_by`` roster so
     the client derives its own read flag (is my id in read_by)."""
+    query_shape.reject_unknown_query_params(
+        request, {"limit"}, endpoint="GET /api/tl-channel"
+    )
     return svc.list_channel(db, limit=limit)
 
 
 @router.get("/unread", response_model=list[TlChannelMessage])
 def list_unread(
+    request: Request,
     agent_id: int = Query(..., description="The team-lead checking their unread"),
     db: Session = Depends(get_db),
 ):
     """Unread messages addressed to / visible to an agent (broadcasts + directs
     to them, excluding their own sends, minus anything already read)."""
+    query_shape.reject_unknown_query_params(
+        request, {"agent_id"}, endpoint="GET /api/tl-channel/unread"
+    )
     if db.get(Agent, agent_id) is None:
         raise HTTPException(404, f"Agent not found: {agent_id}")
     return svc.unread_for_agent(db, agent_id)
+
+
+@router.get("/{message_id}", response_model=TlChannelMessage)
+def get_message(message_id: int, db: Session = Depends(get_db)):
+    """One channel message by id (DWB-530). This is the target of the
+    ``full message: tl-channel #<id>`` pointer in ping alerts (DWB-528). A
+    missing row 404s naming the entity, never a bare Not Found."""
+    msg = svc.get_message(db, message_id)
+    if msg is None:
+        raise HTTPException(404, f"tl-channel message {message_id} not found")
+    return svc.serialize_message(db, msg)
 
 
 @router.post("", response_model=SendResponse, status_code=201)

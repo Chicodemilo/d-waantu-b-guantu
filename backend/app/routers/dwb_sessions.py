@@ -1,12 +1,12 @@
 # Path: app/routers/dwb_sessions.py
 # File: dwb_sessions.py
 # Created: 2026-06-09
-# Purpose: REST endpoints for DWB session open/close/reopen + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-395 reopen, DWB-493 summary+keywords on list/detail)
+# Purpose: REST endpoints for DWB session open/close/reopen + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-395 reopen, DWB-493 summary+keywords on list/detail, DWB-530 wrong-shape 400s)
 # Caller: app/main.py
-# Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/schemas/dwb_session.py, app/models/entity_keyword.py
+# Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/services/query_shape.py, app/schemas/dwb_session.py, app/models/entity_keyword.py
 # Data In: HTTP POST JSON bodies, GET query/path params
 # Data Out: DwbSessionRead, DwbSessionListItem[], DwbSessionDetail (or 404/409)
-# Last Modified: 2026-06-25 (DWB-493: expose summary + batched weighted keywords on list + detail)
+# Last Modified: 2026-09-15 (DWB-530: 400 naming valid params on wrong query shape)
 
 """HTTP layer for DWB session lifecycle.
 
@@ -29,7 +29,7 @@ both code paths produce identically-shaped closed rows.
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -50,8 +50,12 @@ from app.schemas.dwb_session import (
 )
 from app.services import dwb_session as svc
 from app.services import dwb_session_rollup as rollup
+from app.services import query_shape
 
 router = APIRouter(prefix="/api/sessions", tags=["dwb_sessions"])
+
+# DWB-530: the only query params GET /api/projects/{id}/sessions accepts.
+_LIST_SESSIONS_PARAMS = frozenset({"limit", "offset"})
 
 
 def _keywords_by_session(
@@ -357,6 +361,7 @@ def reopen_dwb_session(
 )
 def list_project_sessions(
     project_id: int,
+    request: Request,
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -376,6 +381,12 @@ def list_project_sessions(
     closed_at, total_tokens, total_time_seconds, status) keep their old
     shape and values. DWB-346 aggregates are additive only.
     """
+    # DWB-530: an unknown filter (e.g. ?status=open) must not silently return
+    # the unfiltered list; name the valid params instead.
+    query_shape.reject_unknown_query_params(
+        request, _LIST_SESSIONS_PARAMS,
+        endpoint="GET /api/projects/{project_id}/sessions",
+    )
     if db.get(Project, project_id) is None:
         raise HTTPException(404, f"Project {project_id} not found")
 
@@ -418,6 +429,21 @@ def list_project_sessions(
             )
         )
     return items
+
+
+@router.get("", include_in_schema=False)
+def sessions_collection_not_available(request: Request):
+    """DWB-530: ``GET /api/sessions?project_id=X&status=open`` used to fall
+    through to a bare 404 that read as "no open session". There is no
+    collection form on this prefix; say so and name the routes that exist."""
+    raise query_shape.collection_form_not_available(
+        "GET /api/sessions",
+        use=[
+            "GET /api/projects/{project_id}/sessions (valid params: limit, offset; "
+            "each row carries status open|closed)",
+            "GET /api/sessions/{session_id}",
+        ],
+    )
 
 
 @router.get(
