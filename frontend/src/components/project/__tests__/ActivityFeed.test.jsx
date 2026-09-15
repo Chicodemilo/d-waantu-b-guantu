@@ -1,12 +1,12 @@
 // Path: src/components/project/__tests__/ActivityFeed.test.jsx
 // File: ActivityFeed.test.jsx
 // Created: 2026-06-19
-// Purpose: Tests for DWB-407 type-aware + DWB-412 semantic-verb rendering on the live ProjectPage activity feed. Covers ticket link, alert title, sprint name, generic fallback, project scoping, empty state, plus the 8 semantic verbs (status_changed, reopened, assigned, sprint_opened, sprint_closed, consolidation_acked, session_opened, session_closed).
+// Purpose: Tests for DWB-407 type-aware + DWB-412 semantic-verb rendering on the live ProjectPage activity feed. Covers ticket link, alert title, sprint name, generic fallback, project scoping, empty state, plus the 8 semantic verbs (status_changed, reopened, assigned, sprint_opened, sprint_closed, consolidation_acked, session_opened, session_closed). DWB-554 adds the timestamp block: a naive-UTC created_at must render the correct age whatever timezone the runner sits in, which the old private timeAgo got wrong by the viewer's offset.
 // Caller: vitest test runner
 // Callees: ../ActivityFeed, ../../../api/activityFeed (mocked), react-router-dom (MemoryRouter)
 // Data In: Mocked getActivityFeed responses
 // Data Out: Test assertions
-// Last Modified: 2026-06-22
+// Last Modified: 2026-09-15 (DWB-554)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
@@ -416,5 +416,52 @@ describe('ActivityFeed (demoted test-run notice, DWB-464)', () => {
     renderFeed(1);
 
     await screen.findByText('requested a test run');
+  });
+});
+
+describe('ActivityFeed relative timestamps (DWB-554)', () => {
+  // The API sends naive UTC ("2026-09-15T12:00:00", no Z). Parsing that as local
+  // time shifts every age by the viewer's UTC offset, so these expectations are
+  // fixed values that hold in any TZ the suite runs in.
+  const NOW_UTC = Date.parse('2026-09-15T12:00:00Z');
+
+  beforeEach(() => {
+    // shouldAdvanceTime keeps waitFor and the feed's polling alive while the
+    // clock is pinned; a plain fake clock deadlocks them.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(NOW_UTC);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function renderWithCreatedAt(created_at) {
+    getActivityFeed.mockResolvedValue([
+      { id: 1, project_id: 1, entity_type: 'project', entity_id: 1, action: 'test_run_requested', details: { message: 'ran' }, created_at },
+    ]);
+    renderFeed(1);
+    // scope to the entry row: the header uses the same column class
+    const cell = () => document.querySelector('.activity-feed__entry .activity-feed__col-time');
+    await waitFor(() => expect(cell()).toBeTruthy());
+    return cell().textContent;
+  }
+
+  it('renders a naive-UTC timestamp as the correct age regardless of the runner timezone', async () => {
+    expect(await renderWithCreatedAt('2026-09-15T11:30:00')).toBe('30m ago');
+  });
+
+  it('renders hours and days from naive-UTC timestamps', async () => {
+    expect(await renderWithCreatedAt('2026-09-15T09:00:00')).toBe('3h ago');
+    cleanup();
+    expect(await renderWithCreatedAt('2026-09-13T12:00:00')).toBe('2d ago');
+  });
+
+  it('treats a timestamp inside the last minute as just now', async () => {
+    expect(await renderWithCreatedAt('2026-09-15T11:59:30')).toBe('just now');
+  });
+
+  it('accepts an already-zoned timestamp without double-shifting it', async () => {
+    expect(await renderWithCreatedAt('2026-09-15T11:30:00Z')).toBe('30m ago');
   });
 });

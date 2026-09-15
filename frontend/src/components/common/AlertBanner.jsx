@@ -1,28 +1,18 @@
 // Path: src/components/common/AlertBanner.jsx
 // File: AlertBanner.jsx
 // Created: 2026-03-29
-// Purpose: Renders a dismissible alert banner with severity styling, category badge (DWB-464), agent/project source, and relative timestamp
+// Purpose: Renders a dismissible alert banner with severity styling, category badge (DWB-464), agent/project source, and relative timestamp from the shared utils/format helpers (DWB-554: its private relativeTime parsed the API's naive-UTC timestamps as local time; the 7-day absolute fallback is preserved through the absoluteAfterDays option)
 // Caller: DashboardPage.jsx, ProjectPage.jsx
-// Callees: useStore
+// Callees: useStore, utils/format (relativeAge)
 // Data In: props { alert } (alert object with severity, category, title, body, raised_by_agent_id, project_id, created_at)
 // Data Out: default export AlertBanner component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-554)
 
 import useStore from '../../store/useStore';
+import { relativeAge } from '../../utils/format';
 
-function relativeTime(ts) {
-  if (!ts) return '';
-  const now = Date.now();
-  const diff = now - new Date(ts).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-}
+// Alerts older than a week read better as a date than as "12d ago".
+const ALERT_ABSOLUTE_AFTER_DAYS = 7;
 
 function AlertBanner({ alert }) {
   const dismissAlert = useStore((s) => s.dismissAlert);
@@ -41,7 +31,7 @@ function AlertBanner({ alert }) {
             </span>
           )}
           {alert.created_at && (
-            <span className="alert-banner__time">{relativeTime(alert.created_at)}</span>
+            <span className="alert-banner__time">{relativeAge(alert.created_at, Date.now(), { absoluteAfterDays: ALERT_ABSOLUTE_AFTER_DAYS })}</span>
           )}
           {alert.created_at && source && <span className="alert-banner__sep">::</span>}
           {source && <span className="alert-banner__source">{source}</span>}

@@ -1,27 +1,17 @@
 // Path: src/components/project/ActivityFeed.jsx
 // File: ActivityFeed.jsx
 // Created: 2026-03-29
-// Purpose: Live-polling activity feed showing recent project events with columnar layout, semantic-verb-aware rendering (incl. scoring events score_awarded/score_docked/lead_change, DWB-433 part 4, and the DWB-464 demoted test_run_requested notice), and relative timestamps
+// Purpose: Live-polling activity feed showing recent project events with columnar layout, semantic-verb-aware rendering (incl. scoring events score_awarded/score_docked/lead_change, DWB-433 part 4, and the DWB-464 demoted test_run_requested notice), and relative timestamps from the shared utils/format helpers (DWB-554: its private timeAgo parsed the API's naive-UTC timestamps as local time, so every age was off by the viewer's offset)
 // Caller: ProjectPage.jsx
-// Callees: react (useState, useEffect, useRef), react-router-dom (Link), api/activityFeed (getActivityFeed)
+// Callees: react (useState, useEffect, useRef), react-router-dom (Link), api/activityFeed (getActivityFeed), utils/format (relativeAge)
 // Data In: projectId prop
 // Data Out: default export ActivityFeed component
-// Last Modified: 2026-06-24
+// Last Modified: 2026-09-15 (DWB-554)
 
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getActivityFeed } from '../../api/activityFeed';
-
-function timeAgo(dateStr) {
-  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diff < 60) return 'just now';
-  const mins = Math.floor(diff / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
+import { relativeAge } from '../../utils/format';
 
 function truncate(str, max = 40) {
   if (!str || str.length <= max) return str;
@@ -198,7 +188,7 @@ function ActivityFeed({ projectId }) {
       <div className="activity-feed__scroll">
         {entries.map((entry) => (
           <div key={entry.id} className={`activity-feed__entry${!entry.agent_name || entry.agent_name === 'system' ? ' activity-feed__entry--system' : ''}`}>
-            <span className="activity-feed__col-time">{timeAgo(entry.created_at)}</span>
+            <span className="activity-feed__col-time">{relativeAge(entry.created_at)}</span>
             <span className="activity-feed__col-activity">{renderActivity(entry, projectId)}</span>
             <span className="activity-feed__col-worker">{entry.agent_name || 'system'}</span>
             <span className="activity-feed__col-role">{entry.agent_role || ''}</span>
