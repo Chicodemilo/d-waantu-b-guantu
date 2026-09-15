@@ -313,6 +313,8 @@ Positive `delta` grants reputation, negative demerits. Rules are enforced at the
 
 The human's `/carrot` and `/stick` commands are theirs; agents use the peer endpoint above.
 
+**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: `abs(stick delta) // 2` (minimum 1), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it.
+
 ## Ad Hoc Work (No Filed Ticket)
 
 When the user signals the small-change waiver (see TL playbook § 4c) and the TL delegates a fix without filing a ticket, your tokens and time route to the project's **ad_hoc** bucket (DWB-353) instead of failing an unattributed-tokens alert. The bucket is computed automatically from `tracking_log` rows tagged `ad_hoc_token_report`; no special headers from you required. You don't need to think about it; just do the work. Real implementation work still goes through tickets as usual.
