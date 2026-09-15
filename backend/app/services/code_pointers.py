@@ -13,7 +13,7 @@
 # Callees: git via subprocess, app/services/node_registry.SourceUnit
 # Data In: repo_path, project prefix, commit sha
 # Data Out: (list[SourceUnit], prune_scope set) + plain git-walk dicts
-# Last Modified: 2026-09-14
+# Last Modified: 2026-09-15
 
 import re
 import subprocess
@@ -174,6 +174,33 @@ def deleted_files(repo_path: str, sha: str) -> list[str]:
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
+def renamed_old_paths(repo_path: str, sha: str) -> list[str]:
+    """Repo-relative OLD paths of files RENAMED by a commit (diff-filter=R).
+
+    With -M a rename is reported as R and its NEW path flows through
+    commit_files (re-grounded), but the OLD path is neither in commit_files nor
+    in deleted_files, so its pointers would linger stale until the next full
+    renodify. The caller adds these to the prune scope. --name-status yields a
+    tab-separated ``R<score>\told\tnew`` per rename; the old path is field 2.
+    Returns [] on any git failure.
+    """
+    out = _git(
+        repo_path,
+        ["diff-tree", "--no-commit-id", "--name-status", "-r", "-M", "--root",
+         "--diff-filter=R", sha],
+    )
+    if out is None:
+        return []
+    olds: list[str] = []
+    for ln in out.splitlines():
+        parts = ln.split("\t")
+        if len(parts) >= 3 and parts[0].startswith("R"):
+            old = parts[1].strip()
+            if old:
+                olds.append(old)
+    return olds
+
+
 def build_code_units(
     repo_path: str | None,
     sha: str,
@@ -206,11 +233,16 @@ def build_code_units(
     full = resolve_full_sha(repo_path, sha) or sha
     touched = commit_files(repo_path, full)
     gone = deleted_files(repo_path, full)
+    renamed_from = renamed_old_paths(repo_path, full)
 
     units: list[SourceUnit] = []
-    # Prune scope starts with deletions and every touched file, so a touched
-    # file that yields no minable lines still has its stale pointers cleared.
-    prune_scope: set[tuple[str, str]] = {("code", f) for f in gone}
+    # Prune scope starts with deletions, rename OLD paths (the new path is in
+    # `touched` and re-grounds; the old path would otherwise leak stale
+    # pointers), and every touched file, so a touched file that yields no
+    # minable lines still has its stale pointers cleared.
+    prune_scope: set[tuple[str, str]] = {
+        ("code", f) for f in (*gone, *renamed_from)
+    }
     for f in touched:
         prune_scope.add(("code", f))
         lines = _file_lines_at(repo_path, f, full)

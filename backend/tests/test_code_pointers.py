@@ -113,6 +113,22 @@ class TestCommitFiles:
         assert files == ["keep.py"]
 
 
+class TestRenamedOldPaths:
+    def test_reports_rename_old_side(self, repo):
+        _commit(repo, "old.py", "sprocket\n", "init DWB-1")
+        _git(repo, "mv", "old.py", "new.py")
+        _git(repo, "commit", "-q", "-m", "rename DWB-2")
+        sha = _git(repo, "rev-parse", "HEAD")
+        assert cp.renamed_old_paths(str(repo), sha) == ["old.py"]
+
+    def test_empty_when_no_rename(self, repo):
+        sha = _commit(repo, "a.py", "x\n", "init DWB-1")
+        assert cp.renamed_old_paths(str(repo), sha) == []
+
+    def test_degrades_on_bad_repo(self):
+        assert cp.renamed_old_paths("/nonexistent/xyz", "x") == []
+
+
 class TestBuildCodeUnits:
     def test_per_line_units_with_sha_and_refs(self, repo):
         sha = _commit(
@@ -160,6 +176,18 @@ class TestBuildCodeUnits:
         assert "gone.py" not in refs          # deleted -> no units
         assert ("code", "gone.py") in prune   # ...but pruned
         assert ("code", "keep.py") in prune
+
+    def test_renamed_old_path_in_prune_scope(self, repo):
+        _commit(repo, "old.py", "sprocket\n", "init DWB-1")
+        _git(repo, "mv", "old.py", "new.py")
+        _git(repo, "commit", "-q", "-m", "rename DWB-2")
+        sha = _git(repo, "rev-parse", "HEAD")
+        units, prune = cp.build_code_units(str(repo), sha)
+        refs = {u.ref for u in units}
+        assert "new.py" in refs              # new path re-grounds
+        assert "old.py" not in refs          # old path hosts no units
+        assert ("code", "old.py") in prune   # ...but its stale pointers prune
+        assert ("code", "new.py") in prune   # new path is also a refresh scope
 
     def test_degrades_on_bad_repo(self):
         assert cp.build_code_units(None, "x") == ([], set())
