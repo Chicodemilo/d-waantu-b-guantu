@@ -64,6 +64,7 @@ class TestGetProject:
             "force_consolidation",
             "capture_agent_comms",
             "playbooks_deployed_at",
+            "nodeified_at",
             "created_at", "updated_at",
         }
         assert set(data.keys()) == expected_keys

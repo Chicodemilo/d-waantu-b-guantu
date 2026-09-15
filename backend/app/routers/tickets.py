@@ -12,9 +12,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.project import Project
 from app.models.ticket import TicketStatus, TicketType
+from app.schemas.node_retrieval import RelatedNodesResponse
 from app.schemas.status_history import StatusHistoryRead
 from app.schemas.ticket import StaleCheckInput, StaleCheckResponse, TicketCreate, TicketRead, TicketSlimRead, TicketTokenIncrement, TicketTokenIncrementResult, TicketUpdate
+from app.services import node_retrieval
 from app.services import ticket as svc
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -79,6 +82,21 @@ def update_ticket(
     # DWB-409: thread the acting agent (X-Agent-ID) so semantic activity
     # events attribute to whoever performed the change, not the assignee.
     return svc.update_ticket(db, ticket, data, acting_agent_id=x_agent_id)
+
+
+@router.get("/{ticket_id}/related-nodes", response_model=RelatedNodesResponse)
+def get_ticket_related_nodes(ticket_id: int, db: Session = Depends(get_db)):
+    """DWB-524: nodes related to this ticket - lessons (memory), sessions, and
+    code/doc file refs - matched from the ticket's title+description against the
+    node graph. Pointers only; empty groups when the corpus is empty."""
+    ticket = svc.get_ticket(db, ticket_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+    project = db.get(Project, ticket.project_id)
+    if project is None:
+        raise HTTPException(404, "Ticket project not found")
+    text = f"{ticket.title} {ticket.description or ''}"
+    return node_retrieval.related_nodes(db, project, text)
 
 
 @router.get("/{ticket_id}/history", response_model=list[StatusHistoryRead])

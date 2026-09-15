@@ -387,6 +387,22 @@ def spawn_prepare_payload(
         rule_lines = "(no boundary rules)"
     boundary_section = f"## Boundary Rules\n{rule_lines}\n"
 
+    # DWB-524: retrieval into work. Match the agent's assigned/queued ticket text
+    # against the node graph and surface memory-domain lessons from OTHER agents
+    # (pointers only; the TL pastes these alongside memory_full). Best-effort - a
+    # retrieval failure or empty corpus degrades to an empty list, never blocks
+    # the spawn bundle.
+    from app.services import node_retrieval
+    try:
+        lessons = node_retrieval.relevant_lessons(db, project, agent)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning(
+            "spawn-prepare relevant_lessons failed for agent_id=%s", agent.id,
+            exc_info=True,
+        )
+        lessons = []
+
     return {
         "agent_id": agent.id,
         "identity_prompt": identity_prompt,
@@ -394,6 +410,8 @@ def spawn_prepare_payload(
         # DWB-517: full memory.md verbatim (kept alongside the excerpt for
         # compat) so the TL can inject the whole file into the spawn prompt.
         "memory_full": memory_full,
+        # DWB-524: pointer-only relevant lessons from other agents' memories.
+        "relevant_lessons": lessons,
         "boundary_rules": boundary_section,
         # DWB-341: absolute memory_dir path so callers can reason about
         # where the agent's files live without having to rebuild it.
@@ -514,6 +532,8 @@ def record_session_complete(
             f"could not append to memory files in {memory_dir}: {e}",
         )
 
+    _touch_memory_nodes(db, project, target)
+
     return {
         "agent_id": agent.id,
         "session_id": session_id,
@@ -617,6 +637,24 @@ def _format_memory_append_block(
         heading = f"\n## {timestamp}\n"
     body = content.rstrip("\n") + "\n"
     return heading + body
+
+
+def _touch_memory_nodes(db: Session, project: Project, target: Path) -> None:
+    """DWB-527: re-ground the memory-domain node pointers for this memory.md
+    after a successful write. Best-effort - a node failure must never break the
+    memory write, so all errors are swallowed here + inside touch_memory."""
+    try:
+        from app.services import node_touch  # local: avoid import cycle
+        node_touch.touch_memory(
+            db,
+            project_id=project.id,
+            repo_path=project.repo_path,
+            memory_file=target,
+        )
+    except Exception:
+        logger.warning(
+            "node touch failed for memory %s; skipping", target, exc_info=True
+        )
 
 
 def append_memory(
@@ -728,6 +766,8 @@ def append_memory(
             "memory_file_unwritable",
             f"could not append to {target}: {e}",
         )
+
+    _touch_memory_nodes(db, project, target)
 
     return {
         "agent_id": agent.id,
@@ -863,6 +903,8 @@ def _replace_memory(
         target.write_text(final_text, encoding="utf-8")
     except OSError as e:
         raise err_cls("memory_file_unwritable", f"could not write {target}: {e}")
+
+    _touch_memory_nodes(db, project, target)
 
     return {
         "agent_id": agent.id,

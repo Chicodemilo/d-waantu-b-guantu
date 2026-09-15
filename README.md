@@ -73,13 +73,7 @@ The LiveSessions panel on each project page shows assigned agents with real-time
 
 ### Deployable Playbooks
 
-Master playbooks in `docs/` deploy to other repos via `POST /api/projects/{id}/deploy-playbooks`; the project page shows last deploy time (`playbooks_deployed_at`).
-
-| Playbook | File |
-|----------|------|
-| Team Lead | `docs/team_lead_playbook.md` |
-| PM | `docs/pm_playbook.md` |
-| Worker | `docs/worker_playbook.md` |
+Master playbooks in `docs/` (`team_lead_playbook.md`, `pm_playbook.md`, `worker_playbook.md`) deploy to other repos via `POST /api/projects/{id}/deploy-playbooks`; the project page shows `playbooks_deployed_at`.
 
 ---
 
@@ -146,26 +140,15 @@ Each agent earns a score per project, shown as a leaderboard on the project page
 
 ## Standards Audit
 
-A PR/diff is judged against the single global standards sheet (`docs/rules/global/coding-standards.md`) — plus the audited repo's own **Project Extensions** (the `## Project Extensions` section of its root `CODING_STANDARDS.md`, which *adds to* the global sheet, never overrides it) — by a **fresh, single-purpose auditor** spawned headless with ONLY that law + the diff as context, no team/Archie history, so it cannot rubber-stamp. The verdict, violations, and a per-agent scorecard are recorded via `POST /api/standards-audits` (recording does NOT apply the score deltas — that is a separate step).
+A PR/diff is judged against the global standards sheet (`docs/rules/global/coding-standards.md`) plus the repo's own `## Project Extensions` (adds to the sheet, never overrides) by a **fresh, single-purpose auditor** spawned headless with only that law + the diff — no team history, so it cannot rubber-stamp. Verdict, violations, and per-agent scorecard record via `POST /api/standards-audits`.
 
-Run it with `scripts/run_standards_audit.sh` (reads config from `.env`: `STANDARDS_AUDIT_API_BASE` / `VITE_API_BASE_URL`, `STANDARDS_AUDIT_MODEL`):
+Run via `scripts/run_standards_audit.sh` (config from `.env`: `STANDARDS_AUDIT_MODEL` etc). Diff selection: `--branch <name>` (vs merge-base), `--range a..b`, or `--staged`; `--dry-run` prints without POSTing.
 
-```bash
-scripts/run_standards_audit.sh --project-id 5 --branch my-feature          # diff vs merge-base with master
-scripts/run_standards_audit.sh --project-id 5 --range abc123..def456 --ticket-id 164
-scripts/run_standards_audit.sh --project-id 5 --staged --author Barry_DWB   # explicit author for the scorecard
-scripts/run_standards_audit.sh --project-id 5 --staged --dry-run            # print scorecard, don't POST
-```
+**Attribution:** `--ticket-id` (author = assignee) or `--author <name>` injects a facts-only names/roles block; the auditor names those agents in the scorecard (worker deltas on the author; TL only on repeat-survival; PM only on a ticketing signal). Unknown returned names **fail loudly before POST**. Malformed auditor output never posts (non-zero exit).
 
-**Scorecard attribution.** With `--ticket-id` (author = the ticket's assigned agent) or `--author <name>` (explicit override), the runner injects a facts-only ATTRIBUTION block — author + team-lead + PM **names/roles only, no opinions**, so fresh-eyes judgement is preserved — and the auditor names those exact agents in the scorecard (worker deltas on the author; TL only on repeat-survival; PM only on a clear ticketing signal). Returned names are validated against that roster set; an unknown name **fails loudly before POST** so the ledger can never be mis-attributed. Without either flag, entries fall back to the generic `author`.
+**Applying:** recording does not move scores. `POST /api/standards-audits/{id}/apply-scorecard` is the explicit idempotent second step — deltas to the `score_event` ledger as **The_Auditor**, bypassing peer caps by design.
 
-The uniform PASS/REJECT scorecard prints to stdout on every run. Malformed auditor output is caught and never posted (non-zero exit). Verify writes with `GET /api/standards-audits?project_id=5`.
-
-**Applying the scorecard.** Recording an audit does *not* move scores. `POST /api/standards-audits/{id}/apply-scorecard` is the explicit, idempotent second step: it writes the deltas to the `score_event` ledger (`source=audit`, trigger `audit_grant`/`audit_demerit`), attributed to **The_Auditor** (a seeded system agent), bypassing peer influence caps by design.
-
-**Visibility.** Every recorded audit raises an alert (info=pass, warning=reject) and an activity-feed entry attributed to The_Auditor. The **Audits page** at `/projects/:id/audits` shows pass/fail stats and expandable rows (ref, date, verdict → author, violations, scorecard), linked from a ProjectPage summary section; verdict/violations/scorecard render from shared `components/common/` pieces.
-
-**As a gate.** With `force_standards_audit` ON (see [Sprint Gates](#sprint-gates)), sprint close requires a *passing* audit inside the sprint window.
+**Visibility:** every audit raises an alert (info=pass, warning=reject) + activity entry; the Audits page (`/projects/:id/audits`) shows stats and expandable verdict rows. **As a gate:** with `force_standards_audit` ON, sprint close requires a passing audit in-window.
 
 ---
 
@@ -183,11 +166,7 @@ Native Claude Code SendMessage traffic is captured per project (DWB-446..449): a
 
 ## Alerts
 
-Alerts are flags raised by agents or automation that need human attention. Severities: info, warning, critical.
-
-**Dashboard:** read-only table (Project, Severity, Title, Created).
-
-**Project page:** full alert cards with actions: `$ dismiss all` (bulk dismiss open alerts) and `$ send to team` (writes `ALERTS_PENDING.md` to the project repo for teammates).
+Flags raised by agents or automation needing human attention (info/warning/critical). Dashboard shows a read-only table; the project page shows full cards with `$ dismiss all` and `$ send to team` (writes `ALERTS_PENDING.md` into the project repo).
 
 ---
 
@@ -213,10 +192,7 @@ cd backend && pytest tests/                                           # local
 ./backend/scripts/run_tests.sh --post --project-id 1 --triggered-by "manual"   # with API reporting
 ```
 
-Or trigger via API: `POST /api/system/run-tests`
-
-Coverage check: `GET /api/status/test-coverage`
-Run history: `GET /api/test-results/performance`
+API: trigger `POST /api/system/run-tests`, coverage `GET /api/status/test-coverage`, history `GET /api/test-results/performance`.
 
 ---
 
@@ -232,57 +208,30 @@ Run history: `GET /api/test-results/performance`
 
 ## API Reference
 
-149 endpoints across 25 routers. Full interactive docs at http://localhost:8000/docs.
+149 endpoints across 25 routers. **The full reference is the interactive docs at http://localhost:8000/docs** (every route, schema, and example); `CLAUDE.md` carries the day-to-day quick table. Standard CRUD exists for all resources.
 
 **Slim responses:** List endpoints strip heavy fields by default (test-results omit `details`, agents omit `api_key`); tickets/alerts/sprints support `?fields=slim`.
 
-Standard CRUD exists for all resources; the non-obvious and automation ones:
+The non-obvious and automation endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/projects/from-repo` | Create project from repo scan |
-| POST | `/api/projects/seed-demo` | Seed demo project (idempotent) |
-| POST | `/api/projects/{id}/deploy-playbooks` | Deploy playbooks to project repo |
-| POST | `/api/projects/{id}/disable-jira` | Disable Jira, clear all issue links |
+| POST | `/api/projects/{id}/deploy-playbooks` | Deploy playbooks/skills/hooks to project repo |
 | GET | `/api/projects/{id}/gate-status` | Check sprint gates |
-| GET | `/api/projects/{id}/activity-feed` | Activity feed (newest first) |
-| GET | `/api/projects/{id}/docs` | Scan project doc files |
-| GET | `/api/projects/{id}/token-budget` | Context file token counts + ceilings |
-| POST | `/api/tickets/stale-check` | Stale ticket alert (frontend timer) |
-| GET | `/api/tracking/summary` | Project tracking summary (tracking ops under `/api/tracking/*`) |
-| POST | `/api/hooks/session-start` | Receive SessionStart hook |
-| POST | `/api/hooks/session-end` | Receive SessionEnd/SubagentStop hook |
-| POST | `/api/hooks/tool-use` | PostToolUse action capture (fire-and-forget) |
-| POST | `/api/hooks/lifecycle-event` | Notification / PreCompact capture |
-| POST | `/api/hooks/agent-message` | Capture an inter-agent SendMessage (fire-and-forget) |
-| GET | `/api/projects/{id}/agent-messages` | Captured inter-agent message log (newest first) |
-| DELETE | `/api/projects/{id}/agent-messages` | Clear all captured messages (returns count) |
-| GET | `/api/projects/{id}/scores` | Scoring leaderboard |
-| POST | `/api/projects/{id}/scores/award` | Human carrot/stick |
-| POST | `/api/projects/{id}/scores/peer` | Peer carrot/stick (`X-Agent-ID` header) |
-| GET | `/api/standards-audits` | List standards audits (`?project_id=`); slim rows |
-| POST | `/api/standards-audits` | Record an audit verdict + scorecard (does not apply deltas) |
-| POST | `/api/standards-audits/{id}/apply-scorecard` | Apply the scorecard to the score ledger (idempotent) |
-| GET | `/api/tl-channel` | Cross-project team-lead channel; each message carries a `read_by` roster |
-| GET | `/api/tl-channel/unread` | A team-lead's unread channel messages (`?agent_id`) |
-| POST | `/api/tl-channel` | Send a channel message, direct or broadcast (TL only) |
-| POST | `/api/tl-channel/mark-read` | Mark channel messages read (one or all) |
-| GET | `/api/hooks/sessions` | List hook sessions (`status=orphan` for cleanup) |
-| POST | `/api/sessions/open` | Open a DWB session; omit `opened_at` (server-stamped) |
-| POST | `/api/sessions/{id}/close` | Close a DWB session; `headline` required on AI methods (422 otherwise); consolidation gate opt-in (`force_consolidation`, default OFF), TL-owned docs only |
-| GET | `/api/projects/{id}/sessions` | List DWB sessions, most recent first |
+| GET | `/api/tracking/summary` | Tracking rollup (tracking ops under `/api/tracking/*`) |
+| POST | `/api/hooks/*` | CC lifecycle receivers: session-start/end, tool-use, lifecycle-event, agent-message, post-commit |
+| POST | `/api/sessions/open`, `/api/sessions/{id}/close` | DWB session bounds; omit `opened_at` (server-stamped); `headline` required on AI closes; write-on-close gate on explicit closes |
 | GET | `/api/sessions/{id}` | DWB session detail rollup (by_role/by_ticket/overhead) |
-| POST | `/api/agents/identify` | Resolve identity from `(role, name, project_prefix)`; short or `_<PREFIX>` form |
-| POST | `/api/agents/spawn-prepare` | Identify + return ready-to-paste spawn-brief markdown |
-| POST | `/api/agents/{id}/session-complete` | Append the session-end block to `memory.md` |
-| POST | `/api/agents/{id}/memory/append` | Append to `memory.md` (`file=memory`; append-only) |
-| POST | `/api/agents/{id}/memory/compact` | Replace `memory.md` (compacted); over-ceiling triggers a passive trim |
-| POST | `/api/agents/{id}/scaffold-memory` | Idempotently scaffold `.dwb/memory/` (identity.md + memory.md) |
-| GET | `/api/projects/{id}/team` | Single-roundtrip team roster |
-| POST | `/api/alerts/dismiss-all` | Bulk dismiss open alerts |
-| POST | `/api/alerts/send-to-team` | Write alerts to ALERTS_PENDING.md |
-| GET | `/api/tokens/audit` | Token usage audit |
-| GET | `/api/failure-records/summary` | Aggregated failure analysis |
+| POST | `/api/agents/identify`, `/api/agents/spawn-prepare` | Identity resolution; spawn-prepare returns the brief + full `memory_full` for prompt injection |
+| POST | `/api/agents/{id}/memory/append`, `.../session-complete` | Memory writes; refuse 400 over the 4500-token ceiling (no silent trim) |
+| POST | `/api/agents/{id}/memory/condense` | Sanctioned full-file rewrite to get back under ceiling |
+| GET | `/api/projects/{id}/nodes`, `.../nodes/match?text=` | Node index: weighted tags + pointers; match derives neighbors |
+| POST | `/api/projects/{id}/nodeify` | Bootstrap/refresh the node index (idempotent renodify) |
+| GET/POST | `/api/tl-channel` (+ `/unread`, `/mark-read`) | Cross-project team-lead channel |
+| GET/POST | `/api/standards-audits` (+ `/{id}/apply-scorecard`) | Audit verdicts + idempotent scorecard application |
+| POST | `/api/projects/{id}/scores/award`, `.../scores/peer` | Human and peer carrot/stick (`X-Agent-ID` on peer) |
+| GET | `/api/projects/{id}/team` | Single-roundtrip live roster |
 | GET | `/api/status` | Health check |
 | POST | `/api/system/run-tests` | Trigger test suite |
 

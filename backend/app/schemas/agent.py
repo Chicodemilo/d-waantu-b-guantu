@@ -107,6 +107,20 @@ class SpawnPrepareRequest(BaseModel):
     project_prefix: str
 
 
+class RelevantLesson(BaseModel):
+    """DWB-524: a pointer-only lesson relevant to the spawning agent's tickets.
+
+    Carries WHERE the lesson lives (source agent + memory entry heading/date),
+    never the lesson text - the TL pastes these alongside memory_full."""
+
+    tag: str
+    weight: int
+    source_agent: str | None = None
+    memory_ref: str
+    entry_heading: str | None = None
+    date: str | None = None
+
+
 class SpawnPrepareResponse(BaseModel):
     agent_id: int
     identity_prompt: str
@@ -115,6 +129,9 @@ class SpawnPrepareResponse(BaseModel):
     # The excerpt above is kept for compat; this is the whole file so the TL
     # injects the agent's complete memory into the spawn prompt with no read.
     memory_full: str
+    # DWB-524: top-N memory-domain lessons from OTHER agents matched to this
+    # agent's assigned/queued tickets. Empty list when the corpus is empty.
+    relevant_lessons: list[RelevantLesson] = []
     boundary_rules: str
     # DWB-341: absolute memory_dir path. The endpoint guarantees this dir +
     # its core files (identity.md, scratchpad.md, lessons.md,

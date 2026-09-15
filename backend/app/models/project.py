@@ -83,6 +83,9 @@ class Project(Base):
         DateTime, nullable=False, server_default=func.now()
     )
     playbooks_deployed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # DWB-527: last time the operator-invoked nodeify full pass ran for this
+    # project (rebuilt nodes from memory + docs + git). Null = never nodeified.
+    nodeified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # DWB-342: project-level Jira sync state. Used by the manual sync
     # endpoint to enforce single-sync concurrency, render the
     # last-synced-at header, and show the last run's per-bucket counts.

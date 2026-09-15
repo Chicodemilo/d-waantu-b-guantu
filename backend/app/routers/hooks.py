@@ -6,7 +6,7 @@
 # Callees: app/services/hook_tracking.py, app/services/agent.py, app/services/failed_hook.py, app/services/git_hook.py, app/models/hook_session.py, app/schemas/tool_action.py
 # Data In: HTTP POST from curl hook commands
 # Data Out: JSON responses (HookSession data + DWB-517 SessionStart additionalContext, tool-action + lifecycle capture result, post-commit close result)
-# Last Modified: 2026-09-14 (DWB-517: SessionStart injects TL memory as additionalContext)
+# Last Modified: 2026-09-14 (DWB-525: post-commit re-grounds code pointers via code_pointers.ground_commit)
 
 """Hook endpoints for passive tracking.
 
@@ -33,6 +33,7 @@ from app.schemas.tool_action import (
     ToolUseInput,
 )
 from app.services import agent as agent_svc
+from app.services import code_pointers as code_pointers_svc
 from app.services import git_hook as git_hook_svc
 from app.services import hook_tracking as svc
 from app.services.failed_hook import log_failed_hook
@@ -331,6 +332,19 @@ def hook_post_commit(data: PostCommitRequest, db: Session = Depends(get_db)):
             commit_message=data.commit_message,
             commit_sha=data.commit_sha,
         )
+        # DWB-525: re-ground code pointers for this commit's touched files.
+        # Best-effort in its own commit so a grounding failure never disturbs
+        # the auto-close result or the hook's fire-and-forget 200 contract.
+        pid = result.get("project_id") if isinstance(result, dict) else None
+        if pid:
+            try:
+                code_pointers_svc.ground_commit(
+                    db, pid, data.repo_path, data.commit_sha
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("post-commit code grounding failed")
         return result
     except Exception as e:
         logger.exception("hook_post_commit error")

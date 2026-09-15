@@ -90,6 +90,7 @@ class ProjectRead(BaseModel):
     force_consolidation: bool
     capture_agent_comms: bool
     playbooks_deployed_at: datetime | None
+    nodeified_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

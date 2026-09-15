@@ -6,7 +6,7 @@
 # Callees: app/services/agent_memory.py, app/models/agent.py, pathlib, shutil, re, json
 # Data In: db: Session, project: Project
 # Data Out: DeployResult
-# Last Modified: 2026-09-14 (DWB-511: ship the /sprint-post skill fleet-wide)
+# Last Modified: 2026-09-14 (DWB-526: deploy re-grounds doc pointers via doc_pointers.ground_docs)
 
 import json
 import logging
@@ -21,6 +21,9 @@ from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
 from app.services import agent_memory
+# DWB-526: top-level import so doc_pointers registers its nodeify 'doc' provider
+# at app startup (this module is imported by the projects router on boot).
+from app.services import doc_pointers
 
 logger = logging.getLogger(__name__)
 
@@ -742,6 +745,16 @@ def deploy_bundle(db: Session, project) -> DeployResult:
 
     project.playbooks_deployed_at = datetime.now(timezone.utc)
     db.commit()
+
+    # DWB-526: re-ground doc pointers for this project's doc corpus (root docs +
+    # docs/*.md) on the deploy-playbooks touch event. Isolated best-effort commit
+    # AFTER the deploy commit so a grounding failure never fails the deploy.
+    try:
+        doc_pointers.ground_docs(db, project.id, project.repo_path)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logging.getLogger(__name__).exception("deploy doc grounding failed")
 
     return DeployResult(
         deployed=deployed,
