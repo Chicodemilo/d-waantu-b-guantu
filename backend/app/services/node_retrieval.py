@@ -68,15 +68,23 @@ _POPULARITY_MIN_NODES = 20
 # Hard cap per output group (lessons / sessions / code) and on relevant_lessons.
 MAX_PER_GROUP = 10
 
-# Pivoted length normalization for the file-scored code group. A file's score is
-# divided by (its pointer count ** this exponent). Without it the longest files
-# win every query by sheer surface area: HANDOFF.md and the playbooks mention
-# everything, so they outranked the source files a ticket is actually about.
-# Full cosine normalization (0.5) overcorrects and pushes big-but-relevant source
-# files out, so this uses the partial exponent the IR literature calls pivoted
-# normalization. Anything in 0.25-0.35 behaves the same on the DWB corpus; 0.3 is
-# the middle of that band.
-LENGTH_NORMALIZATION_EXPONENT = 0.3
+# Length normalization for the file-scored code group. A file's score is divided
+# by (its pointer count ** this exponent). Without it the longest files win every
+# query by sheer surface area: HANDOFF.md and the playbooks mention everything,
+# so they outranked the source files a ticket is actually about.
+#
+# DWB-545 shipped this at a PIVOTED 0.3 because full normalization overcorrected
+# and dropped big-but-relevant files like scoring.py. The reason was measurement
+# error, not the exponent: the index then counted a source file's test twin and a
+# second, byte-identical copy of every playbook, so "length" was inflated
+# unevenly and the pivot was compensating for it. DWB-549 removed both sources of
+# inflation at enumeration, so lengths are now honest and the standard full
+# (cosine) exponent is correct. Re-measured on the cleaned index, 0.4-0.5 rank
+# the real implementation files first for both reference tickets AND keep the
+# churn docs out of the top 5; 0.5 is the textbook value and needs no pivot
+# argument. Lower it toward 0.3 only if long source files start losing again,
+# which would mean lengths are being inflated once more.
+LENGTH_NORMALIZATION_EXPONENT = 0.5
 
 
 def pointer_df(node) -> int:
