@@ -1,19 +1,19 @@
 // Path: src/components/nodes/NodeCloud.jsx
 // File: NodeCloud.jsx
 // Created: 2026-09-15
-// Purpose: Weighted tag cloud for the node index (DWB-534). Renders nodes in the order given (API is weight desc, so the order is stable) as text buttons sized by a log bucket (utils/nodeScale), each showing tag + pointer count. An optional bounds prop pins the scale to the full set's min/max so a limited subset (DWB-536 match search) keeps each node's original size. Caps the DOM at pageSize with a "show more" text link so a 3.6k-node project stays usable. Clicking a node calls onSelect(node); the selected node is marked with aria-pressed for the detail overlay consumer (DWB-535).
+// Purpose: Weighted tag cloud for the node index (DWB-534). Renders nodes in the order given (API is weight desc, so the order is stable) as text buttons sized by a log bucket (utils/nodeScale), each showing tag + pointer count. An optional bounds prop pins the scale to the full set's min/max so a limited subset (DWB-536 match search) keeps each node's original size; an optional headlinerIds set (DWB-541, the full set's top 2%) pins the headliner tier the same way; an optional connectedIds set (DWB-543) marks first-degree neighbors with a dimmed node-cloud__node--connected class. Caps the DOM at pageSize with a "show more" text link so a 3.6k-node project stays usable. Clicking a node calls onSelect(node); the selected node is marked with aria-pressed for the detail overlay consumer (DWB-535).
 // Caller: pages/NodesPage.jsx
-// Callees: react (useState, useEffect, useMemo), utils/nodeScale (scaleNodes, bucketForWeight)
-// Data In: nodes (NodeRead[]), onSelect (fn(node)), selectedId (number|null), pageSize (number), bounds ({minW, maxW}|null)
+// Callees: react (useState, useEffect, useMemo), utils/nodeScale (scaleNodes, bucketForWeight, headlinerIds, HEADLINER_BUCKET)
+// Data In: nodes (NodeRead[]), onSelect (fn(node)), selectedId (number|null), pageSize (number), bounds ({minW, maxW}|null), headlinerIds (Set<number>|null), connectedIds (Set<number>|null)
 // Data Out: default export NodeCloud component
-// Last Modified: 2026-09-15 (DWB-536: bounds prop)
+// Last Modified: 2026-09-15 (DWB-543: connected class)
 
 import { useState, useEffect, useMemo } from 'react';
-import { scaleNodes, bucketForWeight } from '../../utils/nodeScale';
+import { scaleNodes, bucketForWeight, headlinerIds as deriveHeadliners, HEADLINER_BUCKET } from '../../utils/nodeScale';
 
 export const NODE_CLOUD_PAGE_SIZE = 500;
 
-function NodeCloud({ nodes, onSelect, selectedId = null, pageSize = NODE_CLOUD_PAGE_SIZE, bounds = null }) {
+function NodeCloud({ nodes, onSelect, selectedId = null, pageSize = NODE_CLOUD_PAGE_SIZE, bounds = null, headlinerIds = null, connectedIds = null }) {
   const [visibleCount, setVisibleCount] = useState(pageSize);
 
   // A new node set (initial load or a limiter result) restarts the cap.
@@ -22,11 +22,15 @@ function NodeCloud({ nodes, onSelect, selectedId = null, pageSize = NODE_CLOUD_P
   }, [nodes, pageSize]);
 
   const scaled = useMemo(() => {
+    const top = headlinerIds || deriveHeadliners(nodes);
     if (bounds && Number.isFinite(bounds.minW) && Number.isFinite(bounds.maxW)) {
-      return nodes.map((n) => ({ ...n, bucket: bucketForWeight(n.weight, bounds.minW, bounds.maxW) }));
+      return nodes.map((n) => ({
+        ...n,
+        bucket: top.has(n.id) ? HEADLINER_BUCKET : bucketForWeight(n.weight, bounds.minW, bounds.maxW),
+      }));
     }
-    return scaleNodes(nodes);
-  }, [nodes, bounds]);
+    return scaleNodes(nodes, undefined, top);
+  }, [nodes, bounds, headlinerIds]);
   const visible = scaled.slice(0, visibleCount);
   const hidden = scaled.length - visible.length;
 
@@ -36,15 +40,17 @@ function NodeCloud({ nodes, onSelect, selectedId = null, pageSize = NODE_CLOUD_P
         {visible.map((node) => {
           const count = Array.isArray(node.pointers) ? node.pointers.length : 0;
           const selected = selectedId != null && node.id === selectedId;
+          const connected = connectedIds != null && connectedIds.has(node.id);
           return (
             <button
               key={node.id}
               type="button"
-              className={`node-cloud__node node-cloud__node--b${node.bucket}${selected ? ' node-cloud__node--selected' : ''}`}
+              className={`node-cloud__node node-cloud__node--b${node.bucket}${node.bucket === HEADLINER_BUCKET ? ' node-cloud__node--headliner' : ''}${selected ? ' node-cloud__node--selected' : ''}${connected ? ' node-cloud__node--connected' : ''}`}
+              data-connected={connected || undefined}
               data-bucket={node.bucket}
               data-weight={node.weight}
               aria-pressed={selected}
-              title={`${node.tag}: weight ${node.weight}, ${count} pointer${count === 1 ? '' : 's'}`}
+              title={`${node.tag}: weight ${node.weight}, ${count} pointer${count === 1 ? '' : 's'}${node.bucket === HEADLINER_BUCKET ? ', headliner' : ''}${connected ? ', connection' : ''}`}
               onClick={() => onSelect && onSelect(node)}
             >
               <span className="node-cloud__tag">{node.tag}</span>

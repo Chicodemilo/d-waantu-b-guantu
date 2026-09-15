@@ -1,8 +1,8 @@
 /* Path: src/styles/nodes.css */
 /* File: nodes.css */
 /* Created: 2026-09-15 */
-/* Purpose: Styles for the project Nodes page (S81, DWB-534/535/536): page head, match-search row with the normalized tag line (DWB-536 limiter), weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page), pointer count chips, selected state, the cap footer with show more / show all text links, and the NodeDetail overlay content (hop trail, pointer groups by kind, neighbor list). Terminal aesthetic, plain CSS. */
-/* Last Modified: 2026-09-15 (DWB-536) */
+/* Purpose: Styles for the project Nodes page (S81, DWB-534/535/536): page head, search row with the substring limiter and the + connections toggle (DWB-536/543), pointer-kind toggle row (DWB-542), weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page) plus the b8 headliner tier for the top 2% (DWB-541, 28px orange-bright), pointer count chips, selected state, the cap footer with show more / show all text links, and the NodeDetail overlay content (hop trail, pointer groups by kind, neighbor list). Terminal aesthetic, plain CSS. */
+/* Last Modified: 2026-09-15 (DWB-543) */
 
 .nodes-page__head {
   display: flex;
@@ -43,34 +43,49 @@
   text-decoration: underline;
 }
 
-/* Match search (limiter, DWB-536) */
+/* Search row: substring limiter (DWB-536/543) + connections toggle (DWB-543) */
 
 .nodes-page__search {
   margin-bottom: 8px;
 }
 
-.nodes-page__tags {
+.nodes-page__connections {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 12px;
   margin-top: 6px;
   font-size: 12px;
 }
 
-.nodes-page__tags-label {
+.nodes-page__connections-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--gray-light);
+  cursor: pointer;
+}
+
+.nodes-page__connections-toggle:hover:not(:disabled) {
+  border-color: var(--blue-dim);
+  color: var(--blue);
+}
+
+.nodes-page__connections-toggle--on {
+  color: var(--blue);
+  border-color: var(--blue-dim);
+  background: var(--bg-hover);
+}
+
+.nodes-page__connections-toggle:disabled {
   color: var(--gray);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  font-size: 10px;
+  cursor: not-allowed;
 }
 
-.nodes-page__tag {
-  color: var(--orange-bright);
-}
-
-.nodes-page__tags-none,
-.nodes-page__tags-pending {
+.nodes-page__connections-note {
   color: var(--gray-light);
 }
 
@@ -78,6 +93,76 @@
   margin-top: 6px;
   font-size: 12px;
   color: var(--red);
+}
+
+/* Pointer-kind toggles (DWB-542) */
+
+.kind-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.kind-filter__label {
+  color: var(--gray);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 10px;
+}
+
+.kind-filter__toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--gray-light);
+  cursor: pointer;
+}
+
+.kind-filter__toggle:hover {
+  border-color: var(--green-dim);
+  color: var(--green);
+}
+
+.kind-filter__toggle--on {
+  color: var(--green-bright);
+  border-color: var(--green-dim);
+  background: var(--bg-hover);
+}
+
+.kind-filter__toggle::before {
+  content: '[ ] ';
+  color: var(--gray);
+}
+
+.kind-filter__toggle--on::before {
+  content: '[x] ';
+  color: var(--green);
+}
+
+.kind-filter__count {
+  margin-left: 6px;
+  color: var(--gray);
+  font-size: 11px;
+}
+
+.kind-filter__all {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.kind-filter__all:hover {
+  text-decoration: underline;
 }
 
 /* Cloud */
@@ -120,6 +205,18 @@
   color: var(--orange-bright);
 }
 
+/* First-degree connections of the search matches (DWB-543): present but dimmed. */
+.node-cloud__node--connected,
+.node-cloud__node--connected.node-cloud__node--headliner {
+  color: var(--blue-dim);
+  opacity: 0.6;
+}
+
+.node-cloud__node--connected:hover {
+  color: var(--blue);
+  opacity: 1;
+}
+
 .node-cloud__count {
   margin-left: 3px;
   color: var(--gray);
@@ -136,6 +233,22 @@
 .node-cloud__node--b5 { font-size: 17px; }
 .node-cloud__node--b6 { font-size: 19px; }
 .node-cloud__node--b7 { font-size: 22px; color: var(--green-bright); }
+
+/* Headliners: the top 2% by weight over the full set (utils/nodeScale.headlinerIds). */
+.node-cloud__node--b8,
+.node-cloud__node--headliner {
+  font-size: 28px;
+  color: var(--orange-bright);
+}
+
+.node-cloud__node--headliner:hover {
+  color: var(--orange-bright);
+  text-decoration: underline;
+}
+
+.node-cloud__node--headliner.node-cloud__node--selected {
+  text-decoration: underline;
+}
 
 .node-cloud__foot {
   display: flex;
