@@ -6,7 +6,7 @@
 # Callees: app.models.hook_session, app.models.tracking_log, app.models.agent, app.models.ticket
 # Data In: SQLAlchemy Session + DwbSession instance
 # Data Out: list[dict] for by_role / by_ticket, tuple[int,int] for overhead, tuple[int,int] for live totals
-# Last Modified: 2026-06-10 (DWB-353)
+# Last Modified: 2026-09-15 (DWB-539: abandoned hook sessions no longer claim the whole window)
 
 """DWB session rollup queries — read-only slices for the detail endpoint.
 
@@ -23,6 +23,7 @@ in the same wall-clock window are filtered out by construction.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Iterable
 
@@ -37,6 +38,8 @@ from app.models.hook_session import HookSession
 from app.models.ticket import Ticket
 from app.models.tracking_log import TrackingLog
 
+
+logger = logging.getLogger(__name__)
 
 def _utcnow() -> datetime:
     return datetime.utcnow()
@@ -86,6 +89,18 @@ def compute_by_role(
 
     by_agent: dict[int, dict] = {}
     for hs, agent in rows:
+        # DWB-539: a row with no end_time is only "still running" if it STARTED
+        # inside this window. Abandoned sessions (a hook that never fired its
+        # end, sometimes months old) otherwise have their open interval clamped
+        # to the whole window and hand an agent the entire session as time with
+        # zero tokens - that is how dark Sage showed 46768s of S81. Skip them.
+        if hs.end_time is None and hs.start_time < win_start:
+            logger.warning(
+                "DWB-539: skipping abandoned hook_session %s (agent %s, started "
+                "%s, no end_time) when rolling up session %s",
+                hs.session_id, agent.id, hs.start_time, session.id,
+            )
+            continue
         bucket = by_agent.setdefault(
             agent.id,
             {

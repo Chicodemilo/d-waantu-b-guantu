@@ -6,7 +6,7 @@
 # Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
-# Last Modified: 2026-07-28 (DWB-506: exclude cache_read_input_tokens from total_tokens - it re-counted cached context every turn, inflating attribution to billions; kept in breakdown for visibility)
+# Last Modified: 2026-09-15 (DWB-539: transcript-span start_time, no backwards intervals, active-sprint ticket scoping)
 #
 # DWB-417 (2026-06-22): handle_tool_use ingests the PostToolUse hook and
 # persists one tool_actions row per tool call, resolving agent/dwb_session/
@@ -459,6 +459,18 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
                             session.sprint_id = ticket.sprint_id
 
     # Update session with end data
+    # DWB-539: never persist end < start; a backwards interval clamps to 0 in
+    # the rollup and reads as "worked no time" for a token-heavy session.
+    if (
+        session.start_time is not None
+        and _as_naive_utc(end_time) < _as_naive_utc(session.start_time)
+    ):
+        logger.warning(
+            "DWB-539: session %s transcript end %s precedes start %s; "
+            "clamping to a zero-length interval",
+            session.session_id, end_time, session.start_time,
+        )
+        end_time = session.start_time
     session.end_time = end_time
     session.total_tokens = token_total
     session.token_breakdown = token_breakdown
@@ -544,6 +556,12 @@ def _parse_transcript_lines(lines_iter, *, agent_name_filter: str | None = None)
     total = 0
     breakdown = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
     last_timestamp = None
+    # DWB-539: the FIRST usage timestamp. A subagent's hook_session row is
+    # created when SubagentStop fires, i.e. after the work, so stamping
+    # start_time with now() and end_time with the transcript's last entry
+    # produced end < start and a clamped duration of 0 for exactly the
+    # token-heaviest teammates. The transcript's own span is the truth.
+    first_timestamp = None
 
     for line in lines_iter:
         line = line.strip()
@@ -592,13 +610,22 @@ def _parse_transcript_lines(lines_iter, *, agent_name_filter: str | None = None)
         ts = entry.get("timestamp")
         if ts:
             try:
-                last_timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                parsed_ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
             except (ValueError, AttributeError):
                 pass
+            else:
+                # DWB-539: min/max rather than "whatever line came last", so the
+                # pair is a well-defined span even if a transcript is not in
+                # timestamp order. Ordered transcripts parse identically.
+                if last_timestamp is None or parsed_ts > last_timestamp:
+                    last_timestamp = parsed_ts
+                if first_timestamp is None or parsed_ts < first_timestamp:
+                    first_timestamp = parsed_ts
 
     return {
         "total_tokens": total,
         "breakdown": breakdown,
+        "start_time": first_timestamp,
         "end_time": last_timestamp,
     }
 
@@ -626,7 +653,7 @@ def _parse_subagent_from_projects_dir(
         return {"total_tokens": 0,
                 "breakdown": {"input": 0, "output": 0,
                               "cache_creation": 0, "cache_read": 0},
-                "end_time": None}
+                "start_time": None, "end_time": None}
 
     try:
         projects_dir = Path(synthetic_path).parent.parent.parent
@@ -634,19 +661,20 @@ def _parse_subagent_from_projects_dir(
         return {"total_tokens": 0,
                 "breakdown": {"input": 0, "output": 0,
                               "cache_creation": 0, "cache_read": 0},
-                "end_time": None}
+                "start_time": None, "end_time": None}
 
     if not projects_dir.exists() or not projects_dir.is_dir():
         return {"total_tokens": 0,
                 "breakdown": {"input": 0, "output": 0,
                               "cache_creation": 0, "cache_read": 0},
-                "end_time": None}
+                "start_time": None, "end_time": None}
 
     # Accumulate across all sibling jsonls. Most projects have just a
     # handful (one per CC session) and we want every matching line.
     aggregated_total = 0
     aggregated_breakdown = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
     latest_timestamp = None
+    earliest_timestamp = None  # DWB-539: real span start, see _parse_transcript_lines
 
     for jsonl_path in projects_dir.glob("*.jsonl"):
         try:
@@ -665,10 +693,14 @@ def _parse_subagent_from_projects_dir(
         if parsed.get("end_time"):
             if latest_timestamp is None or parsed["end_time"] > latest_timestamp:
                 latest_timestamp = parsed["end_time"]
+        if parsed.get("start_time"):
+            if earliest_timestamp is None or parsed["start_time"] < earliest_timestamp:
+                earliest_timestamp = parsed["start_time"]
 
     return {
         "total_tokens": aggregated_total,
         "breakdown": aggregated_breakdown,
+        "start_time": earliest_timestamp,
         "end_time": latest_timestamp,
     }
 
@@ -694,6 +726,7 @@ def parse_transcript(path: str) -> dict:
             "total_tokens": 0,
             "breakdown": {"input": 0, "output": 0,
                           "cache_creation": 0, "cache_read": 0},
+            "start_time": None,
             "end_time": None,
         }
 
@@ -706,6 +739,7 @@ def parse_transcript(path: str) -> dict:
             "total_tokens": 0,
             "breakdown": {"input": 0, "output": 0,
                           "cache_creation": 0, "cache_read": 0},
+            "start_time": None,
             "end_time": None,
         }
 
@@ -1102,6 +1136,11 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
     token_total = 0
     token_breakdown = None
     end_time = datetime.now(UTC)
+    # DWB-539: the transcript's FIRST usage timestamp, when we can read it.
+    # The row is created at SubagentStop (after the work), so a now()-stamped
+    # start with a transcript-derived end ran backwards and every clamped
+    # duration collapsed to 0. None means "no transcript span, keep the stamp".
+    start_time = None
 
     if agent_transcript_path:
         parsed = parse_transcript(agent_transcript_path)
@@ -1109,6 +1148,8 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
         token_breakdown = parsed["breakdown"]
         if parsed.get("end_time"):
             end_time = parsed["end_time"]
+        if parsed.get("start_time"):
+            start_time = parsed["start_time"]
 
     # Resolve project from cwd
     cwd = hook_data.get("cwd", "")
@@ -1152,6 +1193,8 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
             token_breakdown = fallback["breakdown"]
             if fallback.get("end_time"):
                 end_time = fallback["end_time"]
+            if fallback.get("start_time"):
+                start_time = fallback["start_time"]
 
     session_type = _determine_session_type(agent)
 
@@ -1192,7 +1235,20 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
         db.add(session)
         db.flush()
 
-    # Mark completed with token data
+    # Mark completed with token data.
+    # DWB-539: prefer the transcript's own span so worker time_seconds reflects
+    # the work, and never persist end < start (that clamped to 0 and made a
+    # multi-million-token teammate read as 0 or 1 second in the rollup).
+    if start_time is not None:
+        session.start_time = _as_naive_utc(start_time)
+    end_time = _as_naive_utc(end_time)
+    if session.start_time is not None and end_time < _as_naive_utc(session.start_time):
+        logger.warning(
+            "DWB-539: subagent %s transcript end %s precedes start %s; "
+            "clamping to a zero-length interval",
+            subagent_id, end_time, session.start_time,
+        )
+        end_time = _as_naive_utc(session.start_time)
     session.end_time = end_time
     session.total_tokens = token_total
     session.token_breakdown = token_breakdown
@@ -1310,6 +1366,28 @@ def _determine_session_type(agent: Agent | None) -> HookSessionType:
     return HookSessionType.teammate
 
 
+def _active_sprint_id(db: Session, project_id: int) -> int | None:
+    """The project's single active sprint, or None (DWB-539)."""
+    return db.scalar(
+        select(Sprint.id)
+        .where(Sprint.project_id == project_id)
+        .where(Sprint.status == SprintStatus.active)
+        .limit(1)
+    )
+
+
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    """DWB-539: normalize to naive UTC for comparison against stored columns.
+
+    Transcript timestamps and datetime.now(UTC) are tz-aware; hook_sessions
+    columns are naive UTC (MySQL DATETIME). Comparing the two raises, so every
+    DWB-539 interval guard normalizes first.
+    """
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
+
 def _resolve_ticket(db: Session, agent: Agent, project_id: int) -> Ticket | None:
     """Find the best ticket to attribute work to for a worker agent.
 
@@ -1319,58 +1397,53 @@ def _resolve_ticket(db: Session, agent: Agent, project_id: int) -> Ticket | None
     3. In-review ticket assigned to this agent (most recently updated)
     4. Done ticket assigned to this agent (only if updated within last 5 minutes)
     5. None (unattributed)
+
+    DWB-539: every lookup is scoped to the project's ACTIVE sprint when there
+    is one. Without that scope the search ranged over every ticket the agent
+    had ever been assigned, so a stale ticket left in_progress on a closed
+    sprint outranked the work actually in hand: during S81 (sprint 160) this
+    routed 6.7M tokens onto DWB-522 and 4.1M onto DWB-526, both long-done
+    sprint-158 tickets, while the S81 tickets those tokens belonged to
+    recorded 0. A ticket from a closed sprint is never the work in progress.
+    When the project has no active sprint the old unscoped behavior stands,
+    so nothing regresses for projects that do not run sprints.
     """
+    sprint_id = _active_sprint_id(db, project_id)
+
+    def _pick(status: TicketStatus, *extra_conditions) -> Ticket | None:
+        stmt = (
+            select(Ticket)
+            .where(Ticket.project_id == project_id)
+            .where(Ticket.assigned_agent_id == agent.id)
+            .where(Ticket.status == status)
+        )
+        if sprint_id is not None:
+            stmt = stmt.where(Ticket.sprint_id == sprint_id)
+        for condition in extra_conditions:
+            stmt = stmt.where(condition)
+        return db.scalar(stmt.order_by(Ticket.updated_at.desc()).limit(1))
+
     # In-progress ticket assigned to this agent
-    ticket = db.scalar(
-        select(Ticket)
-        .where(Ticket.project_id == project_id)
-        .where(Ticket.assigned_agent_id == agent.id)
-        .where(Ticket.status == TicketStatus.in_progress)
-        .order_by(Ticket.updated_at.desc())
-        .limit(1)
-    )
+    ticket = _pick(TicketStatus.in_progress)
     if ticket:
         return ticket
 
     # Fallback: todo ticket assigned to this agent
-    ticket = db.scalar(
-        select(Ticket)
-        .where(Ticket.project_id == project_id)
-        .where(Ticket.assigned_agent_id == agent.id)
-        .where(Ticket.status == TicketStatus.todo)
-        .order_by(Ticket.updated_at.desc())
-        .limit(1)
-    )
+    ticket = _pick(TicketStatus.todo)
     if ticket:
         return ticket
 
     # Fallback: in_review ticket assigned to this agent
     # Workers move tickets to in_review before session ends, so SubagentStop
     # often fires after the status change.
-    ticket = db.scalar(
-        select(Ticket)
-        .where(Ticket.project_id == project_id)
-        .where(Ticket.assigned_agent_id == agent.id)
-        .where(Ticket.status == TicketStatus.in_review)
-        .order_by(Ticket.updated_at.desc())
-        .limit(1)
-    )
+    ticket = _pick(TicketStatus.in_review)
     if ticket:
         return ticket
 
     # Fallback: recently-done ticket assigned to this agent (within 5 minutes)
     # Catches cases where TL accepts a ticket quickly before SubagentStop fires.
     cutoff = datetime.now(UTC) - timedelta(minutes=5)
-    ticket = db.scalar(
-        select(Ticket)
-        .where(Ticket.project_id == project_id)
-        .where(Ticket.assigned_agent_id == agent.id)
-        .where(Ticket.status == TicketStatus.done)
-        .where(Ticket.updated_at >= cutoff)
-        .order_by(Ticket.updated_at.desc())
-        .limit(1)
-    )
-    return ticket
+    return _pick(TicketStatus.done, Ticket.updated_at >= cutoff)
 
 
 # ---------------------------------------------------------------------------
