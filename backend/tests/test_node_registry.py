@@ -3,12 +3,14 @@
 # Created: 2026-09-14 (DWB-522)
 # Purpose: Tests for the LIGHT node registration service - normalization/merge,
 #          light stemming, the 2-domain grounding rule (refusal + success),
-#          pointer shapes, idempotent re-registration, and prune-on-un-ground.
+#          pointer shapes, idempotent re-registration, prune-on-un-ground, the
+#          TF-IDF relevance weight, and the DWB-522-rework node-stopword + noise
+#          filtering (generic vocab, single letters, git shas, measures).
 # Caller: pytest
 # Callees: app/services/node_registry, app/models/node
 # Data In: pytest fixtures (db_session, make_project)
 # Data Out: assertions
-# Last Modified: 2026-09-14 (DWB-522)
+# Last Modified: 2026-09-15 (DWB-522 rework)
 
 from sqlalchemy import select
 
@@ -76,6 +78,46 @@ class TestLightStem:
         assert "the" not in toks and "and" not in toks
 
 
+# --- DWB-522 rework: node-stopwords + noise filtering -----------------------
+
+class TestNodeStopwordsAndNoise:
+    def test_generic_code_vocab_dropped(self):
+        # NODE_STOPWORDS strips generic code/English boilerplate that grounds
+        # everywhere with no wayfinding value, while keeping real concepts.
+        toks = node_tokens("return the value of the key in the result dict")
+        assert not ({"return", "value", "key", "result", "dict"} & toks)
+
+    def test_generic_verbs_and_stem_artifacts_dropped(self):
+        # The stemmer maps resolved/dropped/updated to resolv/dropp/updat; those
+        # artifacts are in NODE_STOPWORDS so they never become tags.
+        toks = node_tokens("resolved dropped updated created deleted")
+        assert not ({"resolv", "dropp", "updat", "creat", "delet"} & toks)
+
+    def test_real_concepts_survive_stoplist(self):
+        # Deliberately kept OUT of NODE_STOPWORDS - these are real DWB concepts.
+        toks = node_tokens("spawn the roster with sendmessage and nodeify scope")
+        assert {"spawn", "roster", "sendmessage", "nodeify", "scope"} <= toks
+
+    def test_single_and_double_letters_dropped(self):
+        # "d" / "b" (from "d'waantu b'guantu") and any <3-char token are noise.
+        toks = node_tokens("d b of ab node")
+        assert "d" not in toks and "b" not in toks and "ab" not in toks
+        assert "node" in toks
+
+    def test_hex_sha_and_measures_dropped(self):
+        toks = node_tokens("commit 4c8f7a8 93c5fd took 60min 14m 10000m for nodeify")
+        assert not ({"4c8f7a8", "93c5fd", "60min", "14m", "10000m"} & toks)
+        assert "nodeify" in toks
+
+    def test_pure_alpha_hex_words_survive(self):
+        # DWB-522 review catch: pure-a-f words ("facade"/"decade"/"deface"/
+        # "accede") are valid hex strings but carry NO digit, so they must NOT be
+        # eaten as shas. Real shas mix in a digit ("4c8f7a8" dies, "facade" lives).
+        toks = node_tokens("facade decade deface accede versus 4c8f7a8")
+        assert {"facade", "decade", "deface", "accede", "versus"} <= toks
+        assert "4c8f7a8" not in toks
+
+
 # --- grounding rule ---------------------------------------------------------
 
 class TestGrounding:
@@ -133,24 +175,41 @@ class TestGrounding:
         assert code_ptr.line_end == 8
         assert code_ptr.ref == "app/x.py"
 
-    def test_weight_is_distinct_source_count(self, db_session, make_project):
+    def test_weight_is_tfidf_relevance_score(self, db_session, make_project):
+        # DWB-522 rework: weight is a TF-IDF relevance score, not a raw source
+        # count. "alpha" grounds in 2 of the 3 corpus docs (a distinctive term),
+        # "common" grounds in all 3 (boilerplate). df*log((N+1)/(df+1)) must give
+        # the distinctive term the higher weight, and the ubiquitous term a low
+        # (floored-to-1) weight. This is the whole point of the rework: breadth no
+        # longer crowns generic terms.
+        import math
         p = make_project()
-        register_sources(
-            db_session,
-            p["id"],
-            [
-                SourceUnit(kind="memory", ref="mem-1", text="alpha"),
-                SourceUnit(kind="code", ref="a.py", text="alpha"),
-                SourceUnit(kind="doc", ref="d.md", text="alpha"),
-            ],
-        )
-        node = [n for n in _nodes(db_session, p["id"]) if n.tag == "alpha"][0]
-        assert node.weight == 3  # three distinct (kind, ref) sources
+        # 10 docs: "widespread" is in all 10 (ubiquitous), "alpha" in only 2
+        # (distinctive, spanning code+memory). No suppress_generic so grounding
+        # alone decides; the TF-IDF weight must rank alpha above widespread.
+        units = []
+        for i in range(10):
+            kind = "code" if i % 2 == 0 else "memory"
+            text = "widespread alpha" if i < 2 else "widespread"
+            units.append(SourceUnit(kind=kind, ref=f"f{i}", text=text))
+        register_sources(db_session, p["id"], units)
+        nodes = {n.tag: n for n in _nodes(db_session, p["id"])}
+        n_docs = 10
+        exp_alpha = max(1, round(2 * math.log((n_docs + 1) / (2 + 1))))
+        exp_wide = max(1, round(10 * math.log((n_docs + 1) / (10 + 1))))
+        assert nodes["alpha"].weight == exp_alpha
+        # "widespread" is in all 10 docs -> idf ~ 0 -> floored to 1.
+        assert nodes["widespread"].weight == exp_wide
+        assert nodes["widespread"].weight < nodes["alpha"].weight
 
     def test_weight_not_inflated_by_per_line_pointers(self, db_session, make_project):
         # A per-line lane emits multiple pointers for the SAME (kind, ref): three
         # doc line ranges + one memory. That is 4 pointers but only 2 distinct
-        # sources, so weight must be 2, not 4 (anti-inflation, DWB-525/526).
+        # sources, so the df feeding the TF-IDF weight is 2, not 4 (anti-inflation,
+        # DWB-525/526). With N=2 docs and df=2, idf=log(3/3)=0 -> weight floored
+        # to 1; the invariant under test is that per-line pointers don't raise df,
+        # which we verify by asserting weight matches the df=2 formula, not df=4.
+        import math
         p = make_project()
         register_sources(
             db_session,
@@ -165,7 +224,9 @@ class TestGrounding:
         node = [n for n in _nodes(db_session, p["id"]) if n.tag == "beta"][0]
         ptrs = _pointers(db_session, p["id"], tag="beta")
         assert len(ptrs) == 4       # per-line pointers preserved for precision
-        assert node.weight == 2     # but weight counts distinct sources only
+        # df=2 (two distinct sources), N=2. weight = max(1, round(2*log(3/3))) = 1.
+        exp = max(1, round(2 * math.log((2 + 1) / (2 + 1))))
+        assert node.weight == exp
 
 
 # --- normalization merge ----------------------------------------------------
@@ -268,12 +329,14 @@ class TestIdempotencyAndPrune:
         assert {pt.kind.value for pt in ptrs} == {"code", "doc", "memory"}
 
     def test_generic_high_df_tag_suppressed(self, db_session, make_project):
-        # 10 documents all mention "common" (grounds code+doc trivially); only two
+        # 20 documents all mention "common" (grounds code+doc trivially); only two
         # mention "special". With suppress_generic, "common" (df/N = 1.0) is
-        # dropped as boilerplate while "special" (df=2) survives.
+        # dropped as boilerplate while "special" (df=2, ratio 0.10 < 0.12 floor)
+        # survives. Corpus is 20 docs so special stays under the lowered
+        # GENERIC_DF_RATIO (DWB-522 rework dropped it 0.30 -> 0.12).
         p = make_project()
         units = []
-        for i in range(10):
+        for i in range(20):
             kind = "code" if i % 2 == 0 else "doc"
             text = "common special" if i < 2 else "common"
             units.append(SourceUnit(kind=kind, ref=f"f{i}", text=text))

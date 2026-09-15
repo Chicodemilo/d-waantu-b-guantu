@@ -69,11 +69,14 @@ class Node(Base):
         BigInteger, ForeignKey("projects.id"), nullable=False
     )
     tag: Mapped[str] = mapped_column(String(255), nullable=False)
-    # Ranking weight (>=1): the number of DISTINCT (kind, ref) groundings for this
-    # node - i.e. how many distinct places ground the tag, not the raw pointer
-    # count. Per-line pointer lanes (DWB-525/526) can emit many pointers for one
-    # (kind, ref); weight counts that source once so ranking reflects grounding
-    # breadth. Recomputed on every registration pass; consumers sort by it desc.
+    # Ranking weight (>=1): a TF-IDF RELEVANCE SCORE (DWB-522 rework), not raw
+    # grounding breadth. df = distinct (kind, ref) groundings (per-line pointer
+    # lanes DWB-525/526 count a source ONCE, so they can't inflate a tag);
+    # weight = round(df * log((N+1)/(df+1))) where N = distinct docs in the
+    # corpus. IDF sinks ubiquitous terms (which raw-breadth used to crown), so
+    # the ranking surfaces real cross-cutting concepts. Recomputed on every
+    # registration pass; consumers sort by it desc.
+    # Last Modified: 2026-09-15
     weight: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()

@@ -15,7 +15,7 @@
 # Callees: app/services/node_registry (register_sources, SourceUnit), app/models
 # Data In: db: Session, project_id / project + repo paths
 # Data Out: NodeifyResult; None (touch is best-effort)
-# Last Modified: 2026-09-14 (DWB-527)
+# Last Modified: 2026-09-15 (DWB-522 rework - docstring commit correction)
 
 from __future__ import annotations
 
@@ -184,7 +184,11 @@ def nodeify_project(db: Session, project_id: int) -> NodeifyResult:
     (e.g. ticket/session, or a domain whose provider was unregistered) are left
     intact and still count toward grounding. Stamps project.nodeified_at.
 
-    Does NOT commit (caller owns the transaction).
+    COMMITS its own transaction (db.commit() below). get_db does NOT auto-commit
+    in this codebase and the router just returns the service result, so without an
+    explicit commit here the node pointers + nodeified_at would never persist (a
+    live-only bug: TestClient's shared transaction hides it). Callers that need to
+    stay inside a larger uncommitted transaction must not use this entry point.
     """
     project = db.get(Project, project_id)
     if project is None:

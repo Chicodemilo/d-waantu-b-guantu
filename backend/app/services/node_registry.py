@@ -16,10 +16,12 @@
 # Callees: app/services/keyword_extraction (tokenize, STOPWORDS), app/models/node
 # Data In: db: Session, project_id: int, SourceUnit list (+ optional prune scope)
 # Data Out: RegistrationResult (grounded / pruned / skipped tag counts)
-# Last Modified: 2026-09-14
+# Last Modified: 2026-09-15
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass, field
 
 from sqlalchemy import delete, select
@@ -50,8 +52,78 @@ VALID_KINDS = frozenset(k.value for k in NodePointerKind)
 #   documents (distinct (kind, ref) sources).
 # GENERIC_MIN_DOCS: below this many documents, DF is not meaningful - never
 #   suppress (protects small corpora + tests).
-GENERIC_DF_RATIO = 0.30
+#
+# DWB-522 rework: dropped from 0.30 to 0.12. At corpus scale the denominator is
+# thousands of distinct code-file refs, so even a boilerplate token like 'key'
+# only appears in ~7% of docs and slipped under 0.30 - suppression was a no-op
+# and the top-20 stayed generic mush. Ratio-suppression alone is a coarse net
+# (it only catches truly corpus-wide terms); the real fix is the TF-IDF weight
+# below (ubiquitous terms score toward 0) plus the NODE_STOPWORDS list. 0.12
+# now catches the clearly-ubiquitous long tail without touching domain vocab.
+GENERIC_DF_RATIO = 0.12
 GENERIC_MIN_DOCS = 8
+
+# DWB-522 rework: project-agnostic node stoplist. These are generic
+# code-keyword / English-boilerplate terms that ground in 2+ domains in ANY
+# software project (they appear in code AND memory AND docs everywhere) yet carry
+# no wayfinding signal - a node called "value" or "return" points nowhere useful.
+# The S76 STOPWORDS list deliberately excludes DWB domain vocab (ticket, sprint,
+# agent) because TF-IDF is supposed to sink cross-session boilerplate; here the
+# corpus is code+memory+docs of a single project where those same generic-code
+# terms are the noise floor, so we filter them at tokenization. This is
+# INTENTIONALLY narrow: language/structural keywords and pure-filler nouns only,
+# NOT anything that could be a project's actual subject. Applied unconditionally
+# in node_tokens (both full pass and incremental) so a generic term never even
+# becomes a candidate pointer. Kept separate from STOPWORDS so the session-tag
+# ranker (which wants "agent"/"ticket") is unaffected.
+NODE_STOPWORDS: frozenset[str] = frozenset(
+    {
+        # language / structural keywords
+        "true", "false", "none", "null", "return", "def", "class", "self",
+        "import", "from", "function", "func", "var", "let", "const", "async",
+        "await", "yield", "lambda", "pass", "raise", "except", "try", "finally",
+        "elif", "else", "for", "while", "break", "continue", "global", "type",
+        "int", "str", "bool", "float", "list", "dict", "set", "tuple", "enum",
+        # generic code-vocab nouns/verbs that ground everywhere with no signal
+        "value", "values", "key", "keys", "name", "names", "id", "ids", "field",
+        "fields", "param", "params", "arg", "args", "kwarg", "kwargs", "result",
+        "results", "data", "item", "items", "object", "objects", "instance",
+        "method", "methods", "call", "calls", "get", "add", "remove",
+        "create", "update", "delete", "write", "read", "run", "make", "use",
+        "used", "using", "check", "handle", "fail", "fix", "detail",
+        "details", "summary", "content", "text", "string", "number", "count",
+        "total", "line", "lines", "path", "file", "files", "row", "rows",
+        "column", "columns", "record", "records", "entry", "entries",
+        # generic status / boolean-ish adjectives
+        "active", "inactive", "open", "close", "closed", "done", "todo",
+        "valid", "invalid", "default", "optional", "required",
+        # generic connective / structural filler surfaced in code+prose
+        "block", "rule", "rules", "link", "note", "notes", "case", "step",
+        "steps", "part", "parts", "point", "points", "flag", "flags", "mode",
+        # DWB-522 rework: generic filler that crowned the live top-20 (project 1).
+        # These span code+memory+docs everywhere yet point to no concept. Kept
+        # OUT deliberately (they ARE real DWB concepts): spawn, roster, index,
+        # scope, command, contract, score, feed, guard.
+        "top", "unique", "fresh", "found", "next", "end", "base", "written",
+        "manual", "action", "edit", "user", "plain", "stale", "dropped",
+        "resolve", "resolved", "updated", "current", "full", "clean",
+        "single", "double", "raw", "live", "dead", "hard", "soft", "plus",
+        "minus", "old", "big", "small", "long", "short", "first", "last",
+        "same", "each", "every", "still", "back", "away", "within", "across",
+        "per-line", "one-domain", "two-domain", "cross-session",
+        # light_stem artifacts of generic verbs above (the post-stem check sees
+        # these forms, not the source word): resolved/resolving -> "resolv",
+        # dropped -> "dropp", updated/updating -> "updat", removed -> "remov",
+        # returned -> "return" (already listed), handled -> "handl".
+        "resolv", "dropp", "updat", "remov", "handl", "creat", "delet",
+        # DWB-522 rework, second live pass: remaining generic filler in top-25.
+        "instead", "left", "right", "window", "reference", "can-t", "won-t",
+        "don-t", "isn-t", "doesn-t", "wasn-t", "aren-t", "lets", "goes",
+        "went", "gets", "puts", "kept", "keep", "keeps", "given", "gives",
+        "seen", "saw", "says", "said", "want", "wants", "need", "needs",
+        "instead-of", "rather", "either", "neither", "whether",
+    }
+)
 
 
 def light_stem(word: str) -> str:
@@ -95,23 +167,68 @@ def light_stem(word: str) -> str:
     return w
 
 
+# DWB-522 rework: minimum length for a non-ticket-key node tag. Single/double
+# letters ("d" and "b" from "d'waantu b'guantu", stray code identifiers) are pure
+# noise - they grounded in 2+ domains and crowded the ranking. Ticket keys bypass
+# this (they are always meaningful).
+MIN_TAG_LEN = 3
+
+# DWB-522 rework: reject tokens that are a hex-sha-like blob (git short/long shas
+# like "4c8f7a8" / "93c5fd" surfaced as df=2 IDF noise) or a bare number+unit
+# measure ("10000m", "14m", "60min", "2-second"). These carry no wayfinding value
+# and never denote a concept. A token qualifies as sha-like when it is all hex
+# digits (a-f + 0-9), 6-40 chars long, AND carries BOTH a letter and a DIGIT: the
+# digit requirement (Archie's review catch) is what separates a real sha from a
+# pure-a-f English word - "facade"/"decade"/"deface"/"accede" are all valid hex
+# strings but have no digit, so they survive; real shas virtually always mix in a
+# digit. Pure-digit tokens are already dropped earlier (normalize_term rejects
+# no-alpha tokens); this branch is only about the mixed hex blobs.
+_HEXSHA_RE = re.compile(r"^[0-9a-f]{6,40}$")
+_MEASURE_RE = re.compile(r"^\d+(?:-?[a-z]{1,4})?$")
+
+
+def _is_noise_tag(tag: str) -> bool:
+    """True for tokens that ground but carry no concept (DWB-522 rework)."""
+    if len(tag) < MIN_TAG_LEN:
+        return True
+    core = tag.replace("-", "")
+    if _MEASURE_RE.match(tag):
+        return True
+    # hex-sha-like: hex-only AND contains BOTH a letter and a digit (catches
+    # "4c8f7a8"/"93c5fd" while sparing pure-a-f words like "facade"/"decade").
+    if (
+        _HEXSHA_RE.match(core)
+        and any(c.isalpha() for c in core)
+        and any(c.isdigit() for c in core)
+    ):
+        return True
+    return False
+
+
 def node_tokens(text: str) -> set[str]:
     """Normalize free text into a SET of node tags (DWB-522).
 
     Pipeline: reuse the S76 tokenizer (lowercase + kebab; ticket keys verbatim),
-    drop English stopwords, then apply light stemming to non-ticket-key terms.
-    Returns a set (per-source dedupe) so a term repeated within one source yields
-    a single pointer for that source.
+    drop English stopwords + NODE_STOPWORDS + noise tokens, then apply light
+    stemming to non-ticket-key terms. Returns a set (per-source dedupe) so a term
+    repeated within one source yields a single pointer for that source.
     """
     out: set[str] = set()
     for tok in tokenize(text):
         if is_ticket_key(tok):
             out.add(tok)
             continue
-        if tok in STOPWORDS:
+        if tok in STOPWORDS or tok in NODE_STOPWORDS or _is_noise_tag(tok):
             continue
         stemmed = light_stem(tok)
-        if stemmed and stemmed not in STOPWORDS:
+        # Re-check all filters post-stem so a plural of a stopword
+        # ("values" -> "value") or a stem that fell below MIN_TAG_LEN is dropped.
+        if (
+            stemmed
+            and stemmed not in STOPWORDS
+            and stemmed not in NODE_STOPWORDS
+            and not _is_noise_tag(stemmed)
+        ):
             out.add(stemmed)
     return out
 
@@ -248,6 +365,29 @@ def register_sources(
         )
         db.flush()
 
+    # 2b. Corpus size N = distinct (kind, ref) documents across ALL of the
+    # project's surviving pointers, PLUS this batch's docs (batch pointers are not
+    # in the DB yet). Sourced from the DB (not just the batch) so the TF-IDF
+    # weight below is consistent whether this is a corpus-wide nodeify pass or a
+    # single-ref incremental touch - both rank against the same denominator.
+    #
+    # PERF NOTE (DWB-522 review): this is a full DISTINCT (kind, ref) scan of the
+    # project's node_pointers on EVERY call, including single-file incremental
+    # touches. It's cheap at current scale (~15k pointers) and the index on
+    # (project_id, kind, ref) covers it. If incremental commits ever feel slow,
+    # this is the spot to optimize - memoize N per request or maintain a running
+    # distinct-doc counter rather than re-scanning here.
+    db_docs = set(
+        db.execute(
+            select(NodePointer.kind, NodePointer.ref).where(
+                NodePointer.project_id == project_id
+            ).distinct()
+        ).all()
+    )
+    corpus_docs = {(k.value if hasattr(k, "value") else k, r) for k, r in db_docs}
+    corpus_docs |= {(c.kind, c.ref) for ptrs in batch.values() for c in ptrs}
+    total_corpus_docs = len(corpus_docs)
+
     # 3. Re-ground every affected tag against surviving pointers + this batch.
     for tag in sorted(affected_tags):
         surviving = db.execute(
@@ -290,15 +430,22 @@ def register_sources(
                     )
                 )
                 result.pointers_written += 1
-            # weight = number of DISTINCT (kind, ref) groundings, NOT the raw
-            # pointer count. This keeps ranking a measure of how many distinct
-            # places ground a tag (grounding breadth) rather than letting a lane
-            # that emits per-line pointers (DWB-525/526) inflate a common tag's
-            # weight by how many lines of one file mention it.
+            # weight = TF-IDF RELEVANCE SCORE (DWB-522 rework), not raw grounding
+            # breadth. df = distinct (kind, ref) groundings for this tag (still
+            # counting per-line pointers of one file ONCE - DWB-525/526 can't
+            # inflate a tag); N = total distinct docs in the corpus. Old weight =
+            # df alone crowned the most ubiquitous terms; here IDF = log((N+1)/
+            # (df+1)) sinks them, so score = df * IDF peaks for terms that ground
+            # in a MEANINGFUL-but-not-universal number of places. A term in nearly
+            # every doc -> IDF ~ 0 -> low score; a term in one specific spot pair
+            # -> low df -> low score; the middle band (a real cross-cutting
+            # concept) wins. Reuses the S76 rank_tfidf shape (keyword_extraction).
             distinct_sources = {(p.kind.value, p.ref) for p in surviving} | {
                 (c.kind, c.ref) for c in batch_ptrs
             }
-            node.weight = len(distinct_sources)
+            df = len(distinct_sources)
+            idf = math.log((total_corpus_docs + 1) / (df + 1))
+            node.weight = max(1, round(df * idf))
             db.flush()
             result.grounded_tags.append(tag)
         else:
