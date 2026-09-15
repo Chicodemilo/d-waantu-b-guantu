@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: ProjectCreate, ProjectUpdate, ProjectRead, ProjectOverheadIncrement
-# Last Modified: 2026-08-11 (DWB-017: force_standards_audit gate)
+# Last Modified: 2026-09-15 (DWB-546: ticket token baseline schemas)
 
 from datetime import datetime
 
@@ -102,3 +102,53 @@ class ProjectFromRepoRead(ProjectRead):
     (deploy failure never fails project creation)."""
 
     deploy_warning: str | None = None
+
+
+# --- GET /{id}/ticket-token-baseline (DWB-546) -------------------------------
+
+
+class TicketTokenBaselineRow(BaseModel):
+    """One done ticket in the token baseline.
+
+    tokens_used is the ATTRIBUTED value from tracking_log token_report rows
+    (app/services/tracking.compute_ticket_tokens); stored_tokens_used is the
+    denormalized tickets.tokens_used column, which has a manual-increment path
+    that writes no tracking_log row. node_aware is a DWB-546 placeholder, False
+    for every ticket until DWB-545 follow-ups can distinguish a node-aware run.
+    """
+
+    ticket_id: int
+    ticket_key: str
+    sprint_id: int | None
+    assigned_agent_id: int | None
+    assigned_agent_name: str | None
+    tokens_used: int
+    stored_tokens_used: int
+    time_seconds: int
+    completed_at: str | None
+    node_aware: bool
+
+
+class TicketTokenBaselineSprint(BaseModel):
+    """Per-sprint aggregates.
+
+    ticket_count counts every done ticket; the statistics cover only tickets
+    with attributed tokens > 0, because a zero row is an attribution gap
+    (DWB-539) rather than a free ticket. zero_token_ticket_count sizes the gap.
+    """
+
+    sprint_id: int | None
+    ticket_count: int
+    attributed_ticket_count: int
+    zero_token_ticket_count: int
+    median_tokens: float
+    mean_tokens: float
+    p90_tokens: float
+    total_tokens: int
+
+
+class TicketTokenBaselineRead(BaseModel):
+    project_id: int
+    ticket_count: int
+    tickets: list[TicketTokenBaselineRow]
+    sprints: list[TicketTokenBaselineSprint]

@@ -220,6 +220,7 @@ The non-obvious and automation endpoints:
 | POST | `/api/projects/{id}/deploy-playbooks` | Deploy playbooks/skills/hooks to project repo |
 | GET | `/api/projects/{id}/gate-status` | Check sprint gates |
 | GET | `/api/tracking/summary` | Tracking rollup (tracking ops under `/api/tracking/*`) |
+| GET | `/api/projects/{id}/ticket-token-baseline` | Per done-ticket tokens/time + per-sprint count/median/mean/p90; `sprint_id`/`since` filters; zero-token rows counted separately (DWB-539 attribution gap) |
 | POST | `/api/hooks/*` | CC lifecycle receivers: session-start/end, tool-use, lifecycle-event, agent-message, post-commit |
 | POST | `/api/sessions/open`, `/api/sessions/{id}/close` | DWB session bounds; omit `opened_at` (server-stamped); `headline` required on AI closes; write-on-close gate on explicit closes |
 | GET | `/api/sessions/{id}` | DWB session detail rollup (by_role/by_ticket/overhead) |

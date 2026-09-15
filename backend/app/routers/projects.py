@@ -6,7 +6,7 @@
 # Callees: app/services (project, project_agent, standards_audit, test_result, seed_demo, playbook_deploy, activity_log), models (ActivityLog, Agent, Alert, InterAgentMessage, ProjectAgent, Ticket)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-08-12 (DWB-034: reconcile Purpose/Callees with current routes + imports)
+# Last Modified: 2026-09-15 (DWB-546: GET /{id}/ticket-token-baseline)
 
 import json
 import logging
@@ -28,6 +28,7 @@ from app.models.project import ProjectStatus
 from app.models.project_agent import ProjectAgent
 from app.models.ticket import Ticket
 from app.schemas.project import (
+    TicketTokenBaselineRead,
     ProjectCreate,
     ProjectFromRepoRead,
     ProjectOverheadIncrement,
@@ -41,6 +42,7 @@ from app.services import project_agent as pa_svc
 from app.services import recap as recap_svc
 from app.services import standards_audit as standards_audit_svc
 from app.services import test_result as test_svc
+from app.services import ticket_token_baseline as baseline_svc
 from app.services.playbook_deploy import deploy_bundle
 from app.services.activity_log import (
     MIDDLEWARE_ACTIONS,
@@ -1224,3 +1226,35 @@ def get_consolidation_status(
     if not sprint or sprint.project_id != project_id:
         raise HTTPException(404, "Sprint not found for this project")
     return consolidation_svc.get_consolidation_status(db, project, sprint_id)
+
+
+@router.get(
+    "/{project_id}/ticket-token-baseline",
+    response_model=TicketTokenBaselineRead,
+)
+def get_ticket_token_baseline(
+    project_id: int,
+    sprint_id: int | None = Query(None),
+    since: datetime | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """DWB-546: per done-ticket token/time rows plus per-sprint aggregates.
+
+    The measurement floor for "do node-aware agents spend fewer tokens". Token
+    and time attribution is reused from app/services/tracking.py, so a number
+    here always matches the tracking summary for the same ticket.
+
+    Query params: sprint_id narrows to one sprint, since keeps tickets
+    completed at or after that timestamp. Every done ticket is listed,
+    including zero-token ones (an attribution gap, DWB-539); the per-sprint
+    statistics cover the attributed tickets and report the zero count
+    alongside. node_aware is False everywhere until DWB-545 follow-ups set it.
+
+    404 when the project does not exist.
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return baseline_svc.get_ticket_token_baseline(
+        db, project_id=project_id, sprint_id=sprint_id, since=since,
+    )
