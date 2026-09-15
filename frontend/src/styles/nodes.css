@@ -1,8 +1,8 @@
 /* Path: src/styles/nodes.css */
 /* File: nodes.css */
 /* Created: 2026-09-15 */
-/* Purpose: Styles for the project Nodes page (S81, DWB-534/535/536): page head, search row with the substring limiter and the + connections toggle (DWB-536/543), pointer-kind toggle row (DWB-542), weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page) plus the b8 headliner tier for the top 2% (DWB-541, 28px orange-bright), pointer count chips, selected state, the cap footer with show more / show all text links, and the NodeDetail overlay content (hop trail, pointer groups by kind, neighbor list). Terminal aesthetic, plain CSS. */
-/* Last Modified: 2026-09-15 (DWB-543) */
+/* Purpose: Styles for the project Nodes page (S81, DWB-534/535/536): page head, search row with the substring limiter and the + connections toggle (DWB-536/543), pointer-kind toggle row (DWB-542), weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page) plus the b8 headliner tier for the top 0.5% (DWB-541, 28px in the pale --green-light, still green), pointer count chips, selected state, the cap footer with show more / show all text links, and the NodeDetail overlay content (hop trail, pointer groups by kind, neighbor list). Terminal aesthetic, plain CSS. */
+/* Last Modified: 2026-09-15 (DWB-541 tweak: 0.5%, green-light) */
 
 .nodes-page__head {
   display: flex;
@@ -234,15 +234,16 @@
 .node-cloud__node--b6 { font-size: 19px; }
 .node-cloud__node--b7 { font-size: 22px; color: var(--green-bright); }
 
-/* Headliners: the top 2% by weight over the full set (utils/nodeScale.headlinerIds). */
+/* Headliners: the top 0.5% by weight over the full set (utils/nodeScale.headlinerIds).
+   Same green family, one step lighter than b7's green-bright; size is the cue, not a hue change. */
 .node-cloud__node--b8,
 .node-cloud__node--headliner {
   font-size: 28px;
-  color: var(--orange-bright);
+  color: var(--green-light);
 }
 
 .node-cloud__node--headliner:hover {
-  color: var(--orange-bright);
+  color: var(--green-light);
   text-decoration: underline;
 }
 

@@ -1,12 +1,12 @@
 // Path: src/utils/__tests__/nodeScale.test.js
 // File: nodeScale.test.js
 // Created: 2026-09-15
-// Purpose: Tests for the pure log-bucket node scaler (DWB-534): bounds, monotonicity, flat-set fallback, and the live project-1 weight profile (min 10, max 121, top-20 all >= 113) landing the whole top-20 in the single cap bucket so no node dwarfs the page. DWB-541: headliner tier = exactly ceil(2% of N) ids (minimum 1), highest weights first, ties by input order, pinned when scaling a subset.
+// Purpose: Tests for the pure log-bucket node scaler (DWB-534): bounds, monotonicity, flat-set fallback, and the live project-1 weight profile (min 10, max 121, top-20 all >= 113) landing the whole top-20 in the single cap bucket so no node dwarfs the page. DWB-541: headliner tier = exactly ceil(0.5% of N) ids (minimum 1), highest weights first, ties by input order, pinned when scaling a subset.
 // Caller: vitest test runner
 // Callees: ../nodeScale
 // Data In: Synthetic weight sets
 // Data Out: Test assertions
-// Last Modified: 2026-09-15 (DWB-541)
+// Last Modified: 2026-09-15 (DWB-541 tweak: 0.5%)
 
 import { describe, it, expect } from 'vitest';
 import { bucketForWeight, scaleNodes, weightBounds, headlinerCount, headlinerIds, NODE_SCALE_BUCKETS, HEADLINER_BUCKET } from '../nodeScale';
@@ -73,33 +73,34 @@ describe('nodeScale (DWB-534)', () => {
   describe('headliner tier (DWB-541)', () => {
     const mk = (n, weightOf) => Array.from({ length: n }, (_, i) => ({ id: i + 1, weight: weightOf(i) }));
 
-    it('counts exactly ceil(2%) with a minimum of 1 and zero for an empty set', () => {
+    it('counts exactly ceil(0.5%) with a minimum of 1 and zero for an empty set', () => {
       expect(headlinerCount(0)).toBe(0);
       expect(headlinerCount(1)).toBe(1);
       expect(headlinerCount(6)).toBe(1);
-      expect(headlinerCount(50)).toBe(1);
-      expect(headlinerCount(51)).toBe(2);
-      expect(headlinerCount(100)).toBe(2);
-      expect(headlinerCount(3544)).toBe(71);
-      expect(headlinerCount(3668)).toBe(74);
+      expect(headlinerCount(200)).toBe(1);
+      expect(headlinerCount(201)).toBe(2);
+      expect(headlinerCount(400)).toBe(2);
+      expect(headlinerCount(3400)).toBe(17);
+      expect(headlinerCount(3420)).toBe(18);
+      expect(headlinerCount(3668)).toBe(19);
     });
 
     it('picks the highest weights, breaking ties by input order so the count is exact', () => {
-      // 100 nodes, weights descending 121..22, so k = 2 -> ids 1 and 2
-      const nodes = mk(100, (i) => 121 - i);
+      // 400 nodes, weights descending 421..22, so k = 2 -> ids 1 and 2
+      const nodes = mk(400, (i) => 421 - i);
       expect([...headlinerIds(nodes)]).toEqual([1, 2]);
       // shuffled input still picks the two heaviest
       const shuffled = [...nodes].reverse();
       expect([...headlinerIds(shuffled)].sort()).toEqual([1, 2]);
-      // tie at the cut: ids 1,2,3 all weight 121 -> first two in input order
-      const tied = mk(100, (i) => (i < 3 ? 121 : 50));
+      // tie at the cut: ids 1,2,3 all weight 421 -> first two in input order
+      const tied = mk(400, (i) => (i < 3 ? 421 : 50));
       expect([...headlinerIds(tied)]).toEqual([1, 2]);
       expect(headlinerIds(tied).size).toBe(2);
       expect(headlinerIds([]).size).toBe(0);
     });
 
     it('scaleNodes puts headliners in HEADLINER_BUCKET (above b7) and leaves b0-b7 for the rest', () => {
-      const nodes = mk(100, (i) => 121 - i);
+      const nodes = mk(400, (i) => 421 - i);
       const scaled = scaleNodes(nodes);
       expect(HEADLINER_BUCKET).toBe(NODE_SCALE_BUCKETS);
       expect(scaled[0].bucket).toBe(HEADLINER_BUCKET);
@@ -112,7 +113,7 @@ describe('nodeScale (DWB-534)', () => {
     });
 
     it('a pinned headliner set from the full set survives scaling a subset', () => {
-      const full = mk(100, (i) => 121 - i);
+      const full = mk(400, (i) => 421 - i);
       const pinned = headlinerIds(full);
       // subset without any headliner: none promoted when pinned, one derived when not
       const subset = full.slice(10, 20);

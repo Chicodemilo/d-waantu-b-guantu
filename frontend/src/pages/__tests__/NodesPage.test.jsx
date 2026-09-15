@@ -1,7 +1,7 @@
 // Path: src/pages/__tests__/NodesPage.test.jsx
 // File: NodesPage.test.jsx
 // Created: 2026-09-15
-// Purpose: Tests for the project Nodes cloud page (DWB-534/535/536/541/542/543): loading state, render of tag + pointer count with the head count line, log-bucket scaling classes (top nodes share the cap bucket), empty state pointing at POST /nodeify, the 500-node cap with show more / show all, click emitting a selection (aria-pressed), the selection opening the detail Overlay which closes on Esc / close / scrim and clears the selection, the client-side substring LIMITER (case-insensitive on tag, no server call, matches keep their full-set bucket and headliner tier, no-match state, clear link and Esc restore the full cloud), the + connections toggle (off by default, dimmed first-degree neighbors for a small match set, disabled above 25 matches), and the pointer-kind toggle row (only present kinds, toggling memory off hides code/doc-only nodes, all-off message with select all, composes with the search).
+// Purpose: Tests for the project Nodes cloud page (DWB-534/535/536/541/542/543): loading state, render of tag + pointer count with the head count line, log-bucket scaling classes (top nodes share the cap bucket), empty state pointing at POST /nodeify, the 400-node cap with show more / show all, click emitting a selection (aria-pressed), the selection opening the detail Overlay which closes on Esc / close / scrim and clears the selection, the client-side substring LIMITER (case-insensitive on tag, no server call, matches keep their full-set bucket and headliner tier, no-match state, clear link and Esc restore the full cloud), the + connections toggle (off by default, dimmed first-degree neighbors for a small match set, disabled above 25 matches), and the pointer-kind toggle row (only present kinds, toggling memory off hides code/doc-only nodes, all-off message with select all, composes with the search).
 // Caller: vitest test runner
 // Callees: ../NodesPage, ../../api/nodes (mocked: getProjectNodes + matchProjectNodes for connections)
 // Data In: Mocked getProjectNodes responses in the live NodeRead shape
@@ -91,13 +91,13 @@ describe('NodesPage (DWB-534)', () => {
     expect(screen.getByText('showing 6 of 6')).toBeInTheDocument();
   });
 
-  it('scales by log bucket: the heavy top nodes share the cap bucket, the lightest is bucket 0, and exactly ceil(2%) are headliners', async () => {
+  it('scales by log bucket: the heavy top nodes share the cap bucket, the lightest is bucket 0, and exactly ceil(0.5%) are headliners', async () => {
     getProjectNodes.mockResolvedValue(NODES);
     await act(async () => { renderAt(); });
     await waitFor(() => expect(screen.getByText('contract')).toBeInTheDocument());
 
     const bucketOf = (tag) => Number(screen.getByText(tag).closest('button').dataset.bucket);
-    // 6 nodes -> ceil(0.12) = 1 headliner: contract (first of the two weight-121 nodes in API order)
+    // 6 nodes -> ceil(0.03) = 1 headliner: contract (first of the two weight-121 nodes in API order)
     expect(bucketOf('contract')).toBe(8);
     expect(screen.getByText('contract').closest('button')).toHaveClass('node-cloud__node--headliner');
     expect(document.querySelectorAll('.node-cloud__node--headliner')).toHaveLength(1);

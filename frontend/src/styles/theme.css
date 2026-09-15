@@ -2,7 +2,7 @@
 /* File: theme.css */
 /* Created: 2026-03-29 */
 /* Purpose: Global CSS custom properties (colors, fonts) and base reset styles for the terminal-aesthetic theme */
-/* Last Modified: 2026-04-09 */
+/* Last Modified: 2026-09-15 (DWB-541 tweak: --green-light headliner token) */
 
 :root {
   --bg: #000000;
@@ -11,6 +11,7 @@
   --green: #4ade80;
   --green-dim: #22c55e;
   --green-bright: #86efac;
+  --green-light: #bbf7d0; /* pale green, lighter than green-bright; node cloud headliners */
   --orange: #fb923c;
   --orange-bright: #fdba74;
   --blue: #93c5fd;

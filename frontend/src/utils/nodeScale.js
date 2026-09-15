@@ -1,19 +1,19 @@
 // Path: src/utils/nodeScale.js
 // File: nodeScale.js
 // Created: 2026-09-15
-// Purpose: Pure weight-to-size bucketing for the node cloud (DWB-534). Maps a node weight onto a small fixed number of log-spaced buckets so the top nodes share one cap size instead of dwarfing the page; the CSS assigns a font-size per bucket. Bucket boundaries derive from the min/max of the set passed in, so the scale re-fits when the cloud is limited by a search. DWB-541 adds the headliner tier: exactly ceil(2% of N) nodes (minimum 1), the highest weights with ties broken by input order, land in a ninth bucket above b7; the id set is computed over the FULL set so a limited cloud keeps its headliners.
+// Purpose: Pure weight-to-size bucketing for the node cloud (DWB-534). Maps a node weight onto a small fixed number of log-spaced buckets so the top nodes share one cap size instead of dwarfing the page; the CSS assigns a font-size per bucket. Bucket boundaries derive from the min/max of the set passed in, so the scale re-fits when the cloud is limited by a search. DWB-541 adds the headliner tier: exactly ceil(0.5% of N) nodes (minimum 1; Miles tweak, was 2%), the highest weights with ties broken by input order, land in a ninth bucket above b7; the id set is computed over the FULL set so a limited cloud keeps its headliners.
 // Caller: components/nodes/NodeCloud.jsx (scaleNodes, bucketForWeight, headlinerIds), pages/NodesPage.jsx (weightBounds, headlinerIds), utils/__tests__/nodeScale.test.js
 // Callees: None (leaf utility module)
 // Data In: node weight (number), weight bounds, node arrays [{weight, ...}]
-// Data Out: bucket index 0..buckets-1 (HEADLINER_BUCKET = buckets for the top 2%); headliner id Set; nodes decorated with a bucket field
-// Last Modified: 2026-09-15 (DWB-541)
+// Data Out: bucket index 0..buckets-1 (HEADLINER_BUCKET = buckets for the top 0.5%); headliner id Set; nodes decorated with a bucket field
+// Last Modified: 2026-09-15 (DWB-541 tweak: 0.5%)
 
 export const NODE_SCALE_BUCKETS = 8;
 // The tier above the top regular bucket; CSS class node-cloud__node--b8.
 export const HEADLINER_BUCKET = NODE_SCALE_BUCKETS;
-export const HEADLINER_SHARE = 0.02;
+export const HEADLINER_SHARE = 0.005;
 
-// How many headliners a set of n nodes has: ceil(2% of n), never fewer than 1 when n > 0.
+// How many headliners a set of n nodes has: ceil(0.5% of n), never fewer than 1 when n > 0.
 export function headlinerCount(n, share = HEADLINER_SHARE) {
   if (!(n > 0)) return 0;
   return Math.max(1, Math.ceil(n * share));

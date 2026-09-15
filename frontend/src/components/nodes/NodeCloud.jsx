@@ -1,17 +1,18 @@
 // Path: src/components/nodes/NodeCloud.jsx
 // File: NodeCloud.jsx
 // Created: 2026-09-15
-// Purpose: Weighted tag cloud for the node index (DWB-534). Renders nodes in the order given (API is weight desc, so the order is stable) as text buttons sized by a log bucket (utils/nodeScale), each showing tag + pointer count. An optional bounds prop pins the scale to the full set's min/max so a limited subset (DWB-536 match search) keeps each node's original size; an optional headlinerIds set (DWB-541, the full set's top 2%) pins the headliner tier the same way; an optional connectedIds set (DWB-543) marks first-degree neighbors with a dimmed node-cloud__node--connected class. Caps the DOM at pageSize with a "show more" text link so a 3.6k-node project stays usable. Clicking a node calls onSelect(node); the selected node is marked with aria-pressed for the detail overlay consumer (DWB-535).
+// Purpose: Weighted tag cloud for the node index (DWB-534). Renders nodes in the order given (API is weight desc, so the order is stable) as text buttons sized by a log bucket (utils/nodeScale), each showing tag + pointer count. An optional bounds prop pins the scale to the full set's min/max so a limited subset (DWB-536 match search) keeps each node's original size; an optional headlinerIds set (DWB-541, the full set's top 0.5%) pins the headliner tier the same way; an optional connectedIds set (DWB-543) marks first-degree neighbors with a dimmed node-cloud__node--connected class. Caps the DOM at pageSize with a "show more" text link so a 3.6k-node project stays usable. Clicking a node calls onSelect(node); the selected node is marked with aria-pressed for the detail overlay consumer (DWB-535).
 // Caller: pages/NodesPage.jsx
 // Callees: react (useState, useEffect, useMemo), utils/nodeScale (scaleNodes, bucketForWeight, headlinerIds, HEADLINER_BUCKET)
 // Data In: nodes (NodeRead[]), onSelect (fn(node)), selectedId (number|null), pageSize (number), bounds ({minW, maxW}|null), headlinerIds (Set<number>|null), connectedIds (Set<number>|null)
 // Data Out: default export NodeCloud component
-// Last Modified: 2026-09-15 (DWB-543: connected class)
+// Last Modified: 2026-09-15 (DWB-534 tweak: page size 400)
 
 import { useState, useEffect, useMemo } from 'react';
 import { scaleNodes, bucketForWeight, headlinerIds as deriveHeadliners, HEADLINER_BUCKET } from '../../utils/nodeScale';
 
-export const NODE_CLOUD_PAGE_SIZE = 500;
+// Initial cap and show-more step (Miles tweak: 500 -> 400 so the first screen is lighter).
+export const NODE_CLOUD_PAGE_SIZE = 400;
 
 function NodeCloud({ nodes, onSelect, selectedId = null, pageSize = NODE_CLOUD_PAGE_SIZE, bounds = null, headlinerIds = null, connectedIds = null }) {
   const [visibleCount, setVisibleCount] = useState(pageSize);
