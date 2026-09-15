@@ -1,12 +1,12 @@
 // Path: src/pages/__tests__/NodesPage.test.jsx
 // File: NodesPage.test.jsx
 // Created: 2026-09-15
-// Purpose: Tests for the project Nodes cloud page (DWB-534/535/536/541/542/543): loading state, render of tag + pointer count with the head count line, log-bucket scaling classes (top nodes share the cap bucket), empty state pointing at POST /nodeify, the 400-node cap with show more / show all, click emitting a selection (aria-pressed), the selection opening the detail Overlay which closes on Esc / close / scrim and clears the selection, the client-side substring LIMITER (case-insensitive on tag, no server call, matches keep their full-set bucket and headliner tier, no-match state, clear link and Esc restore the full cloud), the + connections toggle (off by default, dimmed first-degree neighbors for a small match set, disabled above 25 matches), and the pointer-kind toggle row (only present kinds, toggling memory off hides code/doc-only nodes, all-off message with select all, composes with the search).
+// Purpose: Tests for the project Nodes cloud page (DWB-534/535/536/541/542/543/551): loading state, render of tag + pointer count with the head count line, log-bucket scaling classes (top nodes share the cap bucket), empty state pointing at POST /nodeify, the 400-node cap with show more / show all, click emitting a selection (aria-pressed), the selection opening the detail Overlay which closes on Esc / close / scrim and clears the selection, the client-side substring LIMITER (case-insensitive on tag, no server call, matches keep their full-set bucket and headliner tier, no-match state, clear link and Esc restore the full cloud), the + connections toggle (off by default, dimmed first-degree neighbors for a small match set, disabled above 25 matches), and the pointer-kind toggle row (only present kinds, toggling memory off hides code/doc-only nodes, all-off message with select all, composes with the search).
 // Caller: vitest test runner
-// Callees: ../NodesPage, ../../api/nodes (mocked: getProjectNodes + matchProjectNodes for connections)
+// Callees: ../NodesPage, ../../api/nodes (mocked: getProjectNodes + matchProjectNodes for connections + nodeifyProject for rescan)
 // Data In: Mocked getProjectNodes responses in the live NodeRead shape
 // Data Out: Test assertions
-// Last Modified: 2026-09-15 (DWB-543)
+// Last Modified: 2026-09-15 (DWB-551)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup, fireEvent, within } from '@testing-library/react';
@@ -15,10 +15,11 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 vi.mock('../../api/nodes', () => ({
   getProjectNodes: vi.fn(),
   matchProjectNodes: vi.fn(),
+  nodeifyProject: vi.fn(),
 }));
 
 import NodesPage from '../NodesPage';
-import { getProjectNodes, matchProjectNodes } from '../../api/nodes';
+import { getProjectNodes, matchProjectNodes, nodeifyProject } from '../../api/nodes';
 import { NODE_CLOUD_PAGE_SIZE } from '../../components/nodes/NodeCloud';
 
 function pointer(i, kind = 'code') {
@@ -45,6 +46,17 @@ const NODES = [
   node(7, 'zelda', 10, 1),
 ];
 
+// Live NodeifyResponse shape (backend app/schemas/node.py::NodeifyResponse).
+const REPORT = {
+  project_id: 1,
+  nodeified_at: '2026-09-15T19:10:00',
+  source_counts: { code: 900, doc: 40, memory: 8 },
+  grounded: 3420,
+  pruned: 12,
+  suppressed: 271,
+  pointers_written: 68916,
+};
+
 function renderAt(path = '/projects/1/nodes') {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -59,6 +71,8 @@ describe('NodesPage (DWB-534)', () => {
   beforeEach(() => {
     getProjectNodes.mockReset();
     matchProjectNodes.mockReset();
+    nodeifyProject.mockReset();
+    nodeifyProject.mockResolvedValue(REPORT);
     matchProjectNodes.mockImplementation((pid, text) => Promise.resolve({ query: text, query_tags: [text], nodes: [] }));
   });
 
@@ -114,15 +128,18 @@ describe('NodesPage (DWB-534)', () => {
     expect(screen.getByText('zelda').closest('button')).toHaveClass('node-cloud__node--b0');
   });
 
-  it('empty state points at POST /nodeify and offers reload', async () => {
+  it('empty state offers the rescan control, which runs a pass and refetches (DWB-551)', async () => {
     getProjectNodes.mockResolvedValueOnce([]).mockResolvedValueOnce(NODES);
+    nodeifyProject.mockResolvedValue(REPORT);
     await act(async () => { renderAt('/projects/7/nodes'); });
     await waitFor(() => expect(screen.getByText('no nodes indexed for this project yet.')).toBeInTheDocument());
-    expect(screen.getByText('POST /api/projects/7/nodeify')).toBeInTheDocument();
     expect(screen.queryByTestId('node-cloud')).not.toBeInTheDocument();
+    // the endpoint is no longer printed as text: the control replaces it
+    expect(screen.queryByText('POST /api/projects/7/nodeify')).not.toBeInTheDocument();
 
-    await act(async () => { fireEvent.click(screen.getByText('reload')); });
+    await act(async () => { fireEvent.click(screen.getByText('rescan now')); });
     await waitFor(() => expect(screen.getByText('contract')).toBeInTheDocument());
+    expect(nodeifyProject).toHaveBeenCalledWith('7');
     expect(getProjectNodes).toHaveBeenCalledTimes(2);
   });
 
@@ -399,6 +416,81 @@ describe('NodesPage (DWB-534)', () => {
       await act(async () => { fireEvent.click(toggle('memory')); });
       expect(visibleTags()).toEqual(['alpha']);
       expect(screen.getByText('1 / 4 match')).toBeInTheDocument();
+    });
+  });
+
+  describe('rescan control (DWB-551)', () => {
+    const rescanBtn = () => screen.getByRole('button', { name: /^rescan/ });
+
+    async function renderLoaded() {
+      getProjectNodes.mockResolvedValue(NODES);
+      await act(async () => { renderAt(); });
+      await waitFor(() => expect(screen.getByText('contract')).toBeInTheDocument());
+    }
+
+    it('renders idle with the index age and no report', async () => {
+      await renderLoaded();
+      expect(rescanBtn()).toHaveTextContent('rescan');
+      expect(rescanBtn()).not.toBeDisabled();
+      // no project row in the test store and no report yet
+      expect(screen.getByTestId('nodeified-age')).toHaveTextContent('never indexed');
+      expect(screen.queryByText(/grounded/)).not.toBeInTheDocument();
+      expect(nodeifyProject).not.toHaveBeenCalled();
+    });
+
+    it('shows the in-progress state while running and disables the control', async () => {
+      await renderLoaded();
+      let resolve;
+      nodeifyProject.mockReturnValue(new Promise((r) => { resolve = r; }));
+
+      await act(async () => { fireEvent.click(rescanBtn()); });
+      expect(rescanBtn()).toHaveTextContent('rescanning...');
+      expect(rescanBtn()).toBeDisabled();
+      expect(rescanBtn()).toHaveAttribute('aria-busy', 'true');
+
+      await act(async () => { resolve(REPORT); });
+      await waitFor(() => expect(rescanBtn()).not.toBeDisabled());
+      expect(rescanBtn()).toHaveTextContent('rescan');
+    });
+
+    it('on success reports the counts, refetches the cloud, and updates the age', async () => {
+      await renderLoaded();
+      await act(async () => { fireEvent.click(rescanBtn()); });
+      await waitFor(() => expect(screen.getByText(/3420 grounded/)).toBeInTheDocument());
+      expect(screen.getByText(/271 suppressed/)).toBeInTheDocument();
+      expect(screen.getByText(/68916 pointers written/)).toBeInTheDocument();
+      expect(nodeifyProject).toHaveBeenCalledWith('1');
+      // the cloud refetched after the pass
+      expect(getProjectNodes).toHaveBeenCalledTimes(2);
+      // age now comes from the report, not the (absent) project row
+      expect(screen.getByTestId('nodeified-age')).not.toHaveTextContent('never indexed');
+      expect(screen.getByTestId('nodeified-age').textContent).toMatch(/^indexed /);
+    });
+
+    it('surfaces a failure with its message and does not refetch', async () => {
+      await renderLoaded();
+      nodeifyProject.mockImplementation(() => Promise.reject(new Error('nodeify already running')));
+      await act(async () => { fireEvent.click(rescanBtn()); });
+      await waitFor(() => expect(screen.getByText(/rescan failed: nodeify already running/)).toBeInTheDocument());
+      expect(getProjectNodes).toHaveBeenCalledTimes(1);
+      expect(rescanBtn()).not.toBeDisabled();
+      expect(screen.queryByText(/grounded/)).not.toBeInTheDocument();
+    });
+
+    it('a double click cannot start two passes', async () => {
+      await renderLoaded();
+      let resolve;
+      nodeifyProject.mockReturnValue(new Promise((r) => { resolve = r; }));
+      const btn = rescanBtn();
+      await act(async () => {
+        fireEvent.click(btn);
+        fireEvent.click(btn);
+        fireEvent.click(btn);
+      });
+      expect(nodeifyProject).toHaveBeenCalledTimes(1);
+      await act(async () => { resolve(REPORT); });
+      await waitFor(() => expect(screen.getByText(/3420 grounded/)).toBeInTheDocument());
+      expect(nodeifyProject).toHaveBeenCalledTimes(1);
     });
   });
 });

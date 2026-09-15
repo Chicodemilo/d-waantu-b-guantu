@@ -1,13 +1,14 @@
 /* Path: src/styles/nodes.css */
 /* File: nodes.css */
 /* Created: 2026-09-15 */
-/* Purpose: Styles for the project Nodes page (S81, DWB-534/535/536): page head, search row with the substring limiter and the + connections toggle (DWB-536/543), pointer-kind toggle row (DWB-542), weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page) plus the b8 headliner tier for the top 0.5% (DWB-541, 28px in the pale --green-light, still green), pointer count chips, selected state, the cap footer with show more / show all text links, and the NodeDetail overlay content (hop trail, pointer groups by kind, neighbor list). Terminal aesthetic, plain CSS. */
-/* Last Modified: 2026-09-15 (DWB-541 tweak: 0.5%, green-light) */
+/* Purpose: Styles for the project Nodes page (S81, DWB-534/535/536/551): page head with the rescan control, index age, and pass report (DWB-551), search row with the substring limiter and the + connections toggle (DWB-536/543), pointer-kind toggle row (DWB-542), weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page) plus the b8 headliner tier for the top 0.5% (DWB-541, 28px in the pale --green-light, still green), pointer count chips, selected state, the cap footer with show more / show all text links, and the NodeDetail overlay content (hop trail, pointer groups by kind, neighbor list). Terminal aesthetic, plain CSS. */
+/* Last Modified: 2026-09-15 (DWB-551: rescan control) */
 
 .nodes-page__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 16px;
+  gap: 8px 16px;
   margin-bottom: 12px;
 }
 
@@ -25,6 +26,45 @@
   margin-top: 8px;
 }
 
+/* Rescan control + index age in the head (DWB-551) */
+
+.nodes-page__age {
+  color: var(--gray);
+  font-size: 12px;
+}
+
+.nodes-page__rescan {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.nodes-page__rescan:hover:not(:disabled) {
+  border-color: var(--green-dim);
+  color: var(--green-bright);
+}
+
+.nodes-page__rescan:disabled {
+  color: var(--orange);
+  border-color: var(--border);
+  cursor: progress;
+}
+
+.nodes-page__rescan-report {
+  color: var(--gray-light);
+  font-size: 12px;
+}
+
+.nodes-page__rescan-error {
+  color: var(--red);
+  font-size: 12px;
+}
+
 .nodes-page__code {
   color: var(--green);
   font-family: var(--font-mono);
@@ -39,8 +79,13 @@
   cursor: pointer;
 }
 
-.nodes-page__link:hover {
+.nodes-page__link:hover:not(:disabled) {
   text-decoration: underline;
+}
+
+.nodes-page__link:disabled {
+  color: var(--orange);
+  cursor: progress;
 }
 
 /* Search row: substring limiter (DWB-536/543) + connections toggle (DWB-543) */

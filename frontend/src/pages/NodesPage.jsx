@@ -1,18 +1,20 @@
 // Path: src/pages/NodesPage.jsx
 // File: NodesPage.jsx
 // Created: 2026-09-15
-// Purpose: Project Nodes page (DWB-534/535/536/541/542/543): renders the node index as a weighted tag cloud with loading and empty states (the empty state points at POST /api/projects/{id}/nodeify). Owns the selected-node state; a selection opens the generic Overlay with NodeDetail inside (DWB-535). The search box is a LIMITER (Miles ruling): a client-side case-insensitive substring filter on node.tag over the loaded set (DWB-543, replacing the exact-tag server match of DWB-536); non-matches disappear, matches keep their full-set weight scale via the cloud's bounds prop and their headliner tier via headlinerIds (DWB-541), an empty query restores the full cloud, Esc or the clear link empties the query. An optional "+ connections" toggle (OFF by default) adds first-degree neighbors of the matches in a dimmed style via hooks/useNodeConnections when 25 or fewer nodes match; above that it is disabled. A pointer-kind toggle row (DWB-542) filters client-side over loaded pointers and composes with the search (both must pass); all kinds off shows "no kinds selected" with a select-all link.
+// Purpose: Project Nodes page (DWB-534/535/536/541/542/543/551): renders the node index as a weighted tag cloud with loading and empty states (the empty state points at POST /api/projects/{id}/nodeify). Owns the selected-node state; a selection opens the generic Overlay with NodeDetail inside (DWB-535). The search box is a LIMITER (Miles ruling): a client-side case-insensitive substring filter on node.tag over the loaded set (DWB-543, replacing the exact-tag server match of DWB-536); non-matches disappear, matches keep their full-set weight scale via the cloud's bounds prop and their headliner tier via headlinerIds (DWB-541), an empty query restores the full cloud, Esc or the clear link empties the query. An optional "+ connections" toggle (OFF by default) adds first-degree neighbors of the matches in a dimmed style via hooks/useNodeConnections when 25 or fewer nodes match; above that it is disabled. A pointer-kind toggle row (DWB-542) filters client-side over loaded pointers and composes with the search (both must pass); all kinds off shows "no kinds selected" with a select-all link. The head carries the rescan control (DWB-551): POST /nodeify behind hooks/useNodeify, disabled with an in-progress state while it runs, reporting grounded / suppressed / pointers written on success and the error text on failure, refetching the cloud after a pass, and showing nodeified_at as a plain relative age (the visibility half of DWB-550). The empty state's rescan link is the same control.
 // Caller: App.jsx (route: /projects/:id/nodes)
-// Callees: react (useState, useMemo), react-router-dom (useParams), store/useStore (getProject), hooks/useProjectNodes, hooks/useNodeConnections, utils/nodeScale (weightBounds, headlinerIds), utils/nodeKinds (pointerKinds, nodeHasSelectedKind), components/nodes/KindFilter, components/nodes/NodeCloud, components/nodes/NodeDetail, components/common/Overlay, components/common/FuzzySearch
+// Callees: react (useState, useMemo), react-router-dom (useParams), store/useStore (getProject), hooks/useProjectNodes, hooks/useNodeConnections, hooks/useNodeify, utils/format (relativeAge), utils/nodeScale (weightBounds, headlinerIds), utils/nodeKinds (pointerKinds, nodeHasSelectedKind), components/nodes/KindFilter, components/nodes/NodeCloud, components/nodes/NodeDetail, components/common/Overlay, components/common/FuzzySearch
 // Data In: Route param (id), project from Zustand store, nodes from API
 // Data Out: Default export NodesPage component
-// Last Modified: 2026-09-15 (DWB-543)
+// Last Modified: 2026-09-15 (DWB-551: rescan + age)
 
 import { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import useProjectNodes from '../hooks/useProjectNodes';
 import useNodeConnections, { MAX_CONNECTION_MATCHES } from '../hooks/useNodeConnections';
+import useNodeify from '../hooks/useNodeify';
+import { relativeAge } from '../utils/format';
 import { weightBounds, headlinerIds } from '../utils/nodeScale';
 import { pointerKinds, nodeHasSelectedKind } from '../utils/nodeKinds';
 import KindFilter from '../components/nodes/KindFilter';
@@ -31,6 +33,12 @@ function NodesPage() {
   const [selected, setSelected] = useState(null);
   const [query, setQuery] = useState('');
   const [connectionsOn, setConnectionsOn] = useState(false);
+
+  // Rescan (DWB-551). The report's nodeified_at is fresher than the store's
+  // project row until the next poll, so it wins for the age line.
+  const { rescan, running: rescanning, report, error: rescanError } = useNodeify(id, reload);
+  const nodeifiedAt = report?.nodeified_at || project?.nodeified_at || null;
+  const age = relativeAge(nodeifiedAt);
 
   // Scale and headliner tier are pinned to the FULL set so a limited cloud keeps each node's size.
   const bounds = useMemo(() => weightBounds(nodes), [nodes]);
@@ -101,8 +109,10 @@ function NodesPage() {
       <div className="empty-state nodes-page__empty">
         <div>no nodes indexed for this project yet.</div>
         <div className="nodes-page__hint">
-          build the index with <code className="nodes-page__code">POST /api/projects/{id}/nodeify</code>, then{' '}
-          <button type="button" className="nodes-page__link" onClick={reload}>reload</button>.
+          <button type="button" className="nodes-page__link" onClick={rescan} disabled={rescanning}>
+            {rescanning ? 'rescanning...' : 'rescan now'}
+          </button>{' '}
+          to build it.
         </div>
       </div>
     );
@@ -176,6 +186,30 @@ function NodesPage() {
         {!loading && !error && nodes.length > 0 && (
           <span className="nodes-page__count">
             {nodes.length} node{nodes.length === 1 ? '' : 's'}, {pointerTotal} pointer{pointerTotal === 1 ? '' : 's'}
+          </span>
+        )}
+        <span className="nodes-page__age" data-testid="nodeified-age">
+          {nodeifiedAt ? `indexed ${age}` : 'never indexed'}
+        </span>
+        <button
+          type="button"
+          className="nodes-page__rescan"
+          onClick={rescan}
+          disabled={rescanning}
+          aria-busy={rescanning}
+          title={rescanning ? 'a rescan is already running' : 'rebuild the node index for this project'}
+        >
+          {rescanning ? 'rescanning...' : 'rescan'}
+        </button>
+        {report && !rescanning && (
+          <span className="nodes-page__rescan-report">
+            {report.grounded} grounded, {report.suppressed} suppressed, {report.pointers_written} pointer
+            {report.pointers_written === 1 ? '' : 's'} written
+          </span>
+        )}
+        {rescanError && (
+          <span className="nodes-page__rescan-error">
+            rescan failed: {rescanError.message || 'unknown error'}
           </span>
         )}
       </div>
