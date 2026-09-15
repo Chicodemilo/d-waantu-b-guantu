@@ -16,7 +16,7 @@
 # Callees: app/services/keyword_extraction (tokenize, STOPWORDS), app/models/node
 # Data In: db: Session, project_id: int, SourceUnit list (+ optional prune scope)
 # Data Out: RegistrationResult (grounded / pruned / skipped tag counts)
-# Last Modified: 2026-09-15
+# Last Modified: 2026-09-15 (DWB-538: GENERIC_MIN_DF floor on suppression threshold)
 
 from __future__ import annotations
 
@@ -62,6 +62,18 @@ VALID_KINDS = frozenset(k.value for k in NodePointerKind)
 # now catches the clearly-ubiquitous long tail without touching domain vocab.
 GENERIC_DF_RATIO = 0.12
 GENERIC_MIN_DOCS = 8
+
+# DWB-538: absolute document-frequency FLOOR for suppression. The ratio alone
+# collapses on small corpora: at 8 docs the threshold is 0.96 (every tag is
+# "generic"), and for 9-16 docs it is under 2, which is the df every grounded
+# tag has BY DEFINITION under the 2-domain rule - so nodeify on an 8..16-doc
+# project suppressed every node it had just grounded. A tag seen in only two
+# documents can never be boilerplate; requiring df >= 3 as well as df >= ratio*N
+# ties suppression to "strictly more than the grounding minimum" at every scale
+# (a floor, unlike a higher GENERIC_MIN_DOCS, has no cliff where suppression
+# switches off entirely for a mid-sized corpus). Above ~25 docs the ratio term
+# dominates and behaviour is unchanged.
+GENERIC_MIN_DF = 3
 
 # DWB-522 rework: project-agnostic node stoplist. These are generic
 # code-keyword / English-boilerplate terms that ground in 2+ domains in ANY
@@ -340,7 +352,9 @@ def register_sources(
         all_docs = {(c.kind, c.ref) for ptrs in batch.values() for c in ptrs}
         total_docs = len(all_docs)
         if total_docs >= GENERIC_MIN_DOCS:
-            threshold = GENERIC_DF_RATIO * total_docs
+            # DWB-538: floor the ratio threshold so a small corpus never treats
+            # the 2-domain grounding minimum itself as generic.
+            threshold = max(GENERIC_DF_RATIO * total_docs, GENERIC_MIN_DF)
             for tag, ptrs in batch.items():
                 df = len({(c.kind, c.ref) for c in ptrs})
                 if df >= threshold:

@@ -8,7 +8,7 @@
 # Callees: app/services/node_touch, app/services/agent (memory append wiring)
 # Data In: pytest fixtures (client, db_session, make_project, make_agent, tmp_path)
 # Data Out: assertions
-# Last Modified: 2026-09-14 (DWB-527)
+# Last Modified: 2026-09-15 (DWB-538: 10-doc two-domain small-corpus pass)
 
 import subprocess
 from pathlib import Path
@@ -187,6 +187,40 @@ class TestNodeifyFullPass:
     def test_unknown_project_404(self, client):
         r = client.post("/api/projects/999999/nodeify")
         assert r.status_code == 404
+
+
+class TestSmallCorpusSuppression:
+    """DWB-538: a nodeify pass over a 10-doc two-domain corpus must ground the
+    shared tags. Before the GENERIC_MIN_DF floor the 0.12 ratio gave a threshold
+    of 1.2 at 10 docs, so every grounded (df>=2) tag was suppressed and the
+    cloud came back empty."""
+
+    def test_ten_doc_two_domain_pass_grounds_shared_tags(
+        self, client, db_session, make_project, tmp_path
+    ):
+        repo = tmp_path
+        project = make_project(repo_path=str(repo))
+        prefix = project["prefix"]
+        rocks = ["quartz", "basalt", "granite", "marble", "slate"]
+        # 5 memory docs + 5 doc docs = 10 distinct (kind, ref) documents. Each
+        # rock sits in one memory + one doc (df=2); "common" is in all 10.
+        for i, rock in enumerate(rocks):
+            # Distinct headings per file: an identical ISO heading token in all
+            # five memory docs would itself count as a (never-grounding) generic.
+            _write(_mem_file(repo, prefix, f"Agent{i}"),
+                   f"## 2026-09-15T00:0{i}:00+00:00\ncommon {rock}\n")
+            name = "README.md" if i == 0 else f"docs/{rock}.md"
+            _write(repo / name, f"common {rock}\n")
+
+        r = client.post(f"/api/projects/{project['id']}/nodeify")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["source_counts"] == {"code": 0, "doc": 5, "memory": 5}
+        assert body["grounded"] == 5
+        assert body["suppressed"] == 1
+        tags = _tags(db_session, project["id"])
+        assert set(rocks) <= tags
+        assert "common" not in tags
 
 
 class TestMemoryTouchWiring:

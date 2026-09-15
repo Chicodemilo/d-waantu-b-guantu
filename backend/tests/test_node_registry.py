@@ -10,12 +10,16 @@
 # Callees: app/services/node_registry, app/models/node
 # Data In: pytest fixtures (db_session, make_project)
 # Data Out: assertions
-# Last Modified: 2026-09-15 (DWB-522 rework)
+# Last Modified: 2026-09-15 (DWB-538: small-corpus suppression floor)
 
 from sqlalchemy import select
 
 from app.models.node import Node, NodePointer
+import pytest
+
 from app.services.node_registry import (
+    GENERIC_MIN_DF,
+    GENERIC_MIN_DOCS,
     SourceUnit,
     light_stem,
     node_tokens,
@@ -367,6 +371,58 @@ class TestIdempotencyAndPrune:
         ]
         register_sources(db_session, p["id"], units, suppress_generic=True)
         assert "common" in _tag_set(db_session, p["id"])
+
+    def test_small_corpus_two_domain_tags_survive_suppression(self, db_session, make_project):
+        """DWB-538: a 10-doc two-domain corpus. Before the GENERIC_MIN_DF floor
+        the ratio threshold was 1.2, so every grounded tag (df>=2) was
+        suppressed and nodeify grounded NOTHING. Now the df=2 topics survive and
+        only the tag in all 10 docs is dropped as generic."""
+        p = make_project()
+        rocks = ["quartz", "basalt", "granite", "marble", "slate"]
+        units = []
+        for i, rock in enumerate(rocks):
+            units.append(SourceUnit(kind="memory", ref=f"m{i}", text=f"common {rock}"))
+            units.append(SourceUnit(kind="code", ref=f"c{i}.py", text=f"common {rock}"))
+        assert len({(u.kind, u.ref) for u in units}) == 10 >= GENERIC_MIN_DOCS
+        res = register_sources(db_session, p["id"], units, suppress_generic=True)
+        tags = _tag_set(db_session, p["id"])
+        assert set(rocks) <= tags
+        assert "common" not in tags
+        assert res.suppressed_tags == ["common"]
+        assert sorted(res.grounded_tags) == sorted(rocks)
+
+    @pytest.mark.parametrize("total_docs", [8, 12, 16, 24])
+    def test_df_two_is_never_generic_at_any_corpus_size(self, db_session, make_project, total_docs):
+        """DWB-538: df=2 is the grounding minimum, so it must never clear the
+        suppression threshold regardless of N."""
+        p = make_project()
+        units = []
+        for i in range(total_docs):
+            kind = "code" if i % 2 == 0 else "doc"
+            text = "filler special" if i < 2 else "filler"
+            units.append(SourceUnit(kind=kind, ref=f"f{i}", text=text))
+        res = register_sources(db_session, p["id"], units, suppress_generic=True)
+        assert "special" in _tag_set(db_session, p["id"])
+        assert "special" not in res.suppressed_tags
+        assert "filler" in res.suppressed_tags   # df == N is always generic
+
+    def test_df_at_floor_is_generic_on_small_corpus(self, db_session, make_project):
+        """DWB-538: with 8 docs the ratio term is 0.96, so the floor decides:
+        a tag in GENERIC_MIN_DF (3) of 8 docs is suppressed, one in 2 survives."""
+        p = make_project()
+        units = []
+        for i in range(8):
+            kind = "code" if i % 2 == 0 else "doc"
+            words = ["filler"]
+            if i < GENERIC_MIN_DF:
+                words.append("trio")
+            if i < 2:
+                words.append("pair")
+            units.append(SourceUnit(kind=kind, ref=f"f{i}", text=" ".join(words)))
+        res = register_sources(db_session, p["id"], units, suppress_generic=True)
+        tags = _tag_set(db_session, p["id"])
+        assert "pair" in tags
+        assert "trio" not in tags and "trio" in res.suppressed_tags
 
     def test_project_isolation(self, db_session, make_project):
         p1 = make_project()
