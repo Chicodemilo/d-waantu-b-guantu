@@ -75,9 +75,10 @@ class TestSessionCompleteWriting:
         memory = (Path(tmp_path) / ".dwb/memory/SC2/Devin/memory.md").read_text()
         assert memory.count("session sess-") == 3
 
-    def test_lessons_free_wrapup_writes_nothing(self, client, tmp_path):
-        """DWB-560: with no lessons there is nothing durable to record, so the
-        endpoint writes no block at all rather than a bare heading."""
+    def test_lessons_free_wrapup_writes_heading_only(self, client, tmp_path):
+        """DWB-560: with no lessons the block is the ISO heading alone. The
+        heading stays so the DWB-519 write-on-close gate still sees the agent
+        participated; the narration is what goes away."""
         project, agent = _setup_agent(client, tmp_path, prefix="SC3", name="Bolt")
         r = client.post(f"/api/agents/{agent['id']}/session-complete", json={
             "session_id": "sess-minimal",
@@ -86,16 +87,17 @@ class TestSessionCompleteWriting:
         assert r.status_code == 200
         memory_dir = Path(tmp_path) / ".dwb/memory/SC3/Bolt"
         memory = (memory_dir / "memory.md").read_text()
-        assert memory.strip() == ""
-        assert "sess-minimal" not in memory
+        assert memory.lstrip().startswith("## ")
+        assert "sess-minimal" in memory
+        assert "no lessons, no tokens" not in memory
         assert "tokens_used" not in memory
         assert "- lessons" not in memory
         # Retired files never created
         assert not (memory_dir / "lessons.md").exists()
         assert not (memory_dir / "recent_sessions.md").exists()
         body = r.json()
-        assert body["paths_written"] == []
-        assert body["bytes_written"] == 0
+        assert any(p.endswith("memory.md") for p in body["paths_written"])
+        assert body["bytes_written"] > 0
 
     def test_multiline_summary_never_reaches_the_file(self, client, tmp_path):
         """DWB-560: a multi-line summary used to be copied verbatim into the

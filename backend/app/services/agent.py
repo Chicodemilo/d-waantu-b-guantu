@@ -470,8 +470,10 @@ def record_session_complete(
     caller (and the database's own session record), but they are no longer
     written into memory.md: the dwb_sessions row with its headline, summary and
     keyword tags already IS the session record, and duplicating it there ate the
-    memory ceiling. A call carrying no lessons writes no file at all and returns
-    empty paths_written with bytes_written 0.
+    memory ceiling. The ISO heading is still written every time, with or without
+    lessons, because the DWB-519 write-on-close gate reads those headings to
+    decide who participated in a sprint; an agent whose only memory activity was
+    a session-complete must still pass it.
 
     Creates the memory dir if missing (a thin precursor to DWB-293's full
     scaffolder — keeps this endpoint usable on a fresh agent).
@@ -504,7 +506,8 @@ def record_session_complete(
 
     # DWB-401: single free-form memory.md.
     # DWB-560: the block is LESSONS ONLY - no summary, no token count, no
-    # status narration. A call with no lessons writes nothing at all.
+    # status narration - but the ISO heading always lands so the DWB-519
+    # write-on-close gate still sees the participation it reads memory for.
     target = memory_dir / "memory.md"
     payload = _format_scratchpad_block(
         timestamp=timestamp,
@@ -568,18 +571,25 @@ def _format_scratchpad_block(
     in memory burned the 4500-token ceiling and forced condense rewrites that
     can summarise a real lesson away (eight condenses across five agents in one
     night). So the summary and the token count no longer reach the file: they
-    still travel to the caller and the database. With no lessons there is
-    nothing durable to write and this returns "", which the caller treats as a
-    no-op rather than writing a bare heading.
+    still travel to the caller and the database.
+
+    The ISO heading is ALWAYS written, lessons or not. It is structural, not
+    narration (every memory write stamps one), and it is precisely what the
+    DWB-519 write-on-close gate reads as the participation trace
+    (services/memory_trace.py::latest_memory_write_at). Dropping it for a
+    lessons-free wrap-up would silently fail the gate for an agent who did
+    everything right and simply had no durable lesson that sprint, and it would
+    present as a missing acknowledgement rather than as this side effect. Two
+    lines of heading is a cheap price for a gate that cannot lie.
 
     `summary` and `tokens_used` stay in the signature because the endpoint
     contract still accepts them; they are deliberately unused here.
     """
-    if not lessons:
-        return ""
-    lines = [f"\n## {timestamp} — session {session_id}\n", "- lessons:\n"]
-    for item in lessons:
-        lines.append(f"  - {item}\n")
+    lines = [f"\n## {timestamp} — session {session_id}\n"]
+    if lessons:
+        lines.append("- lessons:\n")
+        for item in lessons:
+            lines.append(f"  - {item}\n")
     return "".join(lines)
 
 

@@ -71,6 +71,7 @@ class TestSessionCompleteCeiling:
         _, agent = _project_and_agent(client, tmp_path, "SC1")
         r = client.post(f"/api/agents/{agent['id']}/session-complete", json={
             "session_id": "sess-1", "summary": "shipped the ticket",
+            "lessons": ["a durable lesson worth keeping"],
         })
         assert r.status_code == 200, r.text
 
@@ -80,7 +81,10 @@ class TestSessionCompleteCeiling:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(OVER, encoding="utf-8")
         r = client.post(f"/api/agents/{agent['id']}/session-complete", json={
-            "session_id": "sess-2", "summary": "wrap-up over the ceiling",
+            # DWB-560: only the lessons list reaches the file, so the
+            # over-ceiling payload has to be the lessons.
+            "session_id": "sess-2", "summary": "short",
+            "lessons": [OVER],
         })
         assert r.status_code == 400, r.text
         detail = r.json()["detail"].lower()

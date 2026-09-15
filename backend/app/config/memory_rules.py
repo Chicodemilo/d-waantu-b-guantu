@@ -24,12 +24,13 @@ MEMORY_USAGE_RULES: str = (
     "memory.md = DURABLE LESSONS ONLY (identity.md is system; NEVER edit).\n"
     "Write what future-you would otherwise relearn the hard way.\n"
     "Do NOT write ticket ids, dates, counts, what you shipped, or status "
-    "narration: the DWB database is the session record and duplicating it "
-    "burns your ceiling.\n"
+    "narration: the DWB database is the session record; duplicating it burns "
+    "your ceiling.\n"
+    "Append-only; the server stamps an ISO 8601 heading.\n"
     "- Append: POST /api/agents/{id}/memory/append {file:'memory', content}\n"
     "- Size: GET /api/agents/{id}/memory -> est_tokens, ceiling, headroom\n"
-    "- Wrap-up: POST /api/agents/{id}/session-complete writes ONLY lessons.\n"
-    "Over-ceiling writes are REFUSED (400): condense, nothing auto-drops."
+    "- Wrap-up: session-complete writes ONLY your lessons.\n"
+    "Over-ceiling writes are REFUSED (400): condense, nothing drops."
 )
 
 
