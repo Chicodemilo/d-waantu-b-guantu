@@ -1,12 +1,12 @@
 // Path: src/components/layout/Sidebar.jsx
 // File: Sidebar.jsx
 // Created: 2026-03-29
-// Purpose: Navigation sidebar with links to dashboard, system tests, system docs, error log, the cross-project archie channel, the help center, and per-project sub-nav (tickets, team, sessions, tests, audits, docs, inter-agent comms, jira); collapses on mobile
+// Purpose: Navigation sidebar with links to dashboard, system tests, system docs, error log, the cross-project archie channel, the help center, and per-project sub-nav (tickets, team, sessions, tests, audits, docs, nodes, inter-agent comms, jira); collapses on mobile
 // Caller: AppShell.jsx
 // Callees: react (useState), react-router-dom (NavLink, useLocation), useStore
 // Data In: projects from store, current location pathname, open prop, onNavClick callback
 // Data Out: default export Sidebar component
-// Last Modified: 2026-08-12 (DWB-031)
+// Last Modified: 2026-09-15 (DWB-534)
 
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -71,6 +71,11 @@ function Sidebar({ open, onNavClick }) {
             <li>
               <NavLink to={`/projects/${p.id}/docs`} className={linkClass} onClick={onNavClick}>
                 docs
+              </NavLink>
+            </li>
+            <li>
+              <NavLink to={`/projects/${p.id}/nodes`} className={linkClass} onClick={onNavClick}>
+                nodes
               </NavLink>
             </li>
             <li>

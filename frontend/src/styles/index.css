@@ -4,7 +4,7 @@
 /* Purpose: Main stylesheet — links theme + every domain sheet in one place, per CODING_STANDARDS § Styling (DWB-009). Imported once from main.jsx; components no longer import CSS directly. */
 /* Caller: src/main.jsx */
 /* Callees: All stylesheets in src/styles/ */
-/* Last Modified: 2026-08-12 (DWB-018) */
+/* Last Modified: 2026-09-15 (DWB-534) */
 
 /* Theme first: CSS custom properties (colors, fonts) + base reset — every sheet below relies on these variables */
 @import './theme.css';
@@ -47,6 +47,9 @@
 
 /* Unified Jira table page plus legacy list/sprint-board/detail-panel styles */
 @import './jira.css';
+
+/* Project Nodes page (S81): weighted node cloud, log-bucket font sizes, cap footer */
+@import './nodes.css';
 
 /* Per-agent score ledger panel and the full per-project Scoreboard leaderboard */
 @import './score.css';

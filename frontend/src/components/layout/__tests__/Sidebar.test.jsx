@@ -6,7 +6,7 @@
 // Callees: ../Sidebar, react-router-dom (MemoryRouter), store/useStore (mocked)
 // Data In: Mocked projects array from store
 // Data Out: Test assertions
-// Last Modified: 2026-06-10
+// Last Modified: 2026-09-15 (DWB-534: nodes sub-link)
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
@@ -41,7 +41,7 @@ describe('Sidebar', () => {
 
   it('sessions link sits alongside sibling sub-links (same plain-text convention)', () => {
     renderAt('/projects/1');
-    for (const label of ['tickets', 'team', 'sessions', 'tests', 'docs']) {
+    for (const label of ['tickets', 'team', 'sessions', 'tests', 'docs', 'nodes']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });

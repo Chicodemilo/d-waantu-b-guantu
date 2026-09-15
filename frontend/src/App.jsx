@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Root application component that initializes data polling, mounts the RouteLogger (DWB-371) for backend-visible nav lifecycle, and defines all routes
 // Caller: main.jsx
-// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, components/common/RouteLogger, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/AuditsPage, pages/DocsPage, pages/SystemDocsPage, pages/SessionsPage, pages/SessionDetailPage, pages/ArchieChannelPage, pages/InterAgentCommsPage, pages/HelpPage
+// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, components/common/RouteLogger, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/AuditsPage, pages/DocsPage, pages/SystemDocsPage, pages/SessionsPage, pages/SessionDetailPage, pages/ArchieChannelPage, pages/InterAgentCommsPage, pages/HelpPage, pages/NodesPage
 // Data In: None
 // Data Out: Exports App component (renders route tree inside AppShell)
-// Last Modified: 2026-08-12 (DWB-031)
+// Last Modified: 2026-09-15 (DWB-534)
 
 import { Routes, Route } from 'react-router-dom';
 import useAppData from './hooks/useAppData';
@@ -34,6 +34,7 @@ import SessionDetailPage from './pages/SessionDetailPage';
 import ArchieChannelPage from './pages/ArchieChannelPage';
 import InterAgentCommsPage from './pages/InterAgentCommsPage';
 import HelpPage from './pages/HelpPage';
+import NodesPage from './pages/NodesPage';
 
 function App() {
   useAppData();
@@ -52,6 +53,7 @@ function App() {
         <Route path="/projects/:id/tests" element={<ProjectTestsPage />} />
         <Route path="/projects/:id/audits" element={<AuditsPage />} />
         <Route path="/projects/:id/docs" element={<DocsPage />} />
+        <Route path="/projects/:id/nodes" element={<NodesPage />} />
         <Route path="/projects/:id/agents/:agentId" element={<AgentPage />} />
         <Route path="/projects/:id/jira" element={<JiraIssuesPage />} />
         <Route path="/projects/:id/sessions" element={<SessionsPage />} />

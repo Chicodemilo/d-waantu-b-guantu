@@ -1,0 +1,124 @@
+/* Path: src/styles/nodes.css */
+/* File: nodes.css */
+/* Created: 2026-09-15 */
+/* Purpose: Styles for the project Nodes page (S81, DWB-534): page head, weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page), pointer count chips, selected state, and the cap footer with show more / show all text links. Terminal aesthetic, plain CSS. */
+/* Last Modified: 2026-09-15 */
+
+.nodes-page__head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.nodes-page__title {
+  font-size: 14px;
+  color: var(--green-bright);
+}
+
+.nodes-page__count {
+  color: var(--gray-light);
+  font-size: 12px;
+}
+
+.nodes-page__hint {
+  margin-top: 8px;
+}
+
+.nodes-page__code {
+  color: var(--green);
+  font-family: var(--font-mono);
+}
+
+.nodes-page__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.nodes-page__link:hover {
+  text-decoration: underline;
+}
+
+/* Cloud */
+
+.node-cloud__cloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  line-height: 1.5;
+}
+
+.node-cloud__node {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-family: var(--font-mono);
+  color: var(--green);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-cloud__node:hover {
+  color: var(--green-bright);
+  text-decoration: underline;
+}
+
+.node-cloud__node:focus-visible {
+  outline: 1px solid var(--green-dim);
+  outline-offset: 1px;
+}
+
+.node-cloud__node--selected {
+  color: var(--orange-bright);
+}
+
+.node-cloud__count {
+  margin-left: 3px;
+  color: var(--gray);
+  font-size: 0.7em;
+  vertical-align: super;
+}
+
+/* Log buckets: the CSS owns the size ramp; utils/nodeScale owns the mapping. */
+.node-cloud__node--b0 { font-size: 11px; color: var(--green-dim); }
+.node-cloud__node--b1 { font-size: 12px; color: var(--green-dim); }
+.node-cloud__node--b2 { font-size: 13px; }
+.node-cloud__node--b3 { font-size: 14px; }
+.node-cloud__node--b4 { font-size: 15px; }
+.node-cloud__node--b5 { font-size: 17px; }
+.node-cloud__node--b6 { font-size: 19px; }
+.node-cloud__node--b7 { font-size: 22px; color: var(--green-bright); }
+
+.node-cloud__foot {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--gray-light);
+}
+
+.node-cloud__more {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.node-cloud__more:hover {
+  text-decoration: underline;
+}
