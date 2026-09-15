@@ -6,7 +6,7 @@
 # Callees: app/services/scoring.py (apply_score_event, active_sprint_id), app/models/score_event.py
 # Data In: db: Session, appending agent + project, X-Agent-ID caller id, raw append content
 # Data Out: dict {granted: bool, reason: str} (never raises to the caller)
-# Last Modified: 2026-09-15 (DWB-537)
+# Last Modified: 2026-09-15 (DWB-544: half rounded up)
 
 """Stick redemption (DWB-537).
 
@@ -32,7 +32,7 @@ Eligibility (ALL must hold, checked in this order):
   8. The note beyond the token is at least MIN_NOTE_CHARS characters.
 
 Grant: one score_event, source=auto, trigger_type=redemption,
-delta = abs(stick.delta) // 2 (min 1), ref_type='score_event',
+delta = (abs(stick.delta) + 1) // 2 (half rounded up, DWB-544), ref_type='score_event',
 ref_id=<stick id>, actor null, actor_cost 0. Half of ONE stick only, never
 cumulative, never stackable; only the FIRST token in the body is evaluated.
 """
@@ -164,7 +164,8 @@ def evaluate_redemption(
             f"need at least {MIN_NOTE_CHARS}",
         )
 
-    delta = max(1, abs(stick.delta) // 2)
+    # DWB-544 (Miles ruling): half of the stick rounded UP. -1 -> +1, -3 -> +2.
+    delta = (abs(stick.delta) + 1) // 2
     try:
         scoring.apply_score_event(
             db,

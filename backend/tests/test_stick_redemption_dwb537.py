@@ -6,7 +6,7 @@
 # Callees: POST /api/agents/{id}/memory/append, app.services.stick_redemption, app.services.scoring
 # Data In: tmp_path repo, factory project + agent + active sprint, hand-applied score_events
 # Data Out: Assertions on the redemption verdict, score_event rows, agent_score cache, memory.md contents
-# Last Modified: 2026-09-15 (DWB-537)
+# Last Modified: 2026-09-15 (DWB-544: grant is half rounded up)
 
 """DWB-537 stick redemption.
 
@@ -200,8 +200,11 @@ class TestGrant:
         assert f"redeem:{stick.id}" in text
         assert LONG_NOTE in text
 
-    @pytest.mark.parametrize("delta,expected", [(-5, 2), (-1, 1), (-2, 1), (-10, 5)])
-    def test_half_rounds_down_min_one(self, client, db_session, world, delta, expected):
+    @pytest.mark.parametrize("delta,expected", [
+        (-1, 1), (-2, 1), (-3, 2), (-5, 3), (-7, 4), (-10, 5),
+    ])
+    def test_half_rounds_up(self, client, db_session, world, delta, expected):
+        """DWB-544 (Miles ruling): half of the stick rounded UP, (abs + 1) // 2."""
         stick = _stick(db_session, world, delta=delta)
         r = _append(client, world, f"{LONG_NOTE} redeem:{stick.id}")
         assert r.json()["redemption"]["granted"] is True, r.text

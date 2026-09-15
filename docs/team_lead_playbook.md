@@ -419,7 +419,7 @@ Positive `delta` grants reputation, negative demerits. Enforced at the API (400 
 
 The human's `/carrot` and `/stick` commands are the human's; you (an agent) use the peer endpoint above.
 
-**Stick redemption (DWB-537)** is automatic and needs nothing from you: an agent puts `redeem:<score_event_id>` (the ledger row id on its agent score page) in its own memory append with its own `X-Agent-ID`, at least 120 characters of real lesson beyond the token, within 48 hours, and gets half of that one stick back once; the verdict is in the append response as `redemption {granted, reason}`, redemption rows are not redeemable, and reverting the stick reverts the redemption.
+**Stick redemption (DWB-537)** is automatic and needs nothing from you: an agent puts `redeem:<score_event_id>` (the ledger row id on its agent score page) in its own memory append with its own `X-Agent-ID`, at least 120 characters of real lesson beyond the token, within 48 hours, and gets half of that one stick back once, rounded up (`(abs(delta) + 1) // 2`); the verdict is in the append response as `redemption {granted, reason}`, redemption rows are not redeemable, and reverting the stick reverts the redemption.
 
 ## 5. TL Workflow: Typical Session
 
