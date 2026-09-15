@@ -6,7 +6,7 @@
 # Callees: app/services/agent.py, app/services/agent_consolidation.py
 # Data In: HTTP requests
 # Data Out: JSON responses (AgentRead, AgentIdentifyResponse, AgentConsolidationAckRead)
-# Last Modified: 2026-09-14 (DWB-518: memory append/session-complete refuse over-ceiling 400; new condense endpoint; compact hard-gates)
+# Last Modified: 2026-09-15 (DWB-537 redemption verdict on append; DWB-532 GET /{id}/memory)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -28,6 +28,7 @@ from app.schemas.agent import (
     MemoryCompactResponse,
     MemoryCondenseRequest,
     MemoryCondenseResponse,
+    MemoryReadResponse,
     SessionCompleteRequest,
     SessionCompleteResponse,
     SpawnPrepareRequest,
@@ -267,6 +268,30 @@ def write_marker(
         raise HTTPException(status, e.detail)
 
 
+@router.get("/{agent_id}/memory", response_model=MemoryReadResponse)
+def read_agent_memory(agent_id: int, db: Session = Depends(get_db)):
+    """DWB-532: memory.md content plus the server's token estimate.
+
+    Returns {content, est_tokens, ceiling, headroom} using the shared
+    estimator in config/token_budget.py, so a condense can be sized against
+    the real gate number instead of trial and error. Errors:
+      - 404: agent / project not found, or the agent has no memory.md yet
+             (detail names the agent).
+      - 400: unscoped agent, project missing repo_path.
+      - 500: file exists but is unreadable.
+    """
+    try:
+        return svc.read_memory(db, agent_id=agent_id)
+    except svc.MemoryReadError as e:
+        if e.code in ("agent_not_found", "project_not_found", "memory_missing"):
+            status = 404
+        elif e.code in ("agent_unscoped", "repo_path_missing"):
+            status = 400
+        else:
+            status = 500
+        raise HTTPException(status, e.detail)
+
+
 @router.post(
     "/{agent_id}/memory/append",
     response_model=MemoryAppendResponse,
@@ -276,6 +301,7 @@ def append_agent_memory(
     agent_id: int,
     data: MemoryAppendRequest,
     db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None, alias="X-Agent-ID"),
 ):
     """Server-side append to one of the agent's three memory files (DWB-358).
 
@@ -291,6 +317,11 @@ def append_agent_memory(
     session-complete endpoint's heading format) and appends the result
     to the target file. Append-only; prior content is never overwritten.
 
+    DWB-537: if the body carries a `redeem:<score_event_id>` token the
+    stick-redemption chain runs AFTER the write; X-Agent-ID must equal the
+    path agent_id for a grant. The verdict rides the response as
+    `redemption: {granted, reason}` and never changes the status code.
+
     Returns 201 on successful append. Errors:
       - 400: invalid file enum, identity.md attempt, empty content,
              unscoped agent, project missing repo_path.
@@ -304,6 +335,7 @@ def append_agent_memory(
             file=data.file,
             content=data.content,
             session_id=data.session_id,
+            caller_agent_id=x_agent_id,
         )
     except svc.MemoryAppendError as e:
         if e.code in ("agent_not_found", "project_not_found"):

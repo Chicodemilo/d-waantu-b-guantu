@@ -6,7 +6,7 @@
 # Callees: app/models/score_event.py, app/models/agent_score.py, app/models/alert.py, app/models/sprint.py, app/models/agent.py, app/models/project_agent.py, app/config/scoring.py
 # Data In: db: Session, score event fields
 # Data Out: ScoreEvent, AgentScore, Alert (broadcast), leaderboard / ledger dicts
-# Last Modified: 2026-06-23 (DWB-442: human-carrot peer alerts become a pile-on CTA)
+# Last Modified: 2026-09-15 (DWB-537: reverting a redeemed stick cascades to its live redemption row)
 
 """Agent scoring (DWB-424).
 
@@ -247,6 +247,29 @@ def revert_score_event(
     )
     original.reverted_by = revert.id
     db.flush()
+
+    # DWB-537: a stick that was already redeemed (half back, +N) and is now
+    # being reverted must take its redemption with it, or the agent nets +N
+    # from a stick that no longer exists. Cascade in the same transaction.
+    # Reverting a redemption row directly does not touch the stick, and the
+    # reverted redemption still blocks a re-redeem (once per stick, ever).
+    if original.trigger_type != ScoreTriggerType.redemption:
+        redemption = db.scalar(
+            select(ScoreEvent)
+            .where(ScoreEvent.trigger_type == ScoreTriggerType.redemption)
+            .where(ScoreEvent.ref_type == "score_event")
+            .where(ScoreEvent.ref_id == original.id)
+            .where(ScoreEvent.reverted_by.is_(None))
+            .limit(1)
+        )
+        if redemption is not None:
+            revert_score_event(
+                db,
+                redemption.id,
+                actor_agent_id=actor_agent_id,
+                reason=f"revert of redeemed stick {original.id}",
+                commit=False,
+            )
 
     if commit:
         db.commit()

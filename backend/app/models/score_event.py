@@ -6,12 +6,15 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: ScoreEvent, ScoreSource, ScoreTriggerType
-# Last Modified: 2026-08-11 (DWB-016: audit source + audit_grant/audit_demerit triggers)
+# Last Modified: 2026-09-15 (DWB-537: redemption trigger + redemption_of generated column with unique guard)
 
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import (
+    BigInteger, Computed, DateTime, Enum, ForeignKey, Integer, String,
+    UniqueConstraint, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -36,6 +39,7 @@ class ScoreTriggerType(str, enum.Enum):
     human tools (DWB-426): carrot, stick.
     peer economy (DWB-427): peer_grant, peer_demerit.
     audit application (DWB-016): audit_grant, audit_demerit.
+    stick redemption (DWB-537): redemption.
     """
     ticket_closed = "ticket_closed"
     rework = "rework"
@@ -53,6 +57,11 @@ class ScoreTriggerType(str, enum.Enum):
     # per-entry reason carries the worker/Archie/Pam specifics the auditor wrote.
     audit_grant = "audit_grant"
     audit_demerit = "audit_demerit"
+    # DWB-537: automatic half-back on ONE stick, earned exactly once via a
+    # `redeem:<score_event_id>` token in a memory append. source=auto,
+    # ref_type='score_event', ref_id = the redeemed stick. Never redeemable
+    # itself (see services/stick_redemption.py).
+    redemption = "redemption"
 
 
 class ScoreEvent(Base):
@@ -64,6 +73,14 @@ class ScoreEvent(Base):
     """
 
     __tablename__ = "score_event"
+    __table_args__ = (
+        # DWB-537: race-safe once-per-stick guard. redemption_of is a STORED
+        # generated column = ref_id when (trigger_type='redemption' AND
+        # ref_type='score_event'), else NULL. MySQL unique indexes ignore NULLs,
+        # so only redemption rows compete and two concurrent grants for the same
+        # stick cannot both land (the second insert raises IntegrityError).
+        UniqueConstraint("redemption_of", name="uq_score_event_redemption_of"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(
@@ -100,4 +117,14 @@ class ScoreEvent(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
+    )
+    # DWB-537: server-computed; never assigned from Python. See __table_args__.
+    redemption_of: Mapped[int | None] = mapped_column(
+        BigInteger,
+        Computed(
+            "CASE WHEN trigger_type = 'redemption' AND ref_type = 'score_event' "
+            "THEN ref_id ELSE NULL END",
+            persisted=True,
+        ),
+        nullable=True,
     )

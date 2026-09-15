@@ -204,12 +204,39 @@ class MemoryAppendRequest(BaseModel):
     session_id: str | None = None
 
 
+class RedemptionVerdict(BaseModel):
+    """DWB-537: outcome of the stick-redemption check run after an append.
+    granted=True only when a `redeem:<score_event_id>` token passed every
+    eligibility rule and the half-back score_event was written. reason always
+    explains the verdict (including the plain "no redeem token" case)."""
+
+    granted: bool
+    reason: str
+
+
 class MemoryAppendResponse(BaseModel):
     agent_id: int
     file: str
     path: str
     timestamp: str
     bytes_written: int
+    redemption: RedemptionVerdict
+
+
+class MemoryReadResponse(BaseModel):
+    """GET /api/agents/{agent_id}/memory (DWB-532).
+
+    content: memory.md verbatim.
+    est_tokens: the SERVER estimate (config.token_budget.estimate_tokens), the
+                same number append / session-complete / condense gate on.
+    ceiling: the memory_main ceiling those writes enforce.
+    headroom: ceiling - est_tokens; negative when the file is already over.
+    """
+
+    content: str
+    est_tokens: int
+    ceiling: int
+    headroom: int
 
 
 class MemoryCompactRequest(BaseModel):

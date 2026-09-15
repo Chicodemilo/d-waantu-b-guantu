@@ -6,7 +6,7 @@
 // Callees: react (useState, useEffect), api/scores (getAgentScore), utils/scoring (tierLabel)
 // Data In: agentId, projectId props
 // Data Out: Default export AgentScoreLedger component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-537: explicit redemption trigger label)
 
 import { useState, useEffect } from 'react';
 import { getAgentScore } from '../../api/scores';
@@ -25,6 +25,7 @@ function deltaClass(delta) {
 }
 
 function formatTrigger(trigger) {
+  if (trigger === 'redemption') return 'redemption'; // DWB-537: auto half-back on a stick
   return (trigger || '').replace(/_/g, ' ');
 }
 

@@ -6,7 +6,7 @@
 # Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
-# Last Modified: 2026-09-14 (DWB-517: full memory.md in spawn-prepare + TL-memory helper for SessionStart injection)
+# Last Modified: 2026-09-15 (DWB-537 redemption verdict on append; DWB-532 read_memory: content + server token estimate)
 
 import json
 import logging
@@ -657,6 +657,31 @@ def _touch_memory_nodes(db: Session, project: Project, target: Path) -> None:
         )
 
 
+def _evaluate_redemption_safe(
+    db: Session, *, agent: Agent, project: Project,
+    caller_agent_id: int | None, content: str,
+) -> dict:
+    """DWB-537: run the stick-redemption check AFTER a successful append.
+    Best-effort: the append has already landed and must return 201, so any
+    unexpected failure here becomes a not-granted verdict, never a 500."""
+    try:
+        from app.services import stick_redemption  # local: avoid import cycle
+        return stick_redemption.evaluate_redemption(
+            db, agent=agent, project=project,
+            caller_agent_id=caller_agent_id, content=content,
+        )
+    except Exception:
+        logger.warning(
+            "redemption check failed for agent %s; append kept", agent.id,
+            exc_info=True,
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"granted": False, "reason": "redemption check failed; append kept"}
+
+
 def append_memory(
     db: Session,
     *,
@@ -664,6 +689,7 @@ def append_memory(
     file: str,
     content: str,
     session_id: str | None = None,
+    caller_agent_id: int | None = None,
 ) -> dict:
     """Server-side append to the agent's scratchpad / lessons / recent_sessions
     memory file (DWB-358).
@@ -681,6 +707,12 @@ def append_memory(
     append would be reverted on the next spawn-prepare). Empty content is
     refused so a stray POST cannot pollute the file with bare timestamp
     headings.
+
+    DWB-537: after the write succeeds the body is scanned for a
+    ``redeem:<score_event_id>`` token and the stick-redemption chain runs
+    (services/stick_redemption.py). ``caller_agent_id`` is the X-Agent-ID
+    header; it must equal ``agent_id`` for a grant. The verdict is returned
+    under ``redemption`` and never affects the append's success.
 
     Raises MemoryAppendError with a code the router maps to 400 / 404 /
     500. Returns a small dict with the resolved path and bytes_written
@@ -769,12 +801,88 @@ def append_memory(
 
     _touch_memory_nodes(db, project, target)
 
+    redemption = _evaluate_redemption_safe(
+        db, agent=agent, project=project,
+        caller_agent_id=caller_agent_id, content=content,
+    )
+
     return {
         "agent_id": agent.id,
         "file": file,
         "path": str(target),
         "timestamp": timestamp,
         "bytes_written": len(block.encode("utf-8")),
+        "redemption": redemption,
+    }
+
+
+# --- GET /{id}/memory (DWB-532) ----------------------------------------------
+
+
+class MemoryReadError(Exception):
+    """Raised when GET /api/agents/{id}/memory cannot resolve the file.
+
+    code is one of:
+      - agent_not_found / agent_unscoped / project_not_found / repo_path_missing
+      - memory_missing        (memory.md does not exist for this agent)
+      - memory_unreadable     (exists but could not be read)
+    """
+
+    def __init__(self, code: str, detail: str):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+def read_memory(db: Session, *, agent_id: int) -> dict:
+    """DWB-532: the agent's memory.md verbatim plus the SERVER's token estimate.
+
+    The 4500-token ceiling that append / session-complete / condense enforce
+    is measured with config.token_budget.estimate_tokens; until now an agent
+    condensing against it could only guess the count. This returns the same
+    estimator's number for the file as it stands, the ceiling, and the
+    headroom (ceiling - est_tokens, negative when already over), so a condense
+    can be sized in one shot and a mid-session refresh after context
+    compaction can re-read memory through the API instead of raw disk.
+    """
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        raise MemoryReadError("agent_not_found", f"agent id {agent_id} not found")
+    if agent.project_id is None:
+        raise MemoryReadError(
+            "agent_unscoped",
+            f"agent id {agent_id} has no project_id - cannot resolve memory_dir",
+        )
+    project = db.get(Project, agent.project_id)
+    if project is None:
+        raise MemoryReadError(
+            "project_not_found",
+            f"agent id {agent_id} references project {agent.project_id} which is missing",
+        )
+    if not project.repo_path:
+        raise MemoryReadError(
+            "repo_path_missing",
+            f"project '{project.prefix}' has no repo_path - cannot resolve memory_dir",
+        )
+
+    path = Path(_memory_dir(project, agent)) / "memory.md"
+    if not path.is_file():
+        raise MemoryReadError(
+            "memory_missing",
+            f"agent {agent.name} (id {agent.id}) has no memory.md at {path}",
+        )
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        raise MemoryReadError("memory_unreadable", f"could not read {path}: {e}")
+
+    ceiling = ceiling_for_file("memory.md")
+    est = estimate_tokens(content)
+    return {
+        "content": content,
+        "est_tokens": est,
+        "ceiling": ceiling,
+        "headroom": ceiling - est,
     }
 
 
