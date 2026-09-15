@@ -1,12 +1,12 @@
 // Path: src/pages/__tests__/NodesPage.test.jsx
 // File: NodesPage.test.jsx
 // Created: 2026-09-15
-// Purpose: Tests for the project Nodes cloud page (DWB-534/535/536/541/542/543/551): loading state, render of tag + pointer count with the head count line, log-bucket scaling classes (top nodes share the cap bucket), empty state pointing at POST /nodeify, the 400-node cap with show more / show all, click emitting a selection (aria-pressed), the selection opening the detail Overlay which closes on Esc / close / scrim and clears the selection, the client-side substring LIMITER (case-insensitive on tag, no server call, matches keep their full-set bucket and headliner tier, no-match state, clear link and Esc restore the full cloud), the + connections toggle (off by default, dimmed first-degree neighbors for a small match set, disabled above 25 matches), and the pointer-kind toggle row (only present kinds, toggling memory off hides code/doc-only nodes, all-off message with select all, composes with the search).
+// Purpose: Tests for the project Nodes cloud page (DWB-534/535/536/541/542/543/551): loading state, render of tag + pointer count with the head count line, log-bucket scaling classes (top nodes share the cap bucket), empty state pointing at POST /nodeify, the 400-node cap with show more / show all, the rescan control behind its DWB-556 inline confirm, click emitting a selection (aria-pressed), the selection opening the detail Overlay which closes on Esc / close / scrim and clears the selection, the client-side substring LIMITER (case-insensitive on tag, no server call, matches keep their full-set bucket and headliner tier, no-match state, clear link and Esc restore the full cloud), the + connections toggle (off by default, dimmed first-degree neighbors for a small match set, disabled above 25 matches), and the pointer-kind toggle row (only present kinds, toggling memory off hides code/doc-only nodes, all-off message with select all, composes with the search).
 // Caller: vitest test runner
 // Callees: ../NodesPage, ../../api/nodes (mocked: getProjectNodes + matchProjectNodes for connections + nodeifyProject for rescan)
 // Data In: Mocked getProjectNodes responses in the live NodeRead shape
 // Data Out: Test assertions
-// Last Modified: 2026-09-15 (DWB-551)
+// Last Modified: 2026-09-15 (DWB-556: rescan now confirms first)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup, fireEvent, within } from '@testing-library/react';
@@ -137,7 +137,9 @@ describe('NodesPage (DWB-534)', () => {
     // the endpoint is no longer printed as text: the control replaces it
     expect(screen.queryByText('POST /api/projects/7/nodeify')).not.toBeInTheDocument();
 
+    // DWB-556: the control confirms in place before starting a pass
     await act(async () => { fireEvent.click(screen.getByText('rescan now')); });
+    await act(async () => { fireEvent.click(screen.getByText('yes')); });
     await waitFor(() => expect(screen.getByText('contract')).toBeInTheDocument());
     expect(nodeifyProject).toHaveBeenCalledWith('7');
     expect(getProjectNodes).toHaveBeenCalledTimes(2);
@@ -419,8 +421,14 @@ describe('NodesPage (DWB-534)', () => {
     });
   });
 
-  describe('rescan control (DWB-551)', () => {
+  describe('rescan control (DWB-551, confirmed per DWB-556)', () => {
+    // idle trigger, or the in-progress button; never present while confirming
     const rescanBtn = () => screen.getByRole('button', { name: /^rescan/ });
+    // DWB-556: a pass needs the trigger then yes
+    const startRescan = async () => {
+      await act(async () => { fireEvent.click(rescanBtn()); });
+      await act(async () => { fireEvent.click(screen.getByText('yes')); });
+    };
 
     async function renderLoaded() {
       getProjectNodes.mockResolvedValue(NODES);
@@ -436,6 +444,17 @@ describe('NodesPage (DWB-534)', () => {
       expect(screen.getByTestId('nodeified-age')).toHaveTextContent('never indexed');
       expect(screen.queryByText(/grounded/)).not.toBeInTheDocument();
       expect(nodeifyProject).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('rescan-confirm')).not.toBeInTheDocument();
+    });
+
+    it('confirms in place before starting, and cancel starts nothing (DWB-556)', async () => {
+      await renderLoaded();
+      await act(async () => { fireEvent.click(rescanBtn()); });
+      expect(screen.getByTestId('rescan-confirm')).toHaveTextContent('rescan? yes / cancel');
+      expect(nodeifyProject).not.toHaveBeenCalled();
+      await act(async () => { fireEvent.click(screen.getByText('cancel')); });
+      expect(nodeifyProject).not.toHaveBeenCalled();
+      expect(rescanBtn()).toHaveTextContent('rescan');
     });
 
     it('shows the in-progress state while running and disables the control', async () => {
@@ -443,7 +462,7 @@ describe('NodesPage (DWB-534)', () => {
       let resolve;
       nodeifyProject.mockReturnValue(new Promise((r) => { resolve = r; }));
 
-      await act(async () => { fireEvent.click(rescanBtn()); });
+      await startRescan();
       expect(rescanBtn()).toHaveTextContent('rescanning...');
       expect(rescanBtn()).toBeDisabled();
       expect(rescanBtn()).toHaveAttribute('aria-busy', 'true');
@@ -455,7 +474,7 @@ describe('NodesPage (DWB-534)', () => {
 
     it('on success reports the counts, refetches the cloud, and updates the age', async () => {
       await renderLoaded();
-      await act(async () => { fireEvent.click(rescanBtn()); });
+      await startRescan();
       await waitFor(() => expect(screen.getByText(/3420 grounded/)).toBeInTheDocument());
       expect(screen.getByText(/271 suppressed/)).toBeInTheDocument();
       expect(screen.getByText(/68916 pointers written/)).toBeInTheDocument();
@@ -470,22 +489,23 @@ describe('NodesPage (DWB-534)', () => {
     it('surfaces a failure with its message and does not refetch', async () => {
       await renderLoaded();
       nodeifyProject.mockImplementation(() => Promise.reject(new Error('nodeify already running')));
-      await act(async () => { fireEvent.click(rescanBtn()); });
+      await startRescan();
       await waitFor(() => expect(screen.getByText(/rescan failed: nodeify already running/)).toBeInTheDocument());
       expect(getProjectNodes).toHaveBeenCalledTimes(1);
       expect(rescanBtn()).not.toBeDisabled();
       expect(screen.queryByText(/grounded/)).not.toBeInTheDocument();
     });
 
-    it('a double click cannot start two passes', async () => {
+    it('a double click on yes cannot start two passes', async () => {
       await renderLoaded();
       let resolve;
       nodeifyProject.mockReturnValue(new Promise((r) => { resolve = r; }));
-      const btn = rescanBtn();
+      await act(async () => { fireEvent.click(rescanBtn()); });
+      const yes = screen.getByText('yes');
       await act(async () => {
-        fireEvent.click(btn);
-        fireEvent.click(btn);
-        fireEvent.click(btn);
+        fireEvent.click(yes);
+        fireEvent.click(yes);
+        fireEvent.click(yes);
       });
       expect(nodeifyProject).toHaveBeenCalledTimes(1);
       await act(async () => { resolve(REPORT); });

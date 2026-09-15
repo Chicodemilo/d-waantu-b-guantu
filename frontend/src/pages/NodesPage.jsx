@@ -1,12 +1,12 @@
 // Path: src/pages/NodesPage.jsx
 // File: NodesPage.jsx
 // Created: 2026-09-15
-// Purpose: Project Nodes page (DWB-534/535/536/541/542/543/551/552): renders the node index as a weighted tag cloud with loading and empty states (the empty state points at POST /api/projects/{id}/nodeify). Owns the selected-node state; a selection opens the generic Overlay with NodeDetail inside (DWB-535). The search box is a LIMITER (Miles ruling): a client-side case-insensitive substring filter on node.tag over the loaded set (DWB-543, replacing the exact-tag server match of DWB-536); non-matches disappear, matches keep their full-set weight scale via the cloud's bounds prop and their headliner tier via headlinerIds (DWB-541), an empty query restores the full cloud, Esc or the clear link empties the query. An optional "+ connections" toggle (OFF by default) adds first-degree neighbors of the matches in a dimmed style via hooks/useNodeConnections when 25 or fewer nodes match; above that it is disabled. A pointer-kind toggle row (DWB-542) filters client-side over loaded pointers and composes with the search (both must pass); all kinds off shows "no kinds selected" with a select-all link. The head carries the rescan control (DWB-551): POST /nodeify behind hooks/useNodeify, disabled with an in-progress state while it runs, reporting grounded / suppressed / pointers written on success and the error text on failure, refetching the cloud after a pass, and showing nodeified_at as a plain relative age (the visibility half of DWB-550). The empty state's rescan link is the same control. The head also opens the exclusions manager (DWB-552) in the same generic Overlay: managing what the scan skips, with a rescan that closes the panel and leaves the page in the rescan in-progress state.
+// Purpose: Project Nodes page (DWB-534/535/536/541/542/543/551/552/556): renders the node index as a weighted tag cloud with loading and empty states (the empty state points at POST /api/projects/{id}/nodeify). Owns the selected-node state; a selection opens the generic Overlay with NodeDetail inside (DWB-535). The search box is a LIMITER (Miles ruling): a client-side case-insensitive substring filter on node.tag over the loaded set (DWB-543, replacing the exact-tag server match of DWB-536); non-matches disappear, matches keep their full-set weight scale via the cloud's bounds prop and their headliner tier via headlinerIds (DWB-541), an empty query restores the full cloud, Esc or the clear link empties the query. An optional "+ connections" toggle (OFF by default) adds first-degree neighbors of the matches in a dimmed style via hooks/useNodeConnections when 25 or fewer nodes match; above that it is disabled. A pointer-kind toggle row (DWB-542) filters client-side over loaded pointers and composes with the search (both must pass); all kinds off shows "no kinds selected" with a select-all link. The head carries the rescan control (DWB-551): POST /nodeify behind hooks/useNodeify, behind the shared RescanControl's inline-text confirm (DWB-556), disabled with an in-progress state while it runs, reporting grounded / suppressed / pointers written on success and the error text on failure, refetching the cloud after a pass, and showing nodeified_at as a plain relative age (the visibility half of DWB-550). The empty state's rescan link is the same control. The head also opens the exclusions manager (DWB-552) in the same generic Overlay: managing what the scan skips, with a rescan that closes the panel and leaves the page in the rescan in-progress state.
 // Caller: App.jsx (route: /projects/:id/nodes)
-// Callees: react (useState, useMemo), react-router-dom (useParams), store/useStore (getProject), hooks/useProjectNodes, hooks/useNodeConnections, hooks/useNodeify, utils/format (relativeAge), components/nodes/ExclusionsManager, utils/nodeScale (weightBounds, headlinerIds), utils/nodeKinds (pointerKinds, nodeHasSelectedKind), components/nodes/KindFilter, components/nodes/NodeCloud, components/nodes/NodeDetail, components/common/Overlay, components/common/FuzzySearch
+// Callees: react (useState, useMemo), react-router-dom (useParams), store/useStore (getProject), hooks/useProjectNodes, hooks/useNodeConnections, hooks/useNodeify, utils/format (relativeAge), components/nodes/ExclusionsManager, components/nodes/RescanControl, utils/nodeScale (weightBounds, headlinerIds), utils/nodeKinds (pointerKinds, nodeHasSelectedKind), components/nodes/KindFilter, components/nodes/NodeCloud, components/nodes/NodeDetail, components/common/Overlay, components/common/FuzzySearch
 // Data In: Route param (id), project from Zustand store, nodes from API
 // Data Out: Default export NodesPage component
-// Last Modified: 2026-09-15 (DWB-552: exclusions manager)
+// Last Modified: 2026-09-15 (DWB-556: rescan confirm)
 
 import { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
@@ -22,6 +22,7 @@ import FuzzySearch from '../components/common/FuzzySearch';
 import NodeCloud from '../components/nodes/NodeCloud';
 import NodeDetail from '../components/nodes/NodeDetail';
 import ExclusionsManager from '../components/nodes/ExclusionsManager';
+import RescanControl from '../components/nodes/RescanControl';
 import Overlay from '../components/common/Overlay';
 
 const CONNECTIONS_TITLE_NARROW = 'narrow the search to show connections';
@@ -118,9 +119,12 @@ function NodesPage() {
       <div className="empty-state nodes-page__empty">
         <div>no nodes indexed for this project yet.</div>
         <div className="nodes-page__hint">
-          <button type="button" className="nodes-page__link" onClick={rescan} disabled={rescanning}>
-            {rescanning ? 'rescanning...' : 'rescan now'}
-          </button>{' '}
+          <RescanControl
+            onConfirm={rescan}
+            running={rescanning}
+            label="rescan now"
+            className="nodes-page__link"
+          />{' '}
           to build it.
         </div>
       </div>
@@ -200,16 +204,12 @@ function NodesPage() {
         <span className="nodes-page__age" data-testid="nodeified-age">
           {nodeifiedAt ? `indexed ${age}` : 'never indexed'}
         </span>
-        <button
-          type="button"
+        <RescanControl
+          onConfirm={rescan}
+          running={rescanning}
           className="nodes-page__rescan"
-          onClick={rescan}
-          disabled={rescanning}
-          aria-busy={rescanning}
           title={rescanning ? 'a rescan is already running' : 'rebuild the node index for this project'}
-        >
-          {rescanning ? 'rescanning...' : 'rescan'}
-        </button>
+        />
         <button
           type="button"
           className="nodes-page__exclusions-btn"

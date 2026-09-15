@@ -35,6 +35,7 @@ from app.routers import (
     jira,
     node_exclusions,
     nodes,
+    repo_browse,
     playbooks,
     project_agents,
     projects,
@@ -141,3 +142,4 @@ app.include_router(tl_channel.router)
 app.include_router(standards_audits.router)
 app.include_router(nodes.router)
 app.include_router(node_exclusions.router)
+app.include_router(repo_browse.router)

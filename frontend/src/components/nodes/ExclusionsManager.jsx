@@ -1,15 +1,17 @@
 // Path: src/components/nodes/ExclusionsManager.jsx
 // File: ExclusionsManager.jsx
 // Created: 2026-09-15
-// Purpose: Contents of the exclusions manager modal (DWB-552). Lists the project's node scan exclusions as repo-relative patterns, each deletable through the project's inline-text confirm (delete -> confirm? yes / cancel) rather than a nested dialog, adds new patterns by free text with the server's own rejection text shown inline, and offers a rescan that starts the pass and closes the modal. Seeded defaults carry no marker and are ordinary rows by design (Miles: defaults are deletable like any other). This renders INSIDE components/common/Overlay, which the page owns; it is not a dialog itself.
+// Purpose: Contents of the exclusions manager modal (DWB-552). Lists the project's node scan exclusions as repo-relative patterns, each deletable through the project's inline-text confirm (delete -> confirm? yes / cancel) rather than a nested dialog, adds new patterns by free text with the server's own rejection text shown inline or by picking a directory in the DWB-553 browser, and offers a rescan that starts the pass and closes the modal, behind the shared RescanControl's inline-text confirm (DWB-556) so the confirm is never a nested dialog. Seeded defaults carry no marker and are ordinary rows by design (Miles: defaults are deletable like any other). This renders INSIDE components/common/Overlay, which the page owns; it is not a dialog itself.
 // Caller: pages/NodesPage.jsx (as the child of Overlay)
-// Callees: react (useState), hooks/useNodeExclusions
-// Data In: projectId, onRescan (fn, starts the pass and closes), rescanning (bool), browserSlot (optional React node: the DWB-553 directory browser plugs in here when it exists)
+// Callees: react (useState, useMemo), hooks/useNodeExclusions, components/nodes/RescanControl, components/nodes/DirectoryBrowser
+// Data In: projectId, onRescan (fn, starts the pass and closes), rescanning (bool), browserSlot (optional React node overriding the built-in DWB-553 browser; the seam is kept so the panel stays swappable and testable in isolation)
 // Data Out: default export ExclusionsManager component
-// Last Modified: 2026-09-15
+// Last Modified: 2026-09-15 (DWB-553 browser panel)
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import useNodeExclusions from '../../hooks/useNodeExclusions';
+import RescanControl from './RescanControl';
+import DirectoryBrowser from './DirectoryBrowser';
 
 function ExclusionRow({ row, onDelete }) {
   const [confirming, setConfirming] = useState(false);
@@ -51,6 +53,8 @@ function ExclusionsManager({ projectId, onRescan, rescanning = false, browserSlo
   const { rows, loading, error, adding, add, remove } = useNodeExclusions(projectId);
   const [draft, setDraft] = useState('');
   const [addError, setAddError] = useState(null);
+  // Lets the browser mark directories that are already excluded.
+  const patterns = useMemo(() => new Set(rows.map((r) => r.pattern)), [rows]);
 
   const submitAdd = async (e) => {
     if (e) e.preventDefault();
@@ -108,19 +112,19 @@ function ExclusionsManager({ projectId, onRescan, rescanning = false, browserSlo
       </form>
       {addError && <div className="exclusions__error" role="alert">{addError}</div>}
 
-      {/* DWB-553 directory browser plugs in here as a whole component. Absent until
-          it lands: a guessed stub would be worse than nothing. */}
-      {browserSlot}
+      {/* DWB-553 directory browser. browserSlot overrides it so the panel stays
+          swappable and can be exercised in isolation. */}
+      {browserSlot !== null ? browserSlot : (
+        <DirectoryBrowser projectId={projectId} onExclude={add} excluded={patterns} />
+      )}
 
       <div className="exclusions__foot">
-        <button
-          type="button"
+        <RescanControl
+          onConfirm={onRescan}
+          running={rescanning}
+          label="rescan now"
           className="exclusions__rescan"
-          onClick={onRescan}
-          disabled={rescanning}
-        >
-          {rescanning ? 'rescanning...' : 'rescan now'}
-        </button>
+        />
         <span className="exclusions__foot-note">
           rebuilds the index with these exclusions and closes this panel.
         </span>

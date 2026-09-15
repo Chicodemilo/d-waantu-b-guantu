@@ -21,7 +21,7 @@ The alerts-vs-actions taxonomy adds an Alert.category enum. This file pins:
 
 import pytest
 
-from app.models.alert import Alert, AlertCategory, AlertStatus
+from app.models.alert import Alert, AlertCategory, AlertSeverity, AlertStatus
 
 
 class TestAlertCategoryApi:
@@ -123,9 +123,9 @@ class TestKeptSiteCategories:
         assert alerts
         assert all(a.category == AlertCategory.scoring for a in alerts)
 
-    def test_peer_scoring_broadcast_creates_no_alert(self, client, db_session, make_project, make_agent, make_project_agent):
-        # DWB-463: peer scoring is demoted to the activity feed - broadcast
-        # creates no alert rows (only human scoring still alerts).
+    def test_peer_scoring_broadcast_alerts_at_info(self, client, db_session, make_project, make_agent, make_project_agent):
+        # DWB-559 reverses the DWB-463 demotion: peer scoring broadcasts again,
+        # at info severity (human stays critical) and in the scoring category.
         from app.services import scoring
 
         project = make_project()
@@ -147,11 +147,13 @@ class TestKeptSiteCategories:
         )
         db_session.flush()
 
-        assert count == 0
+        assert count >= 1
         alerts = db_session.query(Alert).filter(
             Alert.project_id == project["id"],
         ).all()
-        assert alerts == []
+        assert alerts
+        assert all(a.category == AlertCategory.scoring for a in alerts)
+        assert all(a.severity == AlertSeverity.info for a in alerts)
 
     def test_rework_alert_is_actionable(self, client, make_project, make_agent, make_epic):
         # Rework detection requires a PM on the project.

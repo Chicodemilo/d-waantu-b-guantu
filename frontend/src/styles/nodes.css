@@ -2,7 +2,7 @@
 /* File: nodes.css */
 /* Created: 2026-09-15 */
 /* Purpose: Styles for the project Nodes page (S81, DWB-534/535/536/551): page head with the rescan control, index age, pass report and exclusions button (DWB-551/552), the exclusions manager panel rendered inside the shared Overlay (DWB-552), search row with the substring limiter and the + connections toggle (DWB-536/543), pointer-kind toggle row (DWB-542), weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page) plus the b8 headliner tier for the top 0.5% (DWB-541, 28px in the pale --green-light, still green), pointer count chips, selected state, the cap footer with show more / show all text links, and the NodeDetail overlay content (hop trail, pointer groups by kind, neighbor list). Terminal aesthetic, plain CSS. */
-/* Last Modified: 2026-09-15 (DWB-552: exclusions manager) */
+/* Last Modified: 2026-09-15 (DWB-553 directory browser) */
 
 .nodes-page__head {
   display: flex;
@@ -694,4 +694,85 @@
 .exclusions__foot-note {
   color: var(--gray);
   font-size: 12px;
+}
+
+/* Shared inline-text rescan confirm (DWB-556), used in the page head and the modal */
+
+.rescan-confirm {
+  color: var(--gray-light);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rescan-confirm__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.rescan-confirm__link:hover {
+  text-decoration: underline;
+}
+
+/* Directory browser inside the exclusions modal (DWB-552 over DWB-553) */
+
+.dir-browser__crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.dir-browser__crumb-sep {
+  color: var(--gray);
+  margin: 0 2px;
+}
+
+.dir-browser__up {
+  margin-left: 10px;
+  color: var(--gray-light);
+}
+
+.dir-browser__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.dir-browser__row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.dir-browser__name {
+  flex: 1 1 auto;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--blue);
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.dir-browser__name:hover {
+  color: var(--blue-dim);
+  text-decoration: underline;
+}
+
+.dir-browser__already {
+  color: var(--gray);
+  font-size: 11px;
 }

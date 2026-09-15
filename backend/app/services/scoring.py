@@ -6,7 +6,7 @@
 # Callees: app/models/score_event.py, app/models/agent_score.py, app/models/alert.py, app/models/sprint.py, app/models/agent.py, app/models/project_agent.py, app/config/scoring.py
 # Data In: db: Session, score event fields
 # Data Out: ScoreEvent, AgentScore, Alert (broadcast), leaderboard / ledger dicts
-# Last Modified: 2026-09-15 (DWB-537: reverting a redeemed stick cascades to its live redemption row)
+# Last Modified: 2026-09-15 (DWB-559: peer carrots/sticks broadcast again at info severity, carrot pile-on CTA extended to peers)
 
 """Agent scoring (DWB-424).
 
@@ -412,7 +412,9 @@ def peer_score(
       - per-action ding cap (MAX_DING_PER_ACTION)
       - per-target-per-sprint ding AND grant caps
 
-    Broadcasts at normal severity on success. Returns (event, broadcast_count).
+    DWB-559: broadcasts to the project (info severity, carrots carry the
+    pile-on CTA) as well as emitting the activity-feed event. Returns
+    (event, broadcast_count); broadcast_count is the real row count again.
     """
     def _reject(msg: str):
         logger.warning(
@@ -611,18 +613,26 @@ def broadcast_score_change(
     actor_agent_id: int | None = None,
     actor_name: str | None = None,
 ) -> int:
-    """Notify every project agent (plus the subject) of a HUMAN carrot/stick via
-    the alerts system, at elevated (critical) severity. The subject's own row is
-    phrased directly ("You received ..."); everyone else sees the third-person
-    form. Auto-triggers do NOT call this (mechanical/too frequent). Returns the
+    """Notify every project agent (plus the subject) of a human or PEER
+    carrot/stick via the alerts system. The subject's own row is phrased
+    directly ("You received ..."); everyone else sees the third-person form.
+    Auto-triggers do NOT call this (mechanical/too frequent). Returns the
     number of alert rows written. The caller owns the commit.
 
-    DWB-463: PEER carrots/sticks are demoted from alerts to the activity feed
-    (epic 37, alerts-vs-actions). They no longer create Alert rows here; the
-    caller's score_awarded/score_docked feed event (_emit_score_feed_event) is
-    the peer record. So this returns 0 immediately for any non-human source.
+    DWB-463 demoted PEER carrots/sticks from alerts to the activity feed to cut
+    noise. DWB-559 REVERSES that for peer scoring on the Miles ruling: "broadcast
+    is the fun part of them, others get to add their carrots and sticks". The
+    pile-on IS the peer economy, and the feed cannot deliver it because nothing
+    makes an agent read the feed. Peer events broadcast again; the feed event
+    (_emit_score_feed_event) still fires alongside, so the activity record the
+    DWB-463 work added is unchanged.
+
+    Severity is the noise control instead (DWB-559 judgment call): human awards
+    stay `critical` because a human intervened, peer events go out at `info` so
+    reinstating them cannot drown the critical queue. Auto-trigger sources are
+    still silent here.
     """
-    if source != "human":
+    if source not in ("human", "peer"):
         return 0
 
     severity = AlertSeverity.critical if source == "human" else AlertSeverity.info
@@ -641,10 +651,12 @@ def broadcast_score_change(
     recipient_ids.add(subject_agent_id)
 
     # DWB-442: a human CARROT (source=human, delta>0) turns the non-subject
-    # (peer) alert into a pile-on call-to-action carrying the reason. Human
-    # sticks (delta<0) and all peer-sourced events stay notify-only, and the
-    # subject's own "You received ..." row is never a CTA.
-    human_carrot = source == "human" and delta > 0
+    # alert into a pile-on call-to-action carrying the reason. DWB-559 extends
+    # that CTA to PEER carrots, since the pile-on is exactly what the ruling
+    # named as the fun part. Sticks of either origin stay notify-only (matching
+    # the human-stick rule), and the subject's own "You received ..." row is
+    # never a CTA.
+    is_carrot_cta = delta > 0
     cta_reason = f" for {reason}" if reason else ""
 
     count = 0
@@ -652,9 +664,10 @@ def broadcast_score_change(
         if aid == subject_agent_id:
             title = f"You received {sign} from {origin}"
             body = f"You received {sign} reputation from {origin}{suffix}."
-        elif human_carrot:
+        elif is_carrot_cta:
             title = f"{name} received {sign} from {origin}"
-            body = f"The human gave {name} {sign}{cta_reason}. Pile on: /carrot {name}"
+            giver = "The human" if source == "human" else (actor_name or "A peer")
+            body = f"{giver} gave {name} {sign}{cta_reason}. Pile on: /carrot {name}"
         else:
             title = f"{name} received {sign} from {origin}"
             body = f"{name} received {sign} reputation from {origin}{suffix}."

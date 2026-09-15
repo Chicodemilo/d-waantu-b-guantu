@@ -6,7 +6,7 @@
 # Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
-# Last Modified: 2026-09-15 (DWB-537 redemption verdict on append; DWB-532 read_memory: content + server token estimate)
+# Last Modified: 2026-09-15 (DWB-560: session-complete writes durable lessons only, never narration)
 
 import json
 import logging
@@ -464,7 +464,14 @@ def record_session_complete(
     lessons: list[str] | None = None,
     tokens_used: int | None = None,
 ) -> dict:
-    """Append an ISO 8601 timestamped entry to the agent's scratchpad + recent_sessions.
+    """Record a session wrap-up. DWB-560: memory.md gets LESSONS ONLY.
+
+    The summary and token count are part of the endpoint contract and reach the
+    caller (and the database's own session record), but they are no longer
+    written into memory.md: the dwb_sessions row with its headline, summary and
+    keyword tags already IS the session record, and duplicating it there ate the
+    memory ceiling. A call carrying no lessons writes no file at all and returns
+    empty paths_written with bytes_written 0.
 
     Creates the memory dir if missing (a thin precursor to DWB-293's full
     scaffolder — keeps this endpoint usable on a fresh agent).
@@ -495,9 +502,9 @@ def record_session_complete(
 
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    # DWB-401: single free-form memory.md. The session block carries summary +
-    # tokens + lessons (the scratchpad block already lists lessons). The former
-    # recent_sessions.md is dropped (the DWB database is the session index).
+    # DWB-401: single free-form memory.md.
+    # DWB-560: the block is LESSONS ONLY - no summary, no token count, no
+    # status narration. A call with no lessons writes nothing at all.
     target = memory_dir / "memory.md"
     payload = _format_scratchpad_block(
         timestamp=timestamp,
@@ -507,32 +514,34 @@ def record_session_complete(
         tokens_used=tokens_used,
     )
 
-    # DWB-518: no silent trim. Refuse if the wrap-up block would push memory.md
-    # over its ceiling; the agent must condense first, then re-call.
-    ceiling = ceiling_for_file("memory.md")
-    projected = estimate_tokens(_read_text_safe(target) + payload)
-    if projected > ceiling:
-        raise SessionCompleteError(
-            "over_ceiling",
-            _memory_over_ceiling_detail(agent.id, projected, ceiling),
-            tokens=projected,
-            ceiling=ceiling,
-        )
-
     paths_written: list[str] = []
     bytes_written = 0
-    try:
-        with target.open("a", encoding="utf-8") as f:
-            f.write(payload)
-        paths_written.append(str(target))
-        bytes_written += len(payload.encode("utf-8"))
-    except OSError as e:
-        raise SessionCompleteError(
-            "memory_dir_unwritable",
-            f"could not append to memory files in {memory_dir}: {e}",
-        )
 
-    _touch_memory_nodes(db, project, target)
+    if payload:
+        # DWB-518: no silent trim. Refuse if the wrap-up block would push
+        # memory.md over its ceiling; the agent condenses first, then re-calls.
+        ceiling = ceiling_for_file("memory.md")
+        projected = estimate_tokens(_read_text_safe(target) + payload)
+        if projected > ceiling:
+            raise SessionCompleteError(
+                "over_ceiling",
+                _memory_over_ceiling_detail(agent.id, projected, ceiling),
+                tokens=projected,
+                ceiling=ceiling,
+            )
+
+        try:
+            with target.open("a", encoding="utf-8") as f:
+                f.write(payload)
+            paths_written.append(str(target))
+            bytes_written += len(payload.encode("utf-8"))
+        except OSError as e:
+            raise SessionCompleteError(
+                "memory_dir_unwritable",
+                f"could not append to memory files in {memory_dir}: {e}",
+            )
+
+        _touch_memory_nodes(db, project, target)
 
     return {
         "agent_id": agent.id,
@@ -551,16 +560,26 @@ def _format_scratchpad_block(
     lessons: list[str] | None,
     tokens_used: int | None,
 ) -> str:
-    lines = [
-        f"\n## {timestamp} — session {session_id}\n",
-        f"- summary: {summary}\n",
-    ]
-    if tokens_used is not None:
-        lines.append(f"- tokens_used: {tokens_used}\n")
-    if lessons:
-        lines.append("- lessons:\n")
-        for item in lessons:
-            lines.append(f"  - {item}\n")
+    """DWB-560: memory.md holds DURABLE LESSONS ONLY.
+
+    Miles ruling: boring "I did 50 tickets, their names were, their ids are,
+    the time completed was" is noise. The dwb_sessions row, with its generated
+    headline, summary and keyword tags, IS the session record; duplicating it
+    in memory burned the 4500-token ceiling and forced condense rewrites that
+    can summarise a real lesson away (eight condenses across five agents in one
+    night). So the summary and the token count no longer reach the file: they
+    still travel to the caller and the database. With no lessons there is
+    nothing durable to write and this returns "", which the caller treats as a
+    no-op rather than writing a bare heading.
+
+    `summary` and `tokens_used` stay in the signature because the endpoint
+    contract still accepts them; they are deliberately unused here.
+    """
+    if not lessons:
+        return ""
+    lines = [f"\n## {timestamp} — session {session_id}\n", "- lessons:\n"]
+    for item in lessons:
+        lines.append(f"  - {item}\n")
     return "".join(lines)
 
 

@@ -485,13 +485,15 @@ class TestPeerEconomy:
             .where(ScoreEvent.source == ScoreSource.peer)
         ).first()
         assert ev.actor_agent_id == a1 and ev.actor_cost == 5
-        # DWB-463: peer scoring is demoted to the activity feed - no alert row.
+        # DWB-559: peer scoring broadcasts again (reversing the DWB-463
+        # demotion), at info severity so it cannot drown the critical queue.
         alert = db_session.scalars(
             select(Alert).where(Alert.recipient_agent_id == a2)
             .where(Alert.project_id == pid)
         ).first()
-        assert alert is None
-        assert r.json()["broadcast_count"] == 0
+        assert alert is not None
+        assert alert.severity == AlertSeverity.info
+        assert r.json()["broadcast_count"] >= 1
 
     def test_peer_demerit(self, client, scored_project):
         pid, a1, a2 = scored_project["project_id"], scored_project["a1"], scored_project["a2"]
@@ -748,19 +750,26 @@ class TestHumanCarrotPileOnCTA:
         assert peer.body == "ScoreAlpha received -5 reputation from the human: regression."
         assert "Pile on" not in peer.body
 
-    def test_peer_source_carrot_creates_no_alert(
+    def test_peer_source_carrot_alerts_with_pile_on(
         self, client, db_session, scored_project
     ):
         pid, a1, a2 = (scored_project["project_id"], scored_project["a1"],
                        scored_project["a2"])
-        # DWB-463: peer carrots/sticks are demoted from alerts to the activity
-        # feed. No alert row is created for either the actor or the subject;
-        # broadcast_count is 0. The score_awarded feed event (with source=peer)
-        # is covered by test_peer_emits_feed_event_with_source_peer.
+        # DWB-559 (Miles ruling): peer carrots broadcast again and carry the
+        # same pile-on CTA human carrots do, because the pile-on IS the peer
+        # economy. Info severity keeps them out of the critical queue.
         r = client.post(f"/api/projects/{pid}/scores/peer",
                         json={"subject": str(a2), "delta": 3, "reason": "nice"},
                         headers={"X-Agent-ID": str(a1)})
         assert r.status_code == 201
-        assert r.json()["broadcast_count"] == 0
-        assert self._peer_alert(db_session, pid, a1) is None
-        assert self._peer_alert(db_session, pid, a2) is None
+        assert r.json()["broadcast_count"] >= 1
+        observer = self._peer_alert(db_session, pid, a1)
+        subject = self._peer_alert(db_session, pid, a2)
+        assert observer is not None and subject is not None
+        assert observer.severity == AlertSeverity.info
+        # Third person for the observer, with the pile-on CTA.
+        assert "Pile on: /carrot" in observer.body
+        assert "ScoreAlpha gave" in observer.body
+        # Second person for the subject, never a CTA.
+        assert subject.body.startswith("You received")
+        assert "Pile on" not in subject.body

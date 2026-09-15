@@ -1,12 +1,12 @@
 // Path: src/components/nodes/__tests__/ExclusionsManager.test.jsx
 // File: ExclusionsManager.test.jsx
 // Created: 2026-09-15
-// Purpose: Tests for the exclusions manager panel (DWB-552): lists the project's rows as repo-relative patterns with no default marker, adds by free text and clears the field, renders the server's own rejection text for a duplicate or an absolute path without adding a row, deletes behind the project's inline-text confirm (delete -> confirm? yes / cancel, cancel restores), surfaces a failed delete while keeping the row, and fires the rescan handler. Bound to the live row shape {id, project_id, pattern, created_at} confirmed on 2026-09-15.
+// Purpose: Tests for the exclusions manager panel (DWB-552, browser panel per DWB-553): lists the project's rows as repo-relative patterns with no default marker, adds by free text and clears the field, renders the server's own rejection text for a duplicate or an absolute path without adding a row, deletes behind the project's inline-text confirm (delete -> confirm? yes / cancel, cancel restores), surfaces a failed delete while keeping the row, and fires the rescan handler behind its DWB-556 inline confirm, which must not nest a dialog. Bound to the live row shape {id, project_id, pattern, created_at} confirmed on 2026-09-15.
 // Caller: vitest test runner
 // Callees: ../ExclusionsManager, ../../../api/nodeExclusions (mocked)
 // Data In: Mocked list/create/delete responses and ApiError-shaped rejections
 // Data Out: Test assertions
-// Last Modified: 2026-09-15
+// Last Modified: 2026-09-15 (DWB-556: rescan confirms first)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup, fireEvent } from '@testing-library/react';
@@ -15,6 +15,7 @@ vi.mock('../../../api/nodeExclusions', () => ({
   getNodeExclusions: vi.fn(),
   createNodeExclusion: vi.fn(),
   deleteNodeExclusion: vi.fn(),
+  getRepoDirectories: vi.fn(),
 }));
 
 import ExclusionsManager from '../ExclusionsManager';
@@ -22,6 +23,7 @@ import {
   getNodeExclusions,
   createNodeExclusion,
   deleteNodeExclusion,
+  getRepoDirectories,
 } from '../../../api/nodeExclusions';
 
 // The seven seeded rows on live project 1.
@@ -54,6 +56,8 @@ describe('ExclusionsManager (DWB-552)', () => {
     getNodeExclusions.mockReset();
     createNodeExclusion.mockReset();
     deleteNodeExclusion.mockReset();
+    getRepoDirectories.mockReset();
+    getRepoDirectories.mockResolvedValue({ parent: '', directories: [{ name: 'docs', path: 'docs' }] });
     getNodeExclusions.mockResolvedValue(ROWS);
   });
 
@@ -160,11 +164,18 @@ describe('ExclusionsManager (DWB-552)', () => {
     expect(screen.queryByText(/confirm\?/)).not.toBeInTheDocument();
   });
 
-  it('fires the rescan handler and disables the control while a pass runs', async () => {
+  it('fires the rescan handler behind the inline confirm and disables the control while a pass runs', async () => {
     const onRescan = vi.fn();
     await renderManager({ onRescan });
     await waitFor(() => expect(patterns()).toHaveLength(7));
+
+    // DWB-556: confirm in place, never a nested dialog
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'rescan now' })); });
+    expect(screen.getByTestId('rescan-confirm')).toHaveTextContent('rescan? yes / cancel');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(onRescan).not.toHaveBeenCalled();
+
+    await act(async () => { fireEvent.click(screen.getByText('yes')); });
     expect(onRescan).toHaveBeenCalledTimes(1);
 
     cleanup();
@@ -178,13 +189,26 @@ describe('ExclusionsManager (DWB-552)', () => {
     await waitFor(() => expect(screen.getByText(/could not load exclusions: boom/)).toBeInTheDocument());
   });
 
-  it('renders the browser slot only when one is provided (DWB-553 seam)', async () => {
+  it('renders the real directory browser by default and lets browserSlot override it', async () => {
     await renderManager();
-    await waitFor(() => expect(patterns()).toHaveLength(7));
-    expect(screen.queryByTestId('dir-browser')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('dir-browser')).toBeInTheDocument());
+    expect(getRepoDirectories).toHaveBeenCalledWith('1', '', expect.anything());
 
     cleanup();
-    await renderManager({ browserSlot: <div data-testid="dir-browser">browser</div> });
+    await renderManager({ browserSlot: <div data-testid="slot-override">swapped</div> });
+    await waitFor(() => expect(screen.getByTestId('slot-override')).toBeInTheDocument());
+    expect(screen.queryByTestId('dir-browser')).not.toBeInTheDocument();
+  });
+
+  it('a directory excluded from the browser lands in the list as a subtree pattern', async () => {
+    const created = { id: 9, project_id: 1, pattern: 'docs/', created_at: '2026-09-15T20:10:00' };
+    createNodeExclusion.mockResolvedValue(created);
+    await renderManager();
     await waitFor(() => expect(screen.getByTestId('dir-browser')).toBeInTheDocument());
+
+    const row = [...document.querySelectorAll('.dir-browser__row')][0];
+    await act(async () => { fireEvent.click([...row.querySelectorAll('button')].find((b) => b.textContent === 'exclude')); });
+    expect(createNodeExclusion).toHaveBeenCalledWith('1', 'docs/');
+    await waitFor(() => expect(patterns()).toContain('docs/'));
   });
 });

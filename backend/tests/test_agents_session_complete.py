@@ -29,8 +29,8 @@ def _setup_agent(client, tmp_path, prefix="SC1", name="Sage"):
 
 class TestSessionCompleteWriting:
     def test_creates_memory_dir_and_appends(self, client, tmp_path):
-        # DWB-401: session-complete writes ONE block to memory.md (summary +
-        # tokens + lessons inline). No recent_sessions.md / lessons.md.
+        # DWB-401: session-complete writes ONE block to memory.md.
+        # DWB-560: that block is LESSONS ONLY - no summary, no token count.
         project, agent = _setup_agent(client, tmp_path)
         memory_dir = Path(tmp_path) / ".dwb/memory/SC1/Sage"
 
@@ -52,8 +52,10 @@ class TestSessionCompleteWriting:
 
         memory = (memory_dir / "memory.md").read_text()
         assert "session sess-abc-123" in memory
-        assert "summary: ran the golden test suite" in memory
-        assert "tokens_used: 12500" in memory
+        # DWB-560: narration no longer reaches the file; the DB is the record.
+        assert "summary" not in memory
+        assert "ran the golden test suite" not in memory
+        assert "12500" not in memory
         # lessons fold into the single memory.md block
         assert "always reset DB between runs" in memory
         assert "use fresh tmp_path" in memory
@@ -67,11 +69,15 @@ class TestSessionCompleteWriting:
             client.post(f"/api/agents/{agent['id']}/session-complete", json={
                 "session_id": f"sess-{i}",
                 "summary": f"iteration {i}",
+                # DWB-560: only a wrap-up carrying lessons writes a block.
+                "lessons": [f"lesson from iteration {i}"],
             })
         memory = (Path(tmp_path) / ".dwb/memory/SC2/Devin/memory.md").read_text()
         assert memory.count("session sess-") == 3
 
-    def test_optional_fields_omitted_cleanly(self, client, tmp_path):
+    def test_lessons_free_wrapup_writes_nothing(self, client, tmp_path):
+        """DWB-560: with no lessons there is nothing durable to record, so the
+        endpoint writes no block at all rather than a bare heading."""
         project, agent = _setup_agent(client, tmp_path, prefix="SC3", name="Bolt")
         r = client.post(f"/api/agents/{agent['id']}/session-complete", json={
             "session_id": "sess-minimal",
@@ -80,26 +86,31 @@ class TestSessionCompleteWriting:
         assert r.status_code == 200
         memory_dir = Path(tmp_path) / ".dwb/memory/SC3/Bolt"
         memory = (memory_dir / "memory.md").read_text()
-        # When tokens_used omitted, no tokens line should appear
+        assert memory.strip() == ""
+        assert "sess-minimal" not in memory
         assert "tokens_used" not in memory
-        # When lessons omitted, no lessons header
         assert "- lessons" not in memory
         # Retired files never created
         assert not (memory_dir / "lessons.md").exists()
         assert not (memory_dir / "recent_sessions.md").exists()
         body = r.json()
-        assert all(not p.endswith("/lessons.md") for p in body["paths_written"])
+        assert body["paths_written"] == []
+        assert body["bytes_written"] == 0
 
-    def test_summary_with_newlines_in_memory_block(self, client, tmp_path):
-        # DWB-401: the session block lands in memory.md (recent_sessions.md gone).
+    def test_multiline_summary_never_reaches_the_file(self, client, tmp_path):
+        """DWB-560: a multi-line summary used to be copied verbatim into the
+        block. It is exactly the narration the ruling removed, so now only the
+        lessons land and the summary stays in the request and the database."""
         project, agent = _setup_agent(client, tmp_path, prefix="SC4", name="Pam")
         client.post(f"/api/agents/{agent['id']}/session-complete", json={
             "session_id": "sess-multiline",
             "summary": "line one\nline two\nline three",
+            "lessons": ["the durable part"],
         })
         memory = (Path(tmp_path) / ".dwb/memory/SC4/Pam/memory.md").read_text()
         assert "sess-multiline" in memory
-        assert "line one" in memory and "line three" in memory
+        assert "the durable part" in memory
+        assert "line one" not in memory and "line three" not in memory
 
 
 class TestSessionCompleteErrors:

@@ -1,12 +1,12 @@
 # Path: app/config/memory_rules.py
 # File: memory_rules.py
 # Created: 2026-06-10
-# Purpose: Single source of truth for the inline memory-usage rules surfaced in identify + spawn-prepare responses (DWB-352)
+# Purpose: Single source of truth for the inline memory-usage rules surfaced in identify + spawn-prepare responses (DWB-352); DWB-560 makes them lessons-only
 # Caller: app/services/agent.py (identify_agent, spawn_prepare_payload)
 # Callees: -
 # Data In: -
 # Data Out: MEMORY_USAGE_RULES: str (<=600 chars, enforced at import time)
-# Last Modified: 2026-06-10
+# Last Modified: 2026-09-15 (DWB-560: lessons-only rule with explicit exclusions; drops the stale auto-trim wording)
 
 """Inline memory-usage rules for agent spawn responses (DWB-352).
 
@@ -21,17 +21,15 @@ test run instead of silently bloating the response.
 """
 
 MEMORY_USAGE_RULES: str = (
-    "Memory dir: .dwb/memory/<prefix>/<name>/\n"
-    "Files: identity.md (system; NEVER edit) + memory.md (your single "
-    "free-form memory).\n"
-    "Write through the API so the server adds the ISO 8601 heading + passive "
-    "size-trim:\n"
-    "- Append: POST /api/agents/{agent_id}/memory/append {file, content}. "
-    "file=memory.\n"
-    "- Wrap-up: POST /api/agents/{agent_id}/session-complete writes the "
-    "session block to memory.md.\n"
-    "Append-only; memory.md auto-trims oldest entries past its ceiling "
-    "(a trim threshold, never a close gate)."
+    "memory.md = DURABLE LESSONS ONLY (identity.md is system; NEVER edit).\n"
+    "Write what future-you would otherwise relearn the hard way.\n"
+    "Do NOT write ticket ids, dates, counts, what you shipped, or status "
+    "narration: the DWB database is the session record and duplicating it "
+    "burns your ceiling.\n"
+    "- Append: POST /api/agents/{id}/memory/append {file:'memory', content}\n"
+    "- Size: GET /api/agents/{id}/memory -> est_tokens, ceiling, headroom\n"
+    "- Wrap-up: POST /api/agents/{id}/session-complete writes ONLY lessons.\n"
+    "Over-ceiling writes are REFUSED (400): condense, nothing auto-drops."
 )
 
 
