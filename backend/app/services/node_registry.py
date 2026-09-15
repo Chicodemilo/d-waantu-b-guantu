@@ -16,7 +16,7 @@
 # Callees: app/services/keyword_extraction (tokenize, STOPWORDS), app/models/node
 # Data In: db: Session, project_id: int, SourceUnit list (+ optional prune scope)
 # Data Out: RegistrationResult (grounded / pruned / skipped tag counts)
-# Last Modified: 2026-09-15 (DWB-538: GENERIC_MIN_DF floor on suppression threshold)
+# Last Modified: 2026-09-15 (DWB-538 suppression floor; DWB-545 node_token_counts)
 
 from __future__ import annotations
 
@@ -217,18 +217,22 @@ def _is_noise_tag(tag: str) -> bool:
     return False
 
 
-def node_tokens(text: str) -> set[str]:
-    """Normalize free text into a SET of node tags (DWB-522).
+def node_token_counts(text: str) -> dict[str, int]:
+    """Normalize free text into node tags WITH their occurrence counts.
 
-    Pipeline: reuse the S76 tokenizer (lowercase + kebab; ticket keys verbatim),
-    drop English stopwords + NODE_STOPWORDS + noise tokens, then apply light
-    stemming to non-ticket-key terms. Returns a set (per-source dedupe) so a term
-    repeated within one source yields a single pointer for that source.
+    The single definition of the tag pipeline: reuse the S76 tokenizer (lowercase
+    + kebab; ticket keys verbatim), drop English stopwords + NODE_STOPWORDS +
+    noise tokens, then apply light stemming to non-ticket-key terms.
+
+    Registration only needs the tag SET (see node_tokens) because a term repeated
+    within one source still yields one pointer for that source. Retrieval
+    (DWB-545) also wants the counts: a tag a ticket mentions repeatedly is what
+    the ticket is ABOUT, which is the term-frequency half of ranking.
     """
-    out: set[str] = set()
+    out: dict[str, int] = {}
     for tok in tokenize(text):
         if is_ticket_key(tok):
-            out.add(tok)
+            out[tok] = out.get(tok, 0) + 1
             continue
         if tok in STOPWORDS or tok in NODE_STOPWORDS or _is_noise_tag(tok):
             continue
@@ -241,8 +245,18 @@ def node_tokens(text: str) -> set[str]:
             and stemmed not in NODE_STOPWORDS
             and not _is_noise_tag(stemmed)
         ):
-            out.add(stemmed)
+            out[stemmed] = out.get(stemmed, 0) + 1
     return out
+
+
+def node_tokens(text: str) -> set[str]:
+    """Normalize free text into a SET of node tags (DWB-522).
+
+    Per-source dedupe: a term repeated within one source yields a single pointer
+    for that source. Thin wrapper over node_token_counts so the pipeline has one
+    definition (DWB-545).
+    """
+    return set(node_token_counts(text))
 
 
 @dataclass

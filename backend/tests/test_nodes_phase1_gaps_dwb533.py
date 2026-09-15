@@ -16,7 +16,7 @@
 # Data In: pytest fixtures (client, db_session, make_project, make_agent,
 #          make_ticket, tmp_path, monkeypatch)
 # Data Out: assertions
-# Last Modified: 2026-09-15
+# Last Modified: 2026-09-15 (DWB-545: additive score field, one-per-file code group)
 
 import subprocess
 from pathlib import Path
@@ -740,7 +740,11 @@ class TestRelevantLessonsGaps:
         project, agent = self._objs(db_session, pid, stan["id"])
         lessons = node_retrieval.relevant_lessons(db_session, project, agent)
         assert len(lessons) == 1
-        assert set(lessons[0]) == {"tag", "weight", "source_agent", "memory_ref", "entry_heading", "date"}
+        # DWB-545 added an additive "score" field to every entry.
+        assert set(lessons[0]) == {
+            "tag", "weight", "score", "source_agent", "memory_ref",
+            "entry_heading", "date",
+        }
 
 
 class TestRelatedNodesGaps:
@@ -757,13 +761,18 @@ class TestRelatedNodesGaps:
         out = node_retrieval.related_nodes(db_session, project, "Widgets please")
         assert out["query_tags"] == ["please", "widget"]
         assert out["lessons"] == []
-        assert out["sessions"] == [{"tag": "widget", "weight": out["sessions"][0]["weight"], "ref": "sess-9"}]
+        assert len(out["sessions"]) == 1
+        session = out["sessions"][0]
+        assert session["tag"] == "widget" and session["ref"] == "sess-9"
+        assert session["score"] is not None      # DWB-545 additive field
         kinds = {c["kind"] for c in out["code"]}
         assert kinds == {"code", "doc"}          # doc pointers ride the code group (documented)
         doc = next(c for c in out["code"] if c["kind"] == "doc")
         assert doc["ref"] == "README.md" and doc["sha"] is None and doc["line_start"] == 2
         code = next(c for c in out["code"] if c["ref"] == "a.py")
         assert code["sha"] == "s1" and code["line_start"] == 3 and code["line_end"] == 3
+        # DWB-545: one entry per file, so three files -> three entries.
+        assert len(out["code"]) == len({c["ref"] for c in out["code"]}) == 3
         assert len(node_retrieval.related_nodes(db_session, project, "widget", top_n=1)["code"]) == 1
 
     def test_lessons_without_repo_path_keep_pointer_but_no_heading(self, db_session, make_project):

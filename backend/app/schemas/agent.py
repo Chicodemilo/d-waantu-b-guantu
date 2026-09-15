@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AgentCreate, AgentUpdate, AgentRead
-# Last Modified: 2026-09-14 (DWB-517 memory_full; DWB-518 MemoryCondenseRequest/Response)
+# Last Modified: 2026-09-15 (DWB-545: additive score on RelevantLesson)
 
 from datetime import datetime
 
@@ -115,6 +115,8 @@ class RelevantLesson(BaseModel):
 
     tag: str
     weight: int
+    # DWB-545: specificity rank score (higher = more specific). Additive.
+    score: float | None = None
     source_agent: str | None = None
     memory_ref: str
     entry_heading: str | None = None

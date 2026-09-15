@@ -8,7 +8,7 @@
 # Callees: pydantic
 # Data In: node_retrieval.related_nodes dict
 # Data Out: RelatedNodesResponse
-# Last Modified: 2026-09-14
+# Last Modified: 2026-09-15 (DWB-545: additive score field per entry)
 
 from pydantic import BaseModel
 
@@ -16,6 +16,8 @@ from pydantic import BaseModel
 class LessonRef(BaseModel):
     tag: str
     weight: int
+    # DWB-545: specificity rank score (higher = more specific). Additive.
+    score: float | None = None
     source_agent: str | None = None
     memory_ref: str
     entry_heading: str | None = None
@@ -25,12 +27,16 @@ class LessonRef(BaseModel):
 class SessionRef(BaseModel):
     tag: str
     weight: int
+    # DWB-545: specificity rank score (higher = more specific). Additive.
+    score: float | None = None
     ref: str
 
 
 class CodeRef(BaseModel):
     tag: str
     weight: int
+    # DWB-545: specificity rank score (higher = more specific). Additive.
+    score: float | None = None
     kind: str
     ref: str
     sha: str | None = None
