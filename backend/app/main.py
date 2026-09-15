@@ -6,12 +6,13 @@
 # Callees: All routers, app/database.py
 # Data In: None
 # Data Out: FastAPI app instance
-# Last Modified: 2026-06-10
+# Last Modified: 2026-09-15 (DWB-529: 422 handler encodes validator ctx so ValueError-based validators do not 500)
 
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -87,7 +88,13 @@ async def hook_payload_validation_handler(request: Request, exc: RequestValidati
             raw_payload=raw,
             error=f"RequestValidationError: {exc.errors()}",
         )
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    # DWB-529: a ValueError raised inside a Pydantic model_validator lands in
+    # each error's ctx as the exception object itself, which json cannot
+    # serialize (the default handler would have 500'd). jsonable_encoder
+    # stringifies it and keeps the standard 422 detail shape.
+    return JSONResponse(
+        status_code=422, content={"detail": jsonable_encoder(exc.errors())}
+    )
 
 if os.getenv("TESTING") != "1":
     app.add_middleware(ActivityLoggerMiddleware)

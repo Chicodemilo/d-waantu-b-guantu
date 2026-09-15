@@ -6,7 +6,7 @@
 # Callees:       app.main (FastAPI TestClient), app.database (engine, session)
 # Data In:       MySQL lat_test database connection
 # Data Out:      Rolled-back test transactions; factory-created API objects
-# Last Modified: 2026-06-05
+# Last Modified: 2026-09-15 (DWB-529: make_ticket key trailing number matches ticket_number)
 
 """Shared fixtures for backend API tests.
 
@@ -38,6 +38,7 @@ from sqlalchemy.orm import sessionmaker
 from app.config import settings
 from app.database import Base, get_db
 from app.main import app
+from app.schemas.ticket import ticket_number_from_key
 
 # Build the test DB URL from the same settings (which now has MYSQL_DATABASE=lat_test)
 _TEST_DB_URL = (
@@ -240,6 +241,14 @@ def make_ticket(client, make_project, make_sprint):
 
     def _make(**overrides):
         _counter[0] += 1
+        # DWB-529: a test that supplies its own ticket_key (e.g. "PC1-101")
+        # gets ticket_number derived from that key's trailing integer, unless
+        # it also pins ticket_number explicitly. Keeps every factory ticket
+        # consistent with the API rule (key and number are one fact).
+        if "ticket_key" in overrides and "ticket_number" not in overrides:
+            derived = ticket_number_from_key(overrides["ticket_key"])
+            if derived is not None:
+                overrides["ticket_number"] = derived
         if "project_id" not in overrides:
             project = make_project()
             overrides["project_id"] = project["id"]
@@ -250,7 +259,10 @@ def make_ticket(client, make_project, make_sprint):
             _project_sprints[pid] = sprint["id"]
         data = {
             "ticket_number": _counter[0],
-            "ticket_key": f"T-{_counter[0]}-{id(overrides)}",
+            # DWB-529: the trailing integer of ticket_key MUST equal
+            # ticket_number (POST /api/tickets 422s on disagreement), so the
+            # uniqueness salt goes in the prefix, the counter at the end.
+            "ticket_key": f"T{id(overrides)}-{_counter[0]}",
             "title": f"Test Ticket {_counter[0]}",
             **overrides,
         }

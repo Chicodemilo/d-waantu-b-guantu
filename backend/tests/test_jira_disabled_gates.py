@@ -6,7 +6,7 @@
 # Callees: app.routers.agents (identify), app.routers.tickets (POST/PATCH), app.routers.playbooks (deploy)
 # Data In: per-test factory fixtures, tmp_path for repo_path
 # Data Out: Assertions on identify response shape, ticket 400 gate, deployed playbook content
-# Last Modified: 2026-06-09
+# Last Modified: 2026-09-15 (DWB-529: ticket_number derived from ticket_key in create payloads)
 
 """Coverage for DWB-332:
 
@@ -164,7 +164,6 @@ class TestTicketGateJiraDisabled:
             json={
                 "project_id": project["id"],
                 "sprint_id": sprint["id"],
-                "ticket_number": 1,
                 "ticket_key": "NJ-001",
                 "title": "Blocked link",
                 "jira_issue_key": "POR-9999",
@@ -185,7 +184,6 @@ class TestTicketGateJiraDisabled:
             json={
                 "project_id": project["id"],
                 "sprint_id": sprint["id"],
-                "ticket_number": 1,
                 "ticket_key": "NJ-002",
                 "title": "Local-only",
             },
@@ -199,7 +197,6 @@ class TestTicketGateJiraDisabled:
             json={
                 "project_id": project["id"],
                 "sprint_id": sprint["id"],
-                "ticket_number": 1,
                 "ticket_key": "JR-001",
                 "title": "Linked",
                 "jira_issue_key": "POR-1234",
@@ -217,7 +214,6 @@ class TestTicketGateJiraDisabled:
             json={
                 "project_id": project["id"],
                 "sprint_id": sprint["id"],
-                "ticket_number": 1,
                 "ticket_key": "NJ-003",
                 "title": "Will try to link",
             },
@@ -247,7 +243,6 @@ class TestTicketGateJiraDisabled:
             json={
                 "project_id": project["id"],
                 "sprint_id": sprint["id"],
-                "ticket_number": 1,
                 "ticket_key": "NJ-004",
                 "title": "Clear",
             },
@@ -273,7 +268,7 @@ class TestTicketGateJiraDisabled:
             json={
                 "project_id": non_jira_project["id"],
                 "sprint_id": non_jira_sprint["id"],
-                "ticket_number": 1,
+                "ticket_number": 1,  # DWB-529: key has no trailing integer
                 "ticket_key": "NJ-X",
                 "title": "Refused",
                 "jira_issue_key": "POR-X",
@@ -287,7 +282,7 @@ class TestTicketGateJiraDisabled:
             json={
                 "project_id": jira_project["id"],
                 "sprint_id": jira_sprint["id"],
-                "ticket_number": 1,
+                "ticket_number": 1,  # DWB-529: key has no trailing integer
                 "ticket_key": "JR-X",
                 "title": "Allowed",
                 "jira_issue_key": "POR-Y",
