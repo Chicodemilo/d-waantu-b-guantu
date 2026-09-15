@@ -20,7 +20,7 @@ The sprint-close auto-mint has **never worked**, at every close from S69 to S81.
 
 - **Sprint half:** the lookup selects `status in (planned, active)` ordered by `sprint_number ASC` and takes the first. That is a correct implementation of a **queue model this project abandoned** — we create one sprint at a time and never queue them, so the only `planned` row is a March placeholder (id 23, number 14) and ascending order picks it every time. Repair is not "fix the lookup", it is "replace an assumption".
 - **Assignee half:** `_find_agent_by_role` is an unordered `.limit(1)` with **no `is_active` filter and no ORDER BY**. Latent second defect: with two active testers the assignment would be nondeterministic by query plan.
-- **Best framing (Stan):** why is there a search at all, when the sprint being closed already holds both answers? A search that cannot fail beats a search that fails loudly.
+- **Best framing:** why is there a search at all, when the sprint being closed already holds both answers? (question: Stan; "a search that cannot fail beats a search that fails loudly": Pam)
 
 ## Process rules earned tonight (all cost real cycles)
 
