@@ -21,7 +21,7 @@ Human scoring is NOT demoted (regression guard) - it still alerts.
 
 import pytest
 
-from app.models.alert import Alert, AlertSeverity
+from app.models.alert import Alert
 
 
 def _feed_actions(client, pid):
@@ -39,10 +39,7 @@ def two_member_project(client, make_project, make_agent, make_project_agent):
 
 
 class TestPeerScoringDemoted:
-    def test_peer_alerts_again_and_still_records_feed(self, client, db_session, two_member_project):
-        """DWB-559 REVERSES the DWB-463 demotion for peer scoring (Miles ruling:
-        the pile-on is the point). Peer events alert again, at info severity,
-        and the DWB-463 feed event still fires alongside."""
+    def test_peer_creates_no_alert_but_records_feed(self, client, db_session, two_member_project):
         from sqlalchemy import select
 
         pid, a1, a2 = two_member_project["pid"], two_member_project["a1"], two_member_project["a2"]
@@ -50,14 +47,14 @@ class TestPeerScoringDemoted:
                         json={"subject": str(a2), "delta": 3, "reason": "nice fix"},
                         headers={"X-Agent-ID": str(a1)})
         assert r.status_code == 201
+        # DWB-559: peer grants still create NO alert rows (this demotion
+        # stands); the count now reports agents notified via inter-agent comms.
         assert r.json()["broadcast_count"] >= 1
 
         alerts = db_session.scalars(
             select(Alert).where(Alert.project_id == pid)
         ).all()
-        assert alerts
-        assert all(a.severity == AlertSeverity.info for a in alerts)
-        assert all(a.category.value == "scoring" for a in alerts)
+        assert alerts == []
         assert "score_awarded" in _feed_actions(client, pid)
 
 

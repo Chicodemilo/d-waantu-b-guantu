@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: service dicts from app.services.scoring, human award request body
 # Data Out: LeaderboardRow, ScoreLedgerEntry, AgentScoreDetail, HumanScoreRequest/Response
-# Last Modified: 2026-06-23 (DWB-432: rank + tier on leaderboard + agent detail)
+# Last Modified: 2026-09-15 (DWB-559: broadcast_count documents comms notifications on the peer path)
 
 from pydantic import BaseModel
 
@@ -78,6 +78,15 @@ class PeerScoreRequest(BaseModel):
 
 
 class PeerScoreResponse(BaseModel):
+    """Peer carrot/stick result.
+
+    DWB-559: `broadcast_count` is the number of AGENTS NOTIFIED through the
+    inter-agent comms channel (peer grants deliberately create no alert rows;
+    alerts stay human-only). It reads 0 only when the project's
+    `capture_agent_comms` toggle is off, in which case the grant still scored
+    and simply did not notify.
+    """
+
     status: str
     event_id: int
     actor_agent_id: int

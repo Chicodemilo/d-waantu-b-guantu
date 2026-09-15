@@ -1,25 +1,29 @@
 # Path: tests/test_peer_broadcast_dwb559.py
 # File: test_peer_broadcast_dwb559.py
 # Created: 2026-09-15
-# Purpose: DWB-559: peer carrots and sticks broadcast again (reversing the DWB-463 demotion), at info severity so the critical queue stays human-only, with the carrot pile-on call to action extended to peers and sticks staying notify-only.
+# Purpose: DWB-559: peer carrots and sticks notify through the inter-agent comms channel, not alerts. Proves the messages reach every project agent plus the subject with second/third person phrasing and the carrot pile-on invitation, that no alert rows are created, that human awards still alert, and that capture_agent_comms suppresses only the notification and never the score.
 # Caller: pytest
-# Callees: POST /api/projects/{id}/scores/peer, POST /api/projects/{id}/scores/award, app.services.scoring.broadcast_score_change
+# Callees: POST /api/projects/{id}/scores/peer, POST /api/projects/{id}/scores/award, GET /api/projects/{id}/agent-messages, app.services.scoring.notify_peer_score_via_comms
 # Data In: Factory project with three roster agents and an active sprint
-# Data Out: Assertions on alert rows, severity, person, CTA text, and broadcast_count
+# Data Out: Assertions on InterAgentMessage rows, alert absence, response counts, and the capture toggle
 # Last Modified: 2026-09-15 (DWB-559)
 
-"""DWB-559: "broadcast is the fun part of them" (Miles).
+"""DWB-559: the pile-on goes to the AGENTS, not the human's alert queue.
 
-DWB-463 demoted peer scoring to the activity feed to cut alert noise. That is
-reversed here for peer scoring: the pile-on is the point of a peer economy and
-nothing makes an agent read the feed. Noise is controlled by SEVERITY instead,
-so a human award still outranks a peer one in the queue.
+Miles: "does pile-on have to be noisy? maybe we don't see them on the DWB front
+end alerts, maybe just agent comms route." So peer carrots and sticks travel
+down the inter-agent comms channel that agents read on their next turn, while
+the DWB-463 alert demotion stands: a human does not need every peer grant in
+their queue. Human /carrot and /stick are unchanged, because those are the
+human's own awards.
 """
 
 import pytest
 from sqlalchemy import select
 
-from app.models.alert import Alert, AlertCategory, AlertSeverity
+from app.models.alert import Alert
+from app.models.inter_agent_message import InterAgentMessage
+from app.models.project import Project
 
 
 @pytest.fixture
@@ -27,7 +31,7 @@ def peer_project(client, make_project, make_agent):
     """Project with three roster agents: an actor, a subject and a bystander."""
     project = make_project()
     pid = project["id"]
-    names = {}
+    agents = {}
     for key, name, role in (
         ("actor", "PeerActor559", "backend-worker"),
         ("subject", "PeerSubject559", "frontend-worker"),
@@ -39,13 +43,13 @@ def peer_project(client, make_project, make_agent):
             "project_id": pid, "agent_id": a["id"],
         })
         assert r.status_code == 201
-        names[key] = a
+        agents[key] = a
     epic = client.post("/api/epics", json={"project_id": pid, "name": "E"}).json()
     client.post("/api/sprints", json={
         "project_id": pid, "epic_id": epic["id"], "goal": "peer sprint",
         "sprint_number": 1, "status": "active",
     })
-    return {"pid": pid, **names}
+    return {"pid": pid, **agents}
 
 
 def _peer(client, w, delta, reason="clean root-cause find"):
@@ -56,16 +60,22 @@ def _peer(client, w, delta, reason="clean root-cause find"):
     )
 
 
-def _alerts_for(db, w, agent_key):
+def _messages_for(db, w, agent_key):
     return db.scalars(
-        select(Alert)
-        .where(Alert.project_id == w["pid"])
-        .where(Alert.recipient_agent_id == w[agent_key]["id"])
+        select(InterAgentMessage)
+        .where(InterAgentMessage.project_id == w["pid"])
+        .where(InterAgentMessage.to_agent_id == w[agent_key]["id"])
     ).all()
 
 
-class TestPeerCarrotBroadcasts:
-    def test_every_roster_agent_and_the_subject_get_a_row(
+def _alerts(db, w):
+    return db.scalars(
+        select(Alert).where(Alert.project_id == w["pid"])
+    ).all()
+
+
+class TestPeerCarrotNotifiesViaComms:
+    def test_every_roster_agent_and_the_subject_get_a_message(
         self, client, db_session, peer_project,
     ):
         w = peer_project
@@ -73,95 +83,128 @@ class TestPeerCarrotBroadcasts:
         assert r.status_code == 201, r.text
         assert r.json()["broadcast_count"] == 3  # actor, subject, bystander
         for key in ("actor", "subject", "bystander"):
-            assert len(_alerts_for(db_session, w, key)) == 1
+            assert len(_messages_for(db_session, w, key)) == 1
 
-    def test_subject_row_is_second_person_and_never_a_cta(
+    def test_no_alert_rows_are_created(self, client, db_session, peer_project):
+        """The DWB-463 demotion stands for alerts: the human's queue stays
+        free of peer chatter."""
+        w = peer_project
+        _peer(client, w, 3)
+        assert _alerts(db_session, w) == []
+
+    def test_subject_message_is_second_person_and_never_a_cta(
         self, client, db_session, peer_project,
     ):
         w = peer_project
         _peer(client, w, 4)
-        row = _alerts_for(db_session, w, "subject")[0]
-        assert row.title.startswith("You received +4")
-        assert row.body.startswith("You received +4")
-        assert "Pile on" not in row.body
+        msg = _messages_for(db_session, w, "subject")[0]
+        assert msg.body.startswith("You received +4")
+        assert "Pile on" not in msg.body
 
-    def test_observer_row_is_third_person_with_the_pile_on_cta(
+    def test_observer_message_is_third_person_with_the_pile_on(
         self, client, db_session, peer_project,
     ):
-        """The CTA is the whole point of the ruling: others get to pile on."""
+        """The invitation is the whole point of the ruling: others pile on."""
         w = peer_project
         _peer(client, w, 3, reason="caught my off-by-one")
-        row = _alerts_for(db_session, w, "bystander")[0]
-        assert row.title == "PeerSubject559 received +3 from PeerActor559"
-        assert "PeerActor559 gave PeerSubject559 +3" in row.body
-        assert "for caught my off-by-one" in row.body
-        assert "Pile on: /carrot PeerSubject559" in row.body
+        msg = _messages_for(db_session, w, "bystander")[0]
+        assert "PeerActor559 gave PeerSubject559 +3" in msg.body
+        assert "for caught my off-by-one" in msg.body
+        assert "Pile on: /carrot PeerSubject559" in msg.body
 
-    def test_info_severity_keeps_the_critical_queue_human_only(
+    def test_message_is_attributed_to_the_actor(
         self, client, db_session, peer_project,
     ):
-        """DWB-559 judgment call: reinstating peer broadcast must not drown the
-        critical queue, so peer rows are info and human rows stay critical."""
         w = peer_project
         _peer(client, w, 3)
-        assert all(a.severity == AlertSeverity.info
-                   for a in _alerts_for(db_session, w, "bystander"))
+        msg = _messages_for(db_session, w, "bystander")[0]
+        assert msg.from_agent_id == w["actor"]["id"]
+        assert msg.from_agent_name == "PeerActor559"
+        assert msg.to_agent_name == "PeerBystander559"
 
-        r = client.post(f"/api/projects/{w['pid']}/scores/award",
-                        json={"agent": "PeerSubject559", "delta": 5,
-                              "reason": "shipped it"})
-        assert r.status_code == 201, r.text
-        human = [a for a in _alerts_for(db_session, w, "bystander")
-                 if a.severity == AlertSeverity.critical]
-        assert human, "human awards must stay critical"
-
-    def test_category_is_scoring(self, client, db_session, peer_project):
+    def test_messages_surface_on_the_project_comms_endpoint(
+        self, client, peer_project,
+    ):
+        """It has to be readable where agents actually look."""
         w = peer_project
         _peer(client, w, 3)
-        assert all(a.category == AlertCategory.scoring
-                   for a in _alerts_for(db_session, w, "bystander"))
+        r = client.get(f"/api/projects/{w['pid']}/agent-messages")
+        assert r.status_code == 200, r.text
+        payload = r.json()
+        assert payload["total"] == 3
+        bodies = " ".join(row["body"] for row in payload["rows"])
+        assert "Pile on: /carrot PeerSubject559" in bodies
+        assert "You received +3" in bodies
 
 
-class TestPeerStickBroadcasts:
-    def test_stick_broadcasts_but_is_notify_only(
+class TestPeerStickNotifiesButDoesNotInvite:
+    def test_stick_reaches_everyone_and_is_notify_only(
         self, client, db_session, peer_project,
     ):
-        """Human sticks are notify-only; peer sticks match that. You do not
-        invite a pile-on onto a demerit."""
+        """Human sticks are notify-only; peer sticks match. You do not invite a
+        dogpile onto a demerit."""
         w = peer_project
         r = _peer(client, w, -4, reason="left the suite red")
         assert r.status_code == 201, r.text
         assert r.json()["broadcast_count"] == 3
-        row = _alerts_for(db_session, w, "bystander")[0]
-        assert row.title == "PeerSubject559 received -4 from PeerActor559"
-        assert "Pile on" not in row.body
-        assert "left the suite red" in row.body
-        assert row.severity == AlertSeverity.info
+        msg = _messages_for(db_session, w, "bystander")[0]
+        assert "PeerSubject559 received -4" in msg.body
+        assert "left the suite red" in msg.body
+        assert "Pile on" not in msg.body
+        assert _alerts(db_session, w) == []
 
-    def test_stick_subject_row_is_second_person(
+    def test_stick_subject_message_is_second_person(
         self, client, db_session, peer_project,
     ):
         w = peer_project
         _peer(client, w, -2)
-        row = _alerts_for(db_session, w, "subject")[0]
-        assert row.body.startswith("You received -2")
-        assert "Pile on" not in row.body
+        msg = _messages_for(db_session, w, "subject")[0]
+        assert msg.body.startswith("You received -2")
+        assert "Pile on" not in msg.body
 
 
-class TestUnchangedPaths:
-    def test_feed_event_still_emitted_alongside(self, client, peer_project):
-        """DWB-463's activity-feed record is not removed, only supplemented."""
+class TestCaptureToggle:
+    def test_toggle_off_suppresses_notification_but_still_scores(
+        self, client, db_session, peer_project,
+    ):
+        """capture_agent_comms governs the channel, so turning it off silences
+        the notification. The grant itself is untouched: the ledger row and the
+        reputation move both persist."""
         w = peer_project
-        _peer(client, w, 3)
-        feed = client.get(f"/api/projects/{w['pid']}/activity-feed").json()
-        actions = {e.get("action") for e in (
-            feed if isinstance(feed, list) else feed.get("events", [])
-        )}
-        assert "score_awarded" in actions
+        db_session.get(Project, w["pid"]).capture_agent_comms = False
+        db_session.flush()
 
-    def test_auto_trigger_sources_stay_silent(self, db_session, peer_project):
-        """Only human and peer broadcast. Auto-triggers are mechanical and far
-        too frequent to alert on; that guard is unchanged."""
+        r = _peer(client, w, 3)
+        assert r.status_code == 201, r.text
+        assert r.json()["broadcast_count"] == 0
+        assert _messages_for(db_session, w, "bystander") == []
+        assert _alerts(db_session, w) == []
+        # Scored anyway.
+        assert r.json()["subject_reputation"] == 3
+        score = client.get(f"/api/agents/{w['subject']['id']}/score",
+                           params={"project_id": w["pid"]}).json()
+        assert score["reputation"] == 3
+        assert any(e["trigger_type"] == "peer_grant" for e in score["ledger"])
+
+
+class TestHumanPathUnchanged:
+    def test_human_award_still_alerts_and_sends_no_comms(
+        self, client, db_session, peer_project,
+    ):
+        """Miles's own awards stay in the alert queue where he sees them."""
+        w = peer_project
+        r = client.post(f"/api/projects/{w['pid']}/scores/award",
+                        json={"agent": "PeerSubject559", "delta": 5,
+                              "reason": "shipped it"})
+        assert r.status_code == 201, r.text
+        assert r.json()["broadcast_count"] >= 1
+        assert _alerts(db_session, w)
+        assert _messages_for(db_session, w, "bystander") == []
+
+    def test_direct_broadcast_call_still_refuses_peer_source(
+        self, db_session, peer_project,
+    ):
+        """The alert-path guard is unchanged at the service level."""
         from app.services import scoring
 
         w = peer_project
@@ -169,7 +212,20 @@ class TestUnchangedPaths:
             db_session, project_id=w["pid"],
             subject_agent_id=w["subject"]["id"],
             subject_name=w["subject"]["name"],
-            delta=2, reason="ticket closed", source="auto",
+            delta=2, reason="nice catch", source="peer",
+            actor_agent_id=w["actor"]["id"], actor_name=w["actor"]["name"],
         )
         assert count == 0
-        assert _alerts_for(db_session, w, "bystander") == []
+        assert _alerts(db_session, w) == []
+
+
+class TestFeedEventUnchanged:
+    def test_feed_event_still_emitted_alongside(self, client, peer_project):
+        """DWB-463's activity-feed record is supplemented, not replaced."""
+        w = peer_project
+        _peer(client, w, 3)
+        feed = client.get(f"/api/projects/{w['pid']}/activity-feed").json()
+        actions = {e.get("action") for e in (
+            feed if isinstance(feed, list) else feed.get("events", [])
+        )}
+        assert "score_awarded" in actions

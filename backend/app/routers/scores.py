@@ -6,7 +6,7 @@
 # Callees: app/services/scoring.py, app/models/project.py, app/models/agent.py
 # Data In: HTTP GET/POST
 # Data Out: LeaderboardRow[], AgentScoreDetail, HumanScoreResponse, rebuild result
-# Last Modified: 2026-06-23 (DWB-432: request logging on award/peer/rebuild + reject paths)
+# Last Modified: 2026-09-15 (DWB-559: peer notification moves to inter-agent comms)
 
 """Agent scoring read API (DWB-424)."""
 
@@ -179,6 +179,9 @@ def peer_score(
             404, f"Agent {subject.name!r} is not on project {project.prefix}"
         )
 
+    # DWB-559: peer grants notify via inter-agent comms, so broadcast_count is
+    # the number of agents messaged (0 when capture_agent_comms is off, which
+    # suppresses the notification only - the grant still scored).
     event, broadcast_count = svc.peer_score(
         db, project_id=project_id, actor=actor, subject=subject,
         delta=data.delta, reason=data.reason,

@@ -6,7 +6,7 @@
 # Callees: app/models/score_event.py, app/models/agent_score.py, app/models/alert.py, app/models/sprint.py, app/models/agent.py, app/models/project_agent.py, app/config/scoring.py
 # Data In: db: Session, score event fields
 # Data Out: ScoreEvent, AgentScore, Alert (broadcast), leaderboard / ledger dicts
-# Last Modified: 2026-09-15 (DWB-559: peer carrots/sticks broadcast again at info severity, carrot pile-on CTA extended to peers)
+# Last Modified: 2026-09-15 (DWB-559: peer carrots/sticks notify via the inter-agent comms channel; alerts stay human-only)
 
 """Agent scoring (DWB-424).
 
@@ -34,6 +34,8 @@ from app.config.scoring import (
 from app.models.agent import Agent
 from app.models.agent_score import AgentScore
 from app.models.alert import Alert, AlertCategory, AlertSeverity, AlertStatus
+from app.models.inter_agent_message import InterAgentMessage
+from app.models.project import Project
 from app.models.project_agent import ProjectAgent
 from app.models.score_event import ScoreEvent, ScoreSource, ScoreTriggerType
 from app.models.sprint import Sprint, SprintStatus
@@ -412,9 +414,10 @@ def peer_score(
       - per-action ding cap (MAX_DING_PER_ACTION)
       - per-target-per-sprint ding AND grant caps
 
-    DWB-559: broadcasts to the project (info severity, carrots carry the
-    pile-on CTA) as well as emitting the activity-feed event. Returns
-    (event, broadcast_count); broadcast_count is the real row count again.
+    DWB-559: notifies the project's agents through the inter-agent comms
+    channel (not alerts) and still emits the activity-feed event. Returns
+    (event, notified_count) where notified_count is the number of agents the
+    comms notification reached.
     """
     def _reject(msg: str):
         logger.warning(
@@ -463,10 +466,11 @@ def peer_score(
         trigger_type=trigger, delta=delta, source=ScoreSource.peer,
         actor_agent_id=actor.id, actor_cost=cost, reason=reason, commit=False,
     )
-    count = broadcast_score_change(
+    # DWB-559: peer grants notify through inter-agent comms, NOT alerts.
+    count = notify_peer_score_via_comms(
         db, project_id=project_id, subject_agent_id=subject.id,
-        subject_name=subject.name, delta=delta, reason=reason, source="peer",
-        actor_agent_id=actor.id, actor_name=actor.name,
+        subject_name=subject.name, actor_agent_id=actor.id,
+        actor_name=actor.name, delta=delta, reason=reason,
     )
     db.commit()
     db.refresh(event)
@@ -613,26 +617,23 @@ def broadcast_score_change(
     actor_agent_id: int | None = None,
     actor_name: str | None = None,
 ) -> int:
-    """Notify every project agent (plus the subject) of a human or PEER
-    carrot/stick via the alerts system. The subject's own row is phrased
-    directly ("You received ..."); everyone else sees the third-person form.
-    Auto-triggers do NOT call this (mechanical/too frequent). Returns the
+    """Notify every project agent (plus the subject) of a HUMAN carrot/stick via
+    the alerts system, at elevated (critical) severity. The subject's own row is
+    phrased directly ("You received ..."); everyone else sees the third-person
+    form. Auto-triggers do NOT call this (mechanical/too frequent). Returns the
     number of alert rows written. The caller owns the commit.
 
-    DWB-463 demoted PEER carrots/sticks from alerts to the activity feed to cut
-    noise. DWB-559 REVERSES that for peer scoring on the Miles ruling: "broadcast
-    is the fun part of them, others get to add their carrots and sticks". The
-    pile-on IS the peer economy, and the feed cannot deliver it because nothing
-    makes an agent read the feed. Peer events broadcast again; the feed event
-    (_emit_score_feed_event) still fires alongside, so the activity record the
-    DWB-463 work added is unchanged.
+    DWB-463: PEER carrots/sticks are demoted from alerts to the activity feed
+    (epic 37, alerts-vs-actions). They no longer create Alert rows here; the
+    caller's score_awarded/score_docked feed event (_emit_score_feed_event) is
+    the peer record. So this returns 0 immediately for any non-human source.
 
-    Severity is the noise control instead (DWB-559 judgment call): human awards
-    stay `critical` because a human intervened, peer events go out at `info` so
-    reinstating them cannot drown the critical queue. Auto-trigger sources are
-    still silent here.
+    DWB-559 (Miles): the peer pile-on is delivered to the AGENTS instead, via
+    the inter-agent comms channel (notify_peer_score_via_comms below). Alerts
+    stay human-only: a human does not need every peer grant in their queue,
+    which is exactly the noise DWB-463 removed.
     """
-    if source not in ("human", "peer"):
+    if source != "human":
         return 0
 
     severity = AlertSeverity.critical if source == "human" else AlertSeverity.info
@@ -651,11 +652,9 @@ def broadcast_score_change(
     recipient_ids.add(subject_agent_id)
 
     # DWB-442: a human CARROT (source=human, delta>0) turns the non-subject
-    # alert into a pile-on call-to-action carrying the reason. DWB-559 extends
-    # that CTA to PEER carrots, since the pile-on is exactly what the ruling
-    # named as the fun part. Sticks of either origin stay notify-only (matching
-    # the human-stick rule), and the subject's own "You received ..." row is
-    # never a CTA.
+    # alert into a pile-on call-to-action carrying the reason. Human sticks
+    # (delta<0) stay notify-only, and the subject's own "You received ..." row
+    # is never a CTA. (Peer events never reach here; see the guard above.)
     is_carrot_cta = delta > 0
     cta_reason = f" for {reason}" if reason else ""
 
@@ -666,8 +665,7 @@ def broadcast_score_change(
             body = f"You received {sign} reputation from {origin}{suffix}."
         elif is_carrot_cta:
             title = f"{name} received {sign} from {origin}"
-            giver = "The human" if source == "human" else (actor_name or "A peer")
-            body = f"{giver} gave {name} {sign}{cta_reason}. Pile on: /carrot {name}"
+            body = f"The human gave {name} {sign}{cta_reason}. Pile on: /carrot {name}"
         else:
             title = f"{name} received {sign} from {origin}"
             body = f"{name} received {sign} reputation from {origin}{suffix}."
@@ -681,6 +679,80 @@ def broadcast_score_change(
             status=AlertStatus.open,
             # DWB-462: reputation carrot/stick -> scoring category.
             category=AlertCategory.scoring,
+        ))
+        count += 1
+    db.flush()
+    return count
+
+
+def notify_peer_score_via_comms(
+    db: Session,
+    *,
+    project_id: int,
+    subject_agent_id: int,
+    subject_name: str | None,
+    actor_agent_id: int | None,
+    actor_name: str | None,
+    delta: int,
+    reason: str | None,
+) -> int:
+    """DWB-559: deliver a PEER carrot/stick to the agents via inter-agent comms.
+
+    Miles: "does pile-on have to be noisy? maybe we don't see them on the DWB
+    front end alerts, maybe just agent comms route." The pile-on is for the
+    agents, so it goes down the channel agents actually read on their next turn
+    (the project comms page / GET /api/projects/{id}/agent-messages). Alerts
+    stay human-only, preserving the DWB-463 noise reduction.
+
+    One message per project agent, plus the subject. The subject's own message
+    is second person ("You received ..."); everyone else sees the third-person
+    form, and a CARROT carries the pile-on invitation (sticks are notify-only,
+    matching the human-stick rule: you do not invite a dogpile onto a demerit).
+
+    Respects the per-project ``capture_agent_comms`` toggle (DWB-446). When it
+    is OFF the grant still SCORES - the ledger row and the reputation move are
+    already written by the caller - it simply does not notify, and this returns
+    0. Returns the number of agents notified. The caller owns the commit.
+    """
+    project = db.get(Project, project_id)
+    if project is None or not project.capture_agent_comms:
+        return 0
+
+    name = subject_name or f"agent {subject_agent_id}"
+    giver = actor_name or "a peer"
+    sign = f"{delta:+d}"
+    suffix = f": {reason}" if reason else ""
+    cta_reason = f" for {reason}" if reason else ""
+
+    recipient_ids = set(db.scalars(
+        select(ProjectAgent.agent_id).where(ProjectAgent.project_id == project_id)
+    ).all())
+    recipient_ids.add(subject_agent_id)
+
+    names = dict(db.execute(
+        select(Agent.id, Agent.name).where(Agent.id.in_(recipient_ids))
+    ).all()) if recipient_ids else {}
+
+    count = 0
+    for aid in sorted(recipient_ids):
+        if aid == subject_agent_id:
+            body = f"You received {sign} reputation from {giver}{suffix}."
+            summary = f"You received {sign} from {giver}"
+        elif delta > 0:
+            body = (f"{giver} gave {name} {sign}{cta_reason}. "
+                    f"Pile on: /carrot {name}")
+            summary = f"{name} received {sign} from {giver}"
+        else:
+            body = f"{name} received {sign} reputation from {giver}{suffix}."
+            summary = f"{name} received {sign} from {giver}"
+        db.add(InterAgentMessage(
+            project_id=project_id,
+            from_agent_id=actor_agent_id,
+            from_agent_name=actor_name,
+            to_agent_id=aid,
+            to_agent_name=names.get(aid),
+            body=body,
+            summary=summary[:512],
         ))
         count += 1
     db.flush()
