@@ -61,7 +61,7 @@ Agent definitions in `.claude/agents/` auto-load when spawning teammates. Minimu
 
 Agents are assigned to projects via `project_agents`. The `X-Agent-ID` header on mutating requests attributes actions in the activity feed.
 
-**Per-project rows + system-wide unique names** (DWB-287, 315). Each agent row has one `project_id`; `agents.name` is `UNIQUE` system-wide. Fixed-role agents recurring on every project (TL, PM) get a `_<PREFIX>` suffix (`Archie_DWB`); workers stay plain until a collision. Identify accepts either form.
+**Per-project rows, system-wide unique names** (DWB-287, 315). Each agent has one `project_id`; `agents.name` is `UNIQUE` system-wide, so fixed roles recurring across projects take a `_<PREFIX>` suffix (`Archie_DWB`). Identify accepts either form.
 
 **Spawn-time identity flow.** A teammate calls `POST /api/agents/identify` for its `agent_id` and memory dir. Subagent token attribution uses a pending-marker scheme the TL writes at spawn; details in [ARCHITECTURE.md](ARCHITECTURE.md) § 5.
 
@@ -95,7 +95,7 @@ Hooks handle backfill and recovery automatically; no separate scan script is nee
 
 ## DWB Sessions
 
-A DWB session is a user-bounded span of work: it opens when you signal start, closes when you signal stop, and rolls up tokens + wall-clock time across every CC session in between (one DWB session spans many). Single-active per project, DB-enforced. Four detection layers (Layer-2 Haiku retired, DWB-402): regex on open/close phrases, a SessionEnd transcript retry, slash commands (`/dwb-open`/`/dwb-close`), and a 60-min idle sweeper. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
+A DWB session is a user-bounded span of work: it opens when you signal start, closes when you signal stop, and rolls up tokens and time across every CC session in between. Single-active per project, DB-enforced. Detection: open/close regex, a SessionEnd transcript retry, `/dwb-open` and `/dwb-close`, and an idle sweeper. Full reference: [docs/session_lifecycle.md](docs/session_lifecycle.md).
 
 ---
 

@@ -2,31 +2,47 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current state (2026-09-15, mid-day; CC session cycling for display-mode relaunch. DWB session 109 LEFT OPEN intentionally - work continues after relaunch)
+## Current state (2026-09-15 evening. S81 CLOSED, pushed, team shut down)
 
-- **S80 (CLOSED, 6/6): Nodes Phase 1.** All tickets done with review evidence, write-on-close gate passed all participants. Commits: 7b9d013 (phase-1 checkpoint), 594276e (rename-prune fix DWB-525), 02496b7 (TF-IDF weight + node stoplist DWB-522). Gated test run posted 1689/1689 green. Final renodify: 3744 nodes / 69.6k pointers / 169 suppressed; top-20 verified specific (contract, roster, command, index, ticket-key tier). The index is PROVEN - Miles's hold on the visual phase is lifted.
-- **Relaunch context (why this session ended):** teammates must render as native iTerm2 panes. Proven this session: display mode locks at CC session START (PaneTest spawned after a settings flip, got no pane). CC binary upgraded 2.1.181 -> 2.1.272; `teammateMode: "iterm2"` set in ~/.claude/settings.json. FIRST SPAWN of the new session is the test: if no iTerm2 pane appears, it2 CLI (0.2.3, on PATH) + iTerm2 Python API were verified working today, so suspect CC-side - tell Miles.
-- **VTC feedback batch (from Miles's other machine's lane):** filed as DWB-528..532, backlog, specs in tickets. B4 withdrawn (their bug). DWB-530 has FOUR independent 404-ambiguity repros (2 VTC, 2 mine incl. /api/comments route shape). DWB-532 = GET agent memory endpoint; **Miles has a "funny idea" about it - REMIND HIM once 532 is built.**
-- **Pending Miles decisions (numbered asks he hasn't answered):** #2 stick-redemption rule (endorsed w/ teeth: API-verified memory note citing stick ledger event id -> auto half back, once, 48h window) - if yes, ticket as DWB-537 into S81. #3 S81 slate approval: DWB-534/535/536 (nodes visual: cloud page, detail panel, match search - frontend) + pull 528-530/532/533 + optional 537. NOT FILED - file on his yes. Also undecided: playbook-trim bless/discard on his OTHER clone (~/Dev/d-waantu-b-guantu, different machine, uncommitted working-tree trim deployed to that instance's lanes) - DWB-531 stays backlog until settled.
-- **Also pending discussion (NOT authorized work):** getting nodes into agent context (retrieval already feeds spawn-prepare relevant_lessons; Miles wants to discuss more).
+- **S81 (sprint 160) CLOSED, 27 done.** "Nodes Visual Layer (Cloud, Detail Overlay, Limiter Search)". Origin master at `b555409`, 15 commits pushed. All gates verified green at 20:35 before close. Backend 2050 pass (result 196, taken against committed HEAD), frontend 377 pass (result 193).
+- **Per-agent split:** Freddie 11, Barry 9, Stan 7. Worth knowing that the quietest lane was the largest; anyone reading the session thread would infer the opposite, because the noisy lane was the one collecting amendments.
+- **Nodes visual layer is live** at `/projects/:id/nodes`: weighted cloud with a top-0.5% headliner tier, detail overlay with neighbour hops, substring limiter search with an optional connections toggle, per-project scan exclusions with a directory browser, and a rescan control with an inline confirm.
+- **Also shipped:** stick redemption (half rounded up, once per stick), peer carrots/sticks notifying via agent comms, agent memory now lessons-only, three token-attribution bugs fixed, timestamp parsing corrected across 14 components.
 
-## Next session, in order
-1. Identity flow, confirm DWB session 109 still open (regex open attempt will 409 -> fine).
-2. Spawn ONE worker, verify an iTerm2 PANE opens (not just a panel row). Then full team.
-3. Collect Miles's numbered answers (#2, #3 above); file S81 tickets (next ticket_number: 534; 533 consumed by auto-mint), create S81 sprint under epic 53, respawn Barry_DWB (21) + Stan (38) + a frontend worker (Freddie 19 on roster; Pixel convention also fine) per full spawn flow.
-4. S81 lanes: frontend = visual tickets; Barry = fix batch + 537; Stan = 533 test coverage.
+## Open for Miles (decisions, not tickets)
 
-## Backlog
-DWB-514 (agent DELETE 500 on FK children), DWB-516 (recap re-cut), DWB-515/521 (auto test tickets; NOTE: S80 close auto-assigned DWB-533 to dark Sage on ancient sprint 23 - I rehomed it to Stan/backlog; add that repro to 515/521 scope), DWB-528..532 (VTC batch), DWB-531 (blocked on trim decision).
+1. **Ten stranded test tickets on sprint 23**, all assigned to dark agent Sage, eight still `todo`, spanning June to September: DWB-445, 453, 467, 480, 495, 498, 504, 507, 515, 521. Deliberately NOT rehomed; deciding whether they are still wanted is his call, and a fix that tidies them would destroy the evidence. DWB-563 (tonight's) was rehomed to sprint 160 backlog.
+2. **Nothing else is blocked.** Ten carry-forwards, all backlog/unassigned on sprint 160: DWB-547, 548, 550, 555, 558, 561, 562, 563, 564, 565.
+
+## The mint bug, root-caused (DWB-515 / DWB-521)
+
+The sprint-close auto-mint has **never worked**, at every close from S69 to S81. Root cause verified in `services/sprint.py`, not inferred:
+
+- **Sprint half:** the lookup selects `status in (planned, active)` ordered by `sprint_number ASC` and takes the first. That is a correct implementation of a **queue model this project abandoned** — we create one sprint at a time and never queue them, so the only `planned` row is a March placeholder (id 23, number 14) and ascending order picks it every time. Repair is not "fix the lookup", it is "replace an assumption".
+- **Assignee half:** `_find_agent_by_role` is an unordered `.limit(1)` with **no `is_active` filter and no ORDER BY**. Latent second defect: with two active testers the assignment would be nondeterministic by query plan.
+- **Best framing (Stan):** why is there a search at all, when the sprint being closed already holds both answers? A search that cannot fail beats a search that fails loudly.
+
+## Process rules earned tonight (all cost real cycles)
+
+- **Amendments, three clauses.** A description PATCH is not delivery to an in-flight worker → send a direct message. The **ack** is the load-bearing half; no worker flips to `in_review` without checking their inbox. And **do not issue an amendment until the design is settled** — clauses 1-2 cannot catch a message landing during a long tool call. Four wasted build cycles all trace to relaying half-decisions.
+- **Review from the code, never the worker's comment.** Their comment is accurate against the spec *they* could see. This caught two wrong-design builds.
+- **A ticket carries its own scope.** Cite the source too, and say whether carried text is verbatim. But this is provenance *hygiene, not correctness*: verbatim copying propagates a wrong source faithfully. Anything load-bearing gets checked against the code.
+- **Worked examples in memory are load-bearing** — verify them or label them as reported. A wrong example launders a false premise into a rule that looks tested.
+- **Never `git add -A <dir>`.** Stage the explicit file list for the ticket under review. A broad add swept a rejected design into an unrelated commit (`6c71168`), making unapproved code the repo's committed behaviour; `b555409` names it as superseded.
+- **Silence is not death.** A worker writes nothing to the DB between `in_progress` and `in_review`. I respawned a live worker and the duplicate collided on six files.
+- **The failure shape of the night, five instances:** a mechanism *right about the fact, wrong about the blame* — an outage presenting as a missing ack, a gate change as a delinquent non-writer, a stale roster row as an absent participant, a stale test result as a passing gate, a green suite as a recorded one. When a gate names someone, ask whether it can distinguish "did not" from "could not" from "was never here".
+- **Automated steps that fail quietly while the surface looks healthy** is a class worth sweeping, not three point fixes. The tell: a success signal reporting that a step *ran* rather than that it *landed*.
+- **Working condition, not a courtesy (Pam):** being corrected was treated as useful rather than as friction, so nobody had to defend a position to keep their standing, and four wrong theories were discarded quickly. That is why the mint bug was found.
 
 ## Gotchas (carry forward)
-- Display mode reads at CC session start, NOT at spawn. Settings flips mid-session do nothing.
-- SendMessage routes by LITERAL name; check inbox names before concluding silence.
-- Sprint-close auto-mints next test ticket: reserve ticket numbers AFTER close, and CHECK the minted ticket's assignee+sprint (stale-Sage/ancient-sprint bug).
-- Workers idle instead of answering shutdown_requests; nudge with the request_id, or reissue fresh.
-- Bash tool cwd can stick from earlier commands - pin git with -C.
-- /api/comments?ticket_id=N is the comments route; /api/tickets/{id}/comments does NOT exist (bare 404).
-- Uvicorn (8000, --reload confirmed) + Vite (5173) left RUNNING, MySQL container up.
+
+- Memory ceiling is a **treadmill** if only raised: it exists because memory is injected whole at spawn. Real fixes are lessons-only content (shipped) and retrieval-based delivery. Three of six agents were refused a write within one hour tonight.
+- `run_tests.sh --post` **silently loses results** when `--context` contains an apostrophe (DWB-565): tests pass, nothing is recorded, script exits 1.
+- Sprint close consumes a ticket_number; reserve numbers AFTER closing.
+- Do not close a sprint while a worker is writing backend files: uvicorn `--reload` on a half-written module 500s the memory endpoint and the gate then names innocent participants.
+- The write-on-close gate filters `is_active` before testing writes, so a dark agent cannot block a close.
+- Uvicorn (8000, `--reload`) + Vite (5173) left RUNNING, MySQL container up.
 
 ## Team
-ALL SHUT DOWN clean 15:33 (Barry_DWB, Stan; session-completes verified in memory files before termination; PaneTest throwaway also terminated). Scores: Barry +2, Stan +2 carrots this session. CC teams do not survive sessions - respawn per playbook (spawn-prepare + marker + paste memory_full), never message old roster names first.
+
+Nobody live. Pam_DWB, Freddie, Barry_DWB and Stan were shut down after landing session-complete wraps (all four verified lessons-only, which tested DWB-560 on its own session). CC teams do not survive sessions — respawn per playbook: spawn-prepare, pending marker, paste `memory_full`.
