@@ -57,7 +57,7 @@ If a TL asks you to close a Jira sprint, REFUSE and escalate to the human. This 
 
 ## On Startup
 
-**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker, read your memory dir (`identity.md` + `memory.md`). The dir + both files are auto-scaffolded on spawn (DWB-341); HALT only if they're still missing after that. The identify response also carries `memory_usage_rules` (DWB-352): a condensed inline summary of the memory rules.
+**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker. As of DWB-517 you do NOT read your memory files: your full `memory.md` is injected into your spawn prompt via the TL's `spawn-prepare` handshake (`memory_full` field), so your prior notes are already in context. The dir + files are still auto-scaffolded on spawn (DWB-341) and you only ever WRITE them through the API. The identify response also carries `memory_usage_rules` (DWB-352): a condensed inline summary of the memory rules.
 
 Then read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`. Fetch live roster from `GET /api/projects/{project_id}/team` (DB-authoritative).
 
@@ -100,10 +100,12 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
    └─ memory/<prefix>/<name>/   per-agent personal memory
       ├─ identity.md         system-generated · NEVER edit
       └─ memory.md           single free-form memory (scratchpad + lessons merged)
-            owner writes via the memory API · GATE-EXEMPT (passive trim, never blocks close)
+            injected at spawn, never read · owner writes via the memory API
+            HARD 4500-token write-ceiling (over-ceiling write refused, condense then retry)
+            write-on-close REQUIRED (DWB-519)
 ```
 
-**Budgeted vs exempt:** a doc is *budgeted* (its size gated at close) only when an agent can actually edit it — your memory plus the root/project docs you own. DWB-shipped docs (playbooks, agent defs) are *exempt*: keeping those lean is the DWB team's editorial job, never a close-blocker. No agent can Edit a `.claude/` path directly (it crashes the session) — memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
+**Budgeted vs exempt:** the consolidation gate counts only docs the TL owns (root docs + `project_rules_*`). DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Your `memory.md` is not counted by the consolidation gate, but as of DWB-518 it carries its own HARD 4500-token ceiling enforced at WRITE time: an append / session-complete / compact / condense that would exceed it is refused (HTTP 400, nothing dropped), and you condense to get back under. Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (with a human attached) edits the other `.claude/` files.
 
 ---
 
@@ -330,6 +332,8 @@ Positive `delta` grants reputation, negative demerits. Enforced at the API (400 
 
 The human's `/carrot` and `/stick` commands are the human's; you (an agent) use the peer endpoint above.
 
+**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: `abs(stick delta) // 2` (minimum 1), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it.
+
 ## 12. Sprint Evaluation Workflow
 
 1. Gather: `GET /api/sprints/{id}`, `GET /api/tickets?sprint_id={id}`, `GET /api/test-results?project_id={pid}&limit=10`, `GET /api/alerts?project_id={pid}&status=open`
@@ -340,13 +344,17 @@ The human's `/carrot` and `/stick` commands are the human's; you (an agent) use 
 
 ---
 
-## 12a. Sprint Close: Consolidation Gate (REQUIRED)
+## 12a. Sprint Close: Write-on-Close + Consolidation Gates (REQUIRED)
 
-DWB's `force_consolidation` gate (opt-in per project, default OFF — DWB-400) blocks sprint close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): naked ack with over-ceiling files returns HTTP 400 with violations. **What counts (DWB-397/399/401):** ONLY the TL-owned docs (root docs + all three `project_rules_*` files). Playbooks + agent defs are exempt, and — as of DWB-401 — every agent's `memory.md` is exempt too (bounded by a passive server-side trim, never counted). So no worker or PM ever has an over-ceiling file: your own ack, and theirs, is a clean naked ack. The PM's role at sprint close:
+Two gates can block a sprint close. Know both, because the PM does the close prep.
 
-1. **Verify gate state.** `GET /api/projects/{pid}/consolidation-status?sprint_id={sid}` returns `agents[]` with `acked: true/false` + `owned_over_ceiling_files` per agent, and `gate_satisfied` overall. With memory exempt, `owned_over_ceiling_files` is empty for everyone except possibly the TL (their root/`project_rules` docs).
-2. **Chase missing acks, not trims.** If a participant hasn't acked, ping them to file the ack (it passes clean — nothing of theirs gates). Only the TL might have a real over-ceiling doc to trim; surface that to the TL.
-3. **Self-ack.** PM files a clean naked ack — your memory is exempt, so there's nothing to trim first.
+**Write-on-close gate (DWB-519, ALWAYS ON).** Miles's ruling: "you write for your work on close, no exceptions." Every ACTIVE sprint participant must have written to their `memory.md` at least once within the sprint window (any `append` or `session-complete` counts; detection reads their ISO write-headings). Any non-writer blocks close with HTTP 400 naming them. This is not a per-project toggle; it is skipped only when the project has no `repo_path`. So at close, chase non-writers to land a memory write (a `session-complete` wrap-up is the natural one), the same way you chase missing acks.
+
+**Consolidation gate (`force_consolidation`, opt-in, default OFF, DWB-400).** When on, blocks close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): a naked ack with over-ceiling files returns HTTP 400 with violations. **What it counts (DWB-397/399/401):** ONLY the TL-owned docs (root docs + all three `project_rules_*` files). Playbooks + agent defs are exempt, and every agent's `memory.md` is NOT counted by this gate (it is bounded by its own hard write-ceiling instead, DWB-518, so it is always under ceiling on disk). So no worker or PM ever has an over-ceiling file for the consolidation gate: your own ack, and theirs, is a clean naked ack. The PM's role at sprint close:
+
+1. **Verify gate state.** `GET /api/projects/{pid}/consolidation-status?sprint_id={sid}` returns `agents[]` with `acked: true/false` + `owned_over_ceiling_files` per agent, and `gate_satisfied` overall. Memory is not counted here, so `owned_over_ceiling_files` is empty for everyone except possibly the TL (their root/`project_rules` docs). Separately confirm every active participant has a memory write on record for the window (write-on-close gate above).
+2. **Chase missing acks AND missing memory writes, not trims.** If a participant hasn't acked, ping them to file the ack (it passes clean, nothing of theirs gates). If a participant has no memory write for the window, ping them to land one (append or session-complete) or the close 400s. Only the TL might have a real over-ceiling doc to trim; surface that to the TL.
+3. **Self-ack + self-write.** PM files a clean naked ack (your memory is not counted, nothing to trim first), and make sure you yourself have a memory write on record for the sprint.
 
 ```bash
 # PM's self-ack (clean files → naked ack passes 201; over-ceiling → 400 with violations)

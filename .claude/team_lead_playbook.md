@@ -18,7 +18,7 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 
 ## On Startup
 
-1. **Complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity (identify, cache `agent_id`, read your memory dir: `identity.md` + `memory.md`). Same flow for every agent, TL included.
+1. **Complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity (identify, cache `agent_id`). Same flow for every agent, TL included. As of DWB-517 you do NOT read your memory files: your own full `memory.md` is injected into your session automatically by the SessionStart hook (it returns `hookSpecificOutput.additionalContext` = your memory, which Claude Code loads with zero action from you), so your prior orchestration notes are already in context. You only ever WRITE memory, through the API.
 2. Read this playbook, `.claude/project_rules_team_lead.md`, `HANDOFF.md`
 3. Fetch the live team roster: `GET /api/projects/{project_id}/team`. The DB is authoritative, not a checked-in file.
 4. **Respawn a parked team.** Claude Code teams do NOT survive across CC sessions; a team that `HANDOFF.md` describes as "parked" or "standing by" no longer exists as live processes. If the session's work needs workers, respawn each one via the full spawn flow per § 4a: spawn-prepare handshake, pending marker, then spawn with the Agent tool. There is no separate team-creation step. `TeamCreate`/`TeamDelete` were removed in CC 2.1.178, so a spawned teammate joins this session's team automatically. Do not assign work or SendMessage to roster names from HANDOFF before respawning; those inboxes are dead and messages drop silently.
@@ -32,7 +32,7 @@ Lives at `.dwb/memory/<project_prefix>/Archie_<PREFIX>/` (DWB-401: moved out of 
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
 
-**Memory model (canonical home — DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up) — do NOT free-write memory into root-level docs just because you (the TL) can. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md` — durable lessons go in your `memory.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
+**Memory model (canonical home, DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up); do NOT free-write memory into root-level docs just because you (the TL) can. `memory.md` carries a HARD 4500-token ceiling (DWB-518): a write that would exceed it is refused with HTTP 400, so condense via `POST /api/agents/{id}/memory/condense` (leaner full-file rewrite) then retry, never wait. You are also a sprint participant for the always-on write-on-close gate (DWB-519): write to your `memory.md` at least once per sprint or your own sprint close is refused. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md`: durable lessons go in your `memory.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
 
 ### Playbook locations
 
@@ -65,10 +65,12 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
    └─ memory/<prefix>/<name>/   per-agent personal memory
       ├─ identity.md         system-generated · NEVER edit
       └─ memory.md           single free-form memory (scratchpad + lessons merged)
-            owner writes via the memory API · GATE-EXEMPT (passive trim, never blocks close)
+            injected at spawn, never read · owner writes via the memory API
+            HARD 4500-token write-ceiling (over-ceiling write refused, condense then retry)
+            write-on-close REQUIRED (DWB-519)
 ```
 
-**Budgeted vs exempt:** a doc is *budgeted* (its size gated at close) only when an agent can actually edit it — your memory plus the root/project docs you own. DWB-shipped docs (playbooks, agent defs) are *exempt*: keeping those lean is the DWB team's editorial job, never a close-blocker. No agent can Edit a `.claude/` path directly (it crashes the session) — memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
+**Budgeted vs exempt:** the consolidation gate counts only the root/`project_rules_*` docs the TL owns. DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Every agent's `memory.md` is NOT counted by the consolidation gate, but as of DWB-518 it carries its own HARD 4500-token ceiling enforced at WRITE time (over-ceiling append / session-complete / compact / condense refused with HTTP 400, nothing dropped; condense to get back under). Separately, DWB-519 requires every active participant, TL included, to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
 
 ---
 
@@ -233,7 +235,14 @@ Don't let open alerts accumulate, an ignored queue trains everyone to ignore ale
 
 Spawn teammates with the **Agent tool**; that is the whole mechanism. `TeamCreate`/`TeamDelete` were removed in 2.1.178, so the spawned agent joins this session's team automatically (the old `team_name` arg is accepted but ignored, so passing it is harmless and unnecessary). Spawning didn't change in capability: teammates still SendMessage each other, claim shared tasks, and report back. Only the setup step went away.
 
-**Seeing your team.** Teammates show in the in-session agent panel (up/down to select, Enter to open a transcript, Esc to interrupt) or, with `"teammateMode": "tmux"` in `~/.claude/settings.json`, each in its own iTerm/tmux pane. The display default flipped to `in-process` (one panel) in 2.1.179, and on 2.1.181 **idle teammates auto-hide after ~30s** and reappear on activity. An empty panel does NOT mean the team is gone. Confirm liveness via `GET /api/projects/{id}/team` or `ls ~/.claude/teams/<team>/inboxes/` before concluding a worker died.
+**Seeing your team: check teammateMode BEFORE your first spawn (hard rule, 2026-09-14).** The human must be able to SEE workers in the in-session agent panel. Whether they can is decided by `teammateMode`, read once at each agent's SPAWN time:
+
+- `in-process` (required): teammates render as live tiles in the panel. This is what the human expects.
+- `tmux`: teammates run headless expecting external tmux/iTerm panes. If the human is not running that integration, the whole team is INVISIBLE while working at full speed - the human concludes nothing was launched. This exact failure burned DWB on 2026-09-14 (a stale June experiment left `"teammateMode": "tmux"` in `~/.claude/settings.json`).
+
+Before the FIRST spawn of any session: check `teammateMode` in `~/.claude/settings.json` and the project's `.claude/settings.local.json`. If it resolves to anything but `in-process`, fix it (TL-only settings edit) BEFORE spawning and tell the human. Fixing it mid-session does NOT retile already-spawned agents - the mode is read at spawn - so a crew spawned under `tmux` stays invisible until cycled; surface that trade-off to the human instead of silently continuing.
+
+**Panel behavior once visible:** up/down to select, Enter to open a transcript, Esc to interrupt. **Idle teammates auto-hide after ~30s** (since 2.1.181) and reappear on activity - an empty panel does NOT mean the team is gone. Confirm liveness via `GET /api/projects/{id}/team`, ticket movement, or `ls ~/.claude/teams/<team>/inboxes/` before concluding a worker died.
 
 ### Spawn-Prepare (REQUIRED before every spawn)
 
@@ -242,7 +251,7 @@ POST /api/agents/spawn-prepare
 { "role": "frontend-worker", "name": "Pixel", "project_prefix": "DWB" }
 ```
 
-Response is the identity bundle to inject into the spawn prompt. Confirms the agent exists, is unambiguous, returns `agent_id` + memory dir + scratchpad excerpt + agent-scoped instructions. **Never spawn without this handshake.** 409/404 → HALT and escalate.
+Response is the identity bundle to inject into the spawn prompt. Confirms the agent exists, is unambiguous, and returns `agent_id` + memory dir + agent-scoped instructions + `scratchpad_excerpt` + **`memory_full`** (DWB-517: the agent's ENTIRE `memory.md` verbatim, empty string when none). **Paste `memory_full` into the spawn prompt.** This is how the worker gets its memory now: agents no longer read their own memory files, so if you skip it they spawn amnesiac. Your own TL memory is injected separately by the SessionStart hook (§ On Startup). **Never spawn without this handshake.** 409/404 -> HALT and escalate.
 
 ### Session Marker (TL writes before spawning a worker)
 
@@ -272,7 +281,7 @@ The hook resolver atomically renames the pending marker to the CC-assigned `sess
 
 Subagent edits to ANY path under `.claude/` trigger a permission dialog that crashes them in the ink renderer. Four workers died across S66 from this exact pattern, including some that followed prior playbook guidance to "append yourself" inside their own memory dir. The current model is stricter than what DWB-355 documented:
 
-- **Workers cannot safely write anything under `.claude/`** - that includes `.claude/settings.json`, the playbooks, and the project_rules files. (DWB-401 moved agent memory OUT to `.dwb/memory/<prefix>/<name>/`, which is writable — so the memory dir is no longer in this danger zone, though writes still go through the API for the ISO heading + passive trim.)
+- **Workers cannot safely write anything under `.claude/`** - that includes `.claude/settings.json`, the playbooks, and the project_rules files. (DWB-401 moved agent memory OUT to `.dwb/memory/<prefix>/<name>/`, which is writable, so the memory dir is no longer in this danger zone, though writes still go through the API for the ISO heading + ceiling enforcement.)
 - **TL is the only agent that can directly Edit/Write `.claude/` files.** You run in the main CC window with a user attached for the permission dialog, so the prompt resolves instead of killing you. This is the hard exception to the TL-never-codes rule for harness-config edits.
 - **For worker memory writes**, route them through `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`. The FastAPI process has no permission dialog, so server-side writes are safe. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
 - Do NOT ticket a `.claude/settings.json` edit to a worker. Make the change yourself. The worker playbook carries the matching prohibition.
@@ -386,6 +395,8 @@ Positive `delta` grants reputation, negative demerits. Enforced at the API (400 
 
 The human's `/carrot` and `/stick` commands are the human's; you (an agent) use the peer endpoint above.
 
+**Stick redemption (DWB-537)** is automatic and needs nothing from you: an agent puts `redeem:<score_event_id>` (the ledger row id on its agent score page) in its own memory append with its own `X-Agent-ID`, at least 120 characters of real lesson beyond the token, within 48 hours, and gets half of that one stick back once; the verdict is in the append response as `redemption {granted, reason}`, redemption rows are not redeemable, and reverting the stick reverts the redemption.
+
 ## 5. TL Workflow: Typical Session
 
 1. Check open alerts (`GET /api/alerts?status=open` + `ALERTS_PENDING.md`)
@@ -399,9 +410,13 @@ The human's `/carrot` and `/stick` commands are the human's; you (an agent) use 
 
 ---
 
-## 5a. Sprint Close: Consolidation Gate (REQUIRED)
+## 5a. Sprint Close: Gates (REQUIRED)
 
-The TL is the final witness on the `force_consolidation` gate. The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 when an agent's owned files are over ceiling, unless per-file overrides with non-empty reasons are provided. Participant set is narrowed by DWB-326 (only agents with sprint signals, tickets, comments, tracking_log, hook_sessions, activity_log within window).
+Two gates can block a sprint close; the TL is the final witness on both.
+
+**Write-on-close gate (DWB-519, ALWAYS ON).** `PATCH /api/sprints/{id} {"status":"completed"}` is REFUSED with HTTP 400 if any active sprint participant has no `memory.md` write within the sprint window (any `append` or `session-complete` counts; detection reads ISO write-headings). The 400 names the non-writers. This is not a per-project toggle; it is skipped only when the project has no `repo_path`. So before closing, make sure every participant (you included) has landed a memory write, the natural one being their `session-complete` wrap-up. Chase non-writers the same way you chase missing acks.
+
+**Consolidation gate (`force_consolidation`, opt-in, default OFF).** The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 when an agent's owned files are over ceiling, unless per-file overrides with non-empty reasons are provided. Participant set is narrowed by DWB-326 (only agents with sprint signals, tickets, comments, tracking_log, hook_sessions, activity_log within window).
 
 Before PATCHing a sprint to `completed`:
 
@@ -412,7 +427,7 @@ GET /api/projects/{pid}/consolidation-status?sprint_id={sid}
 - If `gate_satisfied: true`, every participant acked. Safe to PATCH.
 - If `gate_satisfied: false`, do NOT close. Walk the `agents[]` list, name every `acked: false`, ping with their `owned_over_ceiling_files`.
 
-**What the gate counts (DWB-397/399/401):** only the docs YOU (the TL) own — the repo-root docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) AND all three `project_rules_*` files. Everything else is EXEMPT: DWB-shipped playbooks + agent defs (DWB's editorial job), AND — as of DWB-401 — every agent's `memory.md` (it's bounded by a passive server-side trim, never counted). So the consolidation gate is effectively a TL-only check: workers' acks always pass clean. Don't chase anyone to trim memory or a playbook; do keep your own root docs + `project_rules` lean.
+**What the consolidation gate counts (DWB-397/399/401):** only the docs YOU (the TL) own, the repo-root docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) AND all three `project_rules_*` files. Everything else is EXEMPT here: DWB-shipped playbooks + agent defs (DWB's editorial job), AND every agent's `memory.md` (not counted by this gate; as of DWB-518 it is bounded by its own hard write-ceiling instead, so it is always under ceiling on disk). So the consolidation gate is effectively a TL-only check: workers' acks always pass clean. Don't chase anyone to trim memory or a playbook for THIS gate; do keep your own root docs + `project_rules` lean. (The separate write-on-close gate above is what makes you chase memory WRITES, not trims.)
 
 **TL self-ack with the same discipline as workers:** trim own files BEFORE acking. If your ack returns 400, that's the signal to TRIM the listed files, not to override. Override path is for genuinely load-bearing content; repeated overrides on the same root doc mean the cap is wrong, raise it in `TOKEN_CEILINGS` (in the shared `backend/app/config/token_budget.py`, which also holds the `max(len//4, words)` token estimator every gate uses).
 
@@ -428,9 +443,9 @@ Marking an agent inactive removes them from the gate. Use only when an agent has
 
 `HANDOFF.md` describes the state the next session will actually find. Write it last, after every state-changing action is finished, in this order:
 
-1. Workers land their wrap-ups (`session-complete` posts, final ticket transitions).
+1. Workers land their wrap-ups (`session-complete` posts, final ticket transitions). Each `session-complete` (or any `append`) also satisfies that agent's write-on-close gate (§ 5a); a participant with no memory write will block the sprint close, so confirm everyone, you included, has written.
 2. Team disposition is settled and EXECUTED: if the team is shutting down, send the shutdown requests and confirm termination; if it stays parked, leave it alone.
-3. **Doc compaction (TL-only now, DWB-401).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while a *gated* doc is over its token ceiling. As of DWB-401 the only gated docs are the ones YOU own — root continuity docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) and `project_rules`. Agent `memory.md` files are EXEMPT (passive server-side trim keeps them bounded; they never block a close), and shipped playbooks + agent defs are exempt too. So you do NOT need to fan out a compaction pass to the team — there's nothing of theirs to compact. Just keep your own root docs under ceiling: if the close 422s, the body names the over file (it'll be one of yours), trim it, re-close. This whole step collapsed from a team-wide hard gate to a quick TL self-check.
+3. **Doc compaction (TL-only now, DWB-401).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while a *gated* doc is over its token ceiling. As of DWB-401 the only gated docs are the ones YOU own: root continuity docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) and `project_rules`. Agent `memory.md` files are NOT part of this doc-compaction gate (their own hard write-ceiling keeps them bounded, DWB-518, so they never sit over ceiling), and shipped playbooks + agent defs are exempt too. So you do NOT need to fan out a compaction pass to the team, there's nothing of theirs to compact. (Note this is separate from the write-on-close gate in § 5a, which requires each participant to have WRITTEN memory, not trimmed it.) Just keep your own root docs under ceiling: if the close 422s, the body names the over file (it'll be one of yours), trim it, re-close. This whole step collapsed from a team-wide hard gate to a quick TL self-check.
 4. DWB session close fires (any layer) or you close it explicitly per § 4e.
 5. **Only then** update `HANDOFF.md`, recording the state as it now is, and exit.
 
