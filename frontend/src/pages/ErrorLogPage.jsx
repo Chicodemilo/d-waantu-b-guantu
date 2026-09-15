@@ -6,23 +6,16 @@
 // Callees: react, ../api/errors, ../store/useStore
 // Data In: Error logs from API, projects from store
 // Data Out: Default export ErrorLogPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
 
 import { useState, useEffect } from 'react';
+import { formatApiDateTime, TIMESTAMP_WITH_SECONDS } from '../utils/format';
 import { getErrorLogs } from '../api/errors';
 import useStore from '../store/useStore';
 
 function formatTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
+  return formatApiDateTime(ts, TIMESTAMP_WITH_SECONDS);
 }
 
 function sourceLabel(source) {

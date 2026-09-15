@@ -6,14 +6,14 @@
 // Callees: react (useState, useEffect), react-router-dom (Link), useStore, hooks/useTrackingSummary, hooks/useProjectSessions, utils/format, StatusBadge, SessionInfoLine, api/testResults (getProjectTestRuns)
 // Data In: project prop (full project object)
 // Data Out: default export ProjectHeader component
-// Last Modified: 2026-06-12
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing; test-run sort comparator unchanged)
 
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import { useTrackingSummary } from '../../hooks/useTrackingSummary';
 import { useCurrentSession } from '../../hooks/useProjectSessions';
-import { formatTime, formatTokens } from '../../utils/format';
+import { formatTime, formatTokens, formatApiDay } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import SessionInfoLine from '../common/SessionInfoLine';
 import { getProjectTestRuns } from '../../api/testResults';
@@ -78,7 +78,7 @@ function ProjectHeader({ project }) {
         <StatusBadge status={project.status} />
         <span className="project-header__meta-label">created:</span>
         <span className="project-header__meta-value">
-          {new Date(project.created_at).toLocaleDateString()}
+          {formatApiDay(project.created_at)}
         </span>
         <span className="project-header__meta-label">tests:</span>
         <TestStatusIcon projectId={project.id} />

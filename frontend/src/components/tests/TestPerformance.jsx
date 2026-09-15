@@ -6,9 +6,10 @@
 // Callees: react (useState, useEffect), api/testResults (getTestPerformance, getProjectTestRuns)
 // Data In: projectId prop
 // Data Out: default export TestPerformance component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing; sort comparators unchanged)
 
 import { useState, useEffect } from 'react';
+import { formatApiDateTime, parseApiDate } from '../../utils/format';
 import { getTestPerformance, getProjectTestRuns } from '../../api/testResults';
 
 const SPARKLINE_CHARS = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
@@ -35,8 +36,7 @@ function SparklineWithTooltips({ runs }) {
         const v = r.total_tests || 0;
         const idx = Math.round((v / max) * 7);
         const ch = SPARKLINE_CHARS[idx];
-        const d = new Date(r.run_at);
-        const label = d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+        const label = formatApiDateTime(r.run_at);
         return (
           <span key={i} className="sparkline-char">
             {ch}
@@ -100,8 +100,7 @@ function TestDrillDown({ nodeid, testRuns }) {
       </div>
       <div className="test-drill__history">
         {entries.map((e, i) => {
-          const d = new Date(e.run_at);
-          const label = d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+          const label = formatApiDateTime(e.run_at);
           return (
             <div key={i} className="test-drill__row">
               <span className="test-drill__date">{label}</span>
@@ -163,7 +162,7 @@ function TestPerformance({ projectId }) {
     ? [...testRuns].sort((a, b) => new Date(b.run_at || 0) - new Date(a.run_at || 0))[0]
     : null;
   const latestRunDate = latestRun?.run_at
-    ? new Date(latestRun.run_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+    ? formatApiDateTime(latestRun.run_at)
     : '';
   const latestTests = (latestRun?.details?.tests || [])
     .filter((t) => t.duration != null)
@@ -198,8 +197,8 @@ function TestPerformance({ projectId }) {
             let filled = Math.round(((run.duration_seconds || 0) / maxDuration) * MAX_BAR_HEIGHT);
             if (run.duration_seconds > 0 && filled === 0) filled = 1;
             const empty = MAX_BAR_HEIGHT - filled;
-            const runDate = new Date(run.run_at);
-            const label = `${runDate.getMonth() + 1}/${runDate.getDate()}`;
+            const runDate = parseApiDate(run.run_at);
+            const label = runDate ? `${runDate.getMonth() + 1}/${runDate.getDate()}` : '';
             return (
               <div key={i} className="vbar-chart__col">
                 <span className="vbar-chart__value">{(run.duration_seconds || 0).toFixed(1)}</span>

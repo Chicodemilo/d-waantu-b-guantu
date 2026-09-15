@@ -6,25 +6,17 @@
 // Callees: react (useState, useEffect, useRef), api/tlChannel (getTLChannel)
 // Data In: None (global page)
 // Data Out: Default export ArchieChannelPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
 
 import { useState, useEffect, useRef } from 'react';
+import { formatApiDateTime, TIMESTAMP_WITH_SECONDS } from '../utils/format';
 import { getTLChannel } from '../api/tlChannel';
 
 const POLL_MS = 3000;
 
 function formatTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
+  return formatApiDateTime(ts, TIMESTAMP_WITH_SECONDS);
 }
 
 // Single binding point for the frozen GET /api/tl-channel contract (DWB-437,

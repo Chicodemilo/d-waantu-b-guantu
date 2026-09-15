@@ -1,12 +1,12 @@
 // Path: src/__tests__/InterAgentCommsPage.test.jsx
 // File: InterAgentCommsPage.test.jsx
 // Created: 2026-06-24
-// Purpose: Tests for the project-level Inter-Agent Comms glance view (DWB-451) - renders the small header + count, lists captured messages newest-first as the API returns them, shows from -> to and a timestamp, renders the body in the truncation cell (single-line ellipsis is CSS), and drives the inline-text Clear confirm flow (clear -> confirm? yes/cancel) calling the DELETE wrapper on yes.
+// Purpose: Tests for the project-level Inter-Agent Comms glance view (DWB-451) - renders the small header + count, lists captured messages newest-first as the API returns them, shows from -> to and a timestamp, renders the body in the truncation cell (single-line ellipsis is CSS), and drives the inline-text Clear confirm flow (clear -> confirm? yes/cancel) calling the DELETE wrapper on yes. DWB-557 adds the timestamp case: the naive-UTC created_at must render as that UTC instant, not as local time.
 // Caller: vitest test runner
 // Callees: ../pages/InterAgentCommsPage, ../api/agentMessages (mocked)
 // Data In: Mocked agentMessages API
 // Data Out: Test assertions
-// Last Modified: 2026-06-24
+// Last Modified: 2026-09-15 (DWB-557: UTC timestamp case)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, cleanup, fireEvent } from '@testing-library/react';
@@ -134,5 +134,21 @@ describe('InterAgentCommsPage (DWB-451)', () => {
     });
     // No clear control when there is nothing to clear
     expect(screen.queryByText('clear')).not.toBeInTheDocument();
+  });
+});
+
+describe('InterAgentCommsPage timestamps are UTC (DWB-557)', () => {
+  it('renders a naive-UTC created_at as that instant, in any runner timezone', async () => {
+    const NAIVE = '2026-09-08T18:30:05';
+    const expected = new Date(Date.parse(`${NAIVE}Z`)).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    getAgentMessages.mockResolvedValue({
+      ...ENVELOPE,
+      total: 1,
+      rows: [{ ...ENVELOPE.rows[0], created_at: NAIVE }],
+    });
+
+    await act(async () => { renderAt('/projects/1/comms'); });
+    await waitFor(() => expect(document.querySelector('.agent-comms__created')).toBeTruthy());
+    expect(document.querySelector('.agent-comms__created').textContent).toBe(expected);
   });
 });

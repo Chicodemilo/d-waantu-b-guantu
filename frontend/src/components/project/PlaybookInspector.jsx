@@ -6,9 +6,10 @@
 // Callees: react (useState, useEffect), api/projects (getPlaybookFiles)
 // Data In: props { projectId }
 // Data Out: Default export PlaybookInspector component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
 
 import { useState, useEffect } from 'react';
+import { formatApiDay } from '../../utils/format';
 import { getPlaybookFiles } from '../../api/projects';
 
 function PlaybookFile({ file }) {
@@ -16,7 +17,7 @@ function PlaybookFile({ file }) {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return null;
-    return new Date(dateStr).toLocaleDateString();
+    return formatApiDay(dateStr);
   };
 
   if (!file.exists) {

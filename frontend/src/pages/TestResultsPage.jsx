@@ -6,9 +6,10 @@
 // Callees: react, react-router-dom, ../store/useStore, ../api/system, ../components/common/StatusBadge, ../components/common/TerminalOutput, ../components/tests/TestCoverage
 // Data In: Route param (runId), testRuns from Zustand store
 // Data Out: Default export TestResultsPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
 
 import { useState } from 'react';
+import { formatApiDateTime, TIMESTAMP_WITH_SECONDS } from '../utils/format';
 import { useNavigate, useParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { runSystemTests } from '../api/system';
@@ -18,15 +19,7 @@ import TestCoverage from '../components/tests/TestCoverage';
 
 function formatTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
+  return formatApiDateTime(ts, TIMESTAMP_WITH_SECONDS);
 }
 
 function TestRunDetail({ run }) {

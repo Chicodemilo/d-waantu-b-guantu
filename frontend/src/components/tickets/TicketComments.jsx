@@ -3,12 +3,13 @@
 // Created: 2026-03-29
 // Purpose: Displays a list of comments for a ticket with agent names and timestamps
 // Caller: TicketDetail.jsx
-// Callees: useStore
+// Callees: useStore, utils/format (formatApiDateTime)
 // Data In: ticketId prop
 // Data Out: default export TicketComments component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
 
 import useStore from '../../store/useStore';
+import { formatApiDateTime } from '../../utils/format';
 
 function TicketComments({ ticketId }) {
   const comments = useStore((s) => s.getCommentsByTicket(ticketId));
@@ -20,14 +21,7 @@ function TicketComments({ ticketId }) {
   };
 
   const formatTime = (iso) => {
-    const d = new Date(iso);
-    return d.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
+    return formatApiDateTime(iso);
   };
 
   return (

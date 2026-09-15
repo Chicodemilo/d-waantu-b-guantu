@@ -2,7 +2,7 @@
 /* File: common.css */
 /* Created: 2026-03-29 */
 /* Purpose: Shared component styles: data tables, status badges, activity feed, alerts, instructions, sprints, epics, project header, overhead tracker, tools panel, gates, Jira integration, and the common FuzzySearch box (moved from help.css in DWB-536) */
-/* Last Modified: 2026-09-15 (DWB-536) */
+/* Last Modified: 2026-09-15 (DWB-557: dropped the orphaned .activity-item rules with their only consumer) */
 
 .data-table {
   width: 100%;
@@ -143,44 +143,6 @@
   margin-bottom: 8px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
-}
-
-.activity-item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 12px;
-  font-size: 12px;
-  border-left: 2px solid var(--border);
-}
-
-.activity-item__time {
-  color: var(--gray);
-  min-width: 64px;
-  font-size: 11px;
-}
-
-.activity-item__agent {
-  color: var(--orange);
-  min-width: 80px;
-}
-
-.activity-item__action {
-  color: var(--gray-light);
-}
-
-.activity-item__entity {
-  color: var(--blue);
-}
-
-.activity-item__ticket-link {
-  color: var(--blue);
-  text-decoration: none;
-}
-
-.activity-item__ticket-link:hover {
-  color: var(--green-bright);
-  text-decoration: underline;
 }
 
 .alerts-container {

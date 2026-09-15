@@ -6,7 +6,7 @@
 // Callees: ../ArchieChannelPage, ../../api/tlChannel (mocked)
 // Data In: Mocked getTLChannel responses
 // Data Out: Test assertions
-// Last Modified: 2026-06-23
+// Last Modified: 2026-09-15 (DWB-557: UTC timestamp case)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
@@ -159,5 +159,33 @@ describe('ArchieChannelPage (cross-project TL channel)', () => {
     await waitFor(() => {
       expect(screen.getByText('Channel unavailable.')).toBeInTheDocument();
     });
+  });
+});
+
+describe('ArchieChannelPage timestamps are UTC (DWB-557)', () => {
+  it('renders a naive-UTC created_at as that instant, in any runner timezone', async () => {
+    const NAIVE = '2026-09-08T18:30:05';
+    const expected = new Date(Date.parse(`${NAIVE}Z`)).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    getTLChannel.mockResolvedValue([
+      {
+        id: 1,
+        from_agent_id: 21,
+        from_agent_name: 'Archie_DWB',
+        from_project_id: 1,
+        from_project_prefix: 'DWB',
+        to_agent_id: 30,
+        to_agent_name: 'Archie_CI',
+        is_broadcast: false,
+        body: 'hello',
+        created_at: NAIVE,
+        read_by: [],
+      },
+    ]);
+
+    render(<ArchieChannelPage />);
+    // scope to the data row: the header uses the same column class
+    const cell = () => document.querySelector('.tl-channel__row .tl-channel__col-created');
+    await waitFor(() => expect(cell()).toBeTruthy());
+    expect(cell().textContent).toBe(expected);
   });
 });

@@ -6,11 +6,11 @@
 // Callees: react (useState, useEffect), useStore, StatusBadge, TicketComments, api/tickets (getTicketHistory)
 // Data In: ticketId prop
 // Data Out: default export TicketDetail component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
 
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
-import { formatTime } from '../../utils/format';
+import { formatTime, formatApiDateTime, formatApiDay } from '../../utils/format';
 import StatusBadge from '../common/StatusBadge';
 import TicketComments from './TicketComments';
 import { getTicketHistory, updateTicket } from '../../api/tickets';
@@ -41,14 +41,7 @@ function StatusHistory({ ticketId }) {
       <div className="status-history__title">Status History</div>
       <div className="status-history__list">
         {history.map((entry, i) => {
-          const ts = new Date(entry.changed_at || entry.created_at);
-          const time = ts.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-          });
+          const time = formatApiDateTime(entry.changed_at || entry.created_at);
           return (
             <div key={i} className="status-history__entry">
               <span className="status-history__time">{time}</span>
@@ -252,7 +245,7 @@ function TicketDetail({ ticketId }) {
         <div className="ticket-detail__stat">
           <div className="ticket-detail__stat-label">Created</div>
           <div className="ticket-detail__stat-value">
-            {new Date(ticket.created_at).toLocaleDateString()}
+            {formatApiDay(ticket.created_at)}
           </div>
         </div>
       </div>

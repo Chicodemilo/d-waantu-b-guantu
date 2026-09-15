@@ -6,9 +6,10 @@
 // Callees: react, react-router-dom (useNavigate, Link), ../store/useStore, ../components/dashboard/CrossProjectSummary, ../components/dashboard/ProjectCard, ../components/dashboard/TokenOverview, ../components/agents/AgentList, ../components/dashboard/TokenAudit, ../api/projects
 // Data In: Projects, alerts, and agents from Zustand store
 // Data Out: Default export DashboardPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing; alert sort comparator unchanged)
 
 import { useState } from 'react';
+import { formatApiDateTime } from '../utils/format';
 import { useNavigate, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import CrossProjectSummary from '../components/dashboard/CrossProjectSummary';
@@ -93,7 +94,7 @@ function DashboardPage() {
                       </td>
                       <td style={{ color: severityColor }}>{alert.severity}</td>
                       <td>{alert.title}</td>
-                      <td>{alert.created_at ? new Date(alert.created_at).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '\u2014'}</td>
+                      <td>{alert.created_at ? formatApiDateTime(alert.created_at, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '\u2014'}</td>
                     </tr>
                   );
                 })}

@@ -6,9 +6,10 @@
 // Callees: react, react-router-dom, ../store/useStore, ../api/testResults, ../api/alerts, ../components/common/StatusBadge, ../components/tests/TestPerformance, ../components/tests/FailureAnalysis
 // Data In: Route param (id), project from Zustand store, test runs from API
 // Data Out: Default export ProjectTestsPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
 
 import { useState, useEffect } from 'react';
+import { formatApiDateTime, TIMESTAMP_WITH_SECONDS } from '../utils/format';
 import { useParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { getProjectTestRuns } from '../api/testResults';
@@ -20,15 +21,7 @@ import FailureAnalysis from '../components/tests/FailureAnalysis';
 
 function formatTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
+  return formatApiDateTime(ts, TIMESTAMP_WITH_SECONDS);
 }
 
 function TestRunDetail({ run }) {

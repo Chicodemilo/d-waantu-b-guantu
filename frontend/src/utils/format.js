@@ -1,12 +1,12 @@
 // Path: src/utils/format.js
 // File: format.js
 // Created: 2026-03-29
-// Purpose: Shared formatting utilities for time and token display across all components. relativeAge (DWB-551) renders an API timestamp as a plain age; the API sends naive UTC (no trailing Z), so it normalizes before parsing, which a raw new Date(ts) gets wrong by the viewer's UTC offset. DWB-554 pointed ActivityFeed and AlertBanner here and added the absoluteAfterDays option so AlertBanner keeps its long-age absolute fallback without a private parser.
+// Purpose: Shared formatting utilities for time and token display across all components. relativeAge (DWB-551) renders an API timestamp as a plain age; the API sends naive UTC (no trailing Z), so it normalizes before parsing, which a raw new Date(ts) gets wrong by the viewer's UTC offset. DWB-554 pointed ActivityFeed and AlertBanner here and added the absoluteAfterDays option so AlertBanner keeps its long-age absolute fallback without a private parser. DWB-557 moved the remaining twelve components onto these helpers and added formatApiDay for the date-only call sites.
 // Caller: All components that display time or token values
 // Callees: None (leaf utility module)
 // Data In: Numeric values (seconds, token counts)
 // Data Out: Formatted display strings
-// Last Modified: 2026-09-15 (DWB-554: absoluteAfterDays)
+// Last Modified: 2026-09-15 (DWB-557: formatApiDay)
 
 export function formatTime(seconds) {
   if (!seconds || seconds === 0) return '0m';
@@ -37,10 +37,29 @@ export function parseApiDate(ts) {
 
 // Absolute local rendering of an API timestamp ("Sep 8, 14:30"). The instant is
 // parsed as UTC; the output is deliberately in the viewer's local zone.
+// toLocaleString and toLocaleDateString return the same string for these option
+// sets (verified), so unifying on toLocaleString changed no existing output.
 export function formatApiDateTime(ts, options = ABSOLUTE_DATE_OPTIONS) {
   const d = parseApiDate(ts);
-  return d ? d.toLocaleDateString('en-US', options) : '';
+  return d ? d.toLocaleString('en-US', options) : '';
 }
+
+// Date only, in the viewer's locale and zone ("9/8/2026"), for the call sites
+// that showed a bare toLocaleDateString().
+export function formatApiDay(ts) {
+  const d = parseApiDate(ts);
+  return d ? d.toLocaleDateString() : '';
+}
+
+// The seconds-bearing variant several log-style views use.
+export const TIMESTAMP_WITH_SECONDS = {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+};
 
 const ABSOLUTE_DATE_OPTIONS = {
   month: 'short',

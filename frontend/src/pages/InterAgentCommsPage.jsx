@@ -6,9 +6,10 @@
 // Callees: react (useState, useEffect, useRef), react-router-dom (useParams), api/agentMessages (getAgentMessages, clearAgentMessages)
 // Data In: Route param (id)
 // Data Out: Default export InterAgentCommsPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
 
 import { useState, useEffect, useRef } from 'react';
+import { formatApiDateTime, TIMESTAMP_WITH_SECONDS } from '../utils/format';
 import { useParams } from 'react-router-dom';
 import { getAgentMessages, clearAgentMessages } from '../api/agentMessages';
 
@@ -17,16 +18,7 @@ const PAGE_LIMIT = 50;
 
 function formatTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
+  return formatApiDateTime(ts, TIMESTAMP_WITH_SECONDS);
 }
 
 function InterAgentCommsPage() {
