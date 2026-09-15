@@ -6,20 +6,30 @@
 //          state, body hidden when closed, parent toggle), SummaryHeader (renders
 //          only provided Why/How/Where rows + bullet list).
 // Caller: vitest test runner
-// Callees: ../FuzzySearch, ../CollapsibleSection, ../SummaryHeader
+// Callees: ../../common/FuzzySearch, ../CollapsibleSection, ../SummaryHeader
 // Data In: synthetic props
 // Data Out: test assertions
-// Last Modified: 2026-06-25
+// Last Modified: 2026-09-15 (DWB-536: FuzzySearch moved to common, onEscape test)
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import FuzzySearch from '../FuzzySearch';
+import FuzzySearch from '../../common/FuzzySearch';
 import CollapsibleSection from '../CollapsibleSection';
 import SummaryHeader from '../SummaryHeader';
 
 afterEach(() => cleanup());
 
 describe('FuzzySearch (DWB-468)', () => {
+  it('fires onEscape when Esc is pressed inside the box (DWB-536), and ignores Esc without it', () => {
+    const onEscape = vi.fn();
+    const { unmount } = render(<FuzzySearch value="abc" onChange={() => {}} onEscape={onEscape} label="match" />);
+    fireEvent.keyDown(screen.getByLabelText('match'), { key: 'Escape' });
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    unmount();
+    render(<FuzzySearch value="abc" onChange={() => {}} label="plain" />);
+    expect(() => fireEvent.keyDown(screen.getByLabelText('plain'), { key: 'Escape' })).not.toThrow();
+  });
+
   it('renders as a controlled input and fires onChange', () => {
     const onChange = vi.fn();
     render(<FuzzySearch value="abc" onChange={onChange} label="search" />);

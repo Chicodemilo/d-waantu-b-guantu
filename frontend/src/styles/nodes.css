@@ -1,8 +1,8 @@
 /* Path: src/styles/nodes.css */
 /* File: nodes.css */
 /* Created: 2026-09-15 */
-/* Purpose: Styles for the project Nodes page (S81, DWB-534): page head, weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page), pointer count chips, selected state, and the cap footer with show more / show all text links. Terminal aesthetic, plain CSS. */
-/* Last Modified: 2026-09-15 */
+/* Purpose: Styles for the project Nodes page (S81, DWB-534/535/536): page head, match-search row with the normalized tag line (DWB-536 limiter), weighted tag cloud with eight log-bucket font sizes (b0 smallest to b7 cap, so top nodes never dwarf the page), pointer count chips, selected state, the cap footer with show more / show all text links, and the NodeDetail overlay content (hop trail, pointer groups by kind, neighbor list). Terminal aesthetic, plain CSS. */
+/* Last Modified: 2026-09-15 (DWB-536) */
 
 .nodes-page__head {
   display: flex;
@@ -41,6 +41,43 @@
 
 .nodes-page__link:hover {
   text-decoration: underline;
+}
+
+/* Match search (limiter, DWB-536) */
+
+.nodes-page__search {
+  margin-bottom: 8px;
+}
+
+.nodes-page__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.nodes-page__tags-label {
+  color: var(--gray);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 10px;
+}
+
+.nodes-page__tag {
+  color: var(--orange-bright);
+}
+
+.nodes-page__tags-none,
+.nodes-page__tags-pending {
+  color: var(--gray-light);
+}
+
+.nodes-page__match-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--red);
 }
 
 /* Cloud */
@@ -120,5 +157,185 @@
 }
 
 .node-cloud__more:hover {
+  text-decoration: underline;
+}
+
+/* Node detail (overlay content, DWB-535) */
+
+.node-detail {
+  font-size: 13px;
+}
+
+.node-detail__trail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--gray-light);
+}
+
+.node-detail__trail-label {
+  color: var(--gray);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 10px;
+}
+
+.node-detail__trail-item {
+  color: var(--green-dim);
+}
+
+.node-detail__trail-item:last-of-type {
+  color: var(--green-bright);
+}
+
+.node-detail__trail-sep {
+  color: var(--gray);
+  margin-right: 6px;
+}
+
+.node-detail__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.node-detail__tag {
+  font-size: 20px;
+  color: var(--green-bright);
+  word-break: break-all;
+}
+
+.node-detail__meta {
+  color: var(--gray-light);
+  font-size: 12px;
+}
+
+.node-detail__loading {
+  color: var(--orange);
+}
+
+.node-detail__error {
+  color: var(--red);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.node-detail__section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--gray-light);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+  margin: 14px 0 8px;
+}
+
+.node-detail__section-title:first-of-type {
+  margin-top: 0;
+}
+
+.node-detail__empty {
+  color: var(--gray);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.node-detail__group {
+  margin-bottom: 8px;
+}
+
+.node-detail__kind {
+  color: var(--green);
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.node-detail__kind-count {
+  color: var(--gray);
+  margin-left: 6px;
+  font-size: 11px;
+}
+
+.node-detail__pointers,
+.node-detail__neighbors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.node-detail__pointer {
+  padding: 1px 0 1px 14px;
+  color: var(--gray-light);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.node-detail__ref {
+  color: var(--blue);
+}
+
+.node-detail__lines {
+  color: var(--gray);
+}
+
+.node-detail__neighbors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.node-detail__neighbor-btn {
+  background: none;
+  border: none;
+  padding: 1px 2px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--green);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.node-detail__neighbor-btn:hover .node-detail__neighbor-tag,
+.node-detail__neighbor-btn:focus-visible .node-detail__neighbor-tag {
+  color: var(--green-bright);
+  text-decoration: underline;
+}
+
+.node-detail__neighbor-btn:focus-visible {
+  outline: 1px solid var(--green-dim);
+}
+
+.node-detail__neighbor-meta {
+  color: var(--gray);
+  font-size: 11px;
+}
+
+.node-detail__foot {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--gray-light);
+}
+
+.node-detail__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.node-detail__link:hover {
   text-decoration: underline;
 }

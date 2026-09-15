@@ -1,8 +1,8 @@
 /* Path: src/styles/common.css */
 /* File: common.css */
 /* Created: 2026-03-29 */
-/* Purpose: Shared component styles — data tables, status badges, activity feed, alerts, instructions, sprints, epics, project header, overhead tracker, tools panel, gates, Jira integration */
-/* Last Modified: 2026-04-09 */
+/* Purpose: Shared component styles: data tables, status badges, activity feed, alerts, instructions, sprints, epics, project header, overhead tracker, tools panel, gates, Jira integration, and the common FuzzySearch box (moved from help.css in DWB-536) */
+/* Last Modified: 2026-09-15 (DWB-536) */
 
 .data-table {
   width: 100%;
@@ -1150,4 +1150,71 @@ a.jira-link__key:hover {
 
 .jira-link__unlink:hover {
   color: var(--red);
+}
+
+/* ---- FuzzySearch (components/common/FuzzySearch.jsx) ---- */
+.fuzzy-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.fuzzy-search__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;
+}
+
+.fuzzy-search__prompt {
+  color: var(--green-dim);
+  font-size: 13px;
+}
+
+.fuzzy-search__prompt::before {
+  content: '> ';
+  color: var(--gray-light);
+}
+
+.fuzzy-search__input {
+  flex: 1 1 auto;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--green-bright);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 7px 10px;
+}
+
+.fuzzy-search__input:focus {
+  outline: none;
+  border-color: var(--green-dim);
+}
+
+.fuzzy-search__input::placeholder {
+  color: var(--gray);
+}
+
+.fuzzy-search__clear {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--gray-light);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.fuzzy-search__clear:hover {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+
+.fuzzy-search__count {
+  color: var(--gray-light);
+  font-size: 12px;
+  white-space: nowrap;
 }

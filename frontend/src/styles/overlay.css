@@ -1,0 +1,77 @@
+/* Path: src/styles/overlay.css */
+/* File: overlay.css */
+/* Created: 2026-09-15 */
+/* Purpose: Styles for the generic Overlay modal (DWB-535): fixed full-viewport scrim on the .sidebar-overlay pattern, centered scrollable panel with a top bar holding the plain-text close link. Terminal aesthetic, plain CSS, no icons. Domain content inside the panel styles itself. */
+/* Last Modified: 2026-09-15 */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.overlay__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(880px, 100%);
+  max-height: min(84vh, 100%);
+  background: var(--bg-alt);
+  border: 1px solid var(--green-dim);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--bg), 0 12px 40px rgba(0, 0, 0, 0.8);
+  outline: none;
+}
+
+.overlay__bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.overlay__close {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--gray-light);
+  cursor: pointer;
+}
+
+.overlay__close::before {
+  content: '[ ';
+  color: var(--gray);
+}
+
+.overlay__close::after {
+  content: ' ]';
+  color: var(--gray);
+}
+
+.overlay__close:hover,
+.overlay__close:focus-visible {
+  color: var(--green-bright);
+  outline: none;
+}
+
+.overlay__body {
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+@media (max-width: 640px) {
+  .overlay {
+    padding: 8px;
+  }
+  .overlay__panel {
+    max-height: 96vh;
+  }
+}

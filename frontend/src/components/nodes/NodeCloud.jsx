@@ -1,19 +1,19 @@
 // Path: src/components/nodes/NodeCloud.jsx
 // File: NodeCloud.jsx
 // Created: 2026-09-15
-// Purpose: Weighted tag cloud for the node index (DWB-534). Renders nodes in the order given (API is weight desc, so the order is stable) as text buttons sized by a log bucket (utils/nodeScale), each showing tag + pointer count. Caps the DOM at pageSize with a "show more" text link so a 3.6k-node project stays usable. Clicking a node calls onSelect(node); the selected node is marked with aria-pressed for the detail overlay consumer (DWB-535).
+// Purpose: Weighted tag cloud for the node index (DWB-534). Renders nodes in the order given (API is weight desc, so the order is stable) as text buttons sized by a log bucket (utils/nodeScale), each showing tag + pointer count. An optional bounds prop pins the scale to the full set's min/max so a limited subset (DWB-536 match search) keeps each node's original size. Caps the DOM at pageSize with a "show more" text link so a 3.6k-node project stays usable. Clicking a node calls onSelect(node); the selected node is marked with aria-pressed for the detail overlay consumer (DWB-535).
 // Caller: pages/NodesPage.jsx
-// Callees: react (useState, useEffect), utils/nodeScale (scaleNodes)
-// Data In: nodes (NodeRead[]), onSelect (fn(node)), selectedId (number|null), pageSize (number)
+// Callees: react (useState, useEffect, useMemo), utils/nodeScale (scaleNodes, bucketForWeight)
+// Data In: nodes (NodeRead[]), onSelect (fn(node)), selectedId (number|null), pageSize (number), bounds ({minW, maxW}|null)
 // Data Out: default export NodeCloud component
-// Last Modified: 2026-09-15
+// Last Modified: 2026-09-15 (DWB-536: bounds prop)
 
 import { useState, useEffect, useMemo } from 'react';
-import { scaleNodes } from '../../utils/nodeScale';
+import { scaleNodes, bucketForWeight } from '../../utils/nodeScale';
 
 export const NODE_CLOUD_PAGE_SIZE = 500;
 
-function NodeCloud({ nodes, onSelect, selectedId = null, pageSize = NODE_CLOUD_PAGE_SIZE }) {
+function NodeCloud({ nodes, onSelect, selectedId = null, pageSize = NODE_CLOUD_PAGE_SIZE, bounds = null }) {
   const [visibleCount, setVisibleCount] = useState(pageSize);
 
   // A new node set (initial load or a limiter result) restarts the cap.
@@ -21,7 +21,12 @@ function NodeCloud({ nodes, onSelect, selectedId = null, pageSize = NODE_CLOUD_P
     setVisibleCount(pageSize);
   }, [nodes, pageSize]);
 
-  const scaled = useMemo(() => scaleNodes(nodes), [nodes]);
+  const scaled = useMemo(() => {
+    if (bounds && Number.isFinite(bounds.minW) && Number.isFinite(bounds.maxW)) {
+      return nodes.map((n) => ({ ...n, bucket: bucketForWeight(n.weight, bounds.minW, bounds.maxW) }));
+    }
+    return scaleNodes(nodes);
+  }, [nodes, bounds]);
   const visible = scaled.slice(0, visibleCount);
   const hidden = scaled.length - visible.length;
 

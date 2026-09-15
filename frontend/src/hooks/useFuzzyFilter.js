@@ -6,13 +6,13 @@
 //          matches plus the set of matched ids so a parent can force-open them, and
 //          a memoised React hook (default export) wrapping fuzzyFilter. Generic and
 //          presentational-friendly: takes a list of { id, text } and a query string.
-// Caller: components/help/FuzzySearch.jsx, pages/HelpPage.jsx, and any consumer that
+// Caller: components/common/FuzzySearch.jsx, pages/HelpPage.jsx, and any consumer that
 //         needs live substring/subsequence filtering without an npm dependency.
 // Callees: react (useMemo)
 // Data In: items = [{ id, text }], query string
 // Data Out: { results: matchedItems[], matchedIds: Set } (default hook + fuzzyFilter);
 //           fuzzyScore returns a number (higher = better) or null (no match)
-// Last Modified: 2026-06-25
+// Last Modified: 2026-09-15 (DWB-536: caller path)
 
 import { useMemo } from 'react';
 

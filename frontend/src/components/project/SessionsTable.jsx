@@ -3,15 +3,15 @@
 // Created: 2026-06-10
 // Purpose: Full DWB sessions table for a project — every session by default (no slice), scannable rows. Columns: # | Start | End | Duration | Tokens | Tix Made | Tix Done | Summary (headline -> ticket_summary fallback). Aggregate fields are null-guarded for the DWB-346 transition. Rows link to the per-session detail page. Renamed from RecentSessionsStrip after DWB-349 made this the primary content of SessionsPage. Accepts optional `limit` to cap the row count (e.g. when embedding a small recent-only widget elsewhere). Duration column ticks live (every 10s) for any row whose closed_at is null — derived from (now - opened_at) — so the open session matches the elapsed display in the SessionFooter. Closed rows use the frozen total_time_seconds from the API.
 // Caller: SessionsPage.jsx
-// Callees: react (useState, useEffect, useMemo), react-router-dom (Link), api/sessions (getProjectSessions), components/help/FuzzySearch, hooks/useFuzzyFilter
+// Callees: react (useState, useEffect, useMemo), react-router-dom (Link), api/sessions (getProjectSessions), components/common/FuzzySearch, hooks/useFuzzyFilter
 // Data In: projectId prop, optional limit prop (default undefined = all rows), optional searchable prop (DWB-487: render a fuzzy filter over the list)
 // Data Out: Default export SessionsTable component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-536: FuzzySearch import moved to common)
 
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { getProjectSessions } from '../../api/sessions';
-import FuzzySearch from '../help/FuzzySearch';
+import FuzzySearch from '../common/FuzzySearch';
 import useFuzzyFilter from '../../hooks/useFuzzyFilter';
 
 const DASH = '-';

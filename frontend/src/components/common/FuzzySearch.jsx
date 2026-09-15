@@ -1,16 +1,18 @@
-// Path: src/components/help/FuzzySearch.jsx
+// Path: src/components/common/FuzzySearch.jsx
 // File: FuzzySearch.jsx
 // Created: 2026-06-25
 // Purpose: Generic controlled search input (DWB-468). Pure presentational text box
-//          for live filtering; the parent owns the query string and runs the
-//          useFuzzyFilter hook. Optional result-count hint and clear affordance.
-//          No icons, no external dependency.
-// Caller: pages/HelpPage.jsx (and any page needing live fuzzy filtering)
+//          for live filtering; the parent owns the query string and decides what
+//          to do with it (useFuzzyFilter, a debounced API match, ...). Optional
+//          result-count hint, clear affordance, and onEscape (Esc inside the box).
+//          Moved from components/help to components/common in DWB-536 once it was
+//          used by help, sessions, and nodes. No icons, no external dependency.
+// Caller: pages/HelpPage.jsx, components/project/SessionsTable.jsx, pages/NodesPage.jsx
 // Callees: none (controlled by parent via value/onChange)
 // Data In: value (string), onChange (fn), placeholder (string), resultCount (number|null),
-//          totalCount (number|null), label (string)
-// Data Out: default export FuzzySearch component; fires onChange(nextValue)
-// Last Modified: 2026-08-11 (DWB-009)
+//          totalCount (number|null), label (string), onEscape (fn|undefined)
+// Data Out: default export FuzzySearch component; fires onChange(nextValue), onEscape()
+// Last Modified: 2026-09-15 (DWB-536)
 
 
 function FuzzySearch({
@@ -20,6 +22,7 @@ function FuzzySearch({
   resultCount = null,
   totalCount = null,
   label = 'search',
+  onEscape,
 }) {
   const query = value || '';
   const showCount = query.trim() !== '' && resultCount !== null;
@@ -34,6 +37,12 @@ function FuzzySearch({
           value={query}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && onEscape) {
+              e.preventDefault();
+              onEscape();
+            }
+          }}
           aria-label={label}
         />
       </label>

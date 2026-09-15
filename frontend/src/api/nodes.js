@@ -2,7 +2,7 @@
 // File: nodes.js
 // Created: 2026-09-15
 // Purpose: API wrappers for the project node index (S81 Nodes, DWB-534/535/536). getProjectNodes returns the weight-ordered NodeRead list (id, project_id, tag, weight, pointers[id, kind, ref, sha, line_start, line_end]); matchProjectNodes normalizes free text to tags and returns {query, query_tags, nodes[...NodeRead + neighbors[id, tag, weight, shared_refs]]}. Shapes bound field-for-field against the live backend/app/routers/nodes.py.
-// Caller: hooks/useProjectNodes.js, hooks/useNodeMatch.js, components/nodes/NodeDetail.jsx
+// Caller: hooks/useProjectNodes.js (list), hooks/useNodeMatch.js (limiter match), hooks/useNodeDetail.js (detail + neighbor hop match)
 // Callees: ./client (get)
 // Data In: projectId (number|string), optional { kind } filter, free text query, optional { signal }
 // Data Out: Promise<NodeRead[]>; Promise<NodeMatchResponse>

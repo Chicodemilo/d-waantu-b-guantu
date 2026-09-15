@@ -1,15 +1,15 @@
 // Path: src/pages/__tests__/NodesPage.test.jsx
 // File: NodesPage.test.jsx
 // Created: 2026-09-15
-// Purpose: Tests for the project Nodes cloud page (DWB-534): loading state, render of tag + pointer count with the head count line, log-bucket scaling classes (top nodes share the cap bucket), empty state pointing at POST /nodeify, the 500-node cap with show more / show all, and click emitting a selection (aria-pressed).
+// Purpose: Tests for the project Nodes cloud page (DWB-534/535/536): loading state, render of tag + pointer count with the head count line, log-bucket scaling classes (top nodes share the cap bucket), empty state pointing at POST /nodeify, the 500-node cap with show more / show all, click emitting a selection (aria-pressed), the selection opening the detail Overlay which closes on Esc / close / scrim and clears the selection, and the match search LIMITER (debounced, non-matching nodes disappear while matches keep their full-set bucket, query_tags line, no-match state, clear link and Esc restore the full cloud).
 // Caller: vitest test runner
-// Callees: ../NodesPage, ../../api/nodes (mocked)
+// Callees: ../NodesPage, ../../api/nodes (mocked: getProjectNodes + matchProjectNodes)
 // Data In: Mocked getProjectNodes responses in the live NodeRead shape
 // Data Out: Test assertions
-// Last Modified: 2026-09-15
+// Last Modified: 2026-09-15 (DWB-536)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, act, cleanup, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 vi.mock('../../api/nodes', () => ({
@@ -18,8 +18,9 @@ vi.mock('../../api/nodes', () => ({
 }));
 
 import NodesPage from '../NodesPage';
-import { getProjectNodes } from '../../api/nodes';
+import { getProjectNodes, matchProjectNodes } from '../../api/nodes';
 import { NODE_CLOUD_PAGE_SIZE } from '../../components/nodes/NodeCloud';
+import { NODE_MATCH_DEBOUNCE_MS } from '../../hooks/useNodeMatch';
 
 function pointer(i, kind = 'code') {
   return { id: i, kind, ref: `backend/app/f${i}.py`, sha: 'abc', line_start: i, line_end: i };
@@ -58,6 +59,8 @@ function renderAt(path = '/projects/1/nodes') {
 describe('NodesPage (DWB-534)', () => {
   beforeEach(() => {
     getProjectNodes.mockReset();
+    matchProjectNodes.mockReset();
+    matchProjectNodes.mockImplementation((pid, text) => Promise.resolve({ query: text, query_tags: [text], nodes: [] }));
   });
 
   afterEach(() => {
@@ -166,5 +169,129 @@ describe('NodesPage (DWB-534)', () => {
     expect(review).toHaveAttribute('aria-pressed', 'true');
     expect(review).toHaveClass('node-cloud__node--selected');
     expect(screen.getByText('contract').closest('button')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('selecting a node opens the detail overlay; Esc, close link, and scrim each close it and clear the selection', async () => {
+    getProjectNodes.mockResolvedValue(NODES);
+    matchProjectNodes.mockImplementation((pid, text) => Promise.resolve({
+      query: text, query_tags: [text],
+      nodes: [{ ...NODES.find((n) => n.tag === text), neighbors: [{ id: 7, tag: 'zelda', weight: 10, shared_refs: ['a'] }] }],
+    }));
+    await act(async () => { renderAt(); });
+    await waitFor(() => expect(screen.getByText('review')).toBeInTheDocument());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    const open = async (tag) => {
+      await act(async () => { fireEvent.click(screen.getByText(tag).closest('.node-cloud__node')); });
+      await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
+      expect(screen.getByRole('dialog')).toHaveAttribute('aria-label', `node ${tag}`);
+      expect(within(screen.getByRole('dialog')).getByText(tag)).toHaveClass('node-detail__tag');
+      expect(matchProjectNodes).toHaveBeenLastCalledWith('1', tag, expect.anything());
+    };
+
+    await open('review');
+    await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }); });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('review').closest('.node-cloud__node')).toHaveAttribute('aria-pressed', 'false');
+
+    await open('contract');
+    await act(async () => { fireEvent.click(screen.getByText('close')); });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await open('roster');
+    await act(async () => { fireEvent.click(screen.getByTestId('overlay-scrim')); });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  describe('match search limiter (DWB-536)', () => {
+    const MATCHES = {
+      contract: { query_tags: ['contract'], ids: [517] },
+      'review roster': { query_tags: ['review', 'roster'], ids: [1613, 1631] },
+      'sprint close': { query_tags: ['sprint'], ids: [] },
+    };
+
+    function mockMatch() {
+      matchProjectNodes.mockImplementation((pid, text) => {
+        const hit = MATCHES[text] || { query_tags: [text], ids: [] };
+        return Promise.resolve({
+          query: text,
+          query_tags: hit.query_tags,
+          nodes: hit.ids.map((id) => ({ ...NODES.find((n) => n.id === id), neighbors: [] })),
+        });
+      });
+    }
+
+    async function renderLoaded() {
+      getProjectNodes.mockResolvedValue(NODES);
+      mockMatch();
+      await act(async () => { renderAt(); });
+      await waitFor(() => expect(screen.getByText('contract')).toBeInTheDocument());
+      return screen.getByLabelText('match');
+    }
+
+    const visibleTags = () => [...document.querySelectorAll('.node-cloud__tag')].map((el) => el.textContent);
+    // scoped to the cloud: the query_tags line renders the same words
+    const bucketOf = (tag) => Number([...document.querySelectorAll('.node-cloud__node')].find((b) => b.querySelector('.node-cloud__tag').textContent === tag).dataset.bucket);
+
+    it('limits the cloud to matching nodes after the debounce, keeping their full-set size, and shows query_tags', async () => {
+      const input = await renderLoaded();
+      const reviewBucketBefore = bucketOf('review');
+      const rosterBucketBefore = bucketOf('roster');
+
+      fireEvent.change(input, { target: { value: 'review roster' } });
+      // before the debounce window elapses nothing is requested and the full cloud stays
+      expect(matchProjectNodes).not.toHaveBeenCalled();
+      expect(visibleTags()).toHaveLength(6);
+      expect(screen.getByTestId('query-tags').textContent).toContain('matching...');
+
+      await waitFor(() => expect(matchProjectNodes).toHaveBeenCalledTimes(1), { timeout: NODE_MATCH_DEBOUNCE_MS * 4 });
+      expect(matchProjectNodes).toHaveBeenCalledWith('1', 'review roster', expect.anything());
+      await waitFor(() => expect(visibleTags()).toEqual(['roster', 'review']));
+      expect(visibleTags()).not.toContain('contract');
+      expect(visibleTags()).not.toContain('zelda');
+      // weight-scaled size preserved: same bucket as in the full cloud (not re-fit to the subset)
+      expect(bucketOf('review')).toBe(reviewBucketBefore);
+      expect(bucketOf('roster')).toBe(rosterBucketBefore);
+      // query_tags line under the box
+      const tags = [...document.querySelectorAll('.nodes-page__tag')].map((el) => el.textContent);
+      expect(tags).toEqual(['review', 'roster']);
+      expect(screen.getByText('2 / 6 matches')).toBeInTheDocument();
+      expect(screen.getByText('showing 2 of 2')).toBeInTheDocument();
+    });
+
+    it('debounces keystrokes into one request for the final text', async () => {
+      const input = await renderLoaded();
+      fireEvent.change(input, { target: { value: 'c' } });
+      fireEvent.change(input, { target: { value: 'con' } });
+      fireEvent.change(input, { target: { value: 'contract' } });
+      await waitFor(() => expect(visibleTags()).toEqual(['contract']), { timeout: NODE_MATCH_DEBOUNCE_MS * 4 });
+      expect(matchProjectNodes).toHaveBeenCalledTimes(1);
+      expect(matchProjectNodes).toHaveBeenCalledWith('1', 'contract', expect.anything());
+    });
+
+    it('zero matches shows an explicit no-match state with the normalized tags, and clear restores the full cloud', async () => {
+      const input = await renderLoaded();
+      fireEvent.change(input, { target: { value: 'sprint close' } });
+      await waitFor(() => expect(screen.getByText(/no nodes match "sprint close"/)).toBeInTheDocument(), { timeout: NODE_MATCH_DEBOUNCE_MS * 4 });
+      expect(screen.queryByTestId('node-cloud')).not.toBeInTheDocument();
+      expect([...document.querySelectorAll('.nodes-page__tag')].map((el) => el.textContent)).toEqual(['sprint']);
+      expect(screen.getByText('0 / 6 matches')).toBeInTheDocument();
+
+      await act(async () => { fireEvent.click(screen.getByText('clear', { selector: '.fuzzy-search__clear' })); });
+      expect(input.value).toBe('');
+      expect(visibleTags()).toHaveLength(6);
+      expect(screen.queryByTestId('query-tags')).not.toBeInTheDocument();
+      expect(screen.queryByText(/no nodes match/)).not.toBeInTheDocument();
+    });
+
+    it('Esc inside the box empties the query and restores the full cloud', async () => {
+      const input = await renderLoaded();
+      fireEvent.change(input, { target: { value: 'contract' } });
+      await waitFor(() => expect(visibleTags()).toEqual(['contract']), { timeout: NODE_MATCH_DEBOUNCE_MS * 4 });
+      await act(async () => { fireEvent.keyDown(input, { key: 'Escape' }); });
+      expect(input.value).toBe('');
+      expect(visibleTags()).toHaveLength(6);
+      expect(screen.getByText('showing 6 of 6')).toBeInTheDocument();
+    });
   });
 });

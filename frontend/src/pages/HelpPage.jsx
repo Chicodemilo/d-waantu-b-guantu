@@ -12,15 +12,15 @@
 //          plumbing; a portal link ({route, label}) SPA-navigates to a real page via
 //          React Router (DWB-501, global sections only).
 // Caller: App.jsx route /help
-// Callees: react (useState, useMemo, useEffect), react-router-dom (Link), components/help/FuzzySearch, CollapsibleSection,
+// Callees: react (useState, useMemo, useEffect), react-router-dom (Link), components/common/FuzzySearch, components/help/CollapsibleSection,
 //          SummaryHeader; hooks/useFuzzyFilter; helpContent (helpGroups, quickStart)
 // Data In: static help content from helpContent/index.js
 // Data Out: default export HelpPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-15 (DWB-536: FuzzySearch import moved to common)
 
 import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import FuzzySearch from '../components/help/FuzzySearch';
+import FuzzySearch from '../components/common/FuzzySearch';
 import CollapsibleSection from '../components/help/CollapsibleSection';
 import SummaryHeader from '../components/help/SummaryHeader';
 import useFuzzyFilter from '../hooks/useFuzzyFilter';
