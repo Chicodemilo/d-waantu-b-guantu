@@ -86,6 +86,13 @@ class Project(Base):
     # DWB-527: last time the operator-invoked nodeify full pass ran for this
     # project (rebuilt nodes from memory + docs + git). Null = never nodeified.
     nodeified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # DWB-549: whether the shipped node-scan exclusion defaults have been seeded
+    # as rows for this project. A flag, not "is the row set empty", so that
+    # deleting a seeded default is PERMANENT rather than being re-added by the
+    # next read.
+    node_exclusions_seeded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     # DWB-342: project-level Jira sync state. Used by the manual sync
     # endpoint to enforce single-sync concurrency, render the
     # last-synced-at header, and show the last run's per-bucket counts.

@@ -33,6 +33,7 @@ from app.routers import (
     hooks,
     instructions,
     jira,
+    node_exclusions,
     nodes,
     playbooks,
     project_agents,
@@ -139,3 +140,4 @@ app.include_router(scores.router)
 app.include_router(tl_channel.router)
 app.include_router(standards_audits.router)
 app.include_router(nodes.router)
+app.include_router(node_exclusions.router)

@@ -13,11 +13,12 @@
 # Callees: pathlib, app/services/node_registry.SourceUnit
 # Data In: repo_path
 # Data Out: (list[SourceUnit], prune_scope set)
-# Last Modified: 2026-09-14
+# Last Modified: 2026-09-15 (DWB-549: node-scan exclusions at enumeration)
 
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from app.config.node_scan import is_excluded
 from app.services.node_registry import SourceUnit
 
 if TYPE_CHECKING:
@@ -41,12 +42,23 @@ ROOT_DOCS = (
 DOCS_SUBDIR = "docs"
 
 
-def enumerate_doc_targets(repo_path: str | None) -> list[str]:
+def enumerate_doc_targets(
+    repo_path: str | None,
+    *,
+    exclusions: tuple[str, ...] | list[str] = (),
+    include_excluded: bool = False,
+) -> list[str]:
     """Repo-relative paths of every doc-kind target that exists on disk.
 
     Root docs (fixed list) plus every ``docs/*.md`` (sorted for determinism).
     Returns [] when repo_path is missing or does not exist - the caller then
     grounds nothing rather than erroring.
+
+    DWB-549: paths matching the node-scan exclusion list are dropped here, at
+    enumeration, so an excluded doc never becomes a SourceUnit.
+    ``include_excluded=True`` returns the unfiltered candidate list, which
+    build_doc_units uses to build a prune scope that still covers newly-excluded
+    docs (their existing pointers must drop, not linger).
     """
     if not repo_path:
         return []
@@ -64,7 +76,9 @@ def enumerate_doc_targets(repo_path: str | None) -> list[str]:
         for md in sorted(docs_dir.glob("*.md")):
             targets.append(f"{DOCS_SUBDIR}/{md.name}")
 
-    return targets
+    if include_excluded:
+        return targets
+    return [t for t in targets if not is_excluded(t, exclusions)]
 
 
 def _read_lines(root: Path, rel: str) -> list[str] | None:
@@ -76,6 +90,8 @@ def _read_lines(root: Path, rel: str) -> list[str] | None:
 
 def build_doc_units(
     repo_path: str | None,
+    *,
+    exclusions: tuple[str, ...] | list[str] = (),
 ) -> tuple[list[SourceUnit], set[tuple[str, str]]]:
     """Build doc-kind SourceUnits across the whole doc corpus, plus the prune
     scope covering every target (DWB-526).
@@ -91,14 +107,18 @@ def build_doc_units(
     refs move, vanished terms prune). Returns ``([], set())`` when repo_path is
     missing/invalid.
     """
-    targets = enumerate_doc_targets(repo_path)
-    if not targets:
+    # DWB-549: the prune scope spans every CANDIDATE doc, including ones the
+    # exclusion list now drops, so switching an exclusion on removes the
+    # pointers that doc already had instead of leaving them stranded.
+    candidates = enumerate_doc_targets(repo_path, include_excluded=True)
+    targets = [t for t in candidates if not is_excluded(t, exclusions)]
+    if not candidates:
         return [], set()
     assert repo_path is not None  # enumerate returns [] when repo_path falsy
     root = Path(repo_path)
 
     units: list[SourceUnit] = []
-    prune_scope: set[tuple[str, str]] = {("doc", t) for t in targets}
+    prune_scope: set[tuple[str, str]] = {("doc", t) for t in candidates}
     for rel in targets:
         lines = _read_lines(root, rel)
         if lines is None:
@@ -132,7 +152,10 @@ def ground_docs(
     """
     from app.services.node_registry import RegistrationResult, register_sources
 
-    units, prune = build_doc_units(repo_path)
+    from app.services.node_exclusion import patterns_for_project
+
+    exclusions = patterns_for_project(db, project_id)
+    units, prune = build_doc_units(repo_path, exclusions=exclusions)
     if not units and not prune:
         return RegistrationResult()
     return register_sources(db, project_id, units, prune_scope=prune)
@@ -149,7 +172,10 @@ def doc_provider(db: "Session", project, repo_path: str) -> list["SourceUnit"]:
     only the units (nodeify computes the prune scope + registers); best-effort
     ([] on any failure) per the provider contract.
     """
-    units, _ = build_doc_units(repo_path)
+    from app.services.node_exclusion import patterns_for_project
+
+    exclusions = patterns_for_project(db, getattr(project, "id", None))
+    units, _ = build_doc_units(repo_path, exclusions=exclusions)
     return units
 
 

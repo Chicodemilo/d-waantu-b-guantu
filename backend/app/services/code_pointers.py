@@ -13,13 +13,14 @@
 # Callees: git via subprocess, app/services/node_registry.SourceUnit
 # Data In: repo_path, project prefix, commit sha
 # Data Out: (list[SourceUnit], prune_scope set) + plain git-walk dicts
-# Last Modified: 2026-09-15
+# Last Modified: 2026-09-15 (DWB-549: node-scan exclusions at enumeration)
 
 import re
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from app.config.node_scan import is_excluded
 from app.services.node_registry import SourceUnit
 
 if TYPE_CHECKING:
@@ -204,6 +205,8 @@ def renamed_old_paths(repo_path: str, sha: str) -> list[str]:
 def build_code_units(
     repo_path: str | None,
     sha: str,
+    *,
+    exclusions: tuple[str, ...] | list[str] = (),
 ) -> tuple[list[SourceUnit], set[tuple[str, str]]]:
     """Build code-kind SourceUnits for every file a commit touched, plus the
     prune scope for files it deleted (DWB-525).
@@ -244,7 +247,12 @@ def build_code_units(
         ("code", f) for f in (*gone, *renamed_from)
     }
     for f in touched:
+        # DWB-549: an excluded file still enters the prune scope, so adding an
+        # exclusion DROPS the pointers it already had rather than merely
+        # skipping new ones.
         prune_scope.add(("code", f))
+        if is_excluded(f, exclusions):
+            continue
         lines = _file_lines_at(repo_path, f, full)
         if lines is None:
             # Unreadable at this sha (e.g. binary / vanished): prune only.
@@ -348,7 +356,10 @@ def ground_commit(
     """
     from app.services.node_registry import RegistrationResult, register_sources
 
-    units, prune = build_code_units(repo_path, sha)
+    from app.services.node_exclusion import patterns_for_project
+
+    exclusions = patterns_for_project(db, project_id)
+    units, prune = build_code_units(repo_path, sha, exclusions=exclusions)
     if not units and not prune:
         return RegistrationResult()
     return register_sources(db, project_id, units, prune_scope=prune)
@@ -402,9 +413,12 @@ def code_provider(db: "Session", project, repo_path: str) -> list[SourceUnit]:
     and registers; this fn only produces units and is best-effort ([] on any
     failure) per the provider contract.
     """
+    from app.services.node_exclusion import patterns_for_project
+
     prefix = getattr(project, "prefix", None)
     if not prefix or not _repo_ok(repo_path):
         return []
+    exclusions = patterns_for_project(db, getattr(project, "id", None))
     commits = walk_commits_for_tickets(repo_path, prefix, max_commits=500)
     units: list[SourceUnit] = []
     seen_files: set[str] = set()
@@ -416,6 +430,8 @@ def code_provider(db: "Session", project, repo_path: str) -> list[SourceUnit]:
             if f in seen_files:
                 continue
             seen_files.add(f)
+            if is_excluded(f, exclusions):          # DWB-549
+                continue
             lines = _file_lines_at(repo_path, f, sha)
             if lines is None:
                 continue
