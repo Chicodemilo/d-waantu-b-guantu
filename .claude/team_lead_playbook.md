@@ -28,7 +28,9 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 
 ### Your Personal Memory Dir
 
-Lives at `.dwb/memory/<project_prefix>/Archie_<PREFIX>/` (DWB-401: moved out of `.claude/`). File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. TL-flavored use: `memory.md` (single free-form file) for orchestration notes (who's spawned, what you're tracking) and TL-specific patterns (spawn quirks, gate edge cases).
+Lives at `.dwb/memory/<project_prefix>/Archie_<PREFIX>/` (DWB-401: moved out of `.claude/`). File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. TL-flavored use: `memory.md` for TL-specific LESSONS (spawn quirks, gate edge cases, review patterns that caught real bugs). Live orchestration state (who is spawned, what you are tracking right now) is session-scoped and belongs in `HANDOFF.md`, not here.
+**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 4500-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. The ISO heading is still stamped every time, with or without lessons, because that heading is what the DWB-519 write-on-close gate reads as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate.
+
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
 
