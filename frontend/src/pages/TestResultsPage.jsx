@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom, ../store/useStore, ../api/system, ../components/common/StatusBadge, ../components/common/TerminalOutput, ../components/tests/TestCoverage
 // Data In: Route param (runId), testRuns from Zustand store
 // Data Out: Default export TestResultsPage component
-// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
+// Last Modified: 2026-09-16 (DWB-571: run-tests buttons disabled and pass an explicit project id when no project.runs_own_tests exists, matching the now-required project_id on POST /system/run-tests)
 
 import { useState } from 'react';
 import { formatApiDateTime, TIMESTAMP_WITH_SECONDS } from '../utils/format';
@@ -85,6 +85,10 @@ function TestResultsPage() {
   const { runId } = useParams();
   const navigate = useNavigate();
   const testRuns = useStore((s) => s.testRuns);
+  // DWB-571: this page has no :id route param, so it has to find the one
+  // project this server can honestly run tests for itself (backend-computed
+  // via runs_own_tests — see ProjectTestsPage.jsx for the per-project case).
+  const selfProject = useStore((s) => s.projects.find((p) => p.runs_own_tests));
   const [selectedId, setSelectedId] = useState(null);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState(null);
@@ -92,11 +96,12 @@ function TestResultsPage() {
   const [liveOutput, setLiveOutput] = useState(null);
 
   const handleRunTests = async () => {
+    if (!selfProject) return;
     setRunning(true);
     setRunResult(null);
     setLiveOutput(null);
     try {
-      const result = await runSystemTests();
+      const result = await runSystemTests(selfProject.id);
       setRunResult(result);
       setLiveOutput(result.stdout_tail || null);
     } catch {
@@ -144,7 +149,7 @@ function TestResultsPage() {
         <button
           className="sync-btn"
           onClick={handleRunTests}
-          disabled={running}
+          disabled={running || !selfProject}
         >
           {running ? '$ running...' : '$ run system tests'}
         </button>
@@ -168,7 +173,7 @@ function TestResultsPage() {
           <button
             className="sync-btn"
             onClick={handleRunTests}
-            disabled={running}
+            disabled={running || !selfProject}
           >
             {running ? '$ running...' : '$ run system tests'}
           </button>

@@ -238,7 +238,7 @@ def get_system_docs():
 
 @router.post("/system/run-tests")
 def run_tests(
-    project_id: int = Query(1),
+    project_id: int = Query(...),
     db: Session = Depends(get_db),
 ):
     """Trigger the backend test suite via run_tests.sh, store and return a summary.
@@ -249,6 +249,14 @@ def run_tests(
     rather than running DWB's tests and filing them under another project's
     id. Hiding the frontend control is a UI decision, not an access rule:
     this guard is what actually makes it safe to call the endpoint directly.
+
+    project_id is REQUIRED, no default. A `Query(1)` default was the root of
+    the original bug (a silently-picked project), and it stopped protecting
+    anything once the guard above existed: a caller that forgets project_id
+    now gets an immediate 422 naming the missing param, rather than a
+    confusing 400 about some other project it never asked about (or, worse,
+    a defaulted success on a deployment where project 1 happens to be the
+    server's own repo by coincidence, as it is on this one).
     """
     project = db.get(Project, project_id)
     if not project:

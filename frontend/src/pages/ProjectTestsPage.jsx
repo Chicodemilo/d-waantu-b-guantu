@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom, ../store/useStore, ../api/testResults, ../api/alerts, ../components/common/StatusBadge, ../components/tests/TestPerformance, ../components/tests/FailureAnalysis
 // Data In: Route param (id), project from Zustand store, test runs from API
 // Data Out: Default export ProjectTestsPage component
-// Last Modified: 2026-09-16 (DWB-571: "run system tests" only renders when project.runs_own_tests is true — the backend decides, this page just reads the field)
+// Last Modified: 2026-09-16 (DWB-571: "run system tests" only renders when project.runs_own_tests is true, and threads project.id through to runSystemTests — the backend decides, this page just reads the field and passes the id it names, not a default)
 
 import { useState, useEffect } from 'react';
 import { formatApiDateTime, TIMESTAMP_WITH_SECONDS } from '../utils/format';
@@ -100,7 +100,7 @@ function ProjectTestsPage() {
     setRunResult(null);
     setRunOutput(null);
     try {
-      const result = await runSystemTests();
+      const result = await runSystemTests(project.id);
       setRunResult(result);
       setRunOutput(result.stdout_tail || null);
       // Refresh the test runs list

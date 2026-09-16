@@ -6,8 +6,9 @@
 # Callees:       GET /api/status, GET /api/status/test-coverage, POST /api/system/run-tests
 # Data In:       None (stateless health check)
 # Data Out:      Assertions on HTTP 200/400/404 and response shapes
-# Last Modified: 2026-09-16 (DWB-571: run-tests guard-refusal tests; DWB-572:
-#   smoke test for /status/test-coverage after its glob logic moved into
+# Last Modified: 2026-09-16 (DWB-571: run-tests guard-refusal tests plus the
+#   422-when-omitted test for the now-required project_id; DWB-572: smoke
+#   test for /status/test-coverage after its glob logic moved into
 #   services/sprint.router_test_coverage)
 
 """Tests for GET /api/status."""
@@ -50,6 +51,15 @@ class TestRunTestsGuard:
     only exercise the refusal path - the success path would actually spawn
     a nested pytest run and is intentionally not covered here (see
     HANDOFF/ticket notes on that risk)."""
+
+    def test_422_when_project_id_is_omitted(self, client):
+        """DWB-571 amendment: project_id has no default (Freddie's catch —
+        the old Query(1) default was the root of the original bug, and once
+        the guard above exists a silent default no longer protects anything,
+        it just turns a wrong-project call into a confusing 400 about
+        someone else's project instead of a clear 422)."""
+        r = client.post("/api/system/run-tests")
+        assert r.status_code == 422
 
     def test_404_for_missing_project(self, client):
         r = client.post("/api/system/run-tests", params={"project_id": 999999})

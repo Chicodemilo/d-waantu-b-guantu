@@ -1,15 +1,15 @@
 // Path: src/__tests__/ProjectTestsPage.test.jsx
 // File: ProjectTestsPage.test.jsx
 // Created: 2026-09-16
-// Purpose: DWB-571 - the "run system tests" control on a project's Tests page must render only when project.runs_own_tests is true (the backend's answer, not a frontend recomputation). Pins the hide behavior so restoring the button unconditionally fails this test.
+// Purpose: DWB-571 - the "run system tests" control on a project's Tests page must render only when project.runs_own_tests is true (the backend's answer, not a frontend recomputation), and clicking it must send THAT project's own id, not a default. Pins both the hide behavior and the id actually sent, so a regression that restores the button unconditionally, or that calls runSystemTests() with no argument, fails this test.
 // Caller: vitest test runner
 // Callees: ../pages/ProjectTestsPage, ../store/useStore (mocked), ../api/testResults (mocked), ../api/system (mocked), ../components/tests/TestPerformance + FailureAnalysis (mocked), react-router-dom (MemoryRouter)
 // Data In: Mocked store project + mocked api modules
 // Data Out: Test assertions
-// Last Modified: 2026-09-16 (DWB-571)
+// Last Modified: 2026-09-16 (DWB-571: added a test asserting runSystemTests is called with the viewed project's own id, using a non-1 id so it can't pass by coincidence with the endpoint's old default)
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 vi.mock('../api/testResults', () => ({
@@ -31,10 +31,16 @@ vi.mock('../store/useStore', () => ({
 }));
 
 import ProjectTestsPage from '../pages/ProjectTestsPage';
+import { runSystemTests } from '../api/system';
+
+// A deliberately non-1 id: the endpoint's old default was project_id=1, so a
+// bug that drops the argument and falls back to that default would still
+// pass a test written against id 1. Using 42 makes that bug visible.
+const PROJECT_ID = 42;
 
 function project(overrides = {}) {
   return {
-    id: 1,
+    id: PROJECT_ID,
     prefix: 'DWB',
     name: 'DWB',
     repo_path: '/repo',
@@ -52,7 +58,7 @@ function seed(proj) {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/projects/1/tests']}>
+    <MemoryRouter initialEntries={[`/projects/${PROJECT_ID}/tests`]}>
       <Routes>
         <Route path="/projects/:id/tests" element={<ProjectTestsPage />} />
       </Routes>
@@ -63,6 +69,7 @@ function renderPage() {
 describe('ProjectTestsPage run-tests control (DWB-571)', () => {
   afterEach(() => {
     cleanup();
+    runSystemTests.mockReset();
   });
 
   it('hides the button when runs_own_tests is false', async () => {
@@ -80,5 +87,16 @@ describe('ProjectTestsPage run-tests control (DWB-571)', () => {
     expect(
       await screen.findByRole('button', { name: /run system tests/i })
     ).toBeInTheDocument();
+  });
+
+  it('calls runSystemTests with the VIEWED project\'s own id, not a default', async () => {
+    runSystemTests.mockResolvedValue({ passed: 1, failed: 0, total: 1 });
+    seed(project({ runs_own_tests: true }));
+    renderPage();
+    const button = await screen.findByRole('button', { name: /run system tests/i });
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(runSystemTests).toHaveBeenCalledWith(PROJECT_ID);
+    });
   });
 });
