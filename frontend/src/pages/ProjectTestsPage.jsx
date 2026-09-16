@@ -6,7 +6,7 @@
 // Callees: react, react-router-dom, ../store/useStore, ../api/testResults, ../api/alerts, ../components/common/StatusBadge, ../components/tests/TestPerformance, ../components/tests/FailureAnalysis
 // Data In: Route param (id), project from Zustand store, test runs from API
 // Data Out: Default export ProjectTestsPage component
-// Last Modified: 2026-09-15 (DWB-557: shared timestamp parsing)
+// Last Modified: 2026-09-16 (DWB-571: "run system tests" only renders when project.runs_own_tests is true — the backend decides, this page just reads the field)
 
 import { useState, useEffect } from 'react';
 import { formatApiDateTime, TIMESTAMP_WITH_SECONDS } from '../utils/format';
@@ -178,28 +178,30 @@ function ProjectTestsPage() {
   return (
     <div>
       <div className="page-title">{project.prefix} &mdash; Test Results</div>
-      <div className="test-actions">
-        <button
-          className="sync-btn"
-          onClick={handleRunTests}
-          disabled={running}
-        >
-          {running ? '$ running...' : '$ run system tests'}
-        </button>
-        {runResult && !runResult.error && (
-          <span className="sync-btn__status">
-            {'\u2713'} {runResult.passed || 0} passed, {runResult.failed || 0} failed ({runResult.total || 0} total)
-          </span>
-        )}
-        {runResult?.error && (
-          <span className="sync-btn__status" style={{ color: 'var(--red)' }}>test run failed</span>
-        )}
-      </div>
-      <TerminalOutput
-        output={runOutput}
-        isOpen={running || runOutput !== null}
-        isLoading={running}
-      />
+      {project.runs_own_tests && (
+        <div className="test-actions">
+          <button
+            className="sync-btn"
+            onClick={handleRunTests}
+            disabled={running}
+          >
+            {running ? '$ running...' : '$ run system tests'}
+          </button>
+          {runResult && !runResult.error && (
+            <span className="sync-btn__status">
+              {'\u2713'} {runResult.passed || 0} passed, {runResult.failed || 0} failed ({runResult.total || 0} total)
+            </span>
+          )}
+          {runResult?.error && (
+            <span className="sync-btn__status" style={{ color: 'var(--red)' }}>test run failed</span>
+          )}
+          <TerminalOutput
+            output={runOutput}
+            isOpen={running || runOutput !== null}
+            isLoading={running}
+          />
+        </div>
+      )}
       <div className="test-tab-bar">
         <button
           className={`test-tab${activeTab === 'results' ? ' test-tab--active' : ''}`}

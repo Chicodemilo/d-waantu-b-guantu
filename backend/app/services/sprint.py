@@ -49,7 +49,6 @@ def _emit_sprint_event(
     )
     db.commit()
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 logger = logging.getLogger(__name__)
 
 # Matches generic names like "DWB Sprint 4", "INGEST Sprint 1", "Sprint 3"

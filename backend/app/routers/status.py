@@ -3,10 +3,10 @@
 # Created: 2026-03-29
 # Purpose: System status, test coverage, code standards, system docs, and test runner endpoints
 # Caller: app/main.py
-# Callees: app/models (agent, alert, ticket), app/services/sprint (router_test_coverage), pathlib, subprocess
+# Callees: app/models (agent, alert, project, ticket), app/services/sprint (router_test_coverage), app/config/server_repo (runs_own_tests), pathlib, subprocess
 # Data In: HTTP requests
 # Data Out: JSON responses (status dict, coverage report, header format)
-# Last Modified: 2026-09-16 (DWB-572: test-coverage glob delegated to services/sprint.router_test_coverage, shared with the force_test_coverage gate)
+# Last Modified: 2026-09-16 (DWB-571: /system/run-tests refuses a project that isn't this server's own repo; DWB-572: test-coverage glob delegated to services/sprint.router_test_coverage, shared with the force_test_coverage gate)
 
 import json
 import shutil
@@ -20,9 +20,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from app.config.server_repo import runs_own_tests
 from app.database import engine, get_db
 from app.models.agent import Agent
 from app.models.alert import Alert, AlertCategory, AlertStatus
+from app.models.project import Project
 from app.models.ticket import Ticket, TicketStatus
 from app.schemas.test_result import TestResultCreate
 from app.services import sprint as sprint_svc
@@ -239,7 +241,27 @@ def run_tests(
     project_id: int = Query(1),
     db: Session = Depends(get_db),
 ):
-    """Trigger the backend test suite via run_tests.sh, store and return a summary."""
+    """Trigger the backend test suite via run_tests.sh, store and return a summary.
+
+    DWB-571: this endpoint can only ever execute ONE test suite - this
+    server's own (run_tests.sh, cwd=BACKEND_DIR, both fixed) - so it refuses
+    (400) for any project that isn't the repo this server is running from,
+    rather than running DWB's tests and filing them under another project's
+    id. Hiding the frontend control is a UI decision, not an access rule:
+    this guard is what actually makes it safe to call the endpoint directly.
+    """
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not runs_own_tests(project.repo_path):
+        raise HTTPException(
+            400,
+            f"Cannot run tests for project '{project.prefix}': this server "
+            "only runs its own test suite, never an arbitrary tracked "
+            "project's. Valid only for the project whose repo_path is this "
+            "DWB server's own repo.",
+        )
+
     script = SCRIPTS_DIR / "run_tests.sh"
     if not script.is_file():
         raise HTTPException(500, f"Test script not found at {script}")

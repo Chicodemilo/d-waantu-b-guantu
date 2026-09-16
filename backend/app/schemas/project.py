@@ -3,15 +3,16 @@
 # Created: 2026-03-29
 # Purpose: Pydantic schemas for project CRUD with gate flags
 # Caller: app/routers/projects.py
-# Callees: pydantic
+# Callees: pydantic, app/config/server_repo.py
 # Data In: JSON request body
 # Data Out: ProjectCreate, ProjectUpdate, ProjectRead, ProjectOverheadIncrement
-# Last Modified: 2026-09-15 (DWB-546: ticket token baseline schemas)
+# Last Modified: 2026-09-16 (DWB-571: ProjectRead.runs_own_tests computed field)
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
+from app.config.server_repo import runs_own_tests as _runs_own_tests
 from app.models.project import ProjectStatus
 
 
@@ -93,6 +94,17 @@ class ProjectRead(BaseModel):
     nodeified_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    @computed_field
+    @property
+    def runs_own_tests(self) -> bool:
+        """DWB-571: true only for the one project whose repo_path IS this
+        DWB server's own repo - the sole project whose tests this server can
+        honestly execute. The frontend gates the "run system tests" control
+        on this field rather than recomputing the check itself; the backend
+        also enforces it independently at POST /system/run-tests (a hidden
+        control is not an access rule)."""
+        return _runs_own_tests(self.repo_path)
 
 
 class ProjectFromRepoRead(ProjectRead):

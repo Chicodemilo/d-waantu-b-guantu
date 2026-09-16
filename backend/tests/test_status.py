@@ -3,11 +3,12 @@
 # Created:       2026-03-28
 # Purpose:       Tests for system status and health check endpoint
 # Caller:        pytest
-# Callees:       GET /api/status, GET /api/status/test-coverage
+# Callees:       GET /api/status, GET /api/status/test-coverage, POST /api/system/run-tests
 # Data In:       None (stateless health check)
-# Data Out:      Assertions on HTTP 200 and status response shape
-# Last Modified: 2026-09-16 (DWB-572: smoke test for /status/test-coverage after
-#   its glob logic moved into services/sprint.router_test_coverage)
+# Data Out:      Assertions on HTTP 200/400/404 and response shapes
+# Last Modified: 2026-09-16 (DWB-571: run-tests guard-refusal tests; DWB-572:
+#   smoke test for /status/test-coverage after its glob logic moved into
+#   services/sprint.router_test_coverage)
 
 """Tests for GET /api/status."""
 
@@ -41,6 +42,32 @@ def test_status_counts_reflect_data(client, make_agent, make_ticket):
     data = client.get("/api/status").json()
     assert data["active_agents"] >= 1
     assert data["in_progress_tickets"] >= 1
+
+
+class TestRunTestsGuard:
+    """DWB-571: POST /system/run-tests refuses a project that isn't this
+    server's own repo, BEFORE ever shelling out to run_tests.sh. These tests
+    only exercise the refusal path - the success path would actually spawn
+    a nested pytest run and is intentionally not covered here (see
+    HANDOFF/ticket notes on that risk)."""
+
+    def test_404_for_missing_project(self, client):
+        r = client.post("/api/system/run-tests", params={"project_id": 999999})
+        assert r.status_code == 404
+
+    def test_400_for_project_with_no_repo_path(self, client, make_project):
+        project = make_project()
+        r = client.post("/api/system/run-tests", params={"project_id": project["id"]})
+        assert r.status_code == 400
+        assert project["prefix"] in r.json()["detail"]
+
+    def test_400_for_project_with_unrelated_repo_path(
+        self, client, make_project, tmp_path
+    ):
+        project = make_project(repo_path=str(tmp_path))
+        r = client.post("/api/system/run-tests", params={"project_id": project["id"]})
+        assert r.status_code == 400
+        assert project["prefix"] in r.json()["detail"]
 
 
 def test_test_coverage_returns_200_and_shape(client):

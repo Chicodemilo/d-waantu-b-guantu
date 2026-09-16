@@ -7,7 +7,7 @@
 #                GET /api/projects/:id/team (DWB-313, DWB-387)
 # Data In:       Factory-created projects, tickets, test results via conftest fixtures
 # Data Out:      Assertions on HTTP status codes, JSON shapes, and cascade deletes
-# Last Modified: 2026-08-11 (DWB-017: force_standards_audit in response-shape keys)
+# Last Modified: 2026-09-16 (DWB-571: runs_own_tests computed field in response shape + TestRunsOwnTests)
 
 """Tests for /api/projects CRUD and filtering."""
 
@@ -66,8 +66,38 @@ class TestGetProject:
             "playbooks_deployed_at",
             "nodeified_at",
             "created_at", "updated_at",
+            "runs_own_tests",
         }
         assert set(data.keys()) == expected_keys
+
+
+class TestRunsOwnTests:
+    """DWB-571: ProjectRead.runs_own_tests is true only for the project whose
+    repo_path IS this DWB server's own repo (app/config/server_repo.py)."""
+
+    def test_false_with_no_repo_path(self, client, make_project):
+        project = make_project()
+        data = client.get(f"/api/projects/{project['id']}").json()
+        assert data["repo_path"] is None
+        assert data["runs_own_tests"] is False
+
+    def test_false_with_an_unrelated_repo_path(self, client, make_project, tmp_path):
+        project = make_project(repo_path=str(tmp_path))
+        data = client.get(f"/api/projects/{project['id']}").json()
+        assert data["runs_own_tests"] is False
+
+    def test_true_when_repo_path_is_the_servers_own_repo(self, client, make_project):
+        from app.config.server_repo import REPO_ROOT
+
+        project = make_project(repo_path=str(REPO_ROOT))
+        data = client.get(f"/api/projects/{project['id']}").json()
+        assert data["runs_own_tests"] is True
+
+    def test_appears_in_list_endpoint_too(self, client, make_project, tmp_path):
+        """The computed field isn't a GET-by-id special case."""
+        make_project(repo_path=str(tmp_path))
+        projects = client.get("/api/projects").json()
+        assert all("runs_own_tests" in p for p in projects)
 
     def test_get_nonexistent_returns_404(self, client):
         r = client.get("/api/projects/999999")
