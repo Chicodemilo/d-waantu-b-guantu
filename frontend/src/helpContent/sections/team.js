@@ -6,7 +6,7 @@
 // Callees: none (plain data)
 // Data In: none
 // Data Out: default export: one help section object { key, title, summary, bullets }
-// Last Modified: 2026-08-12 (DWB-036: mention The_Auditor + audit scorecard reputation)
+// Last Modified: 2026-09-16 (DWB-570: roster column list was missing description)
 
 export default {
   key: 'team',
@@ -17,9 +17,9 @@ export default {
     where: 'The team link under any project in the sidebar.',
   },
   bullets: [
-    'The Roster tab lists each agent with name, score, type, role, and active status; the Scoreboard tab ranks agents by reputation with rank, tier, sprint delta, and remaining influence.',
+    'The Roster tab lists each agent with name, score, type, role, description, and active status; the Scoreboard tab ranks agents by reputation with rank, tier, sprint delta, and remaining influence.',
     'Reputation moves automatically from work (closing tickets, overhead) and from human awards and peer scoring; the ledger on an agent page shows the last entries with delta, reason, and actor.',
-    'The_Auditor is a fixed global system agent (not a spawned worker): it runs the standards audits, and each audit scorecard hands out sticks and carrots that move the same reputation the roster tracks.',
+    'The_Auditor is a fixed global system agent (not a spawned worker): the standards audits are attributed to it, and each audit scorecard proposes sticks and carrots against the same reputation the roster tracks. They only move it once the scorecard is applied.',
     'Peer scoring spends from a per-sprint influence budget and is guarded: no self-scoring, a per-sprint budget cap, and per-target demerit caps; human awards cost no influence.',
     '/carrot <agent> <points> "reason" awards positive reputation and broadcasts to the team.',
     '/stick <agent> <points> "reason" docks reputation and broadcasts to the team.',

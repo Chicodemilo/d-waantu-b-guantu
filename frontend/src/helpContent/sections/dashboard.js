@@ -9,7 +9,8 @@
 // Callees: none (plain data)
 // Data In: none
 // Data Out: default export: one help section object { key, title, summary, bullets, links }
-// Last Modified: 2026-06-25
+// Last Modified: 2026-09-16 (DWB-570: the "surfaced categories" filter named all three
+//          categories, so it described a filter that excludes nothing)
 
 export default {
   key: 'dashboard',
@@ -21,8 +22,8 @@ export default {
   },
   bullets: [
     'Summary up top gives the cross-project rollup at a glance.',
-    'Open Alerts shows only surfaced categories (comms, scoring, actionable); use clear all to dismiss them.',
-    'Each alert row links to its project; severity is color-coded (critical, warning, info).',
+    'Open Alerts lists every alert still open across all projects, newest first; use clear all to acknowledge the lot. The noisy events that used to pile up here (peer scoring, sprint-close notices, test-run requests) no longer raise alerts at all, so they never reach this table.',
+    'Each alert row links to its project and carries its category (comms, scoring, or actionable); severity is color-coded (critical, warning, info).',
     'Add a project from a repo path with "add project", or load sample data with "seed demo project".',
     'Project cards link into each project; Time & Tokens and Token Audit summarize spend.',
     'The Agents section is a sortable table; click a row to open that agent.',

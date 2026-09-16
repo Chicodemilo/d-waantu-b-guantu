@@ -7,7 +7,7 @@ Purpose: Content contract for the Help Center (DWB-469). Read this before author
          keys, the quick-start shape, and where files go. The HelpPage renders
          whatever section files exist, so content lands incrementally.
 Caller: human + content-author agents (Sylvie, Dolores, Barry_DWB, Sage, Pam_DWB, Freddie)
-Last Modified: 2026-06-25
+Last Modified: 2026-09-16 (DWB-570: canonical keys caught up with index.js - added audits and nodes)
 -->
 
 # Help Center content contract (DWB-469)
@@ -113,7 +113,7 @@ links: [
 - **Only use portal links from the five GLOBAL sections** (dashboard, system_tests,
   system_docs, error_log, archie_channel) whose routes are static (`/`, `/tests`,
   `/docs`, `/errors`, `/archie-channel`). Do NOT add portal links to project-scoped
-  sections (tickets, team, sessions, tests, docs, comms, jira): those pages live at
+  sections (tickets, team, sessions, tests, audits, docs, nodes, comms, jira): those pages live at
   `/projects/:id/...` and the help page has no current-project context to resolve the
   id. Keep those as section cross-links.
 
@@ -131,7 +131,9 @@ Per-project group:
 - `team`             (sidebar: team)
 - `sessions`         (sidebar: sessions)
 - `tests`            (sidebar: tests)
+- `audits`           (sidebar: audits)
 - `docs`             (sidebar: docs)
+- `nodes`            (sidebar: nodes)
 - `comms`            (sidebar: inter-agent comms)
 - `jira`             (sidebar: jira)
 

@@ -15,7 +15,7 @@
 // Callees: ../index (allSections, NAV_GROUPS via import.meta.glob)
 // Data In: real authored section modules
 // Data Out: test assertions
-// Last Modified: 2026-08-12 (DWB-036: added 'audits' to the canonical vocabulary)
+// Last Modified: 2026-09-16 (DWB-570: added 'nodes' to the canonical vocabulary)
 
 import { describe, it, expect } from 'vitest';
 import { allSections, NAV_GROUPS } from '../index';
@@ -37,6 +37,7 @@ describe('help cross-link integrity (DWB-496/497)', () => {
         'docs',
         'error_log',
         'jira',
+        'nodes',
         'sessions',
         'system_docs',
         'system_tests',
