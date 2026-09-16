@@ -341,6 +341,28 @@ def update_ticket(
 
     status_changed = "status" in updates and updates["status"] != old_status
 
+    # DWB-576: an agent who starts an UNASSIGNED ticket owns it. Before this,
+    # a worker told to pick the ticket up itself left assigned_agent_id NULL
+    # forever, and every attribution mechanism keys on that column, so the work
+    # was unattributable by any means: the session lookup filters on
+    # assigned_agent_id == agent.id, and the ticket-side claim has no agent to
+    # claim for. On 2026-09-16 two tickets were worked start to finish this way
+    # and neither can ever be costed. It also left tracking's log_start with no
+    # agent, so those tickets have no start event either.
+    #
+    # Only fills a NULL. Moving a ticket someone else owns to in_progress does
+    # not take it from them; that is a real workflow (a lead restarting a
+    # worker's ticket) and silently reassigning it would be worse than the bug.
+    self_assigned = False
+    if (
+        status_changed
+        and updates["status"] == TicketStatus.in_progress
+        and ticket.assigned_agent_id is None
+        and acting_agent_id is not None
+    ):
+        updates["assigned_agent_id"] = acting_agent_id
+        self_assigned = True
+
     for key, value in updates.items():
         setattr(ticket, key, value)
 
@@ -377,6 +399,29 @@ def update_ticket(
             },
         ) from exc
     db.refresh(ticket)
+
+    # DWB-576: the ticket tells this agent's unattributed sessions who they
+    # belong to. Fires when the assignee CHANGES (including the self-assign
+    # above) and when work STARTS, which are the two moments the answer to
+    # "what is this agent working on" becomes knowable. Side-effect only: a
+    # failure here must never fail the PATCH the user asked for.
+    assignee_changed = ticket.assigned_agent_id != old_assigned
+    started_work = status_changed and updates["status"] == TicketStatus.in_progress
+    if ticket.assigned_agent_id is not None and (assignee_changed or started_work):
+        try:
+            # Local import: hook_tracking is a heavy module and importing it at
+            # module scope here risks a cycle as the tracking side grows.
+            from app.services import hook_tracking as hook_tracking_svc
+
+            claimed = hook_tracking_svc.claim_unattributed_sessions(db, ticket)
+            if claimed:
+                db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning(
+                "DWB-576: session claim failed for ticket %s: %s",
+                ticket.ticket_key, exc,
+            )
 
     # Record status change in history
     if status_changed:

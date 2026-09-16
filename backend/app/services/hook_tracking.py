@@ -451,14 +451,34 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
                 if agent:
                     session.agent_name = agent.role
             if agent:
-                    session.agent_id = agent.id
-                    session.session_type = _determine_session_type(agent)
-                    # Resolve ticket if worker
-                    if agent.role not in OVERHEAD_ROLES:
-                        ticket = _resolve_ticket(db, agent, session.project_id)
-                        if ticket:
-                            session.ticket_id = ticket.id
-                            session.sprint_id = ticket.sprint_id
+                session.agent_id = agent.id
+                session.session_type = _determine_session_type(agent)
+
+        # DWB-576: re-resolve the TICKET on any later event while it is still
+        # NULL, not only on the events where the AGENT also needed resolving.
+        #
+        # This lookup used to live nested inside `if not session.agent_id:`.
+        # The marker resolves the agent correctly at row creation, so that
+        # branch essentially never ran again and ticket resolution was
+        # effectively one-shot: it asked "what ticket is this agent on" at the
+        # instant the row was created and never asked again. On 2026-09-16 the
+        # rows were created 15:07-15:15 and every ticket was assigned at
+        # 15:32, so the question was asked 17 to 25 minutes before the answer
+        # existed, and five of six workers' whole sessions fell to overhead.
+        #
+        # Fill-only, deliberately: a session that already carries a ticket is
+        # never re-pointed at another one. Re-attributing finished work is a
+        # worse failure than leaving it unattributed, because it moves a cost
+        # that someone may already have read.
+        if session.ticket_id is None and session.agent_id:
+            resolved_agent = db.get(Agent, session.agent_id)
+            if resolved_agent and resolved_agent.role not in OVERHEAD_ROLES:
+                later_ticket = _resolve_ticket(
+                    db, resolved_agent, session.project_id
+                )
+                if later_ticket:
+                    session.ticket_id = later_ticket.id
+                    session.sprint_id = later_ticket.sprint_id
 
     # Update session with end data
     # DWB-539: never persist end < start; a backwards interval clamps to 0 in
@@ -1456,6 +1476,63 @@ def recapture_token_growth(db: Session, *, limit: int = 200) -> tuple[int, int]:
             "DWB-580: recaptured %s token(s) across %s session(s)", added, advanced
         )
     return advanced, added
+
+
+def claim_unattributed_sessions(db: Session, ticket: Ticket) -> int:
+    """Point a ticket's assignee's UNATTRIBUTED sessions at that ticket.
+
+    Returns the number of sessions claimed.
+
+    THIS INVERTS THE DIRECTION, which is the point. Resolution normally runs
+    from the session side: a hook event fires and asks "what ticket is this
+    agent on". That question is asked when the event happens, and on this
+    project a worker is routinely spawned and briefed BEFORE its ticket is
+    assigned, so the honest answer at that moment is "none" and the session
+    falls to the ad_hoc bucket. Measured on 2026-09-16: sessions created
+    15:07-15:15, every ticket assigned at 15:32, five of six workers
+    unattributed for their whole run.
+
+    Asking again later only helps if something asks. This side does not wait
+    to be asked: the moment a ticket acquires an assignee, it tells that
+    agent's still-unattributed sessions who they belong to. The answer arrives
+    when it EXISTS rather than being demanded when it does not.
+
+    FILL-ONLY and SPRINT-BOUNDED. Only rows with a NULL ticket_id are touched,
+    so a session that already carries attribution is never re-pointed, and only
+    rows created since the active sprint started, so this cannot reach back
+    into a previous sprint's work. It does NOT move tokens that were already
+    logged elsewhere: deltas recorded before the claim stay where they landed.
+    That is deliberate under the forward-only ruling - this fixes where the
+    NEXT delta goes, it does not rewrite the last one.
+    """
+    if ticket.assigned_agent_id is None:
+        return 0
+
+    stmt = (
+        select(HookSession)
+        .where(HookSession.project_id == ticket.project_id)
+        .where(HookSession.agent_id == ticket.assigned_agent_id)
+        .where(HookSession.ticket_id.is_(None))
+    )
+
+    sprint = db.get(Sprint, ticket.sprint_id) if ticket.sprint_id else None
+    if sprint is not None and sprint.start_date is not None:
+        window_start = datetime.combine(sprint.start_date, datetime.min.time())
+        stmt = stmt.where(HookSession.created_at >= window_start)
+
+    claimed = 0
+    for row in db.scalars(stmt).all():
+        row.ticket_id = ticket.id
+        row.sprint_id = ticket.sprint_id
+        claimed += 1
+
+    if claimed:
+        db.flush()
+        logger.info(
+            "DWB-576: ticket %s claimed %s unattributed session(s) for agent %s",
+            ticket.ticket_key, claimed, ticket.assigned_agent_id,
+        )
+    return claimed
 
 
 # --- Internal helpers ---
