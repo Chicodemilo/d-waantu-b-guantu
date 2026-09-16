@@ -6,7 +6,7 @@
 # Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
-# Last Modified: 2026-09-15 (DWB-560: session-complete writes durable lessons only, never narration)
+# Last Modified: 2026-09-16 (DWB-564: memory writes also stamp agents.last_memory_write_at directly)
 
 import json
 import logging
@@ -502,7 +502,8 @@ def record_session_complete(
             f"could not create memory dir {memory_dir}: {e}",
         )
 
-    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = datetime.now(timezone.utc)
+    timestamp = now.isoformat(timespec="seconds")
 
     # DWB-401: single free-form memory.md.
     # DWB-560: the block is LESSONS ONLY - no summary, no token count, no
@@ -545,6 +546,7 @@ def record_session_complete(
             )
 
         _touch_memory_nodes(db, project, target)
+        _record_memory_write(db, agent, now)
 
     return {
         "agent_id": agent.id,
@@ -574,13 +576,16 @@ def _format_scratchpad_block(
     still travel to the caller and the database.
 
     The ISO heading is ALWAYS written, lessons or not. It is structural, not
-    narration (every memory write stamps one), and it is precisely what the
-    DWB-519 write-on-close gate reads as the participation trace
-    (services/memory_trace.py::latest_memory_write_at). Dropping it for a
-    lessons-free wrap-up would silently fail the gate for an agent who did
-    everything right and simply had no durable lesson that sprint, and it would
-    present as a missing acknowledgement rather than as this side effect. Two
-    lines of heading is a cheap price for a gate that cannot lie.
+    narration (every memory write stamps one). DWB-564: the DWB-519
+    write-on-close gate (memory_trace.agent_wrote_since) no longer reads this
+    heading text directly - it reads whichever is LATER of
+    agents.last_memory_write_at (set by _record_memory_write, below) and
+    memory.md's own mtime - but this write still has to happen: an empty
+    write would leave the file untouched, and an untouched file's mtime is
+    stale, which would leave BOTH sources stale for an agent who did
+    everything right and simply had no durable lesson that sprint. Two lines
+    of heading (still useful as provenance - see latest_memory_write_at) is
+    a cheap price for a write that keeps both sources honest.
 
     `summary` and `tokens_used` stay in the signature because the endpoint
     contract still accepts them; they are deliberately unused here.
@@ -666,6 +671,34 @@ def _format_memory_append_block(
         heading = f"\n## {timestamp}\n"
     body = content.rstrip("\n") + "\n"
     return heading + body
+
+
+def _record_memory_write(db: Session, agent: Agent, when: datetime) -> None:
+    """DWB-564: stamp agents.last_memory_write_at with the instant of a
+    successful memory write. Called from all four write paths (append,
+    session-complete, compact, condense), alongside — never instead of —
+    the ISO heading those paths already write into memory.md itself.
+
+    This is one of two sources services/memory_trace.py::agent_wrote_since
+    reads for the DWB-519 write-on-close gate (the other is memory.md's own
+    mtime; the gate takes the later of the two — see
+    memory_trace.effective_last_write_at). This column alone is exact for
+    every write through our endpoints and immune to what heading (if any)
+    ends up in the file — the gate used to depend entirely on that heading
+    text, which a full-file rewrite (compact/condense) legitimately drops.
+    mtime alone would be exact for that too, but blind to an agent whose
+    column was set by an earlier API write and who then wrote again through
+    the API on a later day where mtime happens to read as older than a
+    stale scan — recording the fact directly here removes that gap; mtime
+    still matters as the catch for a write that goes around the API
+    entirely, which this column cannot see.
+
+    Best-effort is wrong here (unlike _touch_memory_nodes): a silent failure
+    to record this would recreate exactly the bug this column exists to
+    fix, so this commits and lets any exception propagate to the caller.
+    """
+    agent.last_memory_write_at = when
+    db.commit()
 
 
 def _touch_memory_nodes(db: Session, project: Project, target: Path) -> None:
@@ -799,7 +832,8 @@ def append_memory(
         )
 
     target = memory_dir / f"{file}.md"
-    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = datetime.now(timezone.utc)
+    timestamp = now.isoformat(timespec="seconds")
     block = _format_memory_append_block(
         timestamp=timestamp,
         content=content,
@@ -829,6 +863,7 @@ def append_memory(
         )
 
     _touch_memory_nodes(db, project, target)
+    _record_memory_write(db, agent, now)
 
     redemption = _evaluate_redemption_safe(
         db, agent=agent, project=project,
@@ -1042,6 +1077,11 @@ def _replace_memory(
         raise err_cls("memory_file_unwritable", f"could not write {target}: {e}")
 
     _touch_memory_nodes(db, project, target)
+    # DWB-564: record the write directly, regardless of whether ``heading``
+    # stamped anything into the file — compact_memory passes heading=None,
+    # which is exactly the case that used to leave nothing for the old
+    # heading-only gate to find. See _record_memory_write.
+    _record_memory_write(db, agent, datetime.now(timezone.utc))
 
     return {
         "agent_id": agent.id,
@@ -1070,13 +1110,17 @@ def compact_memory(
     (the agent's content is written as-is); the condense endpoint is the
     heading-stamped sibling.
 
-    DWB-564: because no heading is stamped, a compact leaves NOTHING in
-    memory.md that memory_trace.agent_wrote_since can match. An agent whose
-    only memory activity in a window is a compact reads as a non-writer at
-    sprint/session close regardless of when the compact happened. This is a
-    sharper version of the same coupling condense_memory's docstring
-    describes — see that note before changing either function's heading
-    behavior.
+    DWB-564: no heading being stamped USED TO mean a compact left nothing in
+    memory.md that the old heading-only write-on-close gate could match — an
+    agent whose only memory activity in a window was a compact read as a
+    non-writer at sprint/session close regardless of timing, unconditionally.
+    Covered twice over now: _replace_memory calls _record_memory_write, which
+    sets agents.last_memory_write_at directly regardless of what heading (or
+    lack of one) lands in the file, AND this write_text call updates the
+    file's own mtime the same way any write does — the gate takes the later
+    of the two (memory_trace.effective_last_write_at). Do NOT "fix" this by
+    making compact stamp a heading — that would put a dependency back that
+    neither source needs.
     """
     return _replace_memory(
         db, agent_id=agent_id, file=file, content=content,
@@ -1102,18 +1146,23 @@ def condense_memory(
     submission is itself over ceiling (trim more and resubmit); identity.md is
     protected; empty content is refused.
 
-    DWB-564: this stamped heading is LOAD-BEARING for the DWB-519 write-on-close
-    gate (services/memory_trace.py::agent_wrote_since), not just provenance. A
-    condense legitimately replaces every dated heading in memory.md with topic
-    headings ("Epic routing", "Memory mechanics", ...) that the gate's regex does
-    not match — DWB-560 actively encourages exactly that shape. The ONLY reason
-    a condensing agent still passes the gate today is that this heading happens
-    to satisfy memory_trace._HEADING_RE. If this stamp's shape changes, or a
-    caller reaches for compact_memory instead (which stamps no heading at all —
-    see its docstring), a condensing agent who did everything right fails the
-    gate as a silent non-writer. Pinned by
-    test_condense_write_gate_coupling_dwb564.py; do not change this heading's
-    shape without checking that test.
+    DWB-564 history: this stamped heading USED TO BE load-bearing for the
+    DWB-519 write-on-close gate (services/memory_trace.py::agent_wrote_since)
+    — not just provenance. A condense legitimately replaces every dated
+    heading in memory.md with topic headings ("Epic routing", "Memory
+    mechanics", ...) that the gate's old heading-only regex did not match,
+    which is exactly the shape DWB-560 encourages; the ONLY reason a
+    condensing agent kept passing the gate was this heading happening to
+    satisfy memory_trace._HEADING_RE. Two agents hit that in one evening.
+    Fixed on two fronts: _replace_memory now also calls _record_memory_write,
+    setting agents.last_memory_write_at directly at write time, and
+    memory.md's own mtime (updated by this write regardless of content) is
+    checked too — the gate takes whichever is later
+    (memory_trace.effective_last_write_at). This heading is STILL worth
+    keeping — it's real provenance for when the rewrite was made — it's just
+    no longer anything the gate depends on by itself.
+    test_condense_write_gate_coupling_dwb564.py exercises the fix from both
+    directions.
     """
     condensed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     heading = f"## {condensed_at} - condensed\n"

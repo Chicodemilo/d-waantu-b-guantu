@@ -6,8 +6,9 @@
 # Callees: memory_trace helper, sprint-close + session-close endpoints
 # Data In: lat_test DB rows + on-disk memory.md files under tmp_path
 # Data Out: assertions
-# Last Modified: 2026-09-14
+# Last Modified: 2026-09-16 (DWB-564: gate reads mtime; _write_mem backdates it to match ``when``)
 
+import os
 from datetime import date, datetime, timedelta, timezone
 
 from app.models.agent import Agent
@@ -20,9 +21,22 @@ def _iso(dt: datetime) -> str:
 
 
 def _write_mem(repo_path, prefix, name, when: datetime):
+    """Simulate a write that happened at ``when``.
+
+    DWB-564: the gate now reads memory.md's own mtime, not a heading parsed
+    from its content - writing the file always sets mtime to "now", so a
+    test that wants to simulate a write from the past has to say so twice:
+    once in the content (kept here, since latest_memory_write_at and other
+    heading-reading callers still exist and this fixture is shared with
+    them) and once via os.utime, which is what agent_wrote_since actually
+    reads.
+    """
     d = repo_path / ".dwb" / "memory" / prefix / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / "memory.md").write_text(f"\n## {_iso(when)}\nwrote a note\n", encoding="utf-8")
+    path = d / "memory.md"
+    path.write_text(f"\n## {_iso(when)}\nwrote a note\n", encoding="utf-8")
+    ts = when.timestamp()
+    os.utime(path, (ts, ts))
 
 
 # ── memory_trace helper ─────────────────────────────────────────────

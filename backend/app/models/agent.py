@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: Agent
-# Last Modified: 2026-06-05
+# Last Modified: 2026-09-16 (DWB-564: last_memory_write_at)
 
 from datetime import datetime
 
@@ -41,6 +41,20 @@ class Agent(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    # DWB-564: set by the memory service (append / session-complete / compact /
+    # condense) on every successful write, alongside — not instead of — the
+    # ISO heading those endpoints already stamp in memory.md. This is one of
+    # two sources the DWB-519 write-on-close gate reads (see
+    # memory_trace.effective_last_write_at, which takes the LATER of this
+    # column and memory.md's own mtime): this column is exact for every
+    # sanctioned write through our endpoints, mtime additionally catches a
+    # write that went around them (nothing technically prevents that; see the
+    # worker playbook's explicit warning against it). NULL means "never
+    # written through our endpoints" - not "never wrote", since mtime alone
+    # may still have evidence.
+    last_memory_write_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
     )
 
     # Relationships
