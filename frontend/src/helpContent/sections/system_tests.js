@@ -7,7 +7,8 @@
 // Callees: none (plain data)
 // Data In: none
 // Data Out: default export: one help section object { key, title, summary, bullets }
-// Last Modified: 2026-08-12 (DWB-036: note standards-audit close gates + audits cross-link)
+// Last Modified: 2026-09-16 (DWB-572: the coverage table is informational; it is no
+//          longer what the force_test_coverage gate reads)
 
 export default {
   key: 'system_tests',
@@ -21,9 +22,9 @@ export default {
     'The run system tests button executes the backend pytest suite and records a new run; results stream back with passed, failed, and total counts plus a tail of the live output.',
     'Runs list newest-first; click one to open its detail and see every test case with its node id, pass or fail mark, and duration in milliseconds.',
     'Use the passed and failed toggles on a run to filter the case list down to just those outcomes.',
-    'The coverage table lists each backend router, the test file that covers it (or missing), and an overall covered count; this is what the force_test_coverage gate checks.',
+    'The coverage table lists each backend router, the test file that covers it (or missing), and an overall covered count. It is informational and always describes the backend this dashboard runs from; the force_test_coverage sprint gate runs the same check against whichever project is being closed, so the numbers here are not what that gate reads.',
     'force_test_coverage is one of a wider set of sprint-close gates on a tracked project: alongside it, force_standards_audit requires a passing standards audit in the sprint window and force_coding_standards_md requires CODING_STANDARDS.md at the repo root.',
-    'These runs cover DWB itself, so they are recorded against the DWB project rather than a tracked project.',
+    'These runs cover the backend this dashboard runs from, so they are recorded against that project rather than against any tracked project.',
   ],
   // DWB-497: section cross-links; DWB-501: portal link; DWB-036: audits close gate.
   links: [
