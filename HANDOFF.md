@@ -9,10 +9,11 @@
 - **Nodes visual layer is live** at `/projects/:id/nodes`: weighted cloud with a top-0.5% headliner tier, detail overlay with neighbour hops, substring limiter search with an optional connections toggle, per-project scan exclusions with a directory browser, and a rescan control with an inline confirm.
 - **Also shipped:** stick redemption (half rounded up, once per stick), peer carrots/sticks notifying via agent comms, agent memory now lessons-only, three token-attribution bugs fixed, timestamp parsing corrected across 14 components.
 
-## Open for Miles (decisions, not tickets)
+## FIRST JOB NEXT SESSION (decided 2026-09-15, do not relitigate)
 
-1. **Ten stranded test tickets on sprint 23**, all assigned to dark agent Sage, eight still `todo`, spanning June to September: DWB-445, 453, 467, 480, 495, 498, 504, 507, 515, 521. Deliberately NOT rehomed; deciding whether they are still wanted is his call, and a fix that tidies them would destroy the evidence. DWB-563 (tonight's) was rehomed to sprint 160 backlog.
-2. **Nothing else is blocked.** Ten carry-forwards, all backlog/unassigned on sprint 160: DWB-547, 548, 550, 555, 558, 561, 562, 563, 564, 565.
+1. **Fix the mint: DWB-566** (todo, sprint 160, unassigned — give it to a backend worker). Miles chose option 2 of three: mint the test ticket onto **the closing sprint as backlog**, delete the next-sprint search entirely rather than repair it, leave the ticket unassigned. Small change; most of the work is tests, including the never-covered normal case of closing a sprint when no other sprint exists. Full root cause and AC are in the ticket.
+2. **Then delete the ten stranded tickets.** DWB-445, 453, 467, 480, 495, 498, 504, 507, 515, 521 — all on sprint 23 under inactive agent Sage, eight still `todo`. Miles's decision: delete them once DWB-566 lands, **not before**, because they are the evidence the mint never worked. They are stale prompts for a redundant second test pass; the code they name IS tested (132 backend test files, 2050 backend / 377 frontend passing). DWB-515 and DWB-521 also close as duplicates of DWB-566.
+3. **Carry-forwards, eleven**, all backlog/unassigned on sprint 160 except 566 which is todo: DWB-547, 548, 550, 555, 558, 561, 562, 563, 564, 565, 566.
 
 ## The mint bug, root-caused (DWB-515 / DWB-521)
 
