@@ -6,7 +6,9 @@
 # Callees:       POST/PATCH /api/projects, POST/PATCH /api/sprints, POST /api/test-results
 # Data In:       Factory-created projects, epics, test results via conftest fixtures
 # Data Out:      Assertions on gate-blocked 400s and successful 200 completions
-# Last Modified: 2026-08-10 (DWB-004)
+# Last Modified: 2026-09-16 (DWB-572: force_test_coverage tests now build a fake
+#   repo_path-rooted backend/ tree via _write_fake_backend instead of relying on
+#   DWB's own routers/tests)
 
 """Tests for sprint completion gates (DWB-087/088/089).
 
@@ -140,14 +142,42 @@ class TestForceTestRunGate:
         assert r.status_code == 200
 
 
-class TestForceTestCoverageGate:
-    """force_test_coverage=true requires all routers to have test files."""
+def _write_fake_backend(tmp_path, routers: dict):
+    """Build a minimal backend/app/routers + backend/tests tree under tmp_path.
 
-    def _make_coverage_gated_sprint(self, client, make_epic):
+    `routers` maps router filename (e.g. "foo.py") -> covered (bool). Used to
+    give a test project its OWN repo_path-rooted backend so the
+    force_test_coverage gate (DWB-572) has something real to evaluate that
+    isn't DWB's own backend.
+    """
+    routers_dir = Path(tmp_path) / "backend" / "app" / "routers"
+    tests_dir = Path(tmp_path) / "backend" / "tests"
+    routers_dir.mkdir(parents=True)
+    tests_dir.mkdir(parents=True)
+    for name, covered in routers.items():
+        (routers_dir / name).write_text("# router\n")
+        if covered:
+            (tests_dir / f"test_{name}").write_text("# test\n")
+
+
+class TestForceTestCoverageGate:
+    """force_test_coverage=true requires all routers to have test files.
+
+    DWB-572: the gate evaluates the CLOSING project's own repo_path, not
+    DWB's. Every test here gives the project its own fake backend/ tree
+    (via _write_fake_backend) rather than relying on DWB's real routers.
+    """
+
+    def _make_coverage_gated_sprint(self, client, make_epic, repo_path=None, **extra):
         project = client.post("/api/projects", json={
             "prefix": "FTC",
             "name": "Force Test Coverage",
             "force_test_coverage": True,
+            "repo_path": repo_path,
+            # Isolate this gate: force_handoff_md defaults True and would
+            # also block once repo_path is set (no HANDOFF.md in the fake tree).
+            "force_handoff_md": False,
+            **extra,
         }).json()
         epic = make_epic(project_id=project["id"])
         sprint = client.post("/api/sprints", json={
@@ -158,15 +188,60 @@ class TestForceTestCoverageGate:
         }).json()
         return project, sprint
 
-    def test_all_routers_covered_allows_close(self, client, make_epic):
-        """All routers now have test files, so coverage gate passes."""
-        project, sprint = self._make_coverage_gated_sprint(client, make_epic)
+    def test_all_routers_covered_allows_close(self, client, make_epic, tmp_path):
+        """All routers in the PROJECT'S OWN repo have test files, gate passes."""
+        _write_fake_backend(tmp_path, {"foo.py": True, "bar.py": True})
+        project, sprint = self._make_coverage_gated_sprint(
+            client, make_epic, repo_path=str(tmp_path)
+        )
 
         r = client.patch(f"/api/sprints/{sprint['id']}", json={
             "status": "completed",
         })
         assert r.status_code == 200
         assert r.json()["status"] == "completed"
+
+    def test_uncovered_router_in_own_repo_blocks_close(self, client, make_epic, tmp_path):
+        """An uncovered router in the PROJECT'S OWN repo blocks close and is named."""
+        _write_fake_backend(tmp_path, {"foo.py": True, "bar.py": False})
+        project, sprint = self._make_coverage_gated_sprint(
+            client, make_epic, repo_path=str(tmp_path)
+        )
+
+        r = client.patch(f"/api/sprints/{sprint['id']}", json={
+            "status": "completed",
+        })
+        assert r.status_code == 400
+        assert "bar.py" in r.json()["detail"]
+        assert "foo.py" not in r.json()["detail"]
+
+    def test_no_repo_path_refuses_loudly(self, client, make_epic):
+        """DWB-572: no repo_path means the gate cannot evaluate the project at
+        all. It must refuse (400, naming repo_path), never silently fall back
+        to DWB's own backend."""
+        project, sprint = self._make_coverage_gated_sprint(client, make_epic)
+
+        r = client.patch(f"/api/sprints/{sprint['id']}", json={
+            "status": "completed",
+        })
+        assert r.status_code == 400
+        assert "repo_path" in r.json()["detail"]
+
+    def test_repo_path_without_fastapi_shape_refuses_loudly(
+        self, client, make_epic, tmp_path
+    ):
+        """DWB-572: a repo_path that isn't a backend/app/routers + backend/tests
+        tree (e.g. a non-Python project) must refuse, not silently check DWB's
+        own routers instead."""
+        project, sprint = self._make_coverage_gated_sprint(
+            client, make_epic, repo_path=str(tmp_path)
+        )
+
+        r = client.patch(f"/api/sprints/{sprint['id']}", json={
+            "status": "completed",
+        })
+        assert r.status_code == 400
+        assert project["prefix"] in r.json()["detail"]
 
     def test_gate_off_allows_close_with_gaps(self, client, make_project, make_epic):
         """force_test_coverage=false (default) allows close even with uncovered routers."""
@@ -227,14 +302,17 @@ class TestGateCombinations:
         assert "force_test_run" in r.json()["detail"].lower()
 
     def test_both_gates_satisfied_allows_close(
-        self, client, make_epic, make_test_result
+        self, client, make_epic, make_test_result, tmp_path
     ):
         """Both gates on, both satisfied — test run exists and all routers covered."""
+        _write_fake_backend(tmp_path, {"foo.py": True})
         project = client.post("/api/projects", json={
             "prefix": "BG2",
             "name": "Both Gates 2",
             "force_test_run": True,
             "force_test_coverage": True,
+            "repo_path": str(tmp_path),
+            "force_handoff_md": False,
         }).json()
         epic = make_epic(project_id=project["id"])
         sprint = client.post("/api/sprints", json={

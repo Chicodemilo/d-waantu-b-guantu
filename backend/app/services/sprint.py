@@ -6,7 +6,7 @@
 # Callees: models (sprint, ticket, agent, failure_record, test_result, standards_audit, project), agent_consolidation svc, git, services/activity_log
 # Data In: db: Session, SprintCreate/Update, acting_agent_id
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-09-16 (DWB-566: sprint-close mint targets the closing sprint as backlog, unassigned)
+# Last Modified: 2026-09-16 (DWB-572: force_test_coverage evaluates project.repo_path, not DWB's own BACKEND_DIR; router_test_coverage() shared with app/routers/status.py::get_test_coverage)
 
 import logging
 import re
@@ -283,7 +283,7 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
             )
 
     if project.force_test_coverage:
-        uncovered = _get_uncovered_routers()
+        uncovered = _get_uncovered_routers(project)
         if uncovered:
             raise HTTPException(
                 400,
@@ -515,19 +515,60 @@ def sprint_touched_py_files_missing_header(
     return sorted(missing)
 
 
-def _get_uncovered_routers() -> list[str]:
-    """Return list of router filenames that have no corresponding test file."""
-    routers_dir = BACKEND_DIR / "app" / "routers"
-    tests_dir = BACKEND_DIR / "tests"
+def router_test_coverage(routers_dir: Path, tests_dir: Path) -> list[dict]:
+    """Per-router test-file coverage for a given routers/ + tests/ pair.
+
+    Pure glob over whatever directories the caller hands it - no project or
+    DWB-specific assumptions live here. Shared by the force_test_coverage
+    sprint gate (project-scoped, see _get_uncovered_routers below) and
+    GET /status/test-coverage (DWB's own backend, app/routers/status.py) so
+    the two can't silently diverge (DWB-572) the way they had.
+    """
     test_files = {f.name for f in tests_dir.glob("test_*.py")}
-    uncovered = []
+    coverage = []
     for f in sorted(routers_dir.glob("*.py")):
         if f.name == "__init__.py":
             continue
         expected = f"test_{f.name}"
-        if expected not in test_files:
-            uncovered.append(f.name)
-    return uncovered
+        covered = expected in test_files
+        coverage.append({
+            "router": f.name,
+            "test_file": expected if covered else None,
+            "covered": covered,
+        })
+    return coverage
+
+
+def _get_uncovered_routers(project: Project) -> list[str]:
+    """Uncovered router filenames for the PROJECT BEING CLOSED (DWB-572).
+
+    force_test_coverage previously always globbed DWB's own BACKEND_DIR, so
+    any tracked project's sprint close was gated on DWB's router-to-test-file
+    mapping. This evaluates project.repo_path instead, and refuses loudly
+    (400) rather than silently falling back to DWB's own repo when the
+    project can't be evaluated: no repo_path, or a repo_path that isn't
+    shaped like a FastAPI backend (backend/app/routers + backend/tests) -
+    the only shape this check knows how to read.
+    """
+    if not project.repo_path:
+        raise HTTPException(
+            400,
+            "Cannot evaluate force_test_coverage: project "
+            f"'{project.prefix}' has no repo_path set.",
+        )
+    repo_root = Path(project.repo_path)
+    routers_dir = repo_root / "backend" / "app" / "routers"
+    tests_dir = repo_root / "backend" / "tests"
+    if not routers_dir.is_dir() or not tests_dir.is_dir():
+        raise HTTPException(
+            400,
+            f"Cannot evaluate force_test_coverage for project '{project.prefix}': "
+            f"no backend/app/routers and backend/tests found under {project.repo_path}. "
+            "This gate only understands a FastAPI backend shaped like this repo; "
+            "disable force_test_coverage for projects on a different stack.",
+        )
+    coverage = router_test_coverage(routers_dir, tests_dir)
+    return [c["router"] for c in coverage if not c["covered"]]
 
 
 def _on_sprint_completed(db: Session, sprint: Sprint) -> None:

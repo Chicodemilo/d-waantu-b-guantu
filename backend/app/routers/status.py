@@ -3,10 +3,10 @@
 # Created: 2026-03-29
 # Purpose: System status, test coverage, code standards, system docs, and test runner endpoints
 # Caller: app/main.py
-# Callees: app/models (agent, alert, ticket), pathlib, subprocess
+# Callees: app/models (agent, alert, ticket), app/services/sprint (router_test_coverage), pathlib, subprocess
 # Data In: HTTP requests
 # Data Out: JSON responses (status dict, coverage report, header format)
-# Last Modified: 2026-03-29
+# Last Modified: 2026-09-16 (DWB-572: test-coverage glob delegated to services/sprint.router_test_coverage, shared with the force_test_coverage gate)
 
 import json
 import shutil
@@ -25,6 +25,7 @@ from app.models.agent import Agent
 from app.models.alert import Alert, AlertCategory, AlertStatus
 from app.models.ticket import Ticket, TicketStatus
 from app.schemas.test_result import TestResultCreate
+from app.services import sprint as sprint_svc
 from app.services import test_result as test_result_svc
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
@@ -169,26 +170,14 @@ def get_status(db: Session = Depends(get_db)):
 
 @router.get("/status/test-coverage")
 def get_test_coverage():
+    # DWB's own coverage, for the global /tests page (TestResultsPage.jsx) -
+    # deliberately always this repo's backend, never a tracked project's
+    # (that's a different check: the per-project force_test_coverage sprint
+    # gate in services/sprint.py). DWB-572: the glob itself now lives in one
+    # place (sprint.router_test_coverage) so this and the gate can't diverge.
     routers_dir = BACKEND_DIR / "app" / "routers"
     tests_dir = BACKEND_DIR / "tests"
-
-    router_files = sorted(
-        f.name for f in routers_dir.glob("*.py") if f.name != "__init__.py"
-    )
-    test_files = {f.name for f in tests_dir.glob("test_*.py")}
-
-    coverage = []
-    for router_name in router_files:
-        stem = router_name.removesuffix(".py")
-        expected_test = f"test_{stem}.py"
-        covered = expected_test in test_files
-        coverage.append({
-            "router": router_name,
-            "test_file": expected_test if covered else None,
-            "covered": covered,
-        })
-
-    return coverage
+    return sprint_svc.router_test_coverage(routers_dir, tests_dir)
 
 
 _CODE_HEADER_FORMAT = {

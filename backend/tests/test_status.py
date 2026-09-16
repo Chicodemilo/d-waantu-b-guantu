@@ -3,10 +3,11 @@
 # Created:       2026-03-28
 # Purpose:       Tests for system status and health check endpoint
 # Caller:        pytest
-# Callees:       GET /api/status
+# Callees:       GET /api/status, GET /api/status/test-coverage
 # Data In:       None (stateless health check)
 # Data Out:      Assertions on HTTP 200 and status response shape
-# Last Modified: 2026-03-29
+# Last Modified: 2026-09-16 (DWB-572: smoke test for /status/test-coverage after
+#   its glob logic moved into services/sprint.router_test_coverage)
 
 """Tests for GET /api/status."""
 
@@ -40,3 +41,20 @@ def test_status_counts_reflect_data(client, make_agent, make_ticket):
     data = client.get("/api/status").json()
     assert data["active_agents"] >= 1
     assert data["in_progress_tickets"] >= 1
+
+
+def test_test_coverage_returns_200_and_shape(client):
+    """DWB-572: GET /status/test-coverage still reports DWB's OWN backend
+    (unchanged) after the glob logic moved into services/sprint.router_test_coverage,
+    shared with the per-project force_test_coverage gate."""
+    r = client.get("/api/status/test-coverage")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+    assert len(data) > 0
+    for row in data:
+        assert set(row.keys()) == {"router", "test_file", "covered"}
+        assert isinstance(row["covered"], bool)
+        # This is DWB's own status.py router; it must appear covered (this file).
+    routers = {row["router"] for row in data}
+    assert "status.py" in routers
