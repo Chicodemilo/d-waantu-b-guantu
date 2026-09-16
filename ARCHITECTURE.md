@@ -95,7 +95,7 @@ Agent (standalone)
 | **test_results** | project_id, sprint_id, ticket_id, run_at, suite, total_tests, passed, failed, skipped, duration_seconds, status, details, triggered_by, triggered_context | Failed results auto-create failure_records |
 | **hook_sessions** | session_id, transcript_path, agent_id, project_id, ticket_id, sprint_id, start_time, end_time, total_tokens, token_breakdown, status, session_type, agent_name, hook_event, created_at | Status: active/completed/error. Type: main/teammate/subagent |
 | **error_logs** | project_id, agent_id, source, endpoint, error_type, message, stack_trace, file_path, function_name, line_number, status_code, created_at | Source: backend/frontend/hook |
-| **failed_hooks** | session_id, hook_event, reason, cwd, agent_type, agent_name, agent_id_from_marker, project_id, hook_data, created_at | DWB-288 audit table for marker-resolution failures. Every `resolve_agent_from_marker` miss writes a row with the failure reason (`marker_missing`, `marker_unparseable`, `marker_agent_not_found`, etc.) and the raw hook payload, so the diagnostic isn't silent. |
+| **failed_hooks** | session_id, hook_event, reason, cwd, agent_type, agent_name, agent_id_from_marker, project_id, hook_data, created_at | DWB-288 audit table for marker-resolution failures. Every `resolve_agent_from_marker` miss writes a row with the failure reason (`marker_missing`, `marker_unparseable`, `marker_agent_unknown`, etc.) and the raw hook payload, so the diagnostic isn't silent. |
 
 ---
 
