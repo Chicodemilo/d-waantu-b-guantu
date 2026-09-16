@@ -25,6 +25,18 @@ from app.models.project import Project
 # This heading IS the write trace - it is already server-side, so the gate
 # reads it rather than adding a write-path column that would couple to (and
 # collide with) the memory service. A bare "Z" suffix is tolerated for safety.
+#
+# DWB-564: this file (memory.md) is REWRITTEN, not just appended, by the
+# condense/compact endpoints (app.services.agent.condense_memory /
+# compact_memory), and a rewrite drops every heading it replaces. A
+# condensing agent still passes this gate today ONLY because condense_memory
+# stamps its own "## <ISO> - condensed" heading — see the load-bearing note
+# on that function. compact_memory stamps no heading at all, so an agent
+# whose only memory activity is a compact will read as a non-writer here
+# regardless of when they actually wrote. If condense's heading shape ever
+# changes (or condense is asked to stop stamping one), this function keeps
+# working exactly as written and silently starts reporting real writers as
+# non-writers — pinned by test_condense_write_gate_coupling_dwb564.py.
 _HEADING_RE = re.compile(
     r"^##\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2}|Z)?)"
 )

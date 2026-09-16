@@ -1069,6 +1069,14 @@ def compact_memory(
     identity.md is protected; empty content is refused. No heading is stamped
     (the agent's content is written as-is); the condense endpoint is the
     heading-stamped sibling.
+
+    DWB-564: because no heading is stamped, a compact leaves NOTHING in
+    memory.md that memory_trace.agent_wrote_since can match. An agent whose
+    only memory activity in a window is a compact reads as a non-writer at
+    sprint/session close regardless of when the compact happened. This is a
+    sharper version of the same coupling condense_memory's docstring
+    describes — see that note before changing either function's heading
+    behavior.
     """
     return _replace_memory(
         db, agent_id=agent_id, file=file, content=content,
@@ -1093,6 +1101,19 @@ def condense_memory(
     record, then replaces the file. Refused with ``still_over_ceiling`` if the
     submission is itself over ceiling (trim more and resubmit); identity.md is
     protected; empty content is refused.
+
+    DWB-564: this stamped heading is LOAD-BEARING for the DWB-519 write-on-close
+    gate (services/memory_trace.py::agent_wrote_since), not just provenance. A
+    condense legitimately replaces every dated heading in memory.md with topic
+    headings ("Epic routing", "Memory mechanics", ...) that the gate's regex does
+    not match — DWB-560 actively encourages exactly that shape. The ONLY reason
+    a condensing agent still passes the gate today is that this heading happens
+    to satisfy memory_trace._HEADING_RE. If this stamp's shape changes, or a
+    caller reaches for compact_memory instead (which stamps no heading at all —
+    see its docstring), a condensing agent who did everything right fails the
+    gate as a silent non-writer. Pinned by
+    test_condense_write_gate_coupling_dwb564.py; do not change this heading's
+    shape without checking that test.
     """
     condensed_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     heading = f"## {condensed_at} - condensed\n"
