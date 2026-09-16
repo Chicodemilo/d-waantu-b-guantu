@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: HookSession, HookSessionStatus, HookSessionType
-# Last Modified: 2026-07-28
+# Last Modified: 2026-09-16 (DWB-580: transcript_bytes, how much of the transcript the stored total accounts for)
 
 import enum
 from datetime import datetime
@@ -62,6 +62,12 @@ class HookSession(Base):
     # from INT so a large per-session figure can never overflow the column.
     total_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     token_breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # DWB-580: how many BYTES of the transcript the recorded total accounts
+    # for. The recapture sweep stats the file and skips it unless it has grown
+    # past this, so a finished session costs one stat per cycle instead of a
+    # full parse. NULL means "never swept", which reads as zero and lets the
+    # first sweep look once.
+    transcript_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[HookSessionStatus] = mapped_column(
         Enum(HookSessionStatus), nullable=False, default=HookSessionStatus.active
     )

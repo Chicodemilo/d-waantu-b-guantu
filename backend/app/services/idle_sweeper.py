@@ -3,10 +3,10 @@
 # Created: 2026-06-09
 # Purpose: Background asyncio task that periodically auto-closes idle DWB sessions (DWB-337) and purges aged inter-agent messages (DWB-449)
 # Caller: app/main.py lifespan
-# Callees: app.services.dwb_session.sweep_idle_sessions, app.services.inter_agent_message.purge_old_agent_messages, app.database.SessionLocal
+# Callees: app.services.dwb_session.sweep_idle_sessions, app.services.inter_agent_message.purge_old_agent_messages, app.services.hook_tracking.recapture_token_growth, app.database.SessionLocal
 # Data In: settings.IDLE_TIMEOUT_MINUTES, settings.IDLE_SWEEP_INTERVAL_SECONDS, settings.AGENT_MESSAGE_RETENTION_DAYS
 # Data Out: idle-closed DwbSession rows, purged InterAgentMessage rows
-# Last Modified: 2026-06-24 (DWB-449: ride the loop for the agent-message age purge)
+# Last Modified: 2026-09-16 (DWB-580: ride the loop for transcript token recapture)
 
 """Background sweeper for idle DWB sessions.
 
@@ -43,6 +43,7 @@ import os
 from app import database
 from app.config import settings
 from app.services.dwb_session import sweep_idle_sessions
+from app.services.hook_tracking import recapture_token_growth
 from app.services.inter_agent_message import purge_old_agent_messages
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,28 @@ def _run_agent_message_purge_sync(max_age_days: int) -> int:
         db.close()
 
 
+def _run_token_recapture_sync() -> tuple[int, int]:
+    """Re-read transcripts that grew since we last recorded them (DWB-580).
+
+    Rides this loop for the same reason the agent-message purge does: one
+    periodic task in one process is the whole job. Its own SessionLocal and its
+    own try/except, so a recapture failure never touches the idle sweep.
+
+    This is what makes the capture independent of whether a resumed teammate
+    ever emits another SubagentStop, a question that could not be settled. The
+    transcript on disk is evidence that does not depend on a hook arriving.
+    """
+    db = database.SessionLocal()
+    try:
+        return recapture_token_growth(db)
+    except Exception:
+        db.rollback()
+        logger.exception("idle sweeper: token recapture failed")
+        return (0, 0)
+    finally:
+        db.close()
+
+
 async def _sweep_loop() -> None:
     """The recurring sweep loop. Sleeps between sweeps; cancels cleanly."""
     interval = settings.IDLE_SWEEP_INTERVAL_SECONDS
@@ -117,6 +140,7 @@ async def _sweep_loop() -> None:
             await asyncio.sleep(interval)
             await asyncio.to_thread(_run_one_sweep_sync, idle_minutes)
             await asyncio.to_thread(_run_agent_message_purge_sync, retention_days)
+            await asyncio.to_thread(_run_token_recapture_sync)
     except asyncio.CancelledError:
         logger.info("idle sweeper cancelled")
         raise

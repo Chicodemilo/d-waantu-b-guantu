@@ -6,7 +6,7 @@
 # Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
-# Last Modified: 2026-09-15 (DWB-539: transcript-span start_time, no backwards intervals, active-sprint ticket scoping)
+# Last Modified: 2026-09-16 (DWB-580: sessions are no longer frozen at their first turn - shared delta-aware token recorder, completed-guards removed from both hook paths, forward-only transcript recapture sweep)
 #
 # DWB-417 (2026-06-22): handle_tool_use ingests the PostToolUse hook and
 # persists one tool_actions row per tool call, resolving agent/dwb_session/
@@ -345,9 +345,11 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         select(HookSession).where(HookSession.session_id == session_id)
     )
 
-    if session and session.status == HookSessionStatus.completed:
-        # Already processed — idempotent
-        return session
+    # DWB-580: the same freeze existed here. Removing it only on the
+    # SubagentStop path would leave an identical copy to diverge, which is the
+    # failure this ticket already has two instances of. Re-processing is safe
+    # now for the same reason: record_session_tokens diffs against the stored
+    # total, so a repeat delivery logs a delta of zero rather than a duplicate.
 
     # Parse transcript for tokens and timing
     token_total = 0
@@ -472,8 +474,9 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
         )
         end_time = session.start_time
     session.end_time = end_time
-    session.total_tokens = token_total
-    session.token_breakdown = token_breakdown
+    # DWB-580: total_tokens / token_breakdown are NOT set here. The recorder
+    # below needs the previously stored total to compute a delta against;
+    # stamping the new cumulative figure first makes every delta zero.
     session.status = HookSessionStatus.completed
     session.hook_event = hook_event
 
@@ -491,36 +494,14 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
     #                                           unattributed alert that used to fire
     #                                           here is dead per DWB-353)
     agent = db.get(Agent, session.agent_id) if session.agent_id else None
-    if agent:
-        if agent.role in OVERHEAD_ROLES:
-            tracking.log_overhead_stop(db, session.project_id, agent.id)
-            if token_total > 0:
-                # log_overhead_tokens atomically updates the per-role bucket
-                # on the project row - see DWB-305 / tracking.py.
-                tracking.log_overhead_tokens(
-                    db, session.project_id, agent.id, token_total, source="hook"
-                )
-        elif session.ticket_id:
-            tracking.log_stop(db, session.ticket_id, agent.id)
-            if token_total > 0:
-                tracking.log_tokens(
-                    db, session.ticket_id, agent.id, token_total, source="hook"
-                )
-                # Also increment the ticket's tokens_used field
-                ticket = db.get(Ticket, session.ticket_id)
-                if ticket:
-                    ticket.tokens_used += token_total
-                    ticket.token_source = "hook"
-                    db.commit()
-        else:
-            # DWB-353: worker without ticket -> ad_hoc bucket. Previously this
-            # silently inflated tl_overhead_tokens; the skip-ticket-overhead
-            # lane is by design and shouldn't masquerade as TL work.
-            tracking.log_ad_hoc_stop(db, session.project_id, agent.id)
-            if token_total > 0:
-                tracking.log_ad_hoc_tokens(
-                    db, session.project_id, agent.id, token_total, source="hook"
-                )
+    # DWB-580: one shared recorder for both entry points and the sweeper. It
+    # owns the cumulative-vs-delta rule and the DWB-353 bucket routing.
+    delta = record_session_tokens(
+        db, session, token_total, breakdown=token_breakdown, emit_stop=True
+    )
+    # Carried on the instance (not persisted) purely so the endpoint can report
+    # what this event contributed - see the hooks router, DWB-580.
+    session._recorded_delta = delta
 
     # DWB-336: Layer-1 regex fast path for session-close detection. Same
     # post-commit timing as the open path so token attribution lands first.
@@ -1124,12 +1105,23 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
     if not subagent_id:
         raise ValueError("agent_id is required for SubagentStop")
 
-    # Idempotent: check if we already processed this subagent
+    # DWB-580: a completed row is NO LONGER a reason to stop. It used to be:
+    # `if existing and existing.status == completed: return existing`, which is
+    # right for a one-shot Task subagent that stops once, and wrong for a
+    # long-lived teammate resumed by SendMessage dozens of times under the SAME
+    # stable subagent_id. The first stop won, the row was frozen at the first
+    # turn, and every later stop was accepted, answered 200 ok, and discarded.
+    # Measured at 5x under across six sessions in one day.
+    #
+    # What made the guard load-bearing was that re-processing DOUBLE COUNTED.
+    # It no longer can: record_session_tokens diffs against the stored total,
+    # so a genuinely duplicate delivery of the same event now logs a delta of
+    # zero instead of a second full total. The idempotency the guard was
+    # protecting is now a property of the recorder, which is the right place
+    # for it, and re-processing became the feature.
     existing = db.scalar(
         select(HookSession).where(HookSession.session_id == subagent_id)
     )
-    if existing and existing.status == HookSessionStatus.completed:
-        return existing
 
     # Parse the subagent's transcript (NOT the parent's)
     agent_transcript_path = hook_data.get("agent_transcript_path")
@@ -1207,13 +1199,24 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
             sprint_id = ticket.sprint_id
 
     if existing:
-        # Update the existing active session
+        # Update the existing session.
+        #
+        # DWB-580: FILL-ONLY, and this only became load-bearing when the
+        # completed-guard came off. This branch used to run at most once, on a
+        # row that was still active. Now every later stop re-enters it, and the
+        # old `x.id if x else None` assignments would CLEAR a good attribution
+        # on any later stop whose resolution happened to miss - a ticket closed
+        # more than five minutes ago, a marker that no longer reads. Attribution
+        # that was correct would be erased by the mechanism meant to improve it,
+        # and the row would look like it was never attributed at all.
         session = existing
-        session.agent_id = agent.id if agent else None
-        session.ticket_id = ticket.id if ticket else None
-        session.sprint_id = sprint_id
-        session.session_type = session_type
-        session.agent_name = agent_type
+        if agent:
+            session.agent_id = agent.id
+            session.session_type = session_type
+            session.agent_name = agent_type
+        if ticket and session.ticket_id is None:
+            session.ticket_id = ticket.id
+            session.sprint_id = sprint_id
         # DWB-373: Backfill dwb_session_id if the subagent_id row was
         # created before any DWB session opened. Only stamp on NULL.
         if session.dwb_session_id is None:
@@ -1250,8 +1253,8 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
         )
         end_time = _as_naive_utc(session.start_time)
     session.end_time = end_time
-    session.total_tokens = token_total
-    session.token_breakdown = token_breakdown
+    # DWB-580: see handle_session_end. The recorder owns total_tokens and
+    # token_breakdown so it can diff against what is already stored.
     session.status = HookSessionStatus.completed
     session.hook_event = "SubagentStop"
 
@@ -1260,33 +1263,199 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
 
     # Log stop + tokens through tracking.py.
     # DWB-353 routing: same as handle_session_end (see comments there).
-    if agent:
-        if agent.role in OVERHEAD_ROLES:
-            tracking.log_overhead_stop(db, session.project_id, agent.id)
-            if token_total > 0:
-                tracking.log_overhead_tokens(
-                    db, session.project_id, agent.id, token_total, source="hook"
-                )
-        elif session.ticket_id:
-            tracking.log_stop(db, session.ticket_id, agent.id)
-            if token_total > 0:
-                tracking.log_tokens(
-                    db, session.ticket_id, agent.id, token_total, source="hook"
-                )
-                # Also increment the ticket's tokens_used field
-                ticket = db.get(Ticket, session.ticket_id)
-                if ticket:
-                    ticket.tokens_used += token_total
-                    ticket.token_source = "hook"
-                    db.commit()
-        else:
-            tracking.log_ad_hoc_stop(db, session.project_id, agent.id)
-            if token_total > 0:
-                tracking.log_ad_hoc_tokens(
-                    db, session.project_id, agent.id, token_total, source="hook"
-                )
+    # DWB-580: one shared recorder for both entry points and the sweeper. It
+    # owns the cumulative-vs-delta rule and the DWB-353 bucket routing.
+    delta = record_session_tokens(
+        db, session, token_total, breakdown=token_breakdown, emit_stop=True
+    )
+    # Carried on the instance (not persisted) purely so the endpoint can report
+    # what this event contributed - see the hooks router, DWB-580.
+    session._recorded_delta = delta
 
     return session
+
+
+# ---------------------------------------------------------------------------
+# Token recording (DWB-580)
+# ---------------------------------------------------------------------------
+
+
+def record_session_tokens(
+    db: Session,
+    session: HookSession,
+    cumulative_tokens: int,
+    *,
+    breakdown: dict | None = None,
+    emit_stop: bool,
+) -> int:
+    """Advance a session's recorded total and log ONLY what is new.
+
+    Returns the delta actually logged (0 when nothing new arrived).
+
+    THE ROW HOLDS A CUMULATIVE TOTAL, THE LOG TAKES A DELTA, and keeping those
+    two straight is the whole job. A transcript is one cumulative file, so a
+    re-parse always yields the running total for the whole session. But
+    tracking.log_tokens and ticket.tokens_used INCREMENT. Passing the
+    cumulative figure to them on every stop multiplies a ticket's tokens by its
+    stop count, which is worse than recording nothing: today's numbers are at
+    least wrong in one consistent direction, and a multiplied number looks
+    plausible while being unbounded.
+
+    ATOMIC AGAINST THE STORED VALUE. The previous total is read back under an
+    exclusive lock on this row rather than trusted from the caller's copy, and
+    the lock is held until the commit at the end. Without it, a sweep and a
+    hook event landing together both read the same old total, both compute a
+    delta against it, and both log: the same read-check-write race that
+    DWB-567 fixed in node_exclusion.py, in the one place where a sweeper
+    running unattended makes a collision likely rather than theoretical.
+
+    A re-parse that comes back SMALLER never walks the total backwards. That
+    means a truncated or rotated transcript records nothing instead of logging
+    a negative delta that would silently credit tokens back.
+    """
+    locked = db.scalars(
+        select(HookSession)
+        .where(HookSession.id == session.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).first()
+    if locked is None:
+        return 0
+
+    previous = locked.total_tokens or 0
+    cumulative = max(int(cumulative_tokens or 0), 0)
+    delta = cumulative - previous
+
+    if delta < 0:
+        logger.warning(
+            "DWB-580: session %s re-parsed LOWER than recorded (%s < %s); "
+            "leaving the total where it is",
+            locked.session_id, cumulative, previous,
+        )
+        delta = 0
+    elif delta > 0:
+        locked.total_tokens = cumulative
+        if breakdown is not None:
+            locked.token_breakdown = breakdown
+    db.flush()
+
+    # DWB-353 routing, single copy. Previously duplicated byte for byte at the
+    # session-end and SubagentStop sites, which is how a delta rule applied in
+    # one place would have survived in the other (DWB-572, same lesson).
+    #   agent in OVERHEAD_ROLES (tl/pm) -> overhead bucket, even with a ticket
+    #   worker with a ticket            -> ticket attribution
+    #   worker without a ticket         -> ad_hoc bucket
+    #   no agent at all                 -> nothing
+    agent = db.get(Agent, locked.agent_id) if locked.agent_id else None
+    if agent:
+        if agent.role in OVERHEAD_ROLES:
+            if emit_stop:
+                tracking.log_overhead_stop(db, locked.project_id, agent.id)
+            if delta > 0:
+                # log_overhead_tokens atomically updates the per-role bucket
+                # on the project row - see DWB-305 / tracking.py.
+                tracking.log_overhead_tokens(
+                    db, locked.project_id, agent.id, delta, source="hook"
+                )
+        elif locked.ticket_id:
+            if emit_stop:
+                tracking.log_stop(db, locked.ticket_id, agent.id)
+            if delta > 0:
+                tracking.log_tokens(
+                    db, locked.ticket_id, agent.id, delta, source="hook"
+                )
+                ticket = db.get(Ticket, locked.ticket_id)
+                if ticket:
+                    ticket.tokens_used += delta
+                    ticket.token_source = "hook"
+        else:
+            if emit_stop:
+                tracking.log_ad_hoc_stop(db, locked.project_id, agent.id)
+            if delta > 0:
+                tracking.log_ad_hoc_tokens(
+                    db, locked.project_id, agent.id, delta, source="hook"
+                )
+
+    db.commit()
+    return delta
+
+
+# Forward-only boundary for the recapture sweep (DWB-580). Captured once at
+# import, which is process start. The sweep only considers rows created at or
+# after this instant, so it can never reach back and "correct" a figure that
+# predates the fix. Miles's ruling is that the old baseline is lost and is not
+# to be chased; a sweeper that quietly repaired history would violate that
+# without anybody deciding to.
+_RECAPTURE_EPOCH = datetime.now(UTC).replace(tzinfo=None)
+
+
+def recapture_token_growth(db: Session, *, limit: int = 200) -> tuple[int, int]:
+    """Re-read transcripts that have grown since we last recorded them.
+
+    Returns (sessions_advanced, tokens_added).
+
+    WHY A SWEEP AND NOT JUST THE GUARD REMOVAL. Whether a resumed teammate
+    emits another SubagentStop at all could not be established: an event that
+    ARRIVES was proved to be discarded, the firing rate was not. Both answers
+    lead here. If later stops fire, this is belt and braces; if they never
+    fire, this is the only thing that captures the work. A transcript on disk
+    is evidence that does not depend on a hook being delivered, so the sweep
+    reads the evidence rather than waiting for the notification.
+
+    Cheap by construction: a row is only re-parsed when its transcript file is
+    larger than when we last looked, so a finished session costs one stat call
+    per cycle and nothing else.
+    """
+    rows = db.scalars(
+        select(HookSession)
+        .where(HookSession.transcript_path.is_not(None))
+        .where(HookSession.created_at >= _RECAPTURE_EPOCH)
+        .order_by(HookSession.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    advanced = 0
+    added = 0
+    for row in rows:
+        try:
+            path = Path(row.transcript_path)
+            if not path.is_file():
+                continue
+            # The recorded figure is a lower bound on the bytes it came from,
+            # so a file that has not grown cannot hold anything new. One stat
+            # beats one full parse.
+            if path.stat().st_size <= (row.transcript_bytes or 0):
+                continue
+            parsed = parse_transcript(row.transcript_path)
+            size = path.stat().st_size
+            delta = record_session_tokens(
+                db, row, parsed["total_tokens"],
+                breakdown=parsed["breakdown"], emit_stop=False,
+            )
+            # Stamp the size we parsed AT, not the size before it, so growth
+            # during the parse is picked up next cycle rather than skipped.
+            row.transcript_bytes = size
+            if parsed.get("end_time"):
+                end = _as_naive_utc(parsed["end_time"])
+                if row.start_time is None or end >= _as_naive_utc(row.start_time):
+                    row.end_time = end
+            db.commit()
+            if delta > 0:
+                advanced += 1
+                added += delta
+        except Exception:
+            # One unreadable transcript must not stop the sweep. Isolate per
+            # row: a single poison entry silently costing every later row its
+            # capture is the batch hazard, and this sweep runs unattended.
+            db.rollback()
+            logger.exception(
+                "DWB-580: token recapture failed for session %s", row.session_id
+            )
+    if advanced:
+        logger.info(
+            "DWB-580: recaptured %s token(s) across %s session(s)", added, advanced
+        )
+    return advanced, added
 
 
 # --- Internal helpers ---

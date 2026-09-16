@@ -93,11 +93,20 @@ def hook_session_end(data: HookEventInput, db: Session = Depends(get_db)):
     """Receive a SessionEnd or SubagentStop hook event from Claude Code."""
     try:
         session = svc.handle_session_end(db, data.model_dump())
+        # DWB-580: say what LANDED, not merely that the call ran. The old
+        # response was {"status": "ok", ... total_tokens} whether the event was
+        # recorded or silently discarded by the completed-guard, so a stop that
+        # threw away a turn's work was indistinguishable from one that captured
+        # it. That is how 7.8M tokens went missing in a day with every hook
+        # reporting success. `tokens_recorded` is the delta this event actually
+        # contributed; a persistent 0 against a growing transcript is now
+        # visible from the outside instead of being invisible by construction.
         return {
             "status": "ok",
             "session_id": session.session_id,
             "hook_session_id": session.id,
             "total_tokens": session.total_tokens,
+            "tokens_recorded": getattr(session, "_recorded_delta", 0),
         }
     except Exception as e:
         logger.exception("hook_session_end error")
