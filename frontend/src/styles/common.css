@@ -784,6 +784,17 @@
   color: var(--red);
 }
 
+/* Shape-drift failure state for the Code Standards block. Red and unmissable:
+   this replaces a raw JSON dump that read as intentional output. */
+.code-standards__missing {
+  padding: 12px 16px;
+  color: var(--red);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid var(--red);
+}
+
 .code-standards__template {
   padding: 16px;
   color: var(--green);

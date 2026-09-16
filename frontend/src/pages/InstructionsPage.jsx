@@ -3,15 +3,30 @@
 // Created: 2026-03-29
 // Purpose: Manages CLI instruction syncing, displays instruction list, playbooks, and code standards
 // Caller: App.jsx (route: /instructions)
-// Callees: react, ../components/instructions/InstructionList, ../api/instructions, ../api/status
+// Callees: react, ../components/instructions/InstructionList, ../api/instructions, ../api/status, ../services/logger
 // Data In: Instructions sync status, playbooks, and code standards from API
-// Data Out: Default export InstructionsPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Data Out: Default export InstructionsPage component; named export codeHeaderTemplate (pure shape reader)
+// Last Modified: 2026-09-16 (DWB-573: read header_format.template at its real path;
+//          dropped the JSON.stringify fallback that turned a shape break into
+//          raw JSON on the page and made it look deliberate)
 
 import { useState, useEffect, useCallback } from 'react';
 import InstructionList from '../components/instructions/InstructionList';
 import { syncCheck, syncInstructions, getPlaybooks } from '../api/instructions';
 import { getCodeStandards } from '../api/status';
+import { log } from '../services/logger';
+
+// The one shape GET /api/status/code-standards returns: {header_format: {fields,
+// template, placement}}. Read it at its documented path and nowhere else. The
+// previous chain (template || header_template || JSON.stringify) guessed at two
+// top-level keys that have never existed on this endpoint, so it silently fell
+// through to dumping the raw response onto a page a human reads, while looking
+// like deliberate multi-shape handling. A miss is now a visible, logged failure:
+// resilience that hides a break is worse than no resilience at all.
+export function codeHeaderTemplate(codeStandards) {
+  const template = codeStandards?.header_format?.template;
+  return typeof template === 'string' && template.trim() ? template : null;
+}
 
 function InstructionsPage() {
   const [unsynced, setUnsynced] = useState(null);
@@ -20,6 +35,19 @@ function InstructionsPage() {
   const [expandedPlaybook, setExpandedPlaybook] = useState(null);
   const [codeStandards, setCodeStandards] = useState(null);
   const [standardsExpanded, setStandardsExpanded] = useState(false);
+  const headerTemplate = codeHeaderTemplate(codeStandards);
+
+  // Shape drift is loud for the team too, not just the reader: without this the
+  // next move of this key is only ever caught by someone happening to look.
+  useEffect(() => {
+    if (codeStandards && !codeHeaderTemplate(codeStandards)) {
+      log.error(
+        'shape',
+        'code-standards response has no header_format.template',
+        { keys: Object.keys(codeStandards) }
+      );
+    }
+  }, [codeStandards]);
 
   const checkSync = useCallback(async () => {
     try {
@@ -81,22 +109,31 @@ function InstructionsPage() {
             <span className="tooltip-trigger">
               ?
               <span className="tooltip-content">
-                Mandatory header for all code files. Format is managed by the team lead — request changes via Claude Code.
+                Mandatory header for all code files. Format is managed by the team lead: request changes via Claude Code.
               </span>
             </span>
           </div>
-          <div className="instruction-card">
-            <div
-              className="instruction-card__header"
-              onClick={() => setStandardsExpanded(!standardsExpanded)}
-            >
-              <span className={`instruction-card__caret${standardsExpanded ? ' instruction-card__caret--open' : ''}`}>&gt;</span>
-              <span className="instruction-card__title">File Header Template</span>
+          {headerTemplate ? (
+            <div className="instruction-card">
+              <div
+                className="instruction-card__header"
+                onClick={() => setStandardsExpanded(!standardsExpanded)}
+              >
+                <span className={`instruction-card__caret${standardsExpanded ? ' instruction-card__caret--open' : ''}`}>&gt;</span>
+                <span className="instruction-card__title">File Header Template</span>
+              </div>
+              {standardsExpanded && (
+                <pre className="code-standards__template">{headerTemplate}</pre>
+              )}
             </div>
-            {standardsExpanded && (
-              <pre className="code-standards__template">{codeStandards.template || codeStandards.header_template || JSON.stringify(codeStandards, null, 2)}</pre>
-            )}
-          </div>
+          ) : (
+            // Not behind the expander on purpose: a break hidden inside a
+            // collapsed card is the same silent failure in a new costume.
+            <div className="code-standards__missing">
+              Code standards unavailable: the API response carried no
+              header_format.template. Nothing to show here until it does.
+            </div>
+          )}
         </div>
       )}
       <InstructionList />
