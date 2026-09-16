@@ -3,10 +3,10 @@
 # Created: 2026-03-29
 # Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), post-close automation, semantic activity events (DWB-410), gate_miss auto-scoring on blocked close (DWB-425)
 # Caller: app/routers/sprints.py
-# Callees: models (sprint, ticket, alert, agent, failure_record, test_result, standards_audit, project), agent_consolidation svc, git, services/activity_log
+# Callees: models (sprint, ticket, agent, failure_record, test_result, standards_audit, project), agent_consolidation svc, git, services/activity_log
 # Data In: db: Session, SprintCreate/Update, acting_agent_id
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-09-14 (DWB-510: failure-gate stub check uses reviewed flag, not notes text)
+# Last Modified: 2026-09-16 (DWB-566: sprint-close mint targets the closing sprint as backlog, unassigned)
 
 import logging
 import re
@@ -22,7 +22,6 @@ from app.models.agent import Agent
 from app.models.epic import Epic, EpicStatus
 from app.models.failure_record import FailureRecord
 from app.models.project import Project
-from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
 from app.models.standards_audit import AuditVerdict, StandardsAudit
 from app.models.test_result import TestResult
@@ -531,65 +530,50 @@ def _get_uncovered_routers() -> list[str]:
     return uncovered
 
 
-_ALERT_ROLES = ("team-lead", "pm", "tester")
-
-
-def _find_agent_by_role(db: Session, project_id: int, role: str) -> Agent | None:
-    """Find an agent assigned to a project by role."""
-    return db.scalars(
-        select(Agent)
-        .join(ProjectAgent, ProjectAgent.agent_id == Agent.id)
-        .where(ProjectAgent.project_id == project_id)
-        .where(Agent.role == role)
-        .limit(1)
-    ).first()
-
-
 def _on_sprint_completed(db: Session, sprint: Sprint) -> None:
     # DWB-463: the per-role "tests needed" ALERT rows are removed (epic 37,
     # alerts-vs-actions). We deliberately do NOT write a feed entry here: the
     # sprint close is already represented in the activity feed by the
     # sprint_closed event (DWB-410, emitted by update_sprint), so a second
-    # write would duplicate it. This handler now only locates the tester to
-    # auto-assign the next sprint's test ticket.
-    tester_agent = _find_agent_by_role(db, sprint.project_id, "tester")
-
-    # Find the next sprint for the same project. Post-DWB-331 only one
-    # sprint can be active per project, so the auto-ticket target is the
-    # next planned (queued) sprint. We also accept active as a fallback
-    # for any legacy data ordering oddities; the OR keeps the lookup
-    # robust without depending on the order pre-completion ran.
-    next_sprint = db.scalars(
-        select(Sprint)
-        .where(Sprint.project_id == sprint.project_id)
-        .where(Sprint.id != sprint.id)
-        .where(
-            Sprint.status.in_([SprintStatus.planned, SprintStatus.active])
-        )
-        .order_by(Sprint.sprint_number.asc(), Sprint.created_at.asc())
-        .limit(1)
-    ).first()
-
-    if next_sprint and tester_agent:
+    # write would duplicate it. This handler now only mints the test ticket.
+    #
+    # DWB-566: the test ticket is minted onto THE CLOSING SPRINT with status
+    # backlog, unassigned. The previous implementation searched for a "next
+    # planned (queued) sprint" - a correct implementation of a queue model
+    # this project never adopted. Sprints are created one at a time at the
+    # start of the session that works them, so at close time the next sprint
+    # does not exist yet and the ascending-order lookup fell through to a
+    # stale placeholder sprint, stranding every minted ticket there (ten of
+    # them, from June to September 2026). The search is deleted, not repaired.
+    #
+    # Minting onto the closing sprint keeps the ticket with the work it refers
+    # to; backlog status keeps it out of that sprint's done-gate and out of the
+    # closed sprint's working set, so it is pulled forward by hand when the
+    # next sprint opens - which is what a human did with it anyway. No assignee
+    # is set: the old role lookup had no is_active filter and no ORDER BY, so
+    # it handed the ticket to an inactive agent (and would have been
+    # nondeterministic with two active candidates). The sprint's own tester is
+    # picked when the ticket is pulled forward, by whoever pulls it.
+    project = db.get(Project, sprint.project_id)
+    if project:
         # Auto-generate next ticket number for the project
         max_num = db.scalar(
             select(func.coalesce(func.max(Ticket.ticket_number), 0))
             .where(Ticket.project_id == sprint.project_id)
         )
         next_num = max_num + 1
-        project = db.get(Project, sprint.project_id)
         ticket_key = f"{project.prefix}-{next_num:03d}"
 
         db.add(Ticket(
             project_id=sprint.project_id,
-            sprint_id=next_sprint.id,
-            epic_id=next_sprint.epic_id,
-            assigned_agent_id=tester_agent.id,
+            sprint_id=sprint.id,
+            epic_id=sprint.epic_id,
+            assigned_agent_id=None,
             ticket_number=next_num,
             ticket_key=ticket_key,
             title=f"Write tests for S{sprint.sprint_number}: {sprint.name}",
             ticket_type=TicketType.task,
-            status=TicketStatus.todo,
+            status=TicketStatus.backlog,
         ))
 
     db.commit()

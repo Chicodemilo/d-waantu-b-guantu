@@ -118,7 +118,7 @@ Boolean toggles gating sprint completion. All default OFF (opt-in per project):
 
 Check gates: `GET /api/projects/{id}/gate-status`
 
-On sprint completion: alerts fire to TL/PM/tester, test ticket auto-created for next sprint.
+On sprint completion: a test ticket is minted onto the closing sprint as backlog, unassigned (DWB-566), and pulled forward by hand when the next sprint opens. No alerts fire: the per-role tests-needed alerts were removed in DWB-463.
 
 ---
 

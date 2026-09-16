@@ -420,7 +420,7 @@ On every DWB session close (all paths + the idle sweeper, via `_apply_synthesis`
 
 ### Alert Auto-Creation
 - Ticket marked done with 0 tokens -> info alert
-- Sprint completed -> alerts for team-lead, pm, tester + auto-creates test ticket
+- Sprint completed -> mints a test ticket onto the closing sprint as backlog, unassigned (DWB-566). No alert rows: the per-role tests-needed alerts were removed in DWB-463
 - Doc gate failing -> critical alert for TL
 - Rework detected -> info alert for PM
 - Unattributed hook session -> warning alert

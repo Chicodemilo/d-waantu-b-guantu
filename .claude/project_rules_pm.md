@@ -36,7 +36,7 @@ Plus: unreviewed failure records (type=TBD) block close.
 ## Alert Patterns
 
 - **0-token done tickets** — info alert fires automatically. Usually means hooks aren't attributing. Investigate if persistent.
-- **Sprint close** — auto-creates alerts for TL, PM, tester + test ticket for next sprint.
+- **Sprint close** — mints a test ticket onto the closing sprint as backlog, unassigned (DWB-566). No alerts fire; the per-role "tests needed" alerts were removed in DWB-463.
 - **Doc gate failures** — critical alert for TL. Check that INITIAL.md, ARCHITECTURE.md, HANDOFF.md all exist. (TEAM.md is deprecated — roster lives in DB.)
 - **Rework detected** — info alert for PM when ticket goes back to in_progress after done. Auto-creates failure record stub.
 
