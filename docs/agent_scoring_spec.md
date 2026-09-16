@@ -72,7 +72,7 @@ so the ledger is always authoritative.
 | Ticket reopened after done (rework) | down | `failure_record` type=`rework` |
 | Test failure attributed | down per failure | `failure_record` type=`test_failure` |
 | Stale ticket (in_progress, no updates) | down small | existing stale-check |
-| Closed with 0 tokens | down | existing 0-token alert |
+| Closed with 0 tokens | down | `zero_token_close` score penalty (not an alert; no Alert row is created) |
 | `forgot` to do something | down small | see below |
 
 Auto-triggers attribute via `ticket.assigned_agent_id` / `failure_record.logged_by`,

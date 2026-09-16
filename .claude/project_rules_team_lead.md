@@ -36,7 +36,7 @@ Standard DWB team:
 
 - One active sprint at a time
 - Sprint names are descriptive (from goal), not "Sprint N"
-- Latest sprint: 47, latest ticket: DWB-252, latest epic: 17
+- Current counters live in the DB, not here: `GET /api/sprints?project_id=1`, `GET /api/tickets?project_id=1`, `GET /api/epics?project_id=1`. A number written into this file is stale the day after it is written.
 - Gates: 7 enabled (force_headers, force_test_coverage, force_test_run, force_initial_md, force_architecture_md, force_handoff_md + failure records). `force_team_md` was removed in DWB-321 — roster is DB-authoritative.
 
 ## Key Patterns Learned

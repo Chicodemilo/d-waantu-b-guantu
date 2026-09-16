@@ -106,7 +106,7 @@ Live list: `GET /api/projects/{id}/gate-status`. Nine boolean gates (test run + 
 4. Tester runs tests: `./backend/scripts/run_tests.sh --post --project-id 1 --triggered-by "tester"`
 5. Standards audit (if `force_standards_audit` ON): stage the diff, run `scripts/run_standards_audit.sh --project-id 1 --staged --ticket-id N --sprint-id M`; REJECT → back to worker, PASS → commit. See README § Standards Audit.
 6. PM closes sprint (gates checked automatically)
-7. Sprint close auto-creates: test ticket for next sprint, alerts to team
+7. Sprint close auto-creates: a test ticket minted onto the closing sprint as backlog, unassigned (pulled forward by hand when the next sprint opens); no alerts fire
 
 ## Tracking (Time & Tokens)
 
@@ -114,7 +114,7 @@ The `tracking_log` table is the source of truth for time and token accounting. S
 
 - **Start/stop** tracking via the API or auto-inserted on status changes
 - **Hook tracking**: Claude Code hooks (`SessionStart`, `SessionEnd`, `SubagentStop`) POST to `/api/hooks/session-start` and `/api/hooks/session-end` for real-time token attribution
-- **Auto-alert**: if a ticket is closed with 0 tokens, an alert fires
+- **No auto-alert on 0 tokens**: closing a ticket with zero attributed tokens applies a score penalty (`zero_token_close`), it has never raised an alert
 
 ## Failure Analysis
 

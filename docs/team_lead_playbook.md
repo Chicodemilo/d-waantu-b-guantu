@@ -239,9 +239,11 @@ If `.claude/ALERTS_PENDING.md` exists, **read it immediately, it takes priority.
 
 | Alert Type | Examples | Action |
 |------------|----------|--------|
-| Simple / self-service | Stale ticket (agent confirmed dead), zero-token no-op | Handle directly, move ticket, dismiss alert, comment |
+| Simple / self-service | Stale ticket (agent confirmed dead) | Handle directly, move ticket, dismiss alert, comment |
 | Needs investigation | Unclear stale ticket, unexpected failure, gate failure | Delegate to PM |
 | Critical / human decision | DB errors, agent loop, scope questions, compliance | Escalate to human |
+
+A zero-token close is NOT an alert: it applies a `zero_token_close` score penalty automatically (`scoring_triggers.py`). There is no alert row to dismiss for it.
 
 Don't let open alerts accumulate, an ignored queue trains everyone to ignore alerts.
 

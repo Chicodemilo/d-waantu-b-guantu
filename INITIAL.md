@@ -42,7 +42,7 @@ The human operator reads the dashboard. The PM agent observes other agents and w
 
 Every ticket tracks `tokens_used` and `time_spent_seconds`. Team lead and PM tokens are tracked separately as project "overhead" since their work spans across tickets. A stop hook automatically reports tokens from Claude Code session transcripts — agents don't have to remember to self-report, though they can via `POST /api/tickets/:id/tokens`.
 
-When a ticket is closed with zero tokens, an alert fires. This was a deliberate enforcement choice — if an agent did work, the tokens should be recorded.
+When a ticket is closed with zero tokens, no alert fires; a score penalty applies instead (`zero_token_close`, DWB-424..428). This was a deliberate enforcement choice — if an agent did work, the tokens should be recorded.
 
 ### Terminal UI aesthetic
 
