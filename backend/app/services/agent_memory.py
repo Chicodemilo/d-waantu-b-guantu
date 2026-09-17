@@ -3,10 +3,10 @@
 # Created: 2026-06-03
 # Purpose: Scaffold an agent's memory directory (DWB-401: .dwb/memory/<prefix>/<name>/) - identity.md + empty memory.md; DWB-431 prepends a live scoring-standing block; DWB-438 prepends a TL-channel unread block for team-leads
 # Caller: app/services/agent.create_agent, app/services/project_agent.create_project_agent, manual endpoint
-# Callees: app/models/agent, app/models/project, app/services/scoring (get_standing), app/services/tl_channel (unread_for_agent, mark_read)
+# Callees: app/models/agent, app/models/project, app/services/scoring (get_standing), app/services/tl_channel (unread_for_agent, mark_read), app/config/memory_rules (MEMORY_USAGE_RULES)
 # Data In: db: Session, agent_id: int
 # Data Out: ScaffoldResult (paths created, paths preserved, paths skipped)
-# Last Modified: 2026-06-23 (DWB-438: TL-channel unread block for team-leads)
+# Last Modified: 2026-09-17 (DWB-037: render the role-tailored spawn_section; identity.md defers to MEMORY_USAGE_RULES instead of restating it)
 
 import logging
 from dataclasses import dataclass, field
@@ -15,6 +15,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.config.memory_rules import MEMORY_USAGE_RULES
 from app.models.agent import Agent
 from app.models.project import Project
 
@@ -279,7 +280,8 @@ Before doing anything else, read these in order:
 3. **HANDOFF.md** - session continuity (current state, decisions). TL-owned.
 4. **ARCHITECTURE.md** - system design + operational reference.
 5. **README.md** - project overview, setup, API reference.
-6. **Your memory dir** (below) - the single free-form `memory.md`.
+
+Your memory needs no reading - see § Your memory below.
 
 You (the team lead) are the ONLY agent that owns root-level project docs
 (HANDOFF / ARCHITECTURE / README). Do NOT create any other root-level doc -
@@ -292,8 +294,9 @@ Before doing anything else, read these in order:
 
 1. **Your playbook** - `{playbook}`
 2. **Your project rules** - `{project_rules}`
-3. **Your memory dir** (below) - the single free-form `memory.md`.
-   This is your memory; rely on it plus the brief the TL gives you.
+
+Your memory needs no reading - it is already in your session, plus whatever
+brief the TL gives you. See § Your memory below.
 
 Root-level project docs (HANDOFF / ARCHITECTURE / README) belong to the team
 lead. Read ARCHITECTURE.md / README.md ONLY if your task is cross-cutting and
@@ -312,41 +315,19 @@ knowledge lives in your memory dir, not in root files."""
 - **project:** {project.prefix} ({project.name})
 - **created:** {created}
 
-## On Spawn - Read These First
+{spawn_section}
 
-Before doing anything else, read these files in order:
+## Your memory
 
-1. **Your playbook** - `{playbook}`
-2. **Your project rules** - `{project_rules}`
-3. **HANDOFF.md** - session continuity notes (current state, decisions, gotchas)
-4. **ARCHITECTURE.md** - system design and data model
-5. **README.md** - project overview, setup, API reference
+`memory.md` sits next to this file. You do NOT read it on spawn - DWB-517
+injects it into your session for you, so there is nothing to open. Your only
+interaction with it is to WRITE, and only through the API:
 
-This gives you full context without needing to ask the TL. If any of these files don't exist, proceed with what you have and flag it.
+{MEMORY_USAGE_RULES}
 
-## Memory files (DWB-401)
+You must write to `memory.md` at least once per sprint or the sprint cannot
+close (DWB-519); a `session-complete` wrap-up satisfies that.
 
-One free-form file lives in this directory alongside this identity.md:
-
-- `memory.md` - your single durable memory: in-flight working notes AND lessons worth keeping across sessions. Append-only via the API; the server prepends an ISO 8601 heading per entry. (The former scratchpad.md + lessons.md were merged into this file; recent_sessions.md was dropped - the DWB dashboard is the session index.)
-
-## How to write to it
-
-Memory now lives under `.dwb/` (writable), not `.claude/`. Still write through the API so the server applies the ISO heading and the passive size-trim consistently:
-
-- **Append:** `POST /api/agents/{agent.id}/memory/append` with body `{{"file": "memory", "content": "..."}}`. Server prepends the ISO 8601 UTC heading. `identity.md` is system-generated and refused at the validation layer.
-- **Session wrap-up:** `POST /api/agents/{agent.id}/session-complete` writes the session block to memory.md for you with one payload.
-
-memory.md has a passive size ceiling: when it grows past the ceiling the server silently trims the OLDEST entries. This NEVER blocks a session or sprint close - it is a trim threshold, not a gate.
-
-## ISO 8601 entry rule
-
-The append/session-complete endpoints prepend the heading server-side, so you do not format the timestamp. Reference shape for what lands on disk:
-
-```
-## 2026-06-03T20:48:42+00:00 - session <session_id>
-<entry body>
-```
-
-Appends never clobber prior entries (until the passive trim drops the oldest to stay under ceiling).
+The rules above are generated from `app/config/memory_rules.py` - the single
+source of truth. Do not restate them here.
 """

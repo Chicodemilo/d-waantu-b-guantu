@@ -6,9 +6,10 @@
 # Callees: app.services.agent_memory, POST /api/agents, POST /api/project-agents, POST /api/agents/{id}/scaffold-memory
 # Data In: tmp_path filesystem, factory projects + agents
 # Data Out: Assertions on directory layout, identity.md content, idempotency
-# Last Modified: 2026-06-19
+# Last Modified: 2026-09-17
 
 from pathlib import Path
+from app.config.memory_rules import MEMORY_USAGE_RULES
 
 
 def _memory_dir(repo_path, prefix, name):
@@ -51,8 +52,15 @@ class TestScaffoldOnCreate:
         assert "SCF2 (Scaffold Two)" in identity
         # Self-orientation block
         assert "## On Spawn - Read These First" in identity
-        # ISO 8601 entry rule
-        assert "## ISO 8601 entry rule" in identity
+        # The read-list is role-tailored: a worker is pointed at the worker
+        # playbook and is NOT given the team-lead's root-doc responsibilities.
+        assert ".claude/worker_playbook.md" in identity
+        assert "HANDOFF.md" not in identity.split("## Your memory")[0]
+        # The memory rules are embedded verbatim from their single source of
+        # truth rather than restated, so a divergent second copy cannot exist.
+        assert MEMORY_USAGE_RULES in identity
+        assert "silently trims" not in identity
+        assert "not a gate" not in identity
 
 
 class TestScaffoldIdempotency:
