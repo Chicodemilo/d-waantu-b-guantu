@@ -4,7 +4,7 @@
 
 ## Identity at Spawn
 
-Read the **On Spawn — Identity (REQUIRED)** section in `docs/worker_playbook.md` (deployed to `.claude/worker_playbook.md`) first. Five steps: identify via `POST /api/agents/identify`, cache your `agent_id`, the TL writes your session marker (subagents can't touch `.claude/`), read your memory dir, follow the spawn-time read order. Without identity setup your work doesn't attribute correctly and may not appear in the dashboard at all.
+Read the **On Spawn — Identity (REQUIRED)** section in `docs/worker_playbook.md` (deployed to `.claude/worker_playbook.md`) first. Five steps: identify via `POST /api/agents/identify`, cache your `agent_id`, the TL writes your session marker (subagents can't touch `.claude/`), follow the spawn-time read order. Your memory needs no reading — it is injected into your session at spawn (DWB-517); you only ever write it. Without identity setup your work doesn't attribute correctly and may not appear in the dashboard at all.
 
 ## Alembic Migrations
 
