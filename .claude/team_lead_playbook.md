@@ -29,7 +29,7 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 ### Your Personal Memory Dir
 
 Lives at `.dwb/memory/<project_prefix>/Archie_<PREFIX>/` (DWB-401: moved out of `.claude/`). File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. TL-flavored use: `memory.md` for TL-specific LESSONS (spawn quirks, gate edge cases, review patterns that caught real bugs). Live orchestration state (who is spawned, what you are tracking right now) is session-scoped and belongs in `HANDOFF.md`, not here.
-**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 4500-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. The ISO heading is still stamped every time, with or without lessons, because that heading is what the DWB-519 write-on-close gate reads as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate.
+**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 4500-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate — and condensing, which rewrites the headings away, can no longer cost you credit for a write you really made.
 
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
@@ -177,6 +177,8 @@ Status flow: `backlog` → `todo` → `in_progress` → `in_review` → `done`. 
 
 TL drafts the spec (title, description, acceptance criteria, both `ticket_key` and db `id` conventions per project), human approves, PM files via `POST /api/tickets` with `X-Agent-ID`. On PM-less small teams the TL files directly. Tickets auto-assign to the active sprint and inherit its epic.
 
+**You can omit `ticket_number` (DWB-529).** The API derives it from `ticket_key`, and a `ticket_number` that disagrees with the key is rejected with **422** rather than quietly stored. Send the key and let the server do the arithmetic.
+
 ### Querying (no Jira)
 
 - Sprint board: `GET /api/tickets?sprint_id={sid}`
@@ -256,6 +258,8 @@ POST /api/agents/spawn-prepare
 ```
 
 Response is the identity bundle to inject into the spawn prompt. Confirms the agent exists, is unambiguous, and returns `agent_id` + memory dir + agent-scoped instructions + `scratchpad_excerpt` + **`memory_full`** (DWB-517: the agent's ENTIRE `memory.md` verbatim, empty string when none). **Paste `memory_full` into the spawn prompt.** This is how the worker gets its memory now: agents no longer read their own memory files, so if you skip it they spawn amnesiac. Your own TL memory is injected separately by the SessionStart hook (§ On Startup). **Never spawn without this handshake.** 409/404 -> HALT and escalate.
+
+**`relevant_lessons` comes back empty, and that is not a bug yet.** The project node index (lessons + code pointers, ranked) is built and queryable per ticket, but `spawn-prepare` takes only role, name and project — with no ticket to rank against, the field has nothing to return. The retrieval lane that gives `spawn-prepare` a `ticket_id` is specced and pending, so treat an empty list as the known gap, and expect this contract to change when it lands.
 
 ### Session Marker (TL writes before spawning a worker)
 
@@ -419,6 +423,8 @@ The human's `/carrot` and `/stick` commands are the human's; you (an agent) use 
 Two gates can block a sprint close; the TL is the final witness on both.
 
 **Write-on-close gate (DWB-519, ALWAYS ON).** `PATCH /api/sprints/{id} {"status":"completed"}` is REFUSED with HTTP 400 if any active sprint participant has no `memory.md` write within the sprint window (any `append` or `session-complete` counts; detection takes whichever is LATER of `agents.last_memory_write_at`, stamped directly by the write endpoints, and `memory.md`'s own file mtime — the old scan of your ISO write-headings was retired as a gate source in DWB-564, because condensing removes the headings and stranded agents who had written correctly). The 400 names the non-writers. This is not a per-project toggle; it is skipped only when the project has no `repo_path`. So before closing, make sure every participant (you included) has landed a memory write, the natural one being their `session-complete` wrap-up. Chase non-writers the same way you chase missing acks.
+
+**What the close itself mints (DWB-566).** Closing a sprint creates a test ticket for the NEXT sprint's work, but it lands on the sprint you just CLOSED, as `backlog`, unassigned, and fires no alert. Nothing pulls it forward for you: when the next sprint opens, move it or it strands. Ten tickets sat stranded on a stale placeholder for three months exactly this way.
 
 **Consolidation gate (`force_consolidation`, opt-in, default OFF).** The gate has TEETH (DWB-328): the ack endpoint REFUSES with HTTP 400 when an agent's owned files are over ceiling, unless per-file overrides with non-empty reasons are provided. Participant set is narrowed by DWB-326 (only agents with sprint signals, tickets, comments, tracking_log, hook_sessions, activity_log within window).
 
