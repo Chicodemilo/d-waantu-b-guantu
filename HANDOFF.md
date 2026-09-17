@@ -37,7 +37,7 @@ Both are the same defect: **memory is injected whole and pointers are injected n
 
 ## Known gaps, none blocking
 
-- **Workers cannot file `session-complete`**: `session_id` is required and a subagent does not reliably know its own. Three workers hit this today and used the append path instead. Participation still records; the summary and token figures a wrap-up would write to the DB do not. Either the session id reaches workers at spawn, or the field becomes optional.
+- **`session-complete` fails two different ways, and they get conflated.** Two workers hit `422` because `session_id` is required and a subagent does not reliably know its own. A third hit `422` for an unrelated reason — `lessons` expects a list and he sent a string. A fourth filed successfully first try. The append fallback works for all of them, so the workaround hides the distinction. Participation still records either way; the summary and token figures a wrap-up writes to the DB do not. The session-id case needs the id to reach workers at spawn or the field to become optional; the schema case needs one line of documentation.
 - **The token estimator is character-based** (`max(len//4, words)`), so it rewards lexical compression that a real tokenizer would punish. Vowel-dropping "saves" 24% by that measure and would almost certainly cost tokens in reality. A gate trusts this number.
 - **Memory ceiling pressure is system-wide**, not just here: agents on CI and IND were at 99% today. Several condensed mid-task.
 
