@@ -6,7 +6,7 @@
 # Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
-# Last Modified: 2026-09-16 (DWB-580: sessions are no longer frozen at their first turn - shared delta-aware token recorder, completed-guards removed from both hook paths, forward-only transcript recapture sweep)
+# Last Modified: 2026-09-17 (DWB-581: ticket_source stamped at all six ticket_id writes; DWB-580: sessions are no longer frozen at their first turn - shared delta-aware token recorder, completed-guards removed from both hook paths, forward-only transcript recapture sweep)
 #
 # DWB-417 (2026-06-22): handle_tool_use ingests the PostToolUse hook and
 # persists one tool_actions row per tool call, resolving agent/dwb_session/
@@ -65,7 +65,14 @@ from app.models.dwb_session import (
     DwbOpenMethod,
     DwbSession,
 )
-from app.models.hook_session import HookSession, HookSessionStatus, HookSessionType
+from app.models.hook_session import (
+    TICKET_SOURCE_CLAIMED_BY_TICKET,
+    TICKET_SOURCE_RESOLVED_AT_START,
+    TICKET_SOURCE_RESOLVED_LATER,
+    HookSession,
+    HookSessionStatus,
+    HookSessionType,
+)
 from app.models.project import Project
 from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
@@ -293,6 +300,7 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
         agent_id=agent.id if agent else None,
         project_id=project.id,
         ticket_id=ticket.id if ticket else None,
+        ticket_source=TICKET_SOURCE_RESOLVED_AT_START if ticket else None,
         sprint_id=sprint_id,
         dwb_session_id=_active_dwb_session_id(db, project.id),
         status=HookSessionStatus.active,
@@ -405,6 +413,7 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
             agent_id=agent.id if agent else None,
             project_id=project.id,
             ticket_id=ticket.id if ticket else None,
+            ticket_source=TICKET_SOURCE_RESOLVED_AT_START if ticket else None,
             sprint_id=sprint_id,
             dwb_session_id=_active_dwb_session_id(db, project.id),
             status=HookSessionStatus.active,
@@ -479,6 +488,7 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
                 if later_ticket:
                     session.ticket_id = later_ticket.id
                     session.sprint_id = later_ticket.sprint_id
+                    session.ticket_source = TICKET_SOURCE_RESOLVED_LATER
 
     # Update session with end data
     # DWB-539: never persist end < start; a backwards interval clamps to 0 in
@@ -1237,6 +1247,7 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
         if ticket and session.ticket_id is None:
             session.ticket_id = ticket.id
             session.sprint_id = sprint_id
+            session.ticket_source = TICKET_SOURCE_RESOLVED_LATER
         # DWB-373: Backfill dwb_session_id if the subagent_id row was
         # created before any DWB session opened. Only stamp on NULL.
         if session.dwb_session_id is None:
@@ -1249,6 +1260,7 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
             agent_id=agent.id if agent else None,
             project_id=project.id,
             ticket_id=ticket.id if ticket else None,
+            ticket_source=TICKET_SOURCE_RESOLVED_AT_START if ticket else None,
             sprint_id=sprint_id,
             dwb_session_id=_active_dwb_session_id(db, project.id),
             status=HookSessionStatus.active,
@@ -1524,6 +1536,7 @@ def claim_unattributed_sessions(db: Session, ticket: Ticket) -> int:
     for row in db.scalars(stmt).all():
         row.ticket_id = ticket.id
         row.sprint_id = ticket.sprint_id
+        row.ticket_source = TICKET_SOURCE_CLAIMED_BY_TICKET
         claimed += 1
 
     if claimed:

@@ -49,6 +49,10 @@ class HookSessionRead(BaseModel):
     agent_id: int | None
     project_id: int
     ticket_id: int | None
+    # DWB-581: which mechanism supplied ticket_id, so an investigator can tell
+    # a claimed session (a best guess) from a resolved one (a fact) without
+    # opening the database. NULL means we do not know.
+    ticket_source: str | None = None
     sprint_id: int | None
     start_time: datetime
     end_time: datetime | None

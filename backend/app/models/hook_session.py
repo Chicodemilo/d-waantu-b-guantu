@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: HookSession, HookSessionStatus, HookSessionType
-# Last Modified: 2026-09-16 (DWB-580: transcript_bytes, how much of the transcript the stored total accounts for)
+# Last Modified: 2026-09-17 (DWB-581: ticket_source, which mechanism supplied ticket_id)
 
 import enum
 from datetime import datetime
@@ -29,6 +29,38 @@ class HookSessionType(str, enum.Enum):
     subagent = "subagent"
 
 
+# DWB-581: how a session came to carry its ticket_id. Lives here rather than in
+# the service because the service writes it, the schema exposes it, and the
+# tests assert on it: one definition all three import.
+#
+# The point is that a GUESS and a FACT are indistinguishable in the row
+# afterwards. ticket_id alone says which ticket; it never said how confident we
+# were, so an investigator looking at a strange per-ticket number had no way to
+# separate "the ticket was already assigned when we looked" from "a ticket
+# claimed this session later because it was the best available guess".
+TICKET_SOURCE_RESOLVED_AT_START = "resolved_at_start"
+"""The lookup found the ticket when the row was created: it was already
+assigned to this agent. A fact."""
+
+TICKET_SOURCE_RESOLVED_LATER = "resolved_later"
+"""A later hook event filled a NULL. The same lookup, run later. Also a fact,
+and it additionally tells you the attribution arrived after work had started."""
+
+TICKET_SOURCE_CLAIMED_BY_TICKET = "claimed_by_ticket"
+"""The ticket side pushed it (DWB-576). A BEST GUESS, and the only one of the
+three that can be wrong: a session claimed by the most recent assignment may
+belong to earlier work in the same sprint."""
+
+TICKET_SOURCES = (
+    TICKET_SOURCE_RESOLVED_AT_START,
+    TICKET_SOURCE_RESOLVED_LATER,
+    TICKET_SOURCE_CLAIMED_BY_TICKET,
+)
+"""NULL is deliberately not in this tuple. A NULL means "we do not know how
+this row got its ticket", which is the honest reading for every row written
+before this column existed and for every row that never got a ticket at all."""
+
+
 class HookSession(Base):
     __tablename__ = "hook_sessions"
 
@@ -47,6 +79,13 @@ class HookSession(Base):
     sprint_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("sprints.id"), nullable=True, index=True
     )
+    # DWB-581: which mechanism supplied ticket_id. See TICKET_SOURCES above.
+    # String rather than Enum on purpose: DwbOpenMethod still carries
+    # `ai_classifier` as a permanent tombstone because DWB-402 retired that
+    # path and historical rows had to keep loading. Attribution paths are a
+    # vocabulary we keep extending, so the looser type avoids paying that
+    # again every time one is added or retired.
+    ticket_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # DWB-335: link a hook session to its enclosing DWB session for rollup.
     # NULL allowed — historical rows predate the DWB session model and must
     # remain valid; future ingestion sets this when an open DWB session is
