@@ -7,7 +7,8 @@
 # Callees: app.database.SessionLocal, app.services.instruction, app.services.sync_check
 # Data In: CLI args (--export, --import, --sync); DB instructions; docs/rules/*.md files
 # Data Out: Markdown files (export) or DB records (import); stdout report
-# Last Modified: 2026-03-29
+# Last Modified: 2026-09-17 (DWB-575: --sync checks source_readable and catches
+#   SyncSourceUnreadable instead of reporting "in sync" on an unreadable source)
 """Bidirectional sync between DB instructions and docs/rules/ markdown files.
 
 Usage:
@@ -43,7 +44,11 @@ from app.schemas.instruction import InstructionCreate, InstructionUpdate
 from app.services import agent as agent_svc
 from app.services import instruction as instruction_svc
 from app.services import project as project_svc
-from app.services.sync_check import build_sync_report, sync_memory_to_db
+from app.services.sync_check import (
+    SyncSourceUnreadable,
+    build_sync_report,
+    sync_memory_to_db,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parents[1]
@@ -287,8 +292,18 @@ def main() -> int:
         if args.sync:
             # Legacy: memory → DB sync
             report = build_sync_report(db)
+            # DWB-575: an unreadable source is not "in sync" - say so and
+            # fail the command instead of printing the same message a real
+            # empty read would print.
+            if not report.source_readable:
+                print(f"ERROR: {report.source_error}")
+                return 1
             if report.memory_only:
-                created = sync_memory_to_db(db)
+                try:
+                    created = sync_memory_to_db(db)
+                except SyncSourceUnreadable as exc:
+                    print(f"ERROR: {exc}")
+                    return 1
                 print(f"Synced {len(created)} instruction(s) from memory:")
                 for inst in created:
                     print(f"  + [{inst.id}] {inst.title}")

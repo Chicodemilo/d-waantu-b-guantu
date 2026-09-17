@@ -6,9 +6,12 @@
 # Callees:       GET /api/instructions/sync-check, POST /api/instructions/sync
 # Data In:       Factory-created instructions via conftest fixtures
 # Data Out:      Assertions on sync status and instruction state
-# Last Modified: 2026-03-29
+# Last Modified: 2026-09-17 (DWB-575: source_readable/source_error response
+#   fields; a missing memory source must not read as a clean green)
 
 """Tests for /api/instructions sync-check and sync endpoints."""
+
+from app.services import sync_check
 
 
 class TestSyncCheck:
@@ -22,10 +25,13 @@ class TestSyncCheck:
         assert "memory_only" in data
         assert "db_only" in data
         assert "in_sync" in data
+        assert "source_readable" in data
+        assert "source_error" in data
         assert isinstance(data["matched"], list)
         assert isinstance(data["memory_only"], list)
         assert isinstance(data["db_only"], list)
         assert isinstance(data["in_sync"], bool)
+        assert isinstance(data["source_readable"], bool)
 
     def test_sync_check_db_only_includes_instructions(self, client, make_instruction):
         inst = make_instruction(scope="global", title="DB Only Instruction")
@@ -33,12 +39,47 @@ class TestSyncCheck:
         db_only_ids = [d["id"] for d in data["db_only"]]
         assert inst["id"] in db_only_ids
 
+    def test_missing_memory_source_is_not_a_clean_green(self, client, monkeypatch, tmp_path):
+        """DWB-575 AC 2/3: with the source directory absent, the response
+        must not be a clean green. Before the fix this returned
+        {in_sync: True, memory_only: [], ...} having read nothing."""
+        monkeypatch.setattr(sync_check, "MEMORY_DIR", tmp_path / "does-not-exist")
+        r = client.get("/api/instructions/sync-check")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["source_readable"] is False
+        assert data["source_error"] is not None
+        assert data["in_sync"] is False
+        assert data["memory_only"] == []
+
+    def test_readable_empty_source_is_a_genuine_green(self, client, monkeypatch, tmp_path):
+        """The legitimate counterpart: a source that exists, was read, and
+        really has nothing pending IS in_sync (source_readable True)."""
+        empty_dir = tmp_path / "memory"
+        empty_dir.mkdir()
+        monkeypatch.setattr(sync_check, "MEMORY_DIR", empty_dir)
+        data = client.get("/api/instructions/sync-check").json()
+        assert data["source_readable"] is True
+        assert data["source_error"] is None
+        assert data["in_sync"] is True
+
 
 class TestSync:
     def test_sync_returns_201(self, client):
         r = client.post("/api/instructions/sync")
         assert r.status_code == 201
         assert isinstance(r.json(), list)
+
+    def test_missing_memory_source_returns_400_not_empty_list(
+        self, client, monkeypatch, tmp_path
+    ):
+        """DWB-575 AC 4: the write path must not treat an unreadable source
+        as "nothing to sync" (a 201 with an empty body looks identical to a
+        real successful no-op sync)."""
+        monkeypatch.setattr(sync_check, "MEMORY_DIR", tmp_path / "does-not-exist")
+        r = client.post("/api/instructions/sync")
+        assert r.status_code == 400
+        assert "sync" in r.json()["detail"].lower()
 
 
 class TestInstructionsCRUD:

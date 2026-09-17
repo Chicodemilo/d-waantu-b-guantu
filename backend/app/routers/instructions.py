@@ -6,7 +6,9 @@
 # Callees: app/services/instruction.py, app/services/sync_check.py
 # Data In: HTTP requests
 # Data Out: JSON responses (InstructionRead, sync reports)
-# Last Modified: 2026-03-29
+# Last Modified: 2026-09-17 (DWB-575: sync-check/sync report source_readable/
+#   source_error distinctly from a real empty read; POST /sync 400s on an
+#   unreadable source instead of returning [] as if there were nothing to do)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -46,6 +48,13 @@ class SyncCheckResponse(BaseModel):
     memory_only: list[MemoryOnlyOut]
     db_only: list[DbOnlyOut]
     in_sync: bool
+    # DWB-575: distinct from in_sync. False means the memory source could
+    # not be read at all (missing dir, unreadable file, ...); in that case
+    # in_sync is ALWAYS false too, never a false green from an empty read
+    # that never happened. source_error is a short reason, present only
+    # when source_readable is False.
+    source_readable: bool
+    source_error: str | None = None
 
 
 @router.get("/sync-check", response_model=SyncCheckResponse)
@@ -70,13 +79,23 @@ def sync_check_endpoint(db: Session = Depends(get_db)):
             DbOnlyOut(id=d["id"], title=d["title"], scope=d["scope"])
             for d in report.db_only
         ],
-        in_sync=len(report.memory_only) == 0,
+        # DWB-575: in_sync can only be true when the source was actually
+        # read AND that read found nothing pending - never on an unreadable
+        # source, which used to compute in_sync=True having read zero files.
+        in_sync=report.source_readable and len(report.memory_only) == 0,
+        source_readable=report.source_readable,
+        source_error=report.source_error,
     )
 
 
 @router.post("/sync", response_model=list[InstructionRead], status_code=201)
 def sync_instructions(db: Session = Depends(get_db)):
-    return sync_check.sync_memory_to_db(db)
+    # DWB-575: an unreadable memory source must 400, not return [] the same
+    # way a source that was read and had nothing pending would.
+    try:
+        return sync_check.sync_memory_to_db(db)
+    except sync_check.SyncSourceUnreadable as exc:
+        raise HTTPException(400, f"Cannot sync: {exc}")
 
 
 @router.get("", response_model=list[InstructionRead])
