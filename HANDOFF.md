@@ -2,48 +2,53 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current state (2026-09-15 evening. S81 CLOSED, pushed, team shut down)
+## Current state (2026-09-17, S82 open at 14/17, everything pushed)
 
-- **S81 (sprint 160) CLOSED, 27 done.** "Nodes Visual Layer (Cloud, Detail Overlay, Limiter Search)". Origin master at `b555409`, 15 commits pushed. All gates verified green at 20:35 before close. Backend 2050 pass (result 196, taken against committed HEAD), frontend 377 pass (result 193).
-- **Per-agent split:** Freddie 11, Barry 9, Stan 7. Worth knowing that the quietest lane was the largest; anyone reading the session thread would infer the opposite, because the noisy lane was the one collecting amendments.
-- **Nodes visual layer is live** at `/projects/:id/nodes`: weighted cloud with a top-0.5% headliner tier, detail overlay with neighbour hops, substring limiter search with an optional connections toggle, per-project scan exclusions with a directory browser, and a rescan control with an inline confirm.
-- **Also shipped:** stick redemption (half rounded up, once per stick), peer carrots/sticks notifying via agent comms, agent memory now lessons-only, three token-attribution bugs fixed, timestamp parsing corrected across 14 components.
+- **Origin at `6f38cf3`.** Eighteen commits today, nothing local, tree clean.
+- **S82 (sprint 171) still OPEN**, 14 done, 3 left. Not closed, deliberately: the three remaining are the retrieval lane and Miles has not released them.
+- Backend 2152 pass, frontend 388 pass.
+- Uvicorn (8000, `--reload`), Vite (5173) and the MySQL container all left running.
 
-## FIRST JOB NEXT SESSION (decided 2026-09-15, do not relitigate)
+## What shipped today
 
-1. **Fix the mint: DWB-566** (todo, sprint 160, unassigned — give it to a backend worker). Miles chose option 2 of three: mint the test ticket onto **the closing sprint as backlog**, delete the next-sprint search entirely rather than repair it, leave the ticket unassigned. Small change; most of the work is tests, including the never-covered normal case of closing a sprint when no other sprint exists. Full root cause and AC are in the ticket.
-2. **Then delete the ten stranded tickets.** DWB-445, 453, 467, 480, 495, 498, 504, 507, 515, 521 — all on sprint 23 under inactive agent Sage, eight still `todo`. Miles's decision: delete them once DWB-566 lands, **not before**, because they are the evidence the mint never worked. They are stale prompts for a redundant second test pass; the code they name IS tested (132 backend test files, 2050 backend / 377 frontend passing). DWB-515 and DWB-521 also close as duplicates of DWB-566.
-3. **Carry-forwards, eleven**, all backlog/unassigned on sprint 160 except 566 which is todo: DWB-547, 548, 550, 555, 558, 561, 562, 563, 564, 565, 566.
+Started as a doc cleanup and turned into an instrumentation repair. In order of consequence:
 
-## The mint bug, root-caused (DWB-515 / DWB-521)
+- **Token capture was five times under** (DWB-580). A session row recorded its first turn and froze; every later stop hit an idempotency guard and returned. Six sessions in one day: 1.9M recorded against 9.8M real. The guard was correct for one-shot subagents and wrong for long-lived teammates, and usage moved onto that path on 2026-09-15. Fixed by a sweep that re-parses grown transcripts, which is correct whether or not repeat events fire at all — a design that sidesteps a question we could not answer. **Forward-only: historical figures stay wrong, and they are wrong in BOTH directions.** Today under-reports; 2026-09-15 probably over-reports (overlapping re-parses). A trend line across those days means nothing.
+- **Ticket attribution missed 5 of 6 workers** (DWB-576). Resolution ran once, at session creation, asking which ticket an agent was assigned — 17 to 25 minutes before the tickets were assigned. Now inverted: the ticket claims its agent's unattributed sessions, fill-only, sprint-bounded. Also self-assigns when an agent starts an unassigned ticket, which was how two tickets became permanently uncostable.
+- **Attribution provenance** (DWB-581). A claimed session is a best guess; a resolved one is a fact; they used to look identical. Four states with NULL meaning honestly unknown. Guarded by AST tests over all six write sites.
+- **Write-on-close gate decoupled from prose** (DWB-564). It proved participation by reading dated headings in `memory.md`, which condensing removes. Three agents landed in that state in one day, all by condensing *correctly*. Now reads `max(last_memory_write_at, mtime)`.
+- **Sprint-close mint fixed** (DWB-566), plus the ten tickets stranded on a March placeholder since June, deleted.
+- **Doc sweep from removals** (DWB-568/569/570): eleven stale claims, a drift checker that fails when docs name code that no longer resolves, a help-centre audit and the missing Nodes section. `FILE_TREE.md` and `PASSIVE_TRACKING_PLAN.md` deleted.
+- **Four clone-fragility bugs** (571/572/573/574/575): a gate judging every project by this platform's coverage, a button running our suite under other projects' names, a page printing raw JSON, a hardcoded prefix, and a hardcoded home directory that shipped a username and reported "in sync" having read nothing.
 
-The sprint-close auto-mint has **never worked**, at every close from S69 to S81. Root cause verified in `services/sprint.py`, not inferred:
+## FIRST JOB NEXT SESSION
 
-- **Sprint half:** the lookup selects `status in (planned, active)` ordered by `sprint_number ASC` and takes the first. That is a correct implementation of a **queue model this project abandoned** — we create one sprint at a time and never queue them, so the only `planned` row is a March placeholder (id 23, number 14) and ascending order picks it every time. Repair is not "fix the lookup", it is "replace an assumption".
-- **Assignee half:** `_find_agent_by_role` is an unordered `.limit(1)` with **no `is_active` filter and no ORDER BY**. Latent second defect: with two active testers the assignment would be nondeterministic by query plan.
-- **Best framing:** why is there a search at all, when the sprint being closed already holds both answers? (question: Stan; "a search that cannot fail beats a search that fails loudly": Pam)
+**The retrieval lane, DWB-577 then DWB-578, then DWB-579.** Specced in full, unassigned, Miles has not released them.
 
-## Process rules earned tonight (all cost real cycles)
+The problem they solve: the node index works and reaches nobody. `GET /api/tickets/{id}/related-nodes` returns ten ranked lessons and ten code pointers for a real ticket. But `spawn-prepare` takes only role, name and project, so there is no ticket to rank against and `relevant_lessons` has returned `[]` for an entire sprint. Meanwhile memory is delivered by pasting the whole file into the spawn prompt, which is why the 4500 ceiling exists.
 
-- **Amendments, three clauses.** A description PATCH is not delivery to an in-flight worker → send a direct message. The **ack** is the load-bearing half; no worker flips to `in_review` without checking their inbox. And **do not issue an amendment until the design is settled** — clauses 1-2 cannot catch a message landing during a long tool call. Four wasted build cycles all trace to relaying half-decisions.
-- **Review from the code, never the worker's comment.** Their comment is accurate against the spec *they* could see. This caught two wrong-design builds.
-- **A ticket carries its own scope.** Cite the source too, and say whether carried text is verbatim. But this is provenance *hygiene, not correctness*: verbatim copying propagates a wrong source faithfully. Anything load-bearing gets checked against the code.
-- **Worked examples in memory are load-bearing** — verify them or label them as reported. A wrong example launders a false premise into a rule that looks tested.
-- **Never `git add -A <dir>`.** Stage the explicit file list for the ticket under review. A broad add swept a rejected design into an unrelated commit (`6c71168`), making unapproved code the repo's committed behaviour; `b555409` names it as superseded.
-- **Silence is not death.** A worker writes nothing to the DB between `in_progress` and `in_review`. I respawned a live worker and the duplicate collided on six files.
-- **The failure shape of the night, five instances:** a mechanism *right about the fact, wrong about the blame* — an outage presenting as a missing ack, a gate change as a delinquent non-writer, a stale roster row as an absent participant, a stale test result as a passing gate, a green suite as a recorded one. When a gate names someone, ask whether it can distinguish "did not" from "could not" from "was never here".
-- **Automated steps that fail quietly while the surface looks healthy** is a class worth sweeping, not three point fixes. The tell: a success signal reporting that a step *ran* rather than that it *landed*.
-- **Working condition, not a courtesy (Pam):** being corrected was treated as useful rather than as friction, so nobody had to defend a position to keep their standing, and four wrong theories were discarded quickly. That is why the mint bug was found.
+Both are the same defect: **memory is injected whole and pointers are injected never.**
 
-## Gotchas (carry forward)
+- **577**: split memory into a pinned core (always injected, tight cap, agent chooses what is pinned — Miles's ruling, abuse handled by stick) and a retrievable body.
+- **578**: optional `ticket_id` on spawn-prepare; returns the core, the ranked body and the pointers. Cheaper than it reads — the response field already exists and is already pointer-only by design. Carries two requirements with teeth: an empty retrieval must be *loud* (three distinct states, not one empty list), and pointers are labelled advisory and non-exhaustive.
+- **579**: raise the body's ceiling only after 577 and 578. Raising first is a treadmill.
 
-- Memory ceiling is a **treadmill** if only raised: it exists because memory is injected whole at spawn. Real fixes are lessons-only content (shipped) and retrieval-based delivery. Three of six agents were refused a write within one hour tonight.
-- `run_tests.sh --post` **silently loses results** when `--context` contains an apostrophe (DWB-565): tests pass, nothing is recorded, script exits 1.
-- Sprint close consumes a ticket_number; reserve numbers AFTER closing.
-- Do not close a sprint while a worker is writing backend files: uvicorn `--reload` on a half-written module 500s the memory endpoint and the gate then names innocent participants.
-- The write-on-close gate filters `is_active` before testing writes, so a dark agent cannot block a close.
-- Uvicorn (8000, `--reload`) + Vite (5173) left RUNNING, MySQL container up.
+**Miles rejected an agent opt-out mechanism** ("this node stuff sucks, let me explore"), and the reasoning matters: a switch replaces the signal we need (ranking put the wrong file first) with one we do not (someone opted out).
+
+## Known gaps, none blocking
+
+- **Workers cannot file `session-complete`**: `session_id` is required and a subagent does not reliably know its own. Three workers hit this today and used the append path instead. Participation still records; the summary and token figures a wrap-up would write to the DB do not. Either the session id reaches workers at spawn, or the field becomes optional.
+- **The token estimator is character-based** (`max(len//4, words)`), so it rewards lexical compression that a real tokenizer would punish. Vowel-dropping "saves" 24% by that measure and would almost certainly cost tokens in reality. A gate trusts this number.
+- **Memory ceiling pressure is system-wide**, not just here: agents on CI and IND were at 99% today. Several condensed mid-task.
+
+## Process lessons earned today
+
+- **The failure family** (Barry's framing): a mechanism reporting that it *ran* rather than that it *landed*, whose confidence is indistinguishable from knowledge. Five instances in two days. When a check returns nothing, confirm it *can* return something before trusting the negative.
+- **Do not decide a design while waiting for the answer that settles it.** I broke this three times on one ticket, costing three full implementations including a live schema change applied and reverted. If you are asking a question to settle a design, you have forfeited the right to decide until it is answered.
+- **Short messages cross less.** A long correction takes longer to read than it takes to become obsolete.
+- **Duplicated logic is where a correct fix goes to be half-applied.** Two identical increment blocks, two coverage globs, six write sites where the AC implied three. When an AC says "every write", count them and state the number.
+- **A test that names the defect must go red; one guarding an adjacent risk legitimately passes both ways.** Never count the second as evidence of the first.
 
 ## Team
 
-Nobody live. Pam_DWB, Freddie, Barry_DWB and Stan were shut down after landing session-complete wraps (all four verified lessons-only, which tested DWB-560 on its own session). CC teams do not survive sessions — respawn per playbook: spawn-prepare, pending marker, paste `memory_full`.
+Pam_DWB, Barry_DWB, Stan, Sylvie and Freddie all worked today and were asked to land memory wrap-ups before shutdown. CC teams do not survive sessions — respawn per playbook: spawn-prepare, pending marker, paste `memory_full`.
