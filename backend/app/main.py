@@ -3,10 +3,10 @@
 # Created: 2026-03-29
 # Purpose: FastAPI app initialization, CORS, activity logging middleware, and router registration
 # Caller: uvicorn entrypoint
-# Callees: All routers, app/database.py
+# Callees: All routers, app/database.py, app/services/schema_guard.py
 # Data In: None
 # Data Out: FastAPI app instance
-# Last Modified: 2026-09-15 (DWB-529: 422 handler encodes validator ctx so ValueError-based validators do not 500)
+# Last Modified: 2026-09-17 (DWB-040: startup verifies the alembic revision instead of half-building the schema with create_all)
 
 import os
 from contextlib import asynccontextmanager
@@ -17,7 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.database import Base, engine
+from app.database import engine
 from app.middleware.activity_logger import ActivityLoggerMiddleware
 from app.middleware.error_logger import ErrorLoggerMiddleware
 from app.routers import (
@@ -51,12 +51,13 @@ from app.routers import (
     tracking,
 )
 from app.services import idle_sweeper, marker_sweep_task, server_log_handler
+from app.services.schema_guard import verify_schema
 from app.services.failed_hook import log_failed_hook
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    verify_schema(engine)
     # DWB-372: capture app-level log records into the ring buffer so
     # GET /api/server-logs has a non-empty surface from boot.
     server_log_handler.install()
