@@ -4,9 +4,9 @@
 
 ## Current state (2026-09-17, S82 open at 16/19, everything pushed)
 
-- **Origin at `6f38cf3`.** Eighteen commits today, nothing local, tree clean.
+- **Origin at `d3e7d7a`.** Twenty-two commits today, nothing local, tree clean.
 - **S82 (sprint 171) still OPEN**, 16 done, 3 left. Not closed, deliberately: the three remaining are the retrieval lane and Miles has not released them.
-- Backend 2152 pass, frontend 388 pass.
+- Backend 2159 pass, frontend 388 pass.
 - Uvicorn (8000, `--reload`), Vite (5173) and the MySQL container all left running.
 
 ## What shipped today
