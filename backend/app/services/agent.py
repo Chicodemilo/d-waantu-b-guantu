@@ -455,11 +455,36 @@ def _memory_over_ceiling_detail(agent_id: int, tokens: int, ceiling: int) -> str
     )
 
 
+def _resolve_session_id_for_agent(db: Session, agent_id: int) -> str | None:
+    """The session this agent is most likely wrapping up (DWB-582).
+
+    A subagent cannot see its own Claude Code session id from inside its own
+    process, so requiring it made the primary wrap-up path unusable for exactly
+    the callers it exists for. The server already knows: hook_sessions carries
+    one row per session keyed to an agent, which is the same linkage token
+    attribution runs on. Reading it back is smaller than plumbing the id
+    through spawn-prepare and every worker prompt, and it cannot drift from
+    what attribution believes, because it IS what attribution believes.
+
+    Returns None rather than guessing when there is no row. A wrap-up
+    attributed to the WRONG session is worse than one attributed to none: the
+    lessons are the part that matters and they land either way.
+    """
+    from app.models.hook_session import HookSession
+
+    return db.scalar(
+        select(HookSession.session_id)
+        .where(HookSession.agent_id == agent_id)
+        .order_by(HookSession.created_at.desc())
+        .limit(1)
+    )
+
+
 def record_session_complete(
     db: Session,
     *,
     agent_id: int,
-    session_id: str,
+    session_id: str | None = None,
     summary: str,
     lessons: list[str] | None = None,
     tokens_used: int | None = None,
@@ -501,6 +526,12 @@ def record_session_complete(
             "memory_dir_unwritable",
             f"could not create memory dir {memory_dir}: {e}",
         )
+
+    # DWB-582: the caller may not know its own session id. Resolve it here
+    # rather than refusing the wrap-up; None is an acceptable outcome and
+    # the heading simply omits it, as the append path already does.
+    if not session_id:
+        session_id = _resolve_session_id_for_agent(db, agent.id)
 
     now = datetime.now(timezone.utc)
     timestamp = now.isoformat(timespec="seconds")
@@ -560,7 +591,7 @@ def record_session_complete(
 def _format_scratchpad_block(
     *,
     timestamp: str,
-    session_id: str,
+    session_id: str | None,
     summary: str,
     lessons: list[str] | None,
     tokens_used: int | None,
@@ -590,7 +621,13 @@ def _format_scratchpad_block(
     `summary` and `tokens_used` stay in the signature because the endpoint
     contract still accepts them; they are deliberately unused here.
     """
-    lines = [f"\n## {timestamp} — session {session_id}\n"]
+    # DWB-582: session id is optional. An unresolved session omits the
+    # suffix rather than writing "session None", which would read as a
+    # real id to anyone scanning the file later.
+    heading = f"\n## {timestamp}"
+    if session_id:
+        heading += f" — session {session_id}"
+    lines = [heading + "\n"]
     if lessons:
         lines.append("- lessons:\n")
         for item in lessons:

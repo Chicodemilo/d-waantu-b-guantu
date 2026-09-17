@@ -10,7 +10,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class AgentCreate(BaseModel):
@@ -148,15 +148,44 @@ class SpawnPrepareResponse(BaseModel):
 # --- /{id}/session-complete endpoint ---------------------------------------
 
 class SessionCompleteRequest(BaseModel):
-    session_id: str
+    """DWB-582: the wrap-up must not refuse a caller who is filing correctly.
+
+    Every worker on 2026-09-16 fell back to the append path because this
+    endpoint rejected them, and the fallback succeeded, so the cost was
+    invisible: a failure whose workaround always works is one nobody reports.
+    """
+
+    # OPTIONAL (DWB-582). A subagent does not reliably know its own Claude Code
+    # session id from inside its own process, and the workers who hit this were
+    # right not to guess one: a wrap-up attributed to the WRONG session is
+    # worse than one attributed to none. The server resolves it instead.
+    session_id: str | None = None
     summary: str
-    lessons: list[str] | None = None
+    # Accepts a bare string as well as a list (DWB-582). A worker sending
+    # `lessons: "..."` got {'type':'list_type','loc':['body','lessons']}, which
+    # names a pydantic internal and says nothing about what to send instead.
+    # One lesson as a string is a natural thing to send: take it and wrap it.
+    lessons: list[str] | str | None = None
     tokens_used: int | None = None
+
+    @field_validator("lessons", mode="before")
+    @classmethod
+    def _accept_a_single_lesson_as_a_string(cls, v):
+        if v is None or isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            return [v] if v.strip() else None
+        raise ValueError(
+            "lessons must be a list of strings, or a single string. "
+            f"Got {type(v).__name__}."
+        )
 
 
 class SessionCompleteResponse(BaseModel):
     agent_id: int
-    session_id: str
+    # DWB-582: None when the caller sent none and the server could not resolve
+    # one. The wrap-up still lands; only its session linkage is unknown.
+    session_id: str | None
     timestamp: str
     paths_written: list[str]
     bytes_written: int

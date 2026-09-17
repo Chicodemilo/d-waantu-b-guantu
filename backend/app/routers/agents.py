@@ -139,10 +139,16 @@ def session_complete(
     data: SessionCompleteRequest,
     db: Session = Depends(get_db),
 ):
-    """Append an ISO 8601 entry to the agent's scratchpad.md + recent_sessions.md.
+    """Append an ISO 8601 entry to the agent's memory.md.
 
     Creates the memory_dir on demand (precursor to DWB-293's full scaffolder).
     404 if agent missing or unscoped, 500 if the memory dir is unwritable.
+
+    DWB-582: `session_id` is OPTIONAL (the server resolves it from the agent's
+    most recent hook_session) and `lessons` takes a bare string as well as a
+    list. Both were required in shapes a subagent could not reliably produce,
+    so every worker fell back to the append path and the primary path's
+    failure was invisible because the fallback always worked.
     """
     try:
         return svc.record_session_complete(
