@@ -1,12 +1,15 @@
 // Path: src/pages/DocsPage.jsx
 // File: DocsPage.jsx
 // Created: 2026-03-29
-// Purpose: Displays project documentation files with expandable cards; detects DWB project and redirects to system docs
+// Purpose: Displays project documentation files with expandable cards. When the project IS the
+//          repo this dashboard runs from (project.runs_own_tests, a resolved-path comparison),
+//          it has no separate docs and the page points at the system docs view instead.
 // Caller: App.jsx (route: /projects/:id/docs)
 // Callees: react (useState, useEffect), react-router-dom (useParams, Link), useStore, api/docs (getProjectDocs)
 // Data In: Route param (id), project from Zustand store, docs from API
 // Data Out: Default export DocsPage component
-// Last Modified: 2026-08-11 (DWB-009)
+// Last Modified: 2026-09-17 (DWB-574: branch on runs_own_tests instead of a hardcoded
+//          prefix === 'DWB', which took the wrong branch forever on any clone)
 
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
@@ -50,10 +53,20 @@ function DocsPage() {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const isDwb = project?.prefix === 'DWB';
+  // DWB-574: "are we looking at the project whose repo this dashboard is
+  // running from" is a path question, and the API already answers it. This was
+  // `project?.prefix === 'DWB'`, which is true here only because the prefix
+  // happens to be DWB: on any clone that named its project anything else, the
+  // comparison silently stopped matching and this page took the wrong branch
+  // forever. runs_own_tests (backend/app/config/server_repo.py) resolves both
+  // paths and compares them, so it holds whatever the project is called. The
+  // name is test-flavoured because DWB-571 needed the same answer first; the
+  // underlying question is "is this project this server's own repo", which is
+  // exactly what this branch asks.
+  const isOwnRepo = Boolean(project?.runs_own_tests);
 
   useEffect(() => {
-    if (!id || isDwb) {
+    if (!id || isOwnRepo) {
       setLoading(false);
       return;
     }
@@ -68,19 +81,22 @@ function DocsPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [id, isDwb]);
+  }, [id, isOwnRepo]);
 
   if (!project) {
     return <div className="empty-state">Project not found</div>;
   }
 
-  if (isDwb) {
+  if (isOwnRepo) {
     return (
       <div>
-        <div className="page-title">{project.prefix} &mdash; Docs</div>
+        <div className="page-title">{project.prefix} - Docs</div>
         <div className="docs-redirect">
-          This project&apos;s docs are the system docs. View them under{' '}
-          <Link to="/docs" className="docs-redirect__link">Overview &rarr; system_docs</Link>.
+          {/* States the rule, not a project name: this sentence has to stay
+              true on a clone that calls the project something else. */}
+          This project is the repo the dashboard itself runs from, so its docs
+          are the system docs. View them under{' '}
+          <Link to="/docs" className="docs-redirect__link">Overview, system_docs</Link>.
         </div>
       </div>
     );
@@ -96,7 +112,7 @@ function DocsPage() {
   return (
     <div>
       <div className="page-title">
-        {project.prefix} &mdash; Docs
+        {project.prefix} - Docs
         <span className="tooltip-trigger">
           ?
           <span className="tooltip-content">
