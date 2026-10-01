@@ -8,12 +8,15 @@
 # Data In: db: Session, ProjectCreate/Update
 # Data Out: list[Project], Project, MEMORY_MODE_SWITCH_WARNING,
 #           memory_mode_transition_refusal() -> str | None
-# Last Modified: 2026-09-30 (DWB-593: state machine, run lifecycle, the
-#                enumerated_at cutover precondition, abort)
+# Last Modified: 2026-10-01 (DWB-624: complete the child enumeration and
+#                journal memories whose clock origin the teardown destroys;
+#                previously DWB-624: complete the delete_project child
+#                enumeration - nodes, node_pointers, node_exclusions,
+#                standards_audit, and the session-linked memory rows)
 
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.activity_log import ActivityLog
@@ -28,6 +31,10 @@ from app.models.failure_record import FailureRecord
 from app.models.hook_session import HookSession
 from app.models.instruction import Instruction
 from app.models.agent_memory import AgentMemory
+from app.models.agent_memory import MemoryTier
+from app.models.journal_entry import JournalEntry
+from app.models.node import Node, NodePointer
+from app.models.node_exclusion import NodeExclusion
 from app.models.memory_transition import (
     TERMINAL_STATES,
     MemoryTransition,
@@ -40,6 +47,7 @@ from app.models.project import MemoryMode, Project, ProjectStatus
 from app.models.project_agent import ProjectAgent
 from app.models.score_event import ScoreEvent
 from app.models.sprint import Sprint
+from app.models.standards_audit import StandardsAudit
 from app.models.status_history import StatusHistory
 from app.models.test_result import TestResult
 from app.models.ticket import Ticket
@@ -47,7 +55,15 @@ from app.models.inter_agent_message import InterAgentMessage
 from app.models.tl_message import TlMessage
 from app.models.tool_action import ToolAction
 from app.models.tracking_log import TrackingLog
+from app.services import journal as journal_svc
 from app.schemas.project import ProjectCreate, ProjectUpdate
+
+
+# DWB-624: tags on every journal entry this teardown writes, so a human reading
+# the journal later sees why the entry arrived without joining back to a
+# project row that no longer exists. Same precedent as
+# memory_scar_conclude.CONCLUDED_TAGS and memory_evict.EVICTION_TAGS.
+ORIGIN_LOST_TAGS = ["project-deleted", "origin-lost"]
 
 
 def list_projects(db: Session, status: ProjectStatus | None = None) -> list[Project]:
@@ -522,6 +538,18 @@ def delete_project(db: Session, project: Project) -> None:
     db.execute(delete(ActivityLog).where(ActivityLog.project_id == pid))
     # Delete instructions
     db.execute(delete(Instruction).where(Instruction.project_id == pid))
+    # DWB-624: the node graph and the audit log. All three node tables carry a
+    # NOT NULL project_id FK with NO ACTION, so any one of them left behind
+    # 500s the endpoint. node_pointers is cleared explicitly rather than left
+    # to its ON DELETE CASCADE from nodes, because it ALSO holds its own
+    # project_id FK: a pointer whose node lives on another project would block
+    # the delete even after every node here is gone.
+    db.execute(delete(NodePointer).where(NodePointer.project_id == pid))
+    db.execute(delete(Node).where(Node.project_id == pid))
+    db.execute(delete(NodeExclusion).where(NodeExclusion.project_id == pid))
+    # standards_audit rows linked to a ticket cascade with that ticket below,
+    # but a row with a null ticket_id has only its project_id and blocks.
+    db.execute(delete(StandardsAudit).where(StandardsAudit.project_id == pid))
     # DWB-424/425: clear the scoring ledger + derived cache before the sprints
     # and project they reference are deleted (no ON DELETE CASCADE on these FKs).
     db.execute(delete(ScoreEvent).where(ScoreEvent.project_id == pid))
@@ -553,6 +581,86 @@ def delete_project(db: Session, project: Project) -> None:
     # Delete hook sessions (FK to project, sprints, dwb_sessions, tickets) before
     # those parents go away.
     db.execute(delete(HookSession).where(HookSession.project_id == pid))
+    # DWB-624 (absorbing DWB-616): agent_memories and journal_entries carry NO
+    # project_id at all, so they cannot appear in an enumeration of the tables
+    # that reference `projects`. They reach this project only through
+    # dwb_sessions, whose FKs are NO ACTION, and they block the session delete
+    # immediately below.
+    #
+    # These are NULLED, not deleted. Agents are global identities and are
+    # merely detached above rather than removed; their memory belongs to the
+    # agent, not to the project, and an agent that also worked elsewhere would
+    # otherwise lose lessons because an unrelated project was deleted. Nulling
+    # drops only the session linkage, which is what is actually going away.
+    if dwb_session_ids:
+        # HARD RULE 4: nothing leaves memory without landing in the journal
+        # first. Nulling both origins makes a row unscoreable, and an
+        # unscoreable row is excluded from every candidate list and never
+        # rendered to an agent again - it has effectively left memory even
+        # though the row survives. So journal it BEFORE the nulling, carrying
+        # its ORIGINAL created_at (DWB-605), because the lesson existed long
+        # before this journal entry does.
+        #
+        # Only rows that LOSE scoreability qualify. A row reinforced on a
+        # surviving project keeps that origin through the COALESCE in
+        # memory_score.sessions_since_reinforced and stays scoreable, so it is
+        # not leaving memory and must not be journalled. Measured: a row with
+        # both origins here goes unscoreable; one reinforced elsewhere comes
+        # out at score 10.
+        #
+        # `raw` is excluded because it is never scoreable in the first place
+        # (memory_score.UNSCORED_UNTIERED precedes the origin check), so it is
+        # not losing anything it currently has. It DOES lose future
+        # scoreability once tiered, which is a real gap and is flagged to the
+        # TL rather than decided here: journalling a pre-judgment row would put
+        # unjudged content in the journal, which contradicts what `raw` means.
+        doomed_memories = list(
+            db.scalars(
+                select(AgentMemory).where(
+                    AgentMemory.tier != MemoryTier.raw,
+                    or_(
+                        AgentMemory.created_session_id.is_not(None),
+                        AgentMemory.last_reinforced_session_id.is_not(None),
+                    ),
+                    or_(
+                        AgentMemory.created_session_id.is_(None),
+                        AgentMemory.created_session_id.in_(dwb_session_ids),
+                    ),
+                    or_(
+                        AgentMemory.last_reinforced_session_id.is_(None),
+                        AgentMemory.last_reinforced_session_id.in_(dwb_session_ids),
+                    ),
+                )
+            ).all()
+        )
+        for memory in doomed_memories:
+            journal_svc.create_entry(
+                db,
+                agent_id=memory.agent_id,
+                body=memory.body,
+                tags=list(ORIGIN_LOST_TAGS),
+                created_at=memory.created_at,
+            )
+        # Flushed BEFORE the nulling, same reasoning as
+        # memory_scar_conclude: a failure here leaves memory intact and the
+        # journal merely early, never the reverse.
+        db.flush()
+
+        db.execute(
+            update(AgentMemory)
+            .where(AgentMemory.created_session_id.in_(dwb_session_ids))
+            .values(created_session_id=None)
+        )
+        db.execute(
+            update(AgentMemory)
+            .where(AgentMemory.last_reinforced_session_id.in_(dwb_session_ids))
+            .values(last_reinforced_session_id=None)
+        )
+        db.execute(
+            update(JournalEntry)
+            .where(JournalEntry.dwb_session_id.in_(dwb_session_ids))
+            .values(dwb_session_id=None)
+        )
     # Delete DWB sessions on this project
     db.execute(delete(DwbSession).where(DwbSession.project_id == pid))
     # Delete consolidation acks tied to this project's sprints before the sprints

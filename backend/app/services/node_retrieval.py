@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from app.models.node import NodePointer, NodePointerKind
 from app.models.ticket import Ticket, TicketStatus
+from app.services import memory_mode
 from app.services.node_match import match_nodes
 from app.services.node_registry import node_token_counts
 
@@ -310,7 +311,7 @@ def _tag_matcher(tag: str) -> re.Pattern:
 
 
 def _resolve_memory_entry(
-    repo_path: str | None, ref: str, tag: str
+    project, repo_path: str | None, ref: str, tag: str
 ) -> tuple[str | None, str | None]:
     """Resolve the (entry_heading, date) a matched tag lives under in a memory.md.
 
@@ -321,6 +322,14 @@ def _resolve_memory_entry(
     missing, the file is unreadable, or no heading precedes the hit.
     """
     if not repo_path:
+        return None, None
+    # DWB-630: this reads the SEALED stock memory.md of ANOTHER agent, and the
+    # heading it returns is quoted content from that file which then travels in
+    # the spawn bundle as `relevant_lessons[].entry_heading`. Measured live
+    # before the fix, one was a whole provenance line lifted out of a sealed
+    # file. The POINTER (ref + source agent) is not content and still goes; the
+    # quoted line does not.
+    if memory_mode.is_human_memory(project):
         return None, None
     try:
         lines = (Path(repo_path) / ref).read_text(errors="replace").splitlines()
@@ -420,7 +429,9 @@ def relevant_lessons(
             if key in seen:
                 continue
             seen.add(key)
-            heading, date = _resolve_memory_entry(repo_path, p.ref, node.tag)
+            heading, date = _resolve_memory_entry(
+                project, repo_path, p.ref, node.tag
+            )
             node_lessons.append({
                 "tag": node.tag,
                 "weight": node.weight,
@@ -499,7 +510,9 @@ def related_nodes(
 
         for p in node.pointers:
             if p.kind == NodePointerKind.memory:
-                heading, date = _resolve_memory_entry(repo_path, p.ref, node.tag)
+                heading, date = _resolve_memory_entry(
+                    project, repo_path, p.ref, node.tag
+                )
                 tag_lessons.append({
                     "tag": node.tag, "weight": node.weight, "score": rounded,
                     "source_agent": _agent_from_memory_ref(p.ref),

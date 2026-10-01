@@ -3,17 +3,23 @@
 # Created: 2026-09-30 (DWB-603, redesigned per Miles's firing ruling)
 # Purpose: The consultation Miles ruled into existence - "have I made this
 #          scar producing error before? Outside of normal startup." The ONLY
-#          write site for AgentMemory.fired_count. Requires a real term, same
+#          write site for AgentMemory.fired_count AND for
+#          AgentMemory.last_reinforced_session_id. Requires a real term, same
 #          discipline journal.search_entries already enforces, and fires only
 #          the rows that MATCH.
 # Caller: whatever ends up calling a deliberate consultation (settled with
 #         Barry/Freddie: not spawn/SessionStart injection, not DWB-613's
-#         dashboard - both call memory_score.scored_memory(), which is pure)
-# Callees: app/models/agent_memory, app/services/memory_scan (SCAR_FAMILY)
+#         dashboard - both call memory_score.scored_memory(), which is pure).
+#         Live caller today: hook_tracking._topoff_scar_check (DWB-612).
+# Callees: app/models/agent, app/models/agent_memory,
+#          app/services/dwb_session (get_active_session),
+#          app/services/memory_scan (SCAR_FAMILY)
 # Data In: db Session, agent_id, a search term
 # Data Out: dict {agent_id, term, count, entries: list[AgentMemory]} - matches
-#           already carry the post-increment fired_count
-# Last Modified: 2026-09-30 (DWB-603 cont'd)
+#           already carry the post-increment fired_count and the new origin
+# Last Modified: 2026-10-01 (DWB-621: a recalled scar returns to full strength -
+#                this module now also moves last_reinforced_session_id, which
+#                had no writer anywhere in app/ before today)
 
 """Firing, moved to where Miles's ruling says it belongs.
 
@@ -63,7 +69,9 @@ that could drift from the first.
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.models.agent import Agent
 from app.models.agent_memory import AgentMemory
+from app.services import dwb_session as session_svc
 from app.services.memory_scan import SCAR_FAMILY
 
 
@@ -77,8 +85,26 @@ class ConsultError(Exception):
         super().__init__(detail)
 
 
-def _fire(db: Session, memory_ids: list[int]) -> None:
-    """THE ONLY WRITE SITE FOR `fired_count` IN THE APPLICATION.
+def _active_session_id(db: Session, agent_id: int) -> int | None:
+    """The DWB session this consultation is happening inside, or None.
+
+    Same resolution journal.py uses for its own rows: agent -> project ->
+    active session. None is a legitimate answer, not an error - DWB-586 accepts
+    writes when no session is open, so a consultation can genuinely happen
+    outside one. What None must NOT do is clear an origin that is already
+    there; see `_fire`.
+    """
+    agent = db.get(Agent, agent_id)
+    if agent is None or agent.project_id is None:
+        return None
+    active = session_svc.get_active_session(db, agent.project_id)
+    return active.id if active is not None else None
+
+
+def _fire(
+    db: Session, memory_ids: list[int], *, reinforce_session_id: int | None = None
+) -> None:
+    """THE ONLY WRITE SITE FOR `fired_count` AND `last_reinforced_session_id`.
 
     A single UPDATE, not a loop - same shape journal.py's own write site uses
     for its counter, for the same reason: one statement is what lets a guard
@@ -86,13 +112,40 @@ def _fire(db: Session, memory_ids: list[int]) -> None:
     "fetch"` expires the matching ORM objects, so a caller holding those rows
     (consult_scars does, immediately after this call) reads the POST-increment
     value rather than the stale one already in the session's identity map.
+
+    DWB-621: THE RECALL BUMP. Miles's ruling is that a scar which is recalled
+    returns to full strength. The whole of that is moving the decay clock's
+    origin to the session the recall happened in: `sessions_since_reinforced`
+    already does COALESCE(last_reinforced, created), so a fresh origin means
+    zero sessions elapsed, which the existing curve already scores 10. There is
+    deliberately NO new scoring path - a second mechanism for one outcome is
+    how two of them end up disagreeing.
+
+    WHY A SELF-ASSIGNMENT RATHER THAN A SECOND `.values()` CALL. With no
+    session open there is nothing to move the origin to, and writing NULL would
+    fall back through that COALESCE to `created_session_id`, which is OLDER:
+    the row would come out of a consultation scoring LOWER than it went in,
+    which is the opposite of the ruling. Branching into two `update()` calls
+    would fix that and break something else - each branch is a separate
+    `fired_count=` keyword, so the "exactly one write site" guard would start
+    counting two and the next person would weaken the guard to make it pass.
+    `SET col = col` is a true no-op in SQL and keeps both fields written in
+    exactly one place.
     """
     if not memory_ids:
         return
+    new_origin = (
+        AgentMemory.last_reinforced_session_id
+        if reinforce_session_id is None
+        else reinforce_session_id
+    )
     db.execute(
         update(AgentMemory)
         .where(AgentMemory.id.in_(memory_ids))
-        .values(fired_count=AgentMemory.fired_count + 1)
+        .values(
+            fired_count=AgentMemory.fired_count + 1,
+            last_reinforced_session_id=new_origin,
+        )
         .execution_options(synchronize_session="fetch")
     )
 
@@ -147,7 +200,11 @@ def consult_scars(db: Session, *, agent_id: int, term: str) -> dict:
         .all()
     )
 
-    _fire(db, [m.id for m in matches])
+    _fire(
+        db,
+        [m.id for m in matches],
+        reinforce_session_id=_active_session_id(db, agent_id),
+    )
     db.flush()
 
     return {

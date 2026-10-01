@@ -6,7 +6,9 @@
 # Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
-# Last Modified: 2026-10-01 (DWB-617: docstrings cite memory.md's ceiling by name instead of a stale 4500)
+# Last Modified: 2026-10-01 (DWB-629: one top-level bullet per lesson so a
+#                wrap-up splits into one row per lesson; DWB-630: scratchpad_excerpt sealed under human_memory;
+#                _read_scratchpad requires the project so an ungated call cannot be written)
 
 import json
 import logging
@@ -163,7 +165,7 @@ def identify_agent(
                 "lazy scaffold from identify_agent failed for agent_id=%s: %s",
                 agent.id, e,
             )
-    scratchpad_excerpt = _read_scratchpad(memory_dir)
+    scratchpad_excerpt = _read_scratchpad(project, memory_dir)
     instructions = _agent_visible_instructions(db, project.id, agent.id)
 
     return {
@@ -196,20 +198,32 @@ def _memory_dir(project: Project, agent: Agent) -> str:
     return f"{base.rstrip('/')}/.dwb/memory/{project.prefix}/{agent.name}/"
 
 
-def _read_scratchpad(memory_dir: str) -> str:
-    # DWB-401: the single free-form file is now memory.md (scratchpad + lessons
-    # merged; recent_sessions dropped). Key name kept as scratchpad_excerpt for
-    # API stability; it now surfaces memory.md.
+def _read_scratchpad(project: Project, memory_dir: str) -> str:
+    """The `scratchpad_excerpt` field, SEALED at the read rather than at the use.
+
+    DWB-401: the single free-form file is now memory.md (scratchpad + lessons
+    merged; recent_sessions dropped). Key name kept as scratchpad_excerpt for
+    API stability; it now surfaces memory.md.
+
+    DWB-630: `project` is a REQUIRED parameter, and that is the fix rather than
+    an inconvenience. This function used to take only `memory_dir`, so a gated
+    call site and an ungated one were INDISTINGUISHABLE at the call site -
+    which is why the leak sat fourteen lines above a correctly gated read, and
+    why grepping for `memory_mode` returned only the SAFE callers. Taking the
+    project means the ungated call can no longer be spelled: both existing
+    callers were ungated, and a third cannot now be written by omission.
+    """
     path = Path(memory_dir) / "memory.md"
+    excerpt = ""
     try:
         if path.is_file():
             data = path.read_text(encoding="utf-8", errors="replace")
-            return data[-_SCRATCHPAD_EXCERPT_BYTES:]
+            excerpt = data[-_SCRATCHPAD_EXCERPT_BYTES:]
     except OSError:
         # Unreadable file — surface an empty excerpt rather than 500. The
         # failed_hooks-style telemetry for filesystem issues is out of scope.
         pass
-    return ""
+    return memory_mode.stock_excerpt_for(project, excerpt)
 
 
 def _read_memory_full(memory_dir: str) -> str:
@@ -380,11 +394,19 @@ def spawn_prepare_payload(
         f"- memory_dir: {memory_dir}\n"
     )
 
-    scratchpad_raw = _read_scratchpad(memory_dir)
-    scratchpad_section = (
-        "## Recent Scratchpad\n"
-        + (scratchpad_raw if scratchpad_raw else "(no entries yet)\n")
-    )
+    scratchpad_raw = _read_scratchpad(project, memory_dir)
+    if memory_mode.is_human_memory(project):
+        # DWB-630: no section at all under the seal. Emptying only the CONTENT
+        # would leave "## Recent Scratchpad / (no entries yet)", which is false
+        # twice over - there ARE entries and they are sealed, not absent - and a
+        # heading named for stock memory is itself the second thing in the
+        # bundle that looks like memory. Stock's empty case keeps its wording.
+        scratchpad_section = ""
+    else:
+        scratchpad_section = (
+            "## Recent Scratchpad\n"
+            + (scratchpad_raw if scratchpad_raw else "(no entries yet)\n")
+        )
     # DWB-517: the FULL memory.md, verbatim, so the TL injects it into the spawn
     # prompt without the agent having to read it. Empty string when none yet.
     # DWB-589: sealed under human_memory - a spawned agent must not be handed
@@ -666,9 +688,29 @@ def _format_scratchpad_block(
         heading += f" — session {session_id}"
     lines = [heading + "\n"]
     if lessons:
-        lines.append("- lessons:\n")
+        # DWB-629: ONE TOP-LEVEL BULLET PER LESSON. This used to write a single
+        # `- lessons:` bullet with each lesson INDENTED beneath it, and an
+        # indented dash is a NESTED bullet: memory_format.TOP_BULLET is anchored
+        # at column zero precisely so a sub-point stays with the point it
+        # qualifies. So the whole wrap-up split into ONE entry, and several
+        # unrelated lessons were adopted as a single row - taking one tier for
+        # all of them, decaying on one clock, and retrieved or not retrieved as
+        # a block. Three lessons that would each have earned their own strength
+        # were averaged into one. Every agent's wrap-up from the adoption run
+        # has that shape.
+        #
+        # The `- lessons:` label went with it rather than being kept as a
+        # heading: it was never structure the format understood, only the thing
+        # that made the real lessons nested. This block is now shaped exactly
+        # like an append, which is the format both already had to agree on.
+        #
+        # A lesson spanning several lines still forms ONE entry: unindented
+        # continuation lines fold into the open bullet. A continuation line that
+        # itself begins with "- " at column zero would start a new entry, which
+        # is a property of the markdown this format is, not something introduced
+        # here.
         for item in lessons:
-            lines.append(f"  - {item}\n")
+            lines.append(f"- {item}\n")
     return "".join(lines)
 
 

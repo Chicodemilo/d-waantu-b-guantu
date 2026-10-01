@@ -645,25 +645,34 @@ class TestRetrievalHelpers:
         assert m.search("mywidget") is None
 
     def test_resolve_memory_entry_paths(self, tmp_path):
+        # DWB-630: the resolver now takes the project first, because it reads
+        # another agent's memory.md and that file is SEALED under human_memory.
+        # These cases are about path handling, so they run in stock mode; the
+        # seal itself is covered in test_spawn_bundle_seal_dwb630.py.
+        class _StockProject:
+            memory_mode = "stock"
+            repo_path = None
+
+        project = _StockProject()
         ref = "mem/memory.md"
         # No heading above the hit.
         _write(tmp_path / ref, "widget first\n## 2026-09-15T01:00:00+00:00\nlater\n")
-        assert node_retrieval._resolve_memory_entry(str(tmp_path), ref, "widget") == (None, None)
+        assert node_retrieval._resolve_memory_entry(project, str(tmp_path), ref, "widget") == (None, None)
         # Heading without an ISO date.
         _write(tmp_path / ref, "## plain notes\nwidget here\n")
-        assert node_retrieval._resolve_memory_entry(str(tmp_path), ref, "widget") == ("plain notes", None)
+        assert node_retrieval._resolve_memory_entry(project, str(tmp_path), ref, "widget") == ("plain notes", None)
         # Session-suffixed heading: full heading returned, date extracted.
         _write(tmp_path / ref, "## 2026-09-15T01:00:00+00:00 - session abc\nwidget here\n")
-        heading, date = node_retrieval._resolve_memory_entry(str(tmp_path), ref, "widget")
+        heading, date = node_retrieval._resolve_memory_entry(project, str(tmp_path), ref, "widget")
         assert heading == "2026-09-15T01:00:00+00:00 - session abc"
         assert date == "2026-09-15T01:00:00+00:00"
         # Nearest heading above the FIRST hit wins.
         _write(tmp_path / ref, "## 2026-01-01T00:00:00+00:00\nnothing\n## 2026-02-02T00:00:00+00:00\nwidget\n## 2026-03-03T00:00:00+00:00\nwidget again\n")
-        assert node_retrieval._resolve_memory_entry(str(tmp_path), ref, "widget")[1] == "2026-02-02T00:00:00+00:00"
+        assert node_retrieval._resolve_memory_entry(project, str(tmp_path), ref, "widget")[1] == "2026-02-02T00:00:00+00:00"
         # Degradations.
-        assert node_retrieval._resolve_memory_entry(None, ref, "widget") == (None, None)
-        assert node_retrieval._resolve_memory_entry(str(tmp_path), "missing.md", "widget") == (None, None)
-        assert node_retrieval._resolve_memory_entry(str(tmp_path), ref, "absenttag") == (None, None)
+        assert node_retrieval._resolve_memory_entry(project, None, ref, "widget") == (None, None)
+        assert node_retrieval._resolve_memory_entry(project, str(tmp_path), "missing.md", "widget") == (None, None)
+        assert node_retrieval._resolve_memory_entry(project, str(tmp_path), ref, "absenttag") == (None, None)
 
 
 def _seed_memory_lesson(db, pid, mem_ref, text, code_ref="handler.py"):

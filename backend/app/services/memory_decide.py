@@ -9,7 +9,9 @@
 #          app/models/journal_entry, app/models/memory_transition
 # Data In: db Session, agent_id, transition id, a tier
 # Data Out: the updated MemoryTransition; the mode landed in, if it cut over
-# Last Modified: 2026-10-01 (DWB-620: decide() stamps created_session_id, at
+# Last Modified: 2026-10-01 (DWB-633: decided_at is truncated to the second
+#                at source - MySQL rounds a microsecond value HALF-UP into a
+#                DATETIME(0), storing decisions in the future)
 #                parity with raw_memory.py - its absence made every adopted row
 #                unscoreable and therefore unreachable)
 
@@ -174,6 +176,46 @@ def _load(db: Session, transition_id: int) -> MemoryTransition:
     return row
 
 
+def _decision_now() -> datetime:
+    """Now, TRUNCATED to the second, because the column cannot hold more.
+
+    DWB-633. `decided_at` is a `DateTime` with no fractional seconds. MySQL
+    does not truncate a value carrying a fraction on the way in, it ROUNDS IT
+    HALF-UP, so a decision made at :24.635 is stored as :25 - recorded half a
+    second after it happened, in the future relative to the event.
+
+    THE PROBLEM IS THE FRACTION, NOT THE WRITER, and getting that backwards
+    points at a fix that does not work. It is tempting to read this as "Python
+    stamps round, MySQL stamps truncate" and therefore to tidy this helper away
+    into a server-side default. That reintroduces the bug: measured,
+    `CAST(NOW(3) AS DATETIME)` at .513/.629/.749/.865 all round UP, while plain
+    `NOW()` at the same instants does not. `NOW()` is safe because it is
+    GENERATED at second precision and has no fraction to round, not because
+    MySQL produced it. Anything carrying a fraction is rounded, wherever it
+    came from.
+
+    So the fix is to remove the fraction, which is what this does, and a
+    server-side expression is an acceptable substitute ONLY if it generates at
+    second precision.
+
+    The asymmetry that made it visible: `created_at` on this table is plain
+    `NOW()`, so it has no fraction while `decided_at` had one. Comparing them
+    therefore carried an error of up to a FULL second in an unpredictable
+    direction. Measured: a decision stored at :25 sitting "after" a row
+    genuinely created at :24.6 and stored at :24.
+
+    Anything ordering these two columns inherits that, which is how it surfaced
+    - as intermittent failures in the DWB-623 recession detector, where a late
+    arrival could look earlier than the decision it followed. Truncating here
+    makes both sides agree, at the source, rather than compensating downstream
+    with a tolerance that would blunt the comparison for every caller.
+
+    Truncation rather than rounding because a timestamp should never name a
+    moment that has not happened yet.
+    """
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
 def _body_of(row: MemoryTransition) -> tuple[str, tuple[str, ...]]:
     """The lesson and its heading chain, recovered from the stored excerpt.
 
@@ -282,7 +324,7 @@ def decide(
 
     row.decided_tier = chosen
     row.decided_by = decided_by
-    row.decided_at = datetime.now(timezone.utc)
+    row.decided_at = _decision_now()
     row.target_memory_id = memory.id
     row.state = TransitionState.written
     db.flush()
@@ -330,7 +372,7 @@ def skip(
     db.flush()
 
     row.decided_by = decided_by
-    row.decided_at = datetime.now(timezone.utc)
+    row.decided_at = _decision_now()
     row.state = TransitionState.skipped
     db.flush()
     return row

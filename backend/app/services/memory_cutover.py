@@ -8,7 +8,9 @@
 # Callees: app/services/project (open_run, the legal-edge table), app/models
 # Data In: db Session, Project
 # Data Out: the MemoryMode landed in, or None when the run is not finished
-# Last Modified: 2026-09-30 (DWB-594)
+# Last Modified: 2026-10-01 (DWB-622: the refusal reports measured state
+#                counts instead of asserting nothing was journaled; the
+#                preserving set is unchanged and now carries why)
 
 """Cutover is the pipeline finishing, not a thing someone does afterwards.
 
@@ -42,18 +44,46 @@ is the same defective guard with a new name.
 ALL-TERMINAL IS NOT THE SAME AS ANYTHING-SURVIVED, and that gap is the third
 door into the same bug. Found by Barry rather than by me.
 
-An entry reaches a terminal state by being WRITTEN, SKIPPED or JOURNALED. Only
-the first two words of that sentence preserve anything: `written` puts it in the
-new store and `journaled` puts it in the journal, but `skipped` means "decided
-it should not travel" and preserves it NOWHERE. So a run whose entries were all
-skipped is fully terminal with nothing kept, and cutting over would seal the
-flat file (DWB-589) against an empty store - an agent that had memory, has none,
-and cannot read the file that still holds it.
-
-That is indistinguishable from a bug that skipped everything, and the whole lane
+An entry reaches a terminal state by being WRITTEN, SKIPPED or JOURNALED, and
+the question the guard asks is whether the entry still exists ANYWHERE
+afterwards. A run that enumerated candidates and preserved none of them is
+about to seal the flat file (DWB-589) against an empty store - an agent that
+had memory, has none, and cannot read the file that still holds it. That is
+indistinguishable from a bug that discarded everything, and the whole lane
 exists because a state indistinguishable from a bug reached production. So it
 REFUSES. Not a hold step in the normal flow, which the TL ruled against: the
 normal flow is untouched, and this fires only on a run that preserved nothing.
+
+DWB-622 CORRECTION, AND IT IS A CORRECTION OF THIS PARAGRAPH. The original
+version said `skipped` "preserves it NOWHERE", and excluded it from the
+preserving set on that basis. The sentence was false: DWB-594's own ruling
+makes every skip journal the entry FIRST, flushed before the row goes terminal,
+so a terminal `skipped` row on an OPEN run implies a journal row. Nothing
+caught it because the claim and the code agreed with each other while both
+disagreed with `skip()`.
+
+THE SET ITSELF WAS RIGHT AND STAYS UNCHANGED. Only the sentence explaining it
+was false, and only the refusal's MESSAGE was broken. `{written, journaled}` is
+a union across BOTH DIRECTIONS - `written` is how an adopt reaches its
+destination, `journaled` is how a revert reaches its. Two edits were tried here
+before that became clear, and both were wrong in instructive ways: adding
+`skipped` lets an all-skipped run seal the file against an empty store, and
+narrowing to `{written}` refuses every legitimate revert. The second is the
+sharper warning, because it reads as rigour while breaking the case it was
+cheapest to support.
+
+So the defect was never that the refusal fired. It was WHAT IT SAID: an
+all-skipped run was told nothing had been journaled, in exactly the case where
+everything had been. An operator who checks that claim finds six journal rows
+and has been given a reason to distrust the entire refusal, which is worse than
+a wrong number.
+
+SCOPE, because `skipped` has a second writer. The abort path
+(`project.py`) marks rows skipped WITHOUT journaling, so there the implication
+does not hold. It cannot reach here: that same transaction sets the run to
+`aborted`, and this function resolves its run through `open_run`, which matches
+only `state == open`. The status service reports only the open run for the same
+reason. A test pins that.
 
 The escape is deliberate rather than absent. `adopting -> stock` is an abort and
 needs no confirmation, and the explicit CUTOVER edge remains reachable by PATCH
@@ -86,7 +116,7 @@ edge that table already defines, looked up rather than assumed, so
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.memory_transition import (
@@ -120,6 +150,25 @@ class CutoverRefused(Exception):
     """
 
 
+def _completion_now() -> datetime:
+    """Now, TRUNCATED to the second. Same reason as
+    `memory_decide._decision_now()`; see DWB-633.
+
+    MySQL ROUNDS a value carrying a fraction HALF-UP into a DATETIME(0) column
+    rather than truncating it, so an unrounded stamp records a completion up to
+    half a second after it happened - a timestamp naming a moment that has not
+    occurred.
+
+    THE FRACTION IS THE PROBLEM, NOT THE WRITER. Do not replace this with a
+    server-side default on the assumption that MySQL-generated values truncate:
+    `CAST(NOW(3) AS DATETIME)` rounds up just as a Python stamp does. Plain
+    `NOW()` is safe only because it is GENERATED at second precision, so no
+    fraction ever exists. A substitute is acceptable only if it has that same
+    property.
+    """
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
 def _unfinished_count(db: Session, run: MemoryTransitionRun) -> int:
     return len(
         db.execute(
@@ -133,7 +182,31 @@ def _unfinished_count(db: Session, run: MemoryTransitionRun) -> int:
 
 
 # Terminal states that PRESERVE the entry somewhere. `skipped` is deliberately
-# absent: it is the one terminal state that keeps nothing.
+# absent.
+#
+# DWB-622 LEFT THIS SET EXACTLY AS IT WAS, and the reason is worth recording
+# because two different wrong changes were attempted here first.
+#
+# The comment that used to sit on this set said `skipped` "keeps nothing". That
+# sentence is false: DWB-594 makes every skip journal the entry before the row
+# goes terminal. But the SET was still right, and the defect was only ever the
+# refusal's MESSAGE, which asserted that nothing had been journaled in exactly
+# the case where everything had.
+#
+# Wrong change 1: add `skipped`. That makes an all-skipped run cut over, which
+# seals the flat file against an empty store - the precise harm this guard
+# exists to refuse, since the journal is never auto-loaded.
+#
+# Wrong change 2: narrow to `{written}` on the reasoning that only the store
+# counts. That reasoning holds for ADOPT and breaks REVERT, whose entries land
+# as `journaled` rather than `written`. The set is a union across BOTH
+# directions: `written` is how an adopt succeeds, `journaled` is how a revert
+# does. Narrowing it made the guard refuse every legitimate revert, which is
+# the classic shape - tightening a predicate until it also refuses the case it
+# was cheapest to support.
+#
+# So the question this set answers is "did the entry reach its destination for
+# this run's direction", and the union is what makes one set serve both.
 _PRESERVING_STATES = frozenset(
     {TransitionState.written, TransitionState.journaled}
 )
@@ -149,6 +222,21 @@ def _preserved_count(db: Session, run: MemoryTransitionRun) -> int:
         .scalars()
         .all()
     )
+
+
+def _state_counts(db: Session, run: MemoryTransitionRun) -> dict[str, int]:
+    """What the run's rows actually are, for the refusal to REPORT rather than
+    assert. DWB-622: the previous message hard-coded "every one was skipped ...
+    nothing was journaled", which was a claim about the data instead of a
+    reading of it, and it was false for every all-skipped run."""
+    counts: dict[str, int] = {}
+    for state, count in db.execute(
+        select(MemoryTransition.state, func.count(MemoryTransition.id))
+        .where(MemoryTransition.run_id == run.id)
+        .group_by(MemoryTransition.state)
+    ).all():
+        counts[state.value if hasattr(state, "value") else str(state)] = count
+    return counts
 
 
 def _row_count(db: Session, run: MemoryTransitionRun) -> int:
@@ -209,17 +297,29 @@ def complete_if_finished(db: Session, project: Project) -> MemoryMode | None:
     # store, which is the bug this lane exists to close wearing a third face.
     # Zero candidates is a different and legitimate case, handled at BEGIN, so
     # it is excluded here rather than swept into the same refusal.
+    #
+    # DWB-622: the message no longer asserts what the entries were or where
+    # they did not go. It REPORTS the state counts it measured. The previous
+    # text hard-coded "every one was skipped ... nothing was journaled", which
+    # was a claim about the data rather than a reading of it, and it was false
+    # for every all-skipped run because skips journal. An operator told
+    # "nothing was journaled" while six journal rows sat there has been given a
+    # reason to distrust the whole refusal.
     total = _row_count(db, run)
     if total and not _preserved_count(db, run):
+        counts = _state_counts(db, run)
+        breakdown = ", ".join(f"{state}: {n}" for state, n in sorted(counts.items()))
         raise CutoverRefused(
             f"Cutover refused for project {project.id}: transition run {run.id} "
-            f"has {total} entries and every one was skipped, so nothing was "
-            "written to the store and nothing was journaled. Completing here "
-            "would seal the flat file against an empty store - the agent would "
-            "have had memory, have none, and be unable to read the file that "
-            "still holds it. If that is genuinely intended, abort the "
-            "transition (which needs no confirmation) or perform the cutover "
-            "explicitly; it will not happen by arithmetic."
+            f"has {total} entries and not one of them reached its destination. "
+            f"Entries by state - {breakdown}. Skipped entries ARE journaled "
+            "and are not lost, but the journal is never auto-loaded, so "
+            "completing here would seal the "
+            "flat file against an empty store - the agent would have had "
+            "memory, have none, and be unable to read the file that still "
+            "holds it. If that is genuinely intended, abort the transition "
+            "(which needs no confirmation) or perform the cutover explicitly; "
+            "it will not happen by arithmetic."
         )
 
     # DWB-594 acceptance 4: a FINAL SWEEP, and no cutover if it finds anything.
@@ -254,7 +354,7 @@ def complete_if_finished(db: Session, project: Project) -> MemoryMode | None:
         )
 
     run.state = TransitionRunState.completed
-    run.completed_at = datetime.now(timezone.utc)
+    run.completed_at = _completion_now()
     project.memory_mode = target
     db.flush()
     return target

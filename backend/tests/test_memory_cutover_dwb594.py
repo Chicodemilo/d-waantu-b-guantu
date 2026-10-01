@@ -7,7 +7,8 @@
 # Callees: app.services.memory_cutover
 # Data In: lat_test rows
 # Data Out: assertions
-# Last Modified: 2026-09-30 (DWB-594)
+# Last Modified: 2026-10-01 (DWB-622: refusal wording assertions updated; the
+#                preserving-set test confirmed rather than changed)
 
 """DWB-594's cutover, by TL ruling of 2026-09-30.
 
@@ -164,7 +165,12 @@ class TestAllTerminalIsNotAllSurvived:
         )
         with pytest.raises(memory_cutover.CutoverRefused) as exc:
             memory_cutover.complete_if_finished(db_session, project)
-        assert "every one was skipped" in str(exc.value)
+        # DWB-622 changed the WORDING, not the outcome. The old text asserted
+        # "every one was skipped ... nothing was journaled", which was false
+        # whenever the skips went through memory_decide.skip() - every skip
+        # journals first. The refusal now reports measured state counts.
+        assert "skipped: 2" in str(exc.value)
+        assert "nothing was journaled" not in str(exc.value)
         assert project.memory_mode == MemoryMode.adopting
 
     def test_one_written_row_is_enough_to_proceed(
@@ -195,7 +201,16 @@ class TestAllTerminalIsNotAllSurvived:
     ):
         """`journaled` preserves the entry too - spec section 7 hard rule 4
         makes the journal where anything leaving memory goes first. An entry
-        that left as an episode was not lost."""
+        that left as an episode was not lost.
+
+        DWB-622 briefly reversed this test and then put it back. Recorded
+        because the reversal was wrong for a reason that is easy to re-derive:
+        `journaled` is how a REVERT run reaches its destination, so removing it
+        from the preserving set refuses every legitimate revert
+        (`test_a_revert_lands_in_stock` is the one that caught it). The
+        preserving set is a union across both directions, not a statement about
+        the adopt store alone.
+        """
         project, _run = _setup(
             db_session,
             make_project,
@@ -230,8 +245,15 @@ class TestAllTerminalIsNotAllSurvived:
 
     def test_the_preserving_set_excludes_only_skipped(self):
         """Pinned against TERMINAL_STATES so a terminal state added later has to
-        declare whether it preserves anything, rather than defaulting into the
-        safe-looking side and silently permitting an empty cutover."""
+        declare whether it puts the entry in the NEW STORE, rather than
+        defaulting into the safe-looking side and silently permitting an empty
+        cutover.
+
+        DWB-622 confirmed this set rather than changing it. The set is a union
+        across both DIRECTIONS - `written` is how an adopt reaches its
+        destination, `journaled` is how a revert reaches its - which is why
+        narrowing it to `{written}` breaks reverts.
+        """
         from app.models.memory_transition import TERMINAL_STATES
 
         assert memory_cutover._PRESERVING_STATES < TERMINAL_STATES

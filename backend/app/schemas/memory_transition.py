@@ -6,7 +6,8 @@
 # Callees: pydantic, app/models/memory_transition (state vocabularies)
 # Data In: values computed by app/services/memory_transition
 # Data Out: MemoryTransitionStatusRead, MemoryTransitionAgentRow, TransitionStatus
-# Last Modified: 2026-09-30 (DWB-596)
+# Last Modified: 2026-10-01 (DWB-622 entries_journaled is an overlay, not a
+#                third bucket; DWB-623 adds re_enqueued / agents_re_enqueued)
 
 """Response shapes for the derived transition status.
 
@@ -76,6 +77,23 @@ class MemoryTransitionAgentRow(BaseModel):
     entries_total: int
     entries_done: int
     done: bool
+    # DWB-623: this agent had finished every entry it held, and new entries have
+    # since arrived for it. That is the RECEDING CUTOVER made visible.
+    #
+    # An agent's own `session-complete` writes to memory.md, the sweep correctly
+    # picks that writing up as a new candidate, and the agent is holding work
+    # again moments after truthfully reporting itself done. The run is not
+    # stuck and nothing is wrong, but the terminal condition has moved away by
+    # one and NOTHING SAID SO: the totals simply changed, which looks identical
+    # to a run that was always this size. Four recessions in one adoption went
+    # unnoticed that way and the only thing that stopped them was a human
+    # telling people to stop writing.
+    #
+    # `done` cannot carry this. It goes back to False, which is indistinguishable
+    # from an agent that never started, and those two want opposite responses
+    # from an operator: one is "wait", the other is "it moved, expect another
+    # lap".
+    re_enqueued: bool = False
 
 
 class MemoryTransitionStatusRead(BaseModel):
@@ -111,16 +129,29 @@ class MemoryTransitionStatusRead(BaseModel):
     # interchangeable to a human deciding whether to confirm one:
     #
     #   written    landed in the new store
-    #   journaled  left as an episode; real, but not memory
-    #   skipped    deliberately not carried; nothing anywhere
+    #   skipped    deliberately not carried into the store - but JOURNALED
+    #              first, so the content still exists as an episode
     #
-    # A run where every entry was skipped is legitimately complete and has
-    # moved nothing, and it should not LOOK like a successful migration.
-    # Raised by Barry, who owns the guard, against my first version which
-    # reported only entries_done.
+    # A run where every entry was skipped is legitimately complete and has put
+    # nothing in the new store, and it should not LOOK like a successful
+    # migration. Raised by Barry, who owns the guard, against my first version
+    # which reported only entries_done.
+    #
+    # DWB-622: `written` and `skipped` PARTITION the terminal rows; they sum to
+    # entries_done. `entries_journaled` is an OVERLAY over that partition, not a
+    # third bucket, so do NOT add it into that sum. It counts rows whose content
+    # reached the journal: every skip, plus any row in the legacy `journaled`
+    # state. This comment previously said `skipped` meant "nothing anywhere",
+    # which stopped being true when DWB-594 made every skip journal first, and
+    # the cutover guard was built on that sentence.
     entries_written: int = 0
     entries_journaled: int = 0
     entries_skipped: int = 0
     agents_total: int = 0
     agents_done: int = 0
+    # DWB-623: how many agents have re-enqueued since draining. Non-zero means
+    # the terminal condition receded during this run, which is a fact about the
+    # run that no other field reports. Zero is a real answer here rather than an
+    # absent one: it means no agent that finished has had new work arrive.
+    agents_re_enqueued: int = 0
     agents: list[MemoryTransitionAgentRow] = []

@@ -152,6 +152,31 @@ def assert_stock_write_allowed(db: Session, agent_id: int, route: str) -> None:
     )
 
 
+def stock_excerpt_for(project: Project | None, stock_excerpt: str) -> str:
+    """What a spawn / identify bundle should serve for `scratchpad_excerpt`.
+
+    DWB-630. The sibling of `memory_full_for`, and it exists for the same reason:
+    the seal has to be ONE decision rather than a rule each call site remembers.
+    `memory_full` was gated here and correct; `scratchpad_excerpt` was read
+    fourteen lines above it with no gate at all, so every agent on a
+    human_memory project received its tiered memory AND a 2000-byte slice of the
+    sealed stock file in the same payload - the exact failure DWB-589 exists to
+    prevent, which is not the wrong memory being used but TWO memories that both
+    look authoritative and disagree.
+
+    EMPTY RATHER THAN THE POINTER, deliberately. `memory_full` already carries
+    either the assembled memory or the pointer, and a second field repeating the
+    pointer is noise in a bundle whose whole problem was carrying two things
+    that look like memory. Empty is the absence of a second answer.
+
+    The KEY is kept (DWB-401 kept it for API stability and both response schemas
+    declare it required), so no consumer breaks; only its content goes.
+    """
+    if is_human_memory(project):
+        return ""
+    return stock_excerpt
+
+
 def memory_full_for(
     project: Project | None,
     stock_content: str,

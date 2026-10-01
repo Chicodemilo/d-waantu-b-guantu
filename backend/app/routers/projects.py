@@ -6,7 +6,8 @@
 # Callees: app/services (project, project_agent, standards_audit, test_result, seed_demo, playbook_deploy, activity_log), models (ActivityLog, Agent, Alert, InterAgentMessage, ProjectAgent, Ticket)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-09-30 (DWB-596: GET /{id}/memory-transition; DWB-593 transition refusal)
+# Last Modified: 2026-10-01 (DWB-627: the four token-ceiling call sites use
+#                ceiling_for_category instead of inlining 800/1000)
 
 import json
 import logging
@@ -1076,7 +1077,7 @@ def get_project_recap_draft(
 from app.config.token_budget import (  # noqa: E402
     GATE_EXEMPT_CATEGORIES as _GATE_EXEMPT_CATEGORIES,
     MEMORY_FILES as _MEMORY_FILES,
-    TOKEN_CEILINGS as _TOKEN_CEILINGS,
+    ceiling_for_category as _ceiling_for_category,
     classify_file as _classify_file,
     estimate_tokens as _estimate_tokens,
 )
@@ -1135,7 +1136,7 @@ def compute_token_budget(db: Session, project) -> dict:
                 text = ""
             tokens = _estimate_tokens(text)
             category = _classify_file(name)
-            ceiling = _TOKEN_CEILINGS.get(category, 1000)
+            ceiling = _ceiling_for_category(category)
             status = _budget_status(tokens, ceiling, category)
             files.append({
                 "path": str(filepath),
@@ -1160,7 +1161,7 @@ def compute_token_budget(db: Session, project) -> dict:
                 text = ""
             tokens = _estimate_tokens(text)
             category = _classify_file(filepath.name)
-            ceiling = _TOKEN_CEILINGS.get(category, 800)
+            ceiling = _ceiling_for_category(category)
             status = _budget_status(tokens, ceiling, category)
             files.append({
                 "path": str(filepath),
@@ -1184,7 +1185,7 @@ def compute_token_budget(db: Session, project) -> dict:
                     text = ""
                 tokens = _estimate_tokens(text)
                 category = _classify_file(filepath.name)
-                ceiling = _TOKEN_CEILINGS.get(category, 1000)
+                ceiling = _ceiling_for_category(category)
                 status = _budget_status(tokens, ceiling, category)
                 files.append({
                     "path": str(filepath),
@@ -1220,7 +1221,7 @@ def compute_token_budget(db: Session, project) -> dict:
                 except Exception:
                     text = ""
                 tokens = _estimate_tokens(text)
-                ceiling = _TOKEN_CEILINGS.get(category, 1000)
+                ceiling = _ceiling_for_category(category)
                 status = _budget_status(tokens, ceiling, category)
                 files.append({
                     "path": str(filepath),

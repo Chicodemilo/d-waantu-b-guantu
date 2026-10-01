@@ -9,7 +9,8 @@
 #                app.models.memory_transition
 # Data In:       Factory-created projects/agents plus transition runs and rows written directly
 # Data Out:      Assertions on the derived status, and on the absence of a status write path
-# Last Modified: 2026-09-30 (DWB-596: writers allowlisted with reasons, not banned by prefix)
+# Last Modified: 2026-10-01 (DWB-622: written+skipped partition done, with
+#                entries_journaled as an overlay over it rather than a third bucket)
 
 """DWB-596: the status is derived, and there is nothing to write it with.
 
@@ -358,9 +359,20 @@ class TestOutcomeBreakdown:
         assert body["entries_written"] == 0
         assert body["entries_journaled"] == 2
 
-    def test_the_three_outcomes_sum_to_done(
+    def test_written_and_skipped_partition_done_with_journaled_as_an_overlay(
         self, client, make_project, make_agent, make_run, make_rows
     ):
+        """DWB-622 changed what these three mean, so this assertion changed
+        with it.
+
+        It used to add all three and expect `entries_done`. That only held
+        while `journaled` was unreachable: the moment the counter started
+        seeing skips - which are journaled before they go terminal - the three
+        overlapped and the sum double-counted. `written` and `skipped`
+        PARTITION the terminal rows; `entries_journaled` is an OVERLAY over
+        that partition counting whatever reached the journal, so it is checked
+        against its own members rather than added alongside them.
+        """
         project = make_project()
         run = make_run(project["id"])
         agent = make_agent(project_id=project["id"])
@@ -375,12 +387,16 @@ class TestOutcomeBreakdown:
         body = _status(client, project["id"])
         assert body["entries_total"] == 5
         assert body["entries_done"] == 4
-        assert (
-            body["entries_written"]
-            + body["entries_journaled"]
-            + body["entries_skipped"]
-        ) == body["entries_done"]
         assert body["entries_written"] == 2
+        assert body["entries_skipped"] == 1
+        # The partition.
+        assert (
+            body["entries_written"] + body["entries_skipped"]
+            + 1  # the legacy `journaled` row, terminal but in neither bucket
+        ) == body["entries_done"]
+        # The overlay: one legacy journaled row plus one skip, both of whose
+        # content is in the journal.
+        assert body["entries_journaled"] == 2
 
     def test_non_terminal_rows_land_in_no_outcome_bucket(
         self, client, make_project, make_agent, make_run, make_rows
