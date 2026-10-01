@@ -33,10 +33,12 @@ from app.models.project import MemoryMode, Project
 from app.services import memory_cutover
 
 TERMINAL = [TransitionState.written, TransitionState.skipped, TransitionState.journaled]
+# DWB-631 removed `proposed` and `decided`, so `pending` is now the only
+# non-terminal state. Kept as a list rather than collapsed to a scalar: the
+# parametrised tests below are the guard that a state added later has to
+# declare which side of the cutover line it falls on.
 NON_TERMINAL = [
     TransitionState.pending,
-    TransitionState.proposed,
-    TransitionState.decided,
 ]
 
 

@@ -368,6 +368,25 @@ def _retrieval_count_writes() -> list[tuple[str, int]]:
     return sites
 
 
+def _reads_retrieval_count(path: pathlib.Path) -> bool:
+    """True if `path` actually READS `retrieval_count` in code.
+
+    An AST walk rather than a substring search, so a docstring or comment
+    naming the identifier - including one explaining that this module must not
+    read it - is not an offender. Matches the three shapes a read can take:
+    attribute access, a bare name, and a keyword argument.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "retrieval_count":
+            return True
+        if isinstance(node, ast.Name) and node.id == "retrieval_count":
+            return True
+        if isinstance(node, ast.keyword) and node.arg == "retrieval_count":
+            return True
+    return False
+
+
 def _modules_mentioning(needle: str) -> list[pathlib.Path]:
     return [p for p in _python_sources() if needle in p.read_text(encoding="utf-8")]
 
@@ -421,17 +440,37 @@ class TestTheScoreDoesNotReadTheCount:
     a score derived from the count would make the permanent thing decay.
     """
 
+    def test_the_ast_reader_scan_finds_a_known_positive(self):
+        """The guard below is only worth anything if its scanner CAN find a
+        reader. A pattern that matches nothing passes every check it guards.
+
+        `journal.py` genuinely reads `retrieval_count`, so it is the
+        known-positive: if this goes quiet, the scan has stopped working and
+        the guard beneath it has become decorative.
+        """
+        found = _reads_retrieval_count(APP_DIR / "services" / "journal.py")
+        assert found, (
+            "the AST scan found no read of retrieval_count in journal.py, which "
+            "definitely contains one; the scanner is broken, not the tree"
+        )
+
     def test_no_memory_tier_module_reads_retrieval_count(self):
+        """DWB-632: this was a TEXT match (`"retrieval_count" in source`) and it
+        fired on `memory_consolidate.py` for naming the identifier TWICE IN ITS
+        DOCSTRING, in sentences explaining that the module does not read it.
+
+        A source-string tripwire cannot tell a reader from a description of the
+        rule, so it goes red on exactly the prose that teaches the rule, and the
+        obvious response to a guard that fires on a comment is to weaken the
+        guard. An AST walk distinguishes them for free: it sees reads, not
+        mentions.
+        """
         tier_modules = _modules_mentioning("MemoryTier")
         assert tier_modules, (
             "found no modules referencing MemoryTier; this check saw nothing and "
             "would pass against a tree with the feature deleted"
         )
-        offenders = [
-            str(p)
-            for p in tier_modules
-            if "retrieval_count" in p.read_text(encoding="utf-8")
-        ]
+        offenders = [str(p) for p in tier_modules if _reads_retrieval_count(p)]
         assert offenders == [], (
             "a module that works with memory tiers also reads retrieval_count. "
             "Spec section 5 rules the score transient and the count permanent; "

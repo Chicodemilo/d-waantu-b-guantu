@@ -216,8 +216,13 @@ class TestDryRun:
         # table exists to make impossible.
         assert all(r.run_id == run.id for r in persisted)
         assert run.direction == TransitionDirection.adopt
-        assert all(r.proposed_tier is None for r in persisted), (
-            "the snapshot proposed a tier; phase 1 is deterministic and makes no "
+        # DWB-631: this used to assert `proposed_tier is None` on every row.
+        # The column is GONE, so the rule it guarded is now structural rather
+        # than asserted - there is no field a snapshot could put a proposal in.
+        # An absence assertion holds until someone writes the line nobody
+        # anticipated; an absent column cannot be written to at all.
+        assert not hasattr(persisted[0], "proposed_tier"), (
+            "proposed_tier is back; phase 1 is deterministic and makes no "
             "judgment, and tiering here would rubber-stamp in-the-moment salience"
         )
 

@@ -66,3 +66,34 @@ class RawMemoryResponse(BaseModel):
     session_state: str
     fired_count: int
     created_at: datetime
+
+
+class MemoryWithdrawRequest(BaseModel):
+    """DWB-626: retract one of your own memory rows.
+
+    `reason` is optional and free text. It is appended to the JOURNALED body
+    rather than added to `tags`, because tags are the controlled vocabulary the
+    journal search filters on and a free-text reason in there would make every
+    retraction its own unsearchable tag.
+    """
+
+    reason: str | None = None
+
+
+class MemoryWithdrawResponse(BaseModel):
+    """What was withdrawn, and WHERE IT WENT.
+
+    `journal_entry_id` is the load-bearing field. A withdrawal that could not
+    say where the content landed would be indistinguishable from a deletion,
+    and the retraction is recoverable precisely because this id exists.
+    """
+
+    memory_id: int
+    agent_id: int
+    tier: str
+    body: str
+    context_key: str | None
+    withdrawn: bool
+    journal_entry_id: int
+    journal_tags: list[str]
+    reason: str | None

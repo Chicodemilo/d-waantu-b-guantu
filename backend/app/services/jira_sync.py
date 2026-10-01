@@ -6,7 +6,7 @@
 # Callees: app/services/jira.py (read-only client), app/models/jira_ticket_snapshot, app/models/project
 # Data In: Jira REST responses (via app.services.jira), DWB ticket + snapshot rows
 # Data Out: Refreshed jira_ticket_snapshots rows + project sync-state columns; counts dict
-# Last Modified: 2026-06-24 (DWB-456: sub-task type + parent reconcile, READ-ONLY toward Jira)
+# Last Modified: 2026-10-01 (DWB-634: the two private microsecond truncations now call the shared app.services.timestamps helper)
 
 """Manual Jira -> DWB ingestion for the unified Jira table (DWB-342).
 
@@ -41,6 +41,7 @@ from app.models.jira_ticket_snapshot import JiraTicketSnapshot
 from app.models.project import JiraSyncStatus, Project
 from app.models.ticket import Ticket, TicketType
 from app.services import jira as jira_client
+from app.services import timestamps
 
 
 class SyncAlreadyRunning(Exception):
@@ -258,7 +259,7 @@ def _release_lock(
 ) -> None:
     project.last_jira_sync_status = status
     project.last_jira_sync_counts = counts
-    project.last_jira_sync_at = datetime.utcnow().replace(microsecond=0)
+    project.last_jira_sync_at = timestamps.naive_utc_now_second()
     db.commit()
 
 
@@ -389,7 +390,7 @@ def run_sync(
                 continue
 
             snapshot = existing_snapshots.get(ticket.id)
-            now = datetime.utcnow().replace(microsecond=0)
+            now = timestamps.naive_utc_now_second()
 
             if snapshot is None:
                 snapshot = JiraTicketSnapshot(

@@ -71,8 +71,17 @@ class TransitionDirection(str, enum.Enum):
 class TransitionState(str, enum.Enum):
     """Where this entry has got to.
 
-    pending -> proposed -> decided -> written is the happy path. `skipped` and
+    `pending -> written` is the happy path, in ONE hop. `skipped` and
     `journaled` are the other two ways an entry can be finished with.
+
+    DWB-631 REMOVED `proposed` and `decided`, and this line used to describe
+    them as intermediate steps. They never existed in the code: nothing ever
+    assigned either, and no row ever held one. They described a two-phase flow
+    the spec RULES OUT - section 4 says the snapshot makes no judgement,
+    because an agent shown a proposed answer agrees with it, and that
+    rubber-stamp is what the design exists to prevent. The `proposed_tier`
+    column went with them. Reintroducing that flow now requires adding a column
+    and a migration, which is a reviewable act rather than an omission.
 
     TERMINAL MEANS "THE CUTOVER MAY PROCEED PAST THIS ROW", which is the only
     question the guard asks. See TERMINAL_STATES below; it is a named set
@@ -82,8 +91,6 @@ class TransitionState(str, enum.Enum):
     """
 
     pending = "pending"
-    proposed = "proposed"
-    decided = "decided"
     written = "written"
     skipped = "skipped"
     journaled = "journaled"
@@ -127,14 +134,6 @@ class MemoryTransition(Base):
     # The slice of the flat file this row is about. Nullable because a revert
     # has no flat-file source: its source is an agent_memories row.
     source_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Reuses MemoryTier rather than declaring a parallel vocabulary, so there is
-    # one definition of what a tier is. `raw` is reachable through the shared
-    # enum but is not a meaningful PROPOSAL - a proposal is a judgement and
-    # `raw` is the absence of one - so the service refuses it rather than the
-    # schema, keeping the vocabulary single.
-    proposed_tier: Mapped[MemoryTier | None] = mapped_column(
-        Enum(MemoryTier), nullable=True
-    )
     decided_tier: Mapped[MemoryTier | None] = mapped_column(
         Enum(MemoryTier), nullable=True
     )

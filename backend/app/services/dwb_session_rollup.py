@@ -6,7 +6,7 @@
 # Callees: app.models.hook_session, app.models.tracking_log, app.models.agent, app.models.ticket
 # Data In: SQLAlchemy Session + DwbSession instance
 # Data Out: list[dict] for by_role / by_ticket, tuple[int,int] for overhead, tuple[int,int] for live totals
-# Last Modified: 2026-09-15 (DWB-539: abandoned hook sessions no longer claim the whole window)
+# Last Modified: 2026-10-01 (DWB-634: the open-session window end is stamped at second precision via app.services.timestamps)
 
 """DWB session rollup queries — read-only slices for the detail endpoint.
 
@@ -37,12 +37,20 @@ from app.models.epic import Epic
 from app.models.hook_session import HookSession
 from app.models.ticket import Ticket
 from app.models.tracking_log import TrackingLog
+from app.services import timestamps
 
 
 logger = logging.getLogger(__name__)
 
 def _utcnow() -> datetime:
-    return datetime.utcnow()
+    """Naive UTC at SECOND precision (DWB-634).
+
+    This is the open-session end bound. It is never stored, but it is compared
+    against columns that ARE stored at second precision, so carrying a
+    fraction here reintroduces the same asymmetry on the live side of the
+    window that storage introduced on the closed side.
+    """
+    return timestamps.naive_utc_now_second()
 
 
 def compute_window(session: DwbSession, *, now: datetime | None = None) -> tuple[datetime, datetime]:

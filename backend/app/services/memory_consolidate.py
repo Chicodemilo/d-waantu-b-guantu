@@ -83,9 +83,10 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.agent_memory import AgentMemory
+from app.models.agent_memory import AgentMemory, MemoryCaughtBy, MemoryCost, MemoryTier
 from app.models.journal_entry import JournalEntry
-from app.services import memory_evict, memory_promote, memory_scan, memory_scar_conclude
+from app.models.agent import Agent
+from app.services import dwb_session, memory_evict, memory_promote, memory_scan, memory_scar_conclude
 
 
 @dataclass
@@ -109,6 +110,14 @@ class ConsolidationResult:
     """New CORE memories created from journal entries at or past the
     promotion threshold."""
 
+    tiered_raw: list[tuple[int, str]] = field(default_factory=list)
+    """(memory_id, MemoryTier.value) for every RAW row this pass judged.
+
+    DWB-632. Separate from the other four because it is the only movement that
+    creates eligibility rather than acting on it: a row leaving `raw` becomes
+    scoreable, renderable and injectable for the first time.
+    """
+
     @property
     def moved_anything(self) -> bool:
         """True if this pass had any effect at all. A quiet pass (nothing met
@@ -119,6 +128,7 @@ class ConsolidationResult:
             or self.concluded_scars
             or self.evicted_working
             or self.promoted_journal
+            or self.tiered_raw
         )
 
 
@@ -143,6 +153,140 @@ def _scar_family_candidates(db: Session, *, agent_id: int) -> list[AgentMemory]:
         .scalars()
         .all()
     )
+
+
+def _active_session_id(db: Session, agent_id: int) -> int | None:
+    """The DWB session this consolidation is happening inside, or None.
+
+    Same resolution journal.py and memory_consult.py use: agent -> project ->
+    active session. None is a legitimate answer; see `tier_raw_memories` for
+    what it causes.
+    """
+    agent = db.get(Agent, agent_id)
+    if agent is None or agent.project_id is None:
+        return None
+    active = dwb_session.get_active_session(db, agent.project_id)
+    return active.id if active is not None else None
+
+
+def tier_for_raw(memory: AgentMemory) -> MemoryTier:
+    """Which tier a RAW row earns, from the tags the MOMENT captured.
+
+    DWB-632. Spec section 4 says append raw and unsorted during a session,
+    because "tiering in the moment rubber-stamps in-the-moment salience, which
+    is the judgment CONSOLIDATION exists to make". It assigns that judgment to
+    consolidation in plain words; nothing was ever built to carry it out, so
+    `raw` was terminal in practice and 39 rows of one evening's lessons sat
+    permanently unscoreable while a docstring promised they would be tiered.
+
+    THE INPUTS ARE THE ONLY ONES SECTION 4 SAYS SURVIVE THE MOMENT. It tells an
+    agent to "tag only what the moment knows and cannot later be
+    reconstructed": `cost`, `caught_by`, `surprised`. This reads exactly those
+    and nothing else. Reading the BODY instead would be judging salience from
+    text at a moment the spec says is the wrong moment, by a mechanism with no
+    reader in the loop.
+
+    WHAT EARNS A SCAR. Any ONE of:
+      - `cost: high`            it actually cost something
+      - `surprised: True`       it contradicted expectation, which is what a
+                                lesson IS
+      - `caught_by:` not `me`   somebody else found it, and section 4 says
+                                "everything the human had to catch is a map of
+                                where the agent's own checks do not look"
+
+    EVERYTHING ELSE BECOMES `working`, INCLUDING EVERY ROW WITH NO TAGS AT ALL,
+    and that default is the safety mechanism rather than a preference:
+
+      - Down from UNKNOWN is `working`. The adoption rule "tier down on
+        uncertainty" pointed at `scar` only because the alternative there was
+        `core`; the ordering is core > scar > working.
+      - `working` is outside `memory_scan.SCAR_FAMILY`, so `consult_scars`
+        never fires it, so `fired_count` never reaches SCAR_FIRED_THRESHOLD,
+        so `maybe_promote_scar` can never send an UNJUDGED row to CORE - the
+        tier that never decays. Defaulting to `scar` instead would make an
+        untagged scratch note promotable to a permanent memory with no
+        judgment by anyone, which is the rubber-stamp section 4 forbids
+        arriving late and automatically. The default does that work
+        STRUCTURALLY; there is no guard here to maintain or forget.
+      - A `working` row decays and is journaled at its floor under hard rule 4,
+        so an unjudged note nobody ever reaches for fades into the journal
+        rather than resting at 6 forever pretending to be an earned lesson.
+
+    WHAT THIS IS NOT. It is not the SCAN (section 2), which re-examines resting
+    scars against the current context and is the genuinely model-shaped
+    judgment. It is not a way for an agent to re-judge a tier it disagrees
+    with. Neither exists yet. A working mechanism here must not be read as
+    section 4 being finished.
+    """
+    if memory.cost == MemoryCost.high:
+        return MemoryTier.scar
+    if memory.surprised is True:
+        return MemoryTier.scar
+    if memory.caught_by is not None and memory.caught_by != MemoryCaughtBy.me:
+        return MemoryTier.scar
+    return MemoryTier.working
+
+
+def _raw_candidates(db: Session, *, agent_id: int) -> list[AgentMemory]:
+    """Every RAW row for this agent, oldest first."""
+    return list(
+        db.execute(
+            select(AgentMemory)
+            .where(AgentMemory.agent_id == agent_id)
+            .where(AgentMemory.tier == MemoryTier.raw)
+            .order_by(AgentMemory.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+
+def tier_raw_memories(db: Session, *, agent_id: int) -> list[tuple[int, str]]:
+    """Move this agent's RAW rows out of `raw`. Does not commit.
+
+    THE INVARIANT THIS MAINTAINS: a row only leaves `raw` when it will be
+    SCOREABLE once it gets there. Tiering a row that cannot be scored swaps one
+    permanently invisible state for another and would satisfy DWB-632's
+    criterion while leaving the lesson exactly as stranded.
+
+    That matters because of the hole this ticket was originally filed about.
+    `project.delete_project` NULLS both session origins on rows it is tearing
+    down, and it deliberately does not journal `raw` rows, because journaling
+    pre-judgment content contradicts what `raw` means. Correct on both counts.
+    The consequence was that such a row could never BECOME scoreable - and
+    before this function existed there was no moment at which to fix it.
+
+    Now there is. Tiering IS that moment, so a row arriving here with no origin
+    at all gets one: the session in which it is being judged. That value is
+    TRUE in the way the DWB-621 contract requires - the row is becoming a
+    memory now, and the decay clock should run from now - rather than a
+    reconstructed date nobody can stand behind. `created_session_id` and not
+    `last_reinforced_session_id`, because "reinforced" means recalled and this
+    row has never been recalled.
+
+    AND IF THERE IS NO SESSION TO STAMP, THE ROW STAYS RAW. It is left for a
+    later pass rather than tiered into invisibility. A row can sit raw for
+    another session; a tiered row with no origin is stuck forever, because
+    nothing would ever look at it again.
+    """
+    active_id = _active_session_id(db, agent_id)
+    moved: list[tuple[int, str]] = []
+    for memory in _raw_candidates(db, agent_id=agent_id):
+        has_origin = (
+            memory.created_session_id is not None
+            or memory.last_reinforced_session_id is not None
+        )
+        if not has_origin:
+            if active_id is None:
+                # Nothing truthful to stamp. Leave it raw for a later pass.
+                continue
+            memory.created_session_id = active_id
+        tier = tier_for_raw(memory)
+        memory.tier = tier
+        moved.append((memory.id, tier.value))
+    if moved:
+        db.flush()
+    return moved
 
 
 def consolidate_agent(db: Session, *, agent_id: int) -> ConsolidationResult:
@@ -173,5 +317,17 @@ def consolidate_agent(db: Session, *, agent_id: int) -> ConsolidationResult:
     result.promoted_journal = memory_promote.promote_journal_candidates(
         db, agent_id=agent_id
     )
+
+    # 5. RAW -> scar/working, and it runs LAST on purpose (DWB-632).
+    #
+    # Tiering first would let a row be judged and EVICTED in the same pass: a
+    # raw note that has sat through many sessions becomes `working` already at
+    # its floor, and step 3 would journal and delete it immediately. It would
+    # be journaled first, so nothing is lost under hard rule 4, but the lesson
+    # would go from written to gone without ever once being visible to anyone.
+    # Running last gives every newly judged row a full session of visibility
+    # before any movement can act on it; the next pass judges it on equal terms
+    # with everything else.
+    result.tiered_raw = tier_raw_memories(db, agent_id=agent_id)
 
     return result

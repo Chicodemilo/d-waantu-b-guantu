@@ -97,6 +97,19 @@ OPEN_UNDER_HUMAN_MEMORY = {
     "content can still be migrated and inspected by a human",
     "scaffold-memory": "creates the memory DIRECTORY and an empty file at spawn; "
     "infrastructure, not a write of content, and sealing it breaks spawn",
+    # DWB-626. EXCUSED, and the reason is that sealing it would be a category
+    # error rather than a trade-off. The seal exists to stop STOCK memory.md
+    # being written while human_memory is authoritative. Withdrawal does not
+    # touch memory.md at all - it operates on `agent_memories`, which IS the
+    # human_memory store, so it is not a stock write under any reading.
+    #
+    # And the direction matters: withdrawal is the only way to correct a wrong
+    # memory. Sealing it under the mode where memory is authoritative would
+    # leave the store that matters most as the one that cannot be fixed, which
+    # is backwards from what the seal is for.
+    "memories/{memory_id}/withdraw": "retracts a row from the human_memory "
+    "store itself, journaling it first; not a stock memory.md write, and it is "
+    "the only correction path for a wrong memory",
 }
 
 

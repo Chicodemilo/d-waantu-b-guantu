@@ -154,7 +154,17 @@ class TestNoRouteHandsOverTheQueue:
     def test_the_route_table_offers_no_listing(self):
         """A `GET /entries` added later would defeat the ticket and would look
         like an improvement. `/plan` is the one exception: it writes nothing and
-        is for a human deciding whether to begin."""
+        is for a human deciding whether to begin.
+
+        AN EXACT ALLOWLIST RATHER THAN A PATTERN, DELIBERATELY. It does not
+        detect listings - it fails on any ADDITION to this namespace and makes
+        someone justify it per route. That is why it fired on a single-entry
+        lookup that is not a listing at all: correct as written, and the right
+        behaviour, because a check that tried to recognise "listing-shaped"
+        routes would pass the next one that was not shaped the way its author
+        imagined. Register new routes here with the reason; do not widen this
+        into a pattern match.
+        """
         from app.main import app
 
         mine = {
@@ -169,6 +179,13 @@ class TestNoRouteHandsOverTheQueue:
             ("/api/projects/{project_id}/memory-transition/next", "GET"),
             ("/api/projects/{project_id}/memory-transition/sweep", "POST"),
             ("/api/memory-transitions/{transition_id}/decide", "POST"),
+            # DWB-626: ONE decided entry by id, and it cannot become a side
+            # channel into the queue. It refuses a PENDING row with 409, so
+            # choosing what an agent sees still belongs to `next_entry` alone -
+            # which is the property this guard exists to protect. A LISTING of
+            # decided entries was the first attempt; this guard refused it and
+            # the ruling was that the guard wins and the feature gets narrower.
+            ("/api/memory-transitions/{transition_id}", "GET"),
         }
         unexpected = mine - expected
         # DWB-596 owns the derived-status read and is allowed to exist here.

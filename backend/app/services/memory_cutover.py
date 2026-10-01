@@ -8,7 +8,9 @@
 # Callees: app/services/project (open_run, the legal-edge table), app/models
 # Data In: db Session, Project
 # Data Out: the MemoryMode landed in, or None when the run is not finished
-# Last Modified: 2026-10-01 (DWB-622: the refusal reports measured state
+# Last Modified: 2026-10-01 (DWB-634: _completion_now delegates to the shared
+#                app.services.timestamps helper, same expression, one owner;
+#                previous entry: DWB-622 the refusal reports measured state
 #                counts instead of asserting nothing was journaled; the
 #                preserving set is unchanged and now carries why)
 
@@ -128,6 +130,7 @@ from app.models.memory_transition import (
     TransitionState,
 )
 from app.models.project import MemoryMode, Project
+from app.services import timestamps
 
 # Where each direction lands when its pipeline finishes. Data rather than an
 # if/else so a direction added later has to state its destination instead of
@@ -166,7 +169,7 @@ def _completion_now() -> datetime:
     fraction ever exists. A substitute is acceptable only if it has that same
     property.
     """
-    return datetime.now(timezone.utc).replace(microsecond=0)
+    return timestamps.aware_utc_now_second()
 
 
 def _unfinished_count(db: Session, run: MemoryTransitionRun) -> int:

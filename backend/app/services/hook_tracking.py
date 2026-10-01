@@ -6,7 +6,10 @@
 # Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py, app/services/journal.py (DWB-612 top-off journal search), app/services/memory_consult.py (DWB-612 top-off scar consult), app/services/memory_consolidate.py (DWB-609 session-start consolidation)
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows, memory movements via memory_consolidate (DWB-609)
-# Last Modified: 2026-09-30 (DWB-612: top-off's firing pass also consults scars
+# Last Modified: 2026-10-01 (DWB-634: start_time and end_time normalised to
+#                second precision at the transcript ingest boundary, so the
+#                column stops carrying two conventions; previous entry:
+#                DWB-612 top-off's firing pass also consults scars
 #                via memory_consult.consult_scars, same term as the journal
 #                search, per Miles's "same pass, same term" ruling; previous
 #                entry: DWB-609 handle_session_start consolidation)
@@ -87,6 +90,7 @@ from app.services import dwb_session as dwb_svc
 from app.services import journal as journal_svc
 from app.services import memory_consolidate
 from app.services import memory_consult
+from app.services import timestamps
 from app.services import tracking
 from app.services.activity_log import log_activity
 from app.services.failed_hook import log_failed_hook
@@ -534,7 +538,11 @@ def handle_session_end(db: Session, hook_data: dict) -> HookSession:
             session.session_id, end_time, session.start_time,
         )
         end_time = session.start_time
-    session.end_time = end_time
+    # DWB-634: second precision at ingest. start_time on this row may have come
+    # from the server default (which truncates), so an end_time carrying a
+    # fraction would round UP and inflate the interval by up to a second
+    # against a floored start.
+    session.end_time = timestamps.naive_utc_second(end_time)
     # DWB-580: total_tokens / token_breakdown are NOT set here. The recorder
     # below needs the previously stored total to compute a delta against;
     # stamping the new cumulative figure first makes every delta zero.
@@ -1305,9 +1313,19 @@ def _handle_subagent_stop(db: Session, hook_data: dict) -> HookSession:
     # DWB-539: prefer the transcript's own span so worker time_seconds reflects
     # the work, and never persist end < start (that clamped to 0 and made a
     # multi-million-token teammate read as 0 or 1 second in the rollup).
+    # DWB-634: both bounds normalised to second precision HERE, at the one
+    # boundary where the transcript's clock enters the row. This is the column
+    # the ticket named as carrying two conventions: omitted on the three
+    # constructor paths (server default, truncating) and assigned explicitly
+    # here (Python, rounding). Both paths now agree.
+    #
+    # start AND end move together deliberately. Truncating only start would
+    # leave a floored start against a rounded end and systematically inflate
+    # the stored interval by up to a second, which is a new defect of the same
+    # family rather than a partial fix.
     if start_time is not None:
-        session.start_time = _as_naive_utc(start_time)
-    end_time = _as_naive_utc(end_time)
+        session.start_time = timestamps.naive_utc_second(start_time)
+    end_time = timestamps.naive_utc_second(end_time)
     if session.start_time is not None and end_time < _as_naive_utc(session.start_time):
         logger.warning(
             "DWB-539: subagent %s transcript end %s precedes start %s; "
@@ -1499,7 +1517,8 @@ def recapture_token_growth(db: Session, *, limit: int = 200) -> tuple[int, int]:
             # during the parse is picked up next cycle rather than skipped.
             row.transcript_bytes = size
             if parsed.get("end_time"):
-                end = _as_naive_utc(parsed["end_time"])
+                # DWB-634: same ingest boundary, same reason as above.
+                end = timestamps.naive_utc_second(parsed["end_time"])
                 if row.start_time is None or end >= _as_naive_utc(row.start_time):
                     row.end_time = end
             db.commit()

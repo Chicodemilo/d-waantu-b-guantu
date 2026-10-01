@@ -39,9 +39,15 @@ from app.schemas.agent_consolidation_ack import (
     AgentConsolidationAckCreate,
     AgentConsolidationAckRead,
 )
-from app.schemas.agent_memory import RawMemoryCreate, RawMemoryResponse
+from app.schemas.agent_memory import (
+    MemoryWithdrawRequest,
+    MemoryWithdrawResponse,
+    RawMemoryCreate,
+    RawMemoryResponse,
+)
 from app.schemas.memory_score import ScoredMemoryResponse
 from app.services import agent as svc
+from app.services import memory_withdraw as withdraw_svc
 from app.services import agent_consolidation as consolidation_svc
 from app.services import memory_mode as memory_mode_svc
 from app.services import memory_score as memory_score_svc
@@ -615,4 +621,54 @@ def append_raw_memory(
             status = 404
         else:
             status = 400
+        raise HTTPException(status, e.detail)
+
+
+@router.post(
+    "/{agent_id}/memories/{memory_id}/withdraw",
+    response_model=MemoryWithdrawResponse,
+)
+def withdraw_agent_memory(
+    agent_id: int,
+    memory_id: int,
+    data: MemoryWithdrawRequest,
+    db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None, alias="X-Agent-ID"),
+):
+    """DWB-626: retract one of your OWN memory rows. The first way anything has
+    ever left `agent_memories` by choice.
+
+    The row is JOURNALED and then deleted, in that order, by
+    `memory_removal.journal_and_remove` - the single implementation of the
+    sequence, shared with the eviction movements. Not a soft delete: a
+    `withdrawn_at` flag would be an absence-shaped guard across every present
+    and future reader of the table, and the reader that forgets it serves
+    withdrawn content, silently, in the flattering direction.
+
+    OWNERSHIP: `X-Agent-ID` must equal the agent that owns the row. The owner is
+    the only party with the context to know a lesson is wrong, which is the
+    ticket's own argument. There is no human actor at this API to distinguish,
+    so the human acts through the owner's id as the existing human-facing
+    commands already do.
+
+    Returns 200 with the withdrawn content and `journal_entry_id`, which is
+    where to find it afterwards. Errors:
+      - 400: no X-Agent-ID (an unattributed retraction is indistinguishable
+        from a bug), or the memory does not belong to the named agent.
+      - 403: the caller is not the owner.
+      - 404: no such memory.
+    """
+    try:
+        return withdraw_svc.withdraw_memory(
+            db,
+            agent_id=agent_id,
+            memory_id=memory_id,
+            acting_agent_id=x_agent_id,
+            reason=data.reason,
+        )
+    except withdraw_svc.WithdrawError as e:
+        status = {
+            "memory_not_found": 404,
+            "not_owner": 403,
+        }.get(e.code, 400)
         raise HTTPException(status, e.detail)

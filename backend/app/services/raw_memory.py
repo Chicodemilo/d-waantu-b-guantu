@@ -37,6 +37,14 @@ query to NAME `raw` in order to exclude it, where a nullable column would let an
 IS NOT NULL drop those rows silently.
 
 **The three moment-tags live on the MEMORY, not the journal.** Spec section 6
+DWB-632 NOTE ON "CONSOLIDATION TIERS IT LATER". That sentence was false from
+the day it was written until DWB-632: nothing anywhere moved a row out of
+`raw`, so every row this module wrote was permanently unscoreable and never
+rendered. It is true now - `memory_consolidate.tier_raw_memories` runs at
+session start and judges these rows from the moment-tags below. If you are
+reading this because a raw row is still untiered, check that consolidation is
+reaching this agent before assuming the rule is wrong.
+
 as amended 2026-09-29 (DWB-584). Sections 4 and 6 disagreed about where `cost`,
 `caught_by` and `surprised` belonged; the tie was broken by asking what READS
 each one, and all three are read against memories - section 2 gates the SCAN on
@@ -138,7 +146,8 @@ def append_raw_memory(
             "and unsorted during a session, because tiering in the moment "
             "rubber-stamps in-the-moment salience, which is the judgment "
             "consolidation exists to make. Every row this endpoint writes is "
-            f"'{MemoryTier.raw.value}'; consolidation tiers it later.",
+            f"'{MemoryTier.raw.value}'; consolidation tiers it at the next "
+            "session start (DWB-632: memory_consolidate.tier_raw_memories).",
         )
 
     if not body or not body.strip():

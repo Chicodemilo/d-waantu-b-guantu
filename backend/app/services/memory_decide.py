@@ -9,7 +9,9 @@
 #          app/models/journal_entry, app/models/memory_transition
 # Data In: db Session, agent_id, transition id, a tier
 # Data Out: the updated MemoryTransition; the mode landed in, if it cut over
-# Last Modified: 2026-10-01 (DWB-633: decided_at is truncated to the second
+# Last Modified: 2026-10-01 (DWB-634: _decision_now delegates to the shared
+#                app.services.timestamps helper, same expression, one owner;
+#                previous entry: DWB-633 decided_at is truncated to the second
 #                at source - MySQL rounds a microsecond value HALF-UP into a
 #                DATETIME(0), storing decisions in the future)
 #                parity with raw_memory.py - its absence made every adopted row
@@ -71,6 +73,7 @@ from app.models.memory_transition import (
 from app.models.project import MemoryMode, Project
 from app.services import dwb_session as session_svc
 from app.services import memory_format
+from app.services import timestamps
 
 # Tiers an adopting agent may choose. `core` and `raw` are both absent, for
 # different reasons, and both absences are load-bearing:
@@ -213,7 +216,7 @@ def _decision_now() -> datetime:
     Truncation rather than rounding because a timestamp should never name a
     moment that has not happened yet.
     """
-    return datetime.now(timezone.utc).replace(microsecond=0)
+    return timestamps.aware_utc_now_second()
 
 
 def _body_of(row: MemoryTransition) -> tuple[str, tuple[str, ...]]:

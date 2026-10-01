@@ -284,7 +284,7 @@ class TestCutoverGuard:
         run = _run(db_session, project_id)
         _transition(db_session, project_id=project_id, agent_id=agent_id, run=run, state=TransitionState.pending)
         _transition(db_session, project_id=project_id, agent_id=agent_id, run=run, state=TransitionState.pending)
-        _transition(db_session, project_id=project_id, agent_id=other, run=run, state=TransitionState.proposed)
+        _transition(db_session, project_id=project_id, agent_id=other, run=run, state=TransitionState.pending)
 
         detail = client.patch(
             f"/api/projects/{project_id}", json={"memory_mode": "human_memory"}
@@ -293,7 +293,18 @@ class TestCutoverGuard:
         assert "3 memory transition entries" in detail
         assert "2 agents" in detail
         assert f"agent {agent_id}: 2 pending" in detail
-        assert f"agent {other}: 1 proposed" in detail
+        assert f"agent {other}: 1 pending" in detail
+        # DWB-631: this asserted `1 proposed`, and the fixture above created a
+        # `proposed` row to produce it. That state is gone, so `pending` is now
+        # the ONLY non-terminal state and the per-agent breakdown is
+        # single-valued in its state component until another is added.
+        #
+        # The property under test is unchanged and still exercised: the refusal
+        # names WHO, HOW MANY and IN WHICH STATE. What it can no longer show is
+        # two DIFFERENT non-terminal states in one message, because there are
+        # no longer two to show. If a non-terminal state is ever added, restore
+        # a second state here rather than leaving this reading as though the
+        # message only ever reports one.
 
     @pytest.mark.parametrize("state", sorted(s.value for s in TERMINAL_STATES))
     def test_terminal_rows_do_not_block(self, client, db_session, proj, state):
@@ -529,8 +540,11 @@ class TestSchema:
             }
         )
         assert TransitionState.pending not in TERMINAL_STATES
-        assert TransitionState.proposed not in TERMINAL_STATES
-        assert TransitionState.decided not in TERMINAL_STATES
+        # DWB-631 removed `proposed` and `decided`. They were never written by
+        # anything and no row ever held one; they described a two-phase flow
+        # section 4 rules out.
+        assert not hasattr(TransitionState, "proposed")
+        assert not hasattr(TransitionState, "decided")
 
     def test_direction_lives_on_the_run_not_on_every_entry(self):
         """Stated once instead of repeated on every entry row, which is also
@@ -550,8 +564,14 @@ class TestSchema:
 
     def test_tier_vocabulary_is_reused_not_redeclared(self):
         """One definition of what a tier is. A parallel enum here would be the
-        two-homes failure in miniature."""
-        col = MemoryTransition.__table__.c.proposed_tier
+        two-homes failure in miniature.
+
+        DWB-631 dropped `proposed_tier`, so this now reads the vocabulary off
+        `decided_tier`, which is the surviving tier column and the one that is
+        actually written. The property under test is unchanged: the transition
+        surface reuses MemoryTier rather than declaring its own.
+        """
+        col = MemoryTransition.__table__.c.decided_tier
         assert [e for e in col.type.enum_class] == list(MemoryTier)
 
 

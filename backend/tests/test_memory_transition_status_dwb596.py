@@ -406,8 +406,6 @@ class TestOutcomeBreakdown:
         agent = make_agent(project_id=project["id"])
         make_rows(run, agent["id"], [
             TransitionState.pending,
-            TransitionState.proposed,
-            TransitionState.decided,
         ])
 
         body = _status(client, project["id"])

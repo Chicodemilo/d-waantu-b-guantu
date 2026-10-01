@@ -31,10 +31,11 @@ a second entry point would be a second copy of the rule.
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.memory_transition import MemoryTransition
+from app.models.memory_transition import MemoryTransition, TransitionState
 from app.models.project import Project
 from app.services import memory_adopt, memory_cutover, memory_decide, memory_sweep
 from app.services import project as project_svc
@@ -203,3 +204,50 @@ def run_sweep(
         "content_without_candidates": result.content_without_candidates,
         "would_refuse": result.is_defective,
     }
+
+
+# The states a row can be in AFTER a judgement has been made. Deliberately a
+# named set rather than "not pending": a state added later is excluded until
+# someone decides it belongs, which is the safe direction.
+DECIDED_STATES = (
+    TransitionState.written,
+    TransitionState.skipped,
+    TransitionState.journaled,
+)
+
+
+@router.get("/{transition_id}")
+def get_decided_entry(transition_id: int, db: Session = Depends(get_db)):
+    """ONE decided entry, by id. DWB-626, narrowed by Archie's ruling.
+
+    THIS WAS A LISTING AND THE GUARD WAS RIGHT TO REFUSE IT. The first version
+    returned every decided entry for an agent. DWB-594's structural check caught
+    it on its first run, and the two tickets genuinely conflict: DWB-626 asks
+    that a tiering decision be reviewable, DWB-594 forbids handing an agent the
+    queue. The ruling is that the guard wins and this feature gets narrower,
+    because the reason behind the guard is undamaged - AN AGENT SHOWN THE QUEUE
+    REASONS ABOUT THE QUEUE, and one entry at a time is the whole design.
+
+    A lookup by id gives review and undo without ever handing over a set. The
+    caller must already know which decision it is asking about, which is exactly
+    the position an agent correcting its own mis-tier is in: it remembers the
+    call it regrets. What it could not do before was read back what it actually
+    recorded.
+
+    Refuses a row that is still PENDING. An undecided candidate reached by
+    direct id would be the one-entry handover the decide endpoint already owns,
+    with none of its bookkeeping - and `next_entry` is the only thing allowed to
+    choose which candidate an agent sees.
+    """
+    row = db.get(MemoryTransition, transition_id)
+    if row is None:
+        raise HTTPException(404, f"transition {transition_id} not found")
+    if row.state not in DECIDED_STATES:
+        raise HTTPException(
+            409,
+            f"transition {transition_id} is {row.state.value}, not decided. This "
+            "endpoint reads back a DECISION; an undecided candidate is handed "
+            "over by GET /api/projects/{project_id}/memory-transition/next, "
+            "which is the only path allowed to choose what an agent sees.",
+        )
+    return _serialize(row)

@@ -417,24 +417,20 @@ class TestNoReportingFieldCountsAnUnreachableState:
     def test_the_set_of_unreachable_states_is_exactly_what_we_think(self):
         """Pins the deliberate non-decisions.
 
-        THREE states have no writer, not one. `journaled` is the one this
-        ticket is about. `proposed` and `decided` were found by this assertion
-        while it was being written, and they are the same defect one level up:
-        TransitionState's own docstring calls
-        `pending -> proposed -> decided -> written` the happy path, and the
-        code goes `pending -> written` directly. Confirmed with a second
-        instrument - neither identifier appears anywhere in app/ at all.
+        ONE state has no writer now. It was THREE when this was written:
+        `proposed` and `decided` were found by this very assertion going red,
+        and DWB-631 removed them from the enum entirely, because they described
+        a two-phase flow section 4 rules out. `journaled` stays because a
+        reporting field derives from it and the cutover guard holds a
+        definition of it, so it has live consequences those two did not.
 
-        They are NOT in scope for DWB-622 because no reporting field is derived
-        from them, which is the criterion the ticket actually sets and which
-        the test above enforces. They are pinned here so the next person meets
-        the fact instead of rediscovering it, and so that giving any of them a
-        writer forces a visit to this file.
+        Pinned so that giving `journaled` a writer, or adding a state nothing
+        writes, forces a visit to this file.
         """
         unreachable = {s.value for s in TransitionState} - _states_set_in_app()
-        assert unreachable == {"journaled", "proposed", "decided"}, (
+        assert unreachable == {"journaled"}, (
             "the unreachable-state set moved. If a writer for `journaled` was "
             "added, entries_journaled should go back to counting it alone and "
             "this pin should be updated. If a NEW state has no writer, it is "
-            f"the next instance of this ticket. Found: {sorted(unreachable)}"
+            f"the next instance of DWB-631. Found: {sorted(unreachable)}"
         )

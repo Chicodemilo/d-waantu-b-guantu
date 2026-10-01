@@ -6,7 +6,7 @@
 # Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.models.entity_keyword, app.models.ticket, app.models.comment, app.models.inter_agent_message, app.services.dwb_session_rollup, app.services.keyword_extraction, app.services.session_synthesizer, app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-07-28 (DWB-505: clamp rollup to BIGINT ceiling in close_session + per-session SAVEPOINT isolation in sweep_idle_sessions so one overflowing session cannot 500 the close or poison the idle sweep)
+# Last Modified: 2026-10-01 (DWB-634: _utcnow and _strip_tz drop the fractional second via app.services.timestamps, so the rollup window bounds cannot round forward past the server-stamped columns they are compared against)
 
 """DWB session business logic.
 
@@ -65,6 +65,7 @@ from app.models.tracking_log import TrackingLog
 from app.services import dwb_session_rollup as rollup_svc
 from app.services.activity_log import log_activity
 from app.services.keyword_extraction import rank_tfidf
+from app.services import timestamps
 from app.services.session_synthesizer import synthesize_session_summary
 
 logger = logging.getLogger(__name__)
@@ -84,23 +85,33 @@ _KEYWORD_SOURCE = "session_synth"
 
 
 def _utcnow() -> datetime:
-    """Naive UTC, matching MySQL DATETIME columns."""
-    return datetime.utcnow()
+    """Naive UTC at SECOND precision, matching MySQL DATETIME columns.
+
+    DWB-634: the fraction is dropped here rather than at the column, because
+    MySQL ROUNDS a fractional value half-up into a `DATETIME` instead of
+    truncating it. A bound stamped at :00.635 would store as :01 and sit half
+    a second ahead of the event, while server-stamped rows written afterwards
+    store earlier. See `app/services/timestamps.py`.
+    """
+    return timestamps.naive_utc_now_second()
 
 
 def _strip_tz(dt: datetime) -> datetime:
-    """Normalise a datetime to naive UTC for MySQL DATETIME columns.
+    """Normalise a datetime to naive UTC, at second precision, for MySQL.
 
     Callers (REST endpoints, hook handlers) routinely pass aware datetimes
     parsed from ISO 8601 strings. The DwbSession columns are naive; mixing
     aware/naive triggers ``TypeError: can't subtract offset-naive and
     offset-aware datetimes`` in the rollup arithmetic.
-    """
-    if dt.tzinfo is not None:
-        from datetime import timezone
 
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+    DWB-634: this also drops the fractional second. Both call sites feed a
+    `DATETIME` column directly (`opened_at` on open, `closed_at` on close),
+    and those two values are the rollup window bounds that every
+    server-stamped column in the session rollup is compared against. A
+    caller-supplied ISO string routinely carries microseconds, so normalising
+    the offset without normalising the precision fixes only half the mismatch.
+    """
+    return timestamps.naive_utc_second(dt)
 
 
 def get_active_session(db: Session, project_id: int) -> DwbSession | None:
