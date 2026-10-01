@@ -55,7 +55,7 @@ class TestRelevantLessons:
 
         project_obj = db_session.get(Project, pid)
         agent_obj = db_session.get(Agent, stan["id"])
-        lessons = node_retrieval.relevant_lessons(db_session, project_obj, agent_obj)
+        lessons = node_retrieval.relevant_lessons(db_session, project_obj, agent_obj).lessons
 
         assert len(lessons) == 1
         lesson = lessons[0]
@@ -77,14 +77,14 @@ class TestRelevantLessons:
                     assigned_agent_id=stan["id"], status="todo")
         project_obj = db_session.get(Project, pid)
         agent_obj = db_session.get(Agent, stan["id"])
-        assert node_retrieval.relevant_lessons(db_session, project_obj, agent_obj) == []
+        assert node_retrieval.relevant_lessons(db_session, project_obj, agent_obj).lessons == []
 
     def test_no_tickets_empty(self, db_session, make_project, make_agent, tmp_path):
         project = make_project(repo_path=str(tmp_path))
         stan = make_agent(project_id=project["id"], name="Stan", role="backend-worker")
         project_obj = db_session.get(Project, project["id"])
         agent_obj = db_session.get(Agent, stan["id"])
-        assert node_retrieval.relevant_lessons(db_session, project_obj, agent_obj) == []
+        assert node_retrieval.relevant_lessons(db_session, project_obj, agent_obj).lessons == []
 
     def test_empty_corpus_empty(self, db_session, make_project, make_agent, make_ticket, tmp_path):
         project = make_project(repo_path=str(tmp_path))
@@ -95,7 +95,7 @@ class TestRelevantLessons:
         project_obj = db_session.get(Project, pid)
         agent_obj = db_session.get(Agent, stan["id"])
         # No nodes registered -> nothing to match.
-        assert node_retrieval.relevant_lessons(db_session, project_obj, agent_obj) == []
+        assert node_retrieval.relevant_lessons(db_session, project_obj, agent_obj).lessons == []
 
 
 class TestSpawnPrepareRelevantLessons:

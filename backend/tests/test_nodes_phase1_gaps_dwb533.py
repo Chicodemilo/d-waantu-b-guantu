@@ -281,7 +281,7 @@ class TestNodeMatchService:
     def test_neighbors_ordered_by_shared_refs_then_weight_then_tag(self, db_session, make_project):
         p = make_project()
         _seed_neighbor_graph(db_session, p["id"])
-        _q, matches = node_match.match_nodes(db_session, p["id"], "anchor")
+        _q, matches = node_match.match_nodes(db_session, p["id"], "anchor", with_neighbors=True)
         assert len(matches) == 1
         node, neighbors = matches[0]
         assert node.tag == "anchor"
@@ -295,7 +295,7 @@ class TestNodeMatchService:
     def test_neighbor_stub_carries_identity_and_weight(self, db_session, make_project):
         p = make_project()
         _seed_neighbor_graph(db_session, p["id"])
-        _q, matches = node_match.match_nodes(db_session, p["id"], "bravo")
+        _q, matches = node_match.match_nodes(db_session, p["id"], "bravo", with_neighbors=True)
         _node, neighbors = matches[0]
         by_tag = {n.node.tag: n for n in neighbors}
         real = next(n for n in _nodes(db_session, p["id"]) if n.tag == "anchor")
@@ -687,7 +687,7 @@ class TestRelevantLessonsGaps:
         stan = make_agent(project_id=pid, name="Stan", role="backend-worker")
         _ticket(make_ticket, prefix, 901, project_id=pid, title="widget subsystem", assigned_agent_id=stan["id"], status="in_review")
         project, agent = self._objs(db_session, pid, stan["id"])
-        assert node_retrieval.relevant_lessons(db_session, project, agent) == []
+        assert node_retrieval.relevant_lessons(db_session, project, agent).lessons == []
 
     def test_other_agents_tickets_do_not_seed_query(self, db_session, make_project, make_agent, make_ticket, tmp_path):
         p = make_project(repo_path=str(tmp_path))
@@ -699,7 +699,7 @@ class TestRelevantLessonsGaps:
         other = make_agent(project_id=pid, name="Other", role="backend-worker")
         _ticket(make_ticket, prefix, 902, project_id=pid, title="widget subsystem", assigned_agent_id=other["id"], status="todo")
         project, agent = self._objs(db_session, pid, stan["id"])
-        assert node_retrieval.relevant_lessons(db_session, project, agent) == []
+        assert node_retrieval.relevant_lessons(db_session, project, agent).lessons == []
 
     def test_breadth_first_interleave_across_tags(self, db_session, make_project, make_agent, make_ticket, tmp_path):
         p = make_project(repo_path=str(tmp_path))
@@ -715,9 +715,9 @@ class TestRelevantLessonsGaps:
         stan = make_agent(project_id=pid, name="Stan", role="backend-worker")
         _ticket(make_ticket, prefix, 903, project_id=pid, title="widget and gadget work", assigned_agent_id=stan["id"], status="todo")
         project, agent = self._objs(db_session, pid, stan["id"])
-        top2 = node_retrieval.relevant_lessons(db_session, project, agent, top_n=2)
+        top2 = node_retrieval.relevant_lessons(db_session, project, agent, top_n=2).lessons
         assert [l["tag"] for l in top2] == ["gadget", "widget"]   # one per tag, tag-asc on equal weight
-        all4 = node_retrieval.relevant_lessons(db_session, project, agent, top_n=10)
+        all4 = node_retrieval.relevant_lessons(db_session, project, agent, top_n=10).lessons
         assert len(all4) == 4
         assert {(l["tag"], l["source_agent"]) for l in all4} == {
             ("gadget", "Barry"), ("gadget", "Carol"), ("widget", "Barry"), ("widget", "Carol"),
@@ -738,7 +738,7 @@ class TestRelevantLessonsGaps:
         stan = make_agent(project_id=pid, name="Stan", role="backend-worker")
         _ticket(make_ticket, prefix, 904, project_id=pid, title="widget", assigned_agent_id=stan["id"], status="todo")
         project, agent = self._objs(db_session, pid, stan["id"])
-        lessons = node_retrieval.relevant_lessons(db_session, project, agent)
+        lessons = node_retrieval.relevant_lessons(db_session, project, agent).lessons
         assert len(lessons) == 1
         # DWB-545 added an additive "score" field to every entry.
         assert set(lessons[0]) == {

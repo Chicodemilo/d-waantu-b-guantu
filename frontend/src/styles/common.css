@@ -1,8 +1,8 @@
 /* Path: src/styles/common.css */
 /* File: common.css */
 /* Created: 2026-03-29 */
-/* Purpose: Shared component styles: data tables, status badges, activity feed, alerts, instructions, sprints, epics, project header, overhead tracker, tools panel, gates, Jira integration, and the common FuzzySearch box (moved from help.css in DWB-536) */
-/* Last Modified: 2026-09-15 (DWB-557: dropped the orphaned .activity-item rules with their only consumer) */
+/* Purpose: Shared component styles: data tables, status badges, activity feed, alerts, instructions, sprints, epics, project header, overhead tracker, tools panel, gates, Jira integration, the common FuzzySearch box (moved from help.css in DWB-536), the per-agent memory panel, the journal search page, and the top-off landing page (DWB-613) */
+/* Last Modified: 2026-09-30 (DWB-613: memory-panel__*, journal-page__*, topoff-page__*) */
 
 .data-table {
   width: 100%;
@@ -1190,4 +1190,302 @@ a.jira-link__key:hover {
   color: var(--gray-light);
   font-size: 12px;
   white-space: nowrap;
+}
+
+/* DWB-588: memory_mode toggle in the project Tools panel. The warning copy is
+   rendered from the API's refusal, so nothing here encodes the text itself;
+   only its emphasis, which the spec renders as a bold lead line. */
+.memory-mode__current {
+  font-size: 12px;
+  color: var(--gray-light);
+}
+
+.memory-mode__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-mode__confirm-text {
+  font-size: 12px;
+  color: var(--orange);
+}
+
+.memory-mode__confirm-sep {
+  font-size: 12px;
+  color: var(--gray);
+}
+
+.memory-mode__warning {
+  margin-left: 25px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--orange);
+  background: var(--bg-alt);
+  max-width: 900px;
+}
+
+.memory-mode__warning-line {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--orange-bright);
+  white-space: pre-wrap;
+}
+
+.memory-mode__warning-line:last-child {
+  margin-bottom: 0;
+}
+
+.memory-mode__warning-line--lead {
+  font-weight: 700;
+}
+
+/* A failed switch replaces the control's output where the control is, not
+   behind an expander. A break the reader has to click to find is a silent
+   failure in a new costume. */
+.memory-mode__failure {
+  margin-left: 25px;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--red);
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.memory-mode__note {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--gray);
+  max-width: 900px;
+}
+
+/* DWB-597: the control is unavailable while a transition is running. There is
+   no legal move that starts something from inside one, so this states why
+   rather than hiding the control and leaving the reader to guess. */
+.memory-mode__in-transition {
+  font-size: 12px;
+  color: var(--gray-light);
+}
+
+/* DWB-597: the transition status strip. It sits in NORMAL FLOW on purpose.
+   It is called an overlay in the ticket but it is a status, and a status that
+   covers or intercepts anything hands back the outage this lane exists to
+   remove: the project has to stay fully usable while a transition runs. No
+   position, no z-index, no pointer-events games. */
+.memory-transition {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--orange);
+  background: var(--bg-alt);
+  color: var(--orange-bright);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.memory-transition--failed {
+  border-left-color: var(--red);
+  color: var(--red);
+}
+
+/* DWB-597: a start that completed immediately because there was nothing to
+   move. Not a failure, so it is not red; worth saying, because the alternative
+   is the mode changing with no status strip and no explanation. */
+.memory-mode__outcome {
+  margin-left: 25px;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--green-dim);
+  color: var(--green);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* DWB-613: per-agent memory panel (AgentPage). One tier at a time, each in
+   its own .data-table so the existing table styling carries over unchanged. */
+.memory-panel__empty {
+  padding: 12px 0;
+  color: var(--gray);
+  font-size: 13px;
+}
+
+.memory-panel__summary {
+  display: flex;
+  gap: 24px;
+  margin: 4px 0 16px;
+}
+
+.memory-panel__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.memory-panel__stat-value {
+  font-size: 18px;
+  color: var(--green);
+}
+
+.memory-panel__stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+}
+
+.memory-panel__tier {
+  margin-bottom: 20px;
+}
+
+.memory-panel__tier-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
+  margin-bottom: 6px;
+}
+
+.memory-panel__tier-count {
+  margin-left: 8px;
+  color: var(--gray);
+}
+
+.memory-panel__body {
+  color: var(--green);
+  max-width: 480px;
+}
+
+.memory-panel__band {
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.memory-panel__band--full {
+  color: var(--green-bright);
+  border: 1px solid var(--green-dim);
+}
+
+.memory-panel__band--compressed {
+  color: var(--blue);
+  border: 1px solid var(--blue-dim);
+}
+
+.memory-panel__band--demote {
+  color: var(--orange-bright);
+  border: 1px solid var(--orange);
+}
+
+.memory-panel__band--evict {
+  color: var(--red);
+  border: 1px solid var(--red-dim);
+}
+
+/* DWB-613: journal search page. Deliberately no "browse all" affordance -
+   the backend refuses a filterless read (422) and the UI does not work
+   around it. */
+.journal-page__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.journal-page__input {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 10px;
+  min-width: 180px;
+}
+
+.journal-page__input--date {
+  min-width: 140px;
+}
+
+.journal-page__submit {
+  background: var(--bg-alt);
+  border: 1px solid var(--green-dim);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.journal-page__submit:hover {
+  color: var(--green-bright);
+  border-color: var(--green-bright);
+}
+
+.journal-page__submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.journal-page__error {
+  padding: 8px 12px;
+  border-left: 2px solid var(--orange);
+  color: var(--orange-bright);
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+
+.journal-page__meta {
+  font-size: 12px;
+  color: var(--gray-light);
+  margin-bottom: 8px;
+}
+
+.journal-page__tag {
+  display: inline-block;
+  border: 1px solid var(--border);
+  color: var(--gray-light);
+  font-size: 11px;
+  padding: 1px 6px;
+  margin: 0 4px 2px 0;
+}
+
+.journal-page__body {
+  color: var(--green);
+  max-width: 520px;
+}
+
+/* DWB-613: top-off landing page. No historical event log exists to show -
+   the prompt counter on the live session IS the mechanism, so that is what
+   is rendered. */
+.topoff-page__note {
+  max-width: 720px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--gray-light);
+  margin-bottom: 16px;
+}
+
+.topoff-page__status {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.topoff-page__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.topoff-page__stat-value {
+  font-size: 16px;
+  color: var(--green);
+}
+
+.topoff-page__stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--gray-light);
 }

@@ -11,7 +11,7 @@
 # Callees: app/services/node_match, app/services/node_touch, app/services/project
 # Data In: HTTP GET requests; POST /nodeify
 # Data Out: list[NodeRead]; NodeMatchResponse; NodeifyResponse
-# Last Modified: 2026-09-14 (DWB-527: nodeify endpoint)
+# Last Modified: 2026-09-29 (match endpoint opts into neighbor derivation)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -82,7 +82,11 @@ def match_project_nodes(
     """Normalize ``text`` to tags and return matching nodes, each with its full
     pointer list and derived neighbors (nodes sharing a pointer ref)."""
     _require_project(db, project_id)
-    query_tags, matches = match_svc.match_nodes(db, project_id, text)
+    # The graph view is the one consumer that renders neighbors, so it is the one
+    # caller that opts into deriving them (see match_nodes on why it is opt-in).
+    query_tags, matches = match_svc.match_nodes(
+        db, project_id, text, with_neighbors=True
+    )
     nodes = [
         NodeMatchNode(
             id=node.id,

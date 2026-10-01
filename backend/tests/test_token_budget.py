@@ -6,7 +6,7 @@
 # Callees:       GET /api/projects/:id/token-budget
 # Data In:       Temp repo dir with .claude/ + memory layout, factory-created project + agents
 # Data Out:      Assertions on category/agent_name fields and inclusion of new docs/memory files
-# Last Modified: 2026-06-19
+# Last Modified: 2026-10-01 (DWB-617: ceilings raised across the board)
 
 """Tests for the /api/projects/:id/token-budget endpoint.
 
@@ -33,6 +33,7 @@ def _setup_repo(tmp_path: Path, prefix: str, agent_names: list[str]) -> Path:
     _write(repo / "ARCHITECTURE.md", "# Architecture\n" + "word " * 200)
     _write(repo / "README.md", "# Readme\n" + "word " * 100)
     _write(repo / "INITIAL.md", "# Initial\n" + "word " * 80)
+    _write(repo / "HANDOFF.md", "# Handoff\n" + "word " * 120)
     # Agent definition
     _write(repo / ".claude" / "agents" / "backend-worker.md", "# backend\n" + "word " * 60)
     # Playbook + project rules
@@ -177,57 +178,59 @@ class TestTokenBudgetExtended:
 
 
 class TestCeilingRebalance:
-    """Post-DWB-331 ceilings (2026-06-05): playbook 2500→4000,
-    project_rules 1000→3000, claude_md 1500→2000, architecture 6000→7500,
-    readme 2500→3500, initial 1500→2000. agent_def stays at 1500. memory and
-    handoff caps unchanged. DWB-399: project_rules 3000→4000. DWB-490:
-    architecture 7500→8500 (doc grew with help-center + session-write-up work).
+    """The ceiling table itself, asserted through the budget endpoint.
 
-    Asserts caps surface on the budget endpoint. If a future ticket tunes
-    them again, the source of truth (_TOKEN_CEILINGS in routers/projects.py)
-    must update along with these tests.
+    DWB-617 (2026-10-01) raised every category. The old table was fiction:
+    CLAUDE.md, HANDOFF.md, ARCHITECTURE.md, README.md, all three playbooks and
+    every scaffold-generated identity.md were already over their own ceilings,
+    and four of eight agents sat at 91-98% of the memory cap. New values:
+    agent_def 1500->3000, playbook 4000->20000, claude_md 2000->4000,
+    project_rules 4000->8000, handoff 1500->8000, architecture 8500->20000,
+    readme 3500->8000, initial 2000->4000, memory_identity 600->1500,
+    memory_main 4500->12000. DEFAULT_CEILING stays 1000.
+
+    The numbers are transcribed by hand here rather than imported on purpose:
+    these tests are ABOUT the values, so importing TOKEN_CEILINGS would only
+    prove the table equals itself. A ticket that tunes the ceilings must edit
+    app/config/token_budget.py AND this class.
     """
 
-    def test_agent_def_ceiling_is_1500(self, client, make_project, tmp_path):
+    def test_agent_def_ceiling_is_3000(self, client, make_project, tmp_path):
         repo = _setup_repo(tmp_path, "DR1", agent_names=[])
         proj = make_project(prefix="DR1", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         agent_def = next(
             f for f in data["files"] if f["category"] == "agent_def"
         )
-        assert agent_def["ceiling"] == 1500
+        assert agent_def["ceiling"] == 3000
 
-    def test_project_rules_ceiling_is_4000(self, client, make_project, tmp_path):
-        # DWB-399: bumped 3000 -> 4000 (worker rules are ~3042, need headroom).
+    def test_project_rules_ceiling_is_8000(self, client, make_project, tmp_path):
         repo = _setup_repo(tmp_path, "DR2", agent_names=[])
         proj = make_project(prefix="DR2", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         rules = next(
             f for f in data["files"] if f["category"] == "project_rules"
         )
-        assert rules["ceiling"] == 4000
+        assert rules["ceiling"] == 8000
 
-    def test_architecture_ceiling_is_8500(self, client, make_project, tmp_path):
-        # DWB-490: raised 7500 -> 8500. ARCHITECTURE.md hit the cap twice in one
-        # session (help-center + session-write-up features); the doc is
-        # legitimately growing, so the ceiling encodes reality rather than
-        # forcing lossy condensing of load-bearing reference detail.
+    def test_architecture_ceiling_is_20000(self, client, make_project, tmp_path):
+        # DWB-617: 8500 -> 20000. ARCHITECTURE.md measured 10649 against 8500.
         repo = _setup_repo(tmp_path, "DR3", agent_names=[])
         proj = make_project(prefix="DR3", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         arch = next(
             f for f in data["files"] if f["category"] == "architecture"
         )
-        assert arch["ceiling"] == 8500
+        assert arch["ceiling"] == 20000
 
-    def test_readme_ceiling_is_3500(self, client, make_project, tmp_path):
+    def test_readme_ceiling_is_8000(self, client, make_project, tmp_path):
         repo = _setup_repo(tmp_path, "DR4", agent_names=[])
         proj = make_project(prefix="DR4", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         readme = next(
             f for f in data["files"] if f["category"] == "readme"
         )
-        assert readme["ceiling"] == 3500
+        assert readme["ceiling"] == 8000
 
     def test_playbook_and_claude_md_and_initial_bumped(
         self, client, make_project, tmp_path
@@ -236,9 +239,44 @@ class TestCeilingRebalance:
         proj = make_project(prefix="DR5", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         by_category = {f["category"]: f["ceiling"] for f in data["files"]}
-        assert by_category["playbook"] == 4000
-        assert by_category["claude_md"] == 2000
-        assert by_category["initial"] == 2000
+        assert by_category["playbook"] == 20000
+        assert by_category["claude_md"] == 4000
+        assert by_category["initial"] == 4000
+
+    def test_every_category_in_the_table_reaches_the_endpoint(
+        self, client, make_project, make_agent, tmp_path
+    ):
+        """DWB-617 AC 1: the budget endpoint reports the new ceiling for EVERY
+        category, memory files included. A per-category test can pass while a
+        category nobody wrote a fixture for still serves a stale number, so
+        assert the whole table in one sweep against a repo that contains one
+        file of every kind.
+        """
+        prefix = "DR6"
+        repo = _setup_repo(tmp_path, prefix, agent_names=["Barry"])
+        proj = make_project(prefix=prefix, repo_path=str(repo))
+        make_agent(project_id=proj["id"], name="Barry", role="backend-worker")
+        data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+
+        expected = {
+            "agent_def": 3000,
+            "playbook": 20000,
+            "claude_md": 4000,
+            "project_rules": 8000,
+            "handoff": 8000,
+            "architecture": 20000,
+            "readme": 8000,
+            "initial": 4000,
+            "memory_identity": 1500,
+            "memory_main": 12000,
+        }
+        seen = {f["category"]: f["ceiling"] for f in data["files"]}
+        missing = set(expected) - set(seen)
+        assert not missing, f"no fixture file reached these categories: {missing}"
+        for category, ceiling in expected.items():
+            assert seen[category] == ceiling, (
+                f"{category}: endpoint says {seen[category]}, table says {ceiling}"
+            )
 
 
 class TestGateEnforcedHelper:
@@ -313,10 +351,16 @@ class TestExemptStatus:
     def test_over_ceiling_playbook_still_exempt_not_over(
         self, client, make_project, tmp_path
     ):
-        # A playbook far past its 4000 ceiling must still read 'exempt', proving
-        # the exemption short-circuits the ratio judgment.
+        # A playbook far past its ceiling must still read 'exempt', proving the
+        # exemption short-circuits the ratio judgment. DWB-617: the fixture is
+        # sized FROM the ceiling rather than from a literal, so a later raise
+        # cannot silently leave this test asserting 'exempt' on an under-ceiling
+        # file (which every category would pass).
+        from app.config.token_budget import TOKEN_CEILINGS
+
         repo = tmp_path / "repo"
-        _write(repo / ".claude" / "worker_playbook.md", "# huge\n" + "word " * 6000)
+        words = TOKEN_CEILINGS["playbook"] * 2  # "word " -> est = 1.25 * words
+        _write(repo / ".claude" / "worker_playbook.md", "# huge\n" + "word " * words)
         proj = make_project(prefix="EX2", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
         pb = next(f for f in data["files"] if f["category"] == "playbook")
@@ -328,9 +372,11 @@ class TestExemptStatus:
         repo = _setup_repo(tmp_path, "EX3", agent_names=[])
         proj = make_project(prefix="EX3", repo_path=str(repo))
         data = client.get(f"/api/projects/{proj['id']}/token-budget").json()
+        from app.config.token_budget import TOKEN_CEILINGS
+
         pb = next(f for f in data["files"] if f["category"] == "playbook")
         assert isinstance(pb["tokens"], int) and pb["tokens"] > 0
-        assert pb["ceiling"] == 4000
+        assert pb["ceiling"] == TOKEN_CEILINGS["playbook"]
 
     def test_root_docs_and_memory_not_exempt(
         self, client, make_project, make_agent, tmp_path

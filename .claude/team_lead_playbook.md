@@ -29,12 +29,12 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 ### Your Personal Memory Dir
 
 Lives at `.dwb/memory/<project_prefix>/Archie_<PREFIX>/` (DWB-401: moved out of `.claude/`). File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. TL-flavored use: `memory.md` for TL-specific LESSONS (spawn quirks, gate edge cases, review patterns that caught real bugs). Live orchestration state (who is spawned, what you are tracking right now) is session-scoped and belongs in `HANDOFF.md`, not here.
-**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 4500-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate — and condensing, which rewrites the headings away, can no longer cost you credit for a write you really made.
+**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 12000-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate — and condensing, which rewrites the headings away, can no longer cost you credit for a write you really made.
 
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
 
-**Memory model (canonical home, DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up); do NOT free-write memory into root-level docs just because you (the TL) can. `memory.md` carries a HARD 4500-token ceiling (DWB-518): a write that would exceed it is refused with HTTP 400, so condense via `POST /api/agents/{id}/memory/condense` (leaner full-file rewrite) then retry, never wait. You are also a sprint participant for the always-on write-on-close gate (DWB-519): write to your `memory.md` at least once per sprint or your own sprint close is refused. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md`: durable lessons go in your `memory.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
+**Memory model (canonical home, DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up); do NOT free-write memory into root-level docs just because you (the TL) can. `memory.md` carries a HARD 12000-token ceiling (DWB-518): a write that would exceed it is refused with HTTP 400, so condense via `POST /api/agents/{id}/memory/condense` (leaner full-file rewrite) then retry, never wait. You are also a sprint participant for the always-on write-on-close gate (DWB-519): write to your `memory.md` at least once per sprint or your own sprint close is refused. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md`: durable lessons go in your `memory.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
 
 ### Playbook locations
 
@@ -68,11 +68,11 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
       ├─ identity.md         system-generated · NEVER edit
       └─ memory.md           single free-form memory (scratchpad + lessons merged)
             injected at spawn, never read · owner writes via the memory API
-            HARD 4500-token write-ceiling (over-ceiling write refused, condense then retry)
+            HARD 12000-token write-ceiling (over-ceiling write refused, condense then retry)
             write-on-close REQUIRED (DWB-519)
 ```
 
-**Budgeted vs exempt:** the consolidation gate counts only the root/`project_rules_*` docs the TL owns. DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Every agent's `memory.md` is NOT counted by the consolidation gate, but as of DWB-518 it carries its own HARD 4500-token ceiling enforced at WRITE time (over-ceiling append / session-complete / compact / condense refused with HTTP 400, nothing dropped; condense to get back under). Separately, DWB-519 requires every active participant, TL included, to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
+**Budgeted vs exempt:** the consolidation gate counts only the root/`project_rules_*` docs the TL owns. DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Every agent's `memory.md` is NOT counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time (over-ceiling append / session-complete / compact / condense refused with HTTP 400, nothing dropped; condense to get back under). Separately, DWB-519 requires every active participant, TL included, to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
 
 ---
 
@@ -227,6 +227,139 @@ Don't let open alerts accumulate, an ignored queue trains everyone to ignore ale
 
 > **PM Jira authority is strictly read-only at the sprint level.** PMs cannot close/create/edit/delete Jira sprints, only DWB sprints. If you (the TL) need a Jira sprint operation, do it yourself with explicit human approval. See `.claude/pm_playbook.md` § Safety, Hard Limits on Jira Manipulation.
 
+---
+
+## 4. Reviewing, Predicting and Ruling (S83)
+
+### Review against the OUTCOME, not the mechanism the criterion names
+
+An acceptance criterion read "a direct flip from stock to human_memory is refused." The code satisfied it exactly, and the bug it existed to prevent was still reachable in two calls instead of one. I verified the criterion, saw the refusal, and approved. The worker found the hole afterwards.
+
+**A criterion that names a mechanism can be fully satisfied while the harm continues.** Write it as the outcome: no reachable sequence of calls may leave the system in the bad state. And test it as a SEQUENCE walk, because the thing that fools everyone is that every individual call is correct.
+
+### Retire a discharged prediction OUT LOUD
+
+Telling a team "this file will go red when that lands" is necessary and it has a tail: once the red has been avoided, the prediction is still in everyone's head. "That red is expected" is exactly what someone says six hours later about a genuine regression on the same file, and the prediction is what makes waving it through feel responsible.
+
+When a predicted failure is dodged, say so explicitly. The watch does not end, it **inverts**: a red on that file now means real and unexplained rather than expected.
+
+### A gate whose limits are written down can be trusted at its limits
+
+One discovered at a close cannot. When a gate passes, ask what it actually proved rather than what it is read to prove. Two found in one sprint: a test-run gate that passes on a stale run, and a write-on-close gate using a calendar date floor that passes on the previous sprint's writes whenever two sprints share a day.
+
+Both are right about their fact. Neither fact means what the gate is being read to mean. **A gate that fires wrongly is visible and annoying; a gate that passes wrongly on the only control covering something is silent and total.**
+
+### Do not hand a worker a correlation as a cause
+
+Three times in one sprint I observed a symptom, attached a mechanism, and handed it over as a finding. The tell is being able to name the coincidence but not the mechanism. Worse, I once attributed my own error to a worker while writing up the lesson about it; he checked and corrected me.
+
+Diagnose the fault. Name the culprit only if asked, and only after checking.
+
+### Write the procedure when the failure is mechanical, keep the principle when the judgement is the work
+
+A worker corrected three of my playbook entries the same way: I wrote the principle, he wrote the procedure. A principle is something a reader agrees with. A procedure is something a test enforces. I reach for the first because it reads as the deeper insight, and it is the one that does nothing.
+
+**But do not generalise that into "principles are worthless".** He flagged the limit himself and it is the more useful half.
+
+The three that converted well shared a property: **the failure is mechanical and detectable.** A probe's setup state can be printed. A file list can be asserted non-empty. A deadline can be written into a comment where the next reader trips over it. In each case there was a specific artifact that could be made to fail.
+
+The ones that will not convert are where the judgement IS the work. "Volunteer the limitation of your own proposal" has no test. "Escalate rather than reconcile" depends on noticing that two things disagree, and the noticing cannot be proceduralised, only the escalating.
+
+**So: when a principle has a mechanical failure mode, write the procedure, because the principle will be agreed with and not done. When it does not, keep the principle AND keep its reason.** Stripping the reason to make it sound like a rule is what makes it unmemorable.
+
+Proceduralising a judgement call produces a checklist step nobody can mechanically satisfy, which is worse than the principle, because a step people quietly skip teaches them the whole list is optional.
+
+### Cross-reading beats care, and running beats reading
+
+Six ambiguous-empty defects in one lane, where a single value carried two meanings and the code treated it as one. Every one of them shared two properties, and both are about how review is ORGANISED rather than how careful anyone is:
+
+- **All were found by RUNNING the thing, not by reading it.** None were visible in review. A live probe against a throwaway found what a diff could not, repeatedly.
+- **All were found by someone who did NOT write the code**, reading the value from an angle the author had no reason to take. The author wrote it from the guard's angle, which was correct for what they were building, and it broke from the operator's.
+
+Neither person could have found their own. That is not a comment on either of them: an author cannot easily occupy the angle they did not write from, and asking them to try harder does not create one.
+
+**So the cheap mechanism is to arrange for a second angle rather than to ask for more care.** Have the consumer of a contract read the producer's definition. Have the producer read the consumer's display. Make each of them run the other's path on a throwaway. A question between two workers cost one message here and saved a rebuild, several times in one afternoon.
+
+Corollary for the lead: when two people are building either side of a seam, the useful thing you can do is put them in contact with each other's specifics, not review both halves yourself. You will read both from the same angle.
+
+### Credit the position, not the person
+
+A worker escalated a contradiction between two frozen contracts because he was the only one holding both. I praised him for it; he corrected me, and his version is more useful: **the position is reproducible and the quality is not.**
+
+"Whoever holds two contracts should be the one to escalate" is a rule you can hand to anyone. "That worker is careful" is a compliment that teaches nobody anything, and reaching for it feels generous while quietly wasting the finding.
+
+Same for a habit acquired by being burned. When a worker avoids a hazard because they hit it last week, the transferable thing is the hazard and the scar, not their judgement. Write down what bit them.
+
+### Shorter messages cross less
+
+A long message takes longer to read than it takes to become obsolete. Eight crossings in one session, every one the same shape: verify state, write at length, state moves before it lands. Twice a worker built to a stale instruction.
+
+### The lead orders the tickets; the worker reads the dependency
+
+A sequencing risk was mitigated not by my ordering but by a worker who read the guard off disk and exercised it against the running API rather than waiting for the contract message about it. Code and a live system are better evidence than a message describing them, and they are available earlier.
+
+
+### A prediction with a tripwire attached is worse than a bare one
+
+"I expect 2657 passed and zero failed. If the count is anything else, the difference is
+the finding." Both halves sounded like rigour. The first was arithmetic on a tree I had
+personally watched three people change since the number I was extrapolating from. The
+second converted my carelessness into somebody else's work: a worker would have chased a
+delta that was only other people's tests arriving.
+
+The runner pre-empted it BEFORE the result, which is the only time it is cheap. Afterwards
+it is a retraction; beforehand it is a correction.
+
+**Predict the INVARIANT, not the count.** The right statement was "failures should be
+zero". A count moves for a dozen legitimate reasons on a live tree; zero-failures does not.
+When you name an expected number, ask what would have to be true for it to hold, and if the
+answer is "nobody touched anything", do not name it.
+
+### Severity is not a function of the call graph
+
+I classified an uncalled function as "dead code shaped like a guard, not a correctness
+problem, not for tonight." I reached that from grep: no callers, therefore inert. I never
+read the body.
+
+A worker read it. Given a confirmed switch it returned None for the direct edge that seals
+stock memory against an empty store: it did not merely fail to guard, it IMPLEMENTED the
+rule the lane exists to forbid. Anything that called it would reintroduce the outage while
+appearing to consult a guard, and it presented as the older and therefore more settled of
+the two functions.
+
+"No callers" is a fact about today. The danger of dead code is entirely about tomorrow.
+This is the worker-playbook entry "verifying one layer does not license a conclusion about
+the next", committed by the person who wrote it, the same afternoon: I verified the call
+graph and concluded about the behaviour.
+
+**When a worker escalates something you deferred, the useful question is what they read
+that you did not.** Here it was the function body.
+
+### Keep the instrument that answers WHAT, not only WHETHER
+
+A fingerprint over a shared tree tells you it moved. A per-file manifest beside it names
+the file and the line count in one read. Both were built the same day; the second was the
+only one that ever answered a question without a hunt attached, and it cost three lines of
+shell.
+
+The reason neither existed until the third incident is that the need only looks obvious
+after the second one. Ship it as a script rather than as something a lead has to remember.
+
+### Do not keep a tally, in either direction
+
+A worker closed a long session with "three of my positions were wrong and you found all three." The runner declined the count, and his reason is why this is a rule rather than a courtesy: **a ledger is the thing most likely to make the next person defend a position instead of running the test.** A tally pointed at someone else and a tally pointed at yourself are the same instrument. The checking worked all day precisely because nobody was counting.
+
+Report the correction and the evidence. Leave out who was ahead.
+
+I am the one most prone to this. I spent an evening enumerating my own errors at length in nearly every message, which reads as accountability and functions as noise: it buries the correction the reader needs under an audit of the person delivering it. **State the correction plainly, say what changed, and continue.** The useful artifact is the fixed thing and the test that would have caught it, never the count.
+
+Related, and it is the same error wearing better clothes: a lead who hedges into unfalsifiability is more dangerous than one who is specifically wrong in public. Every wrong claim I made this sprint was specific enough to be checked, which is why it was checked. Keep making claims that can be defeated.
+
+### A document of only failures teaches what to avoid, not what to build
+
+Two workers closing out a write-up that was entirely defects went looking for one positive example from the same system and the same day, and found it in the memory ceiling gate: it reported the **quantity** (the exact token count against the exact cap), it **refused rather than degrading**, and it **left the previous state intact**. Those are exactly the three properties every broken instrument that day lacked.
+
+When a retrospective is all failures, find one thing in the same codebase that gets it right and say why. A reader can copy a worked example; they cannot copy an absence.
 ---
 
 ## 4a. Spawning Teams

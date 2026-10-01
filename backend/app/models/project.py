@@ -5,13 +5,25 @@
 # Caller: app/services/project.py, sprint.py
 # Callees: app/database.Base
 # Data In: DB rows
-# Data Out: Project, ProjectStatus
-# Last Modified: 2026-08-11 (DWB-017: force_standards_audit gate)
+# Data Out: Project, ProjectStatus, MemoryMode
+# Last Modified: 2026-09-30 (DWB-593: memory_mode gains adopting + reverting)
 
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, String, Text, false, func, true
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Enum,
+    Integer,
+    String,
+    Text,
+    false,
+    func,
+    true,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,6 +34,47 @@ class ProjectStatus(str, enum.Enum):
     paused = "paused"
     completed = "completed"
     archived = "archived"
+
+
+class MemoryMode(str, enum.Enum):
+    """DWB-584: which memory system this project's agents run on.
+
+    - stock:        one markdown file per agent with a token ceiling, injected
+                    whole at spawn. The system as it has always worked.
+    - human_memory: memories become rows across four holders with a derived
+                    score and a journal. Spec: docs/human_memory_spec.md.
+
+    - adopting:     mid-transition INTO human_memory (DWB-593).
+    - reverting:    mid-transition back OUT to stock (DWB-593).
+
+    Per spec section 7 hard rule 1, when human_memory is on it is the ONLY
+    memory: stock memory is not written, not read, not consulted. The two are a
+    choice, never a fallback pair, because two memories that both look
+    authoritative and disagree is the failure this whole design exists to
+    avoid.
+
+    THE TWO TRANSITION STATES ARE NOT SEALED, AND THAT IS THE WHOLE POINT OF
+    DWB-593. Stock stays authoritative for reads AND writes throughout a
+    transition, so an agent spawning mid-flight reads its memory exactly as it
+    does today and notices nothing. The seal and the flip happen together at
+    cutover, as one act.
+
+    That property costs nothing to maintain because the single `memory_mode`
+    predicate in the backend (app/services/memory_mode.py) asks
+    `== human_memory` rather than `!= stock`. IF YOU ARE TIDYING THAT LINE, DO
+    NOT: rewriting it as `!= stock` seals a project the moment it starts
+    adopting, against a store that is still empty, which is precisely the
+    amnesia bug DWB-593 exists to make unreachable. A test asserts it.
+
+    ORDER IS SIGNIFICANT. MySQL stores an ENUM as the ordinal of its value, so
+    the two new members are APPENDED. Inserting either in the middle renumbers
+    `human_memory` on every existing row.
+    """
+
+    stock = "stock"
+    human_memory = "human_memory"
+    adopting = "adopting"
+    reverting = "reverting"
 
 
 class JiraSyncStatus(str, enum.Enum):
@@ -92,6 +145,34 @@ class Project(Base):
     # next read.
     node_exclusions_seeded: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
+    )
+    # DWB-584: human_memory mode. Per-project toggle, defaults to stock, and
+    # per the spec the mode never leaves beta, which is why it is versioned.
+    # memory_schema_version is stamped so v1 content stays readable by v2
+    # tooling. Switching modes rewrites every memory the project has, so the
+    # UI that sets this must warn first (spec section 6).
+    memory_mode: Mapped[MemoryMode] = mapped_column(
+        Enum(MemoryMode),
+        nullable=False,
+        default=MemoryMode.stock,
+        server_default=MemoryMode.stock.value,
+    )
+    memory_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    # DWB-584 / DWB-590: TOP-OFF. THESE TWO COLUMNS ARE DELIBERATELY UNRELATED
+    # TO THE MEMORY COLUMNS ABOVE THEM. Miles ruled top-off INDEPENDENT of
+    # memory mode, and the spec reached the same conclusion in section 8: it is
+    # orthogonal, about repetition and drift, not memory structure. They sit
+    # here because DWB-584 held the sprint's only migration slot, which is a
+    # delivery fact and nothing else. Top-off must work on a project in stock
+    # mode, and DWB-590's logic must not read memory_mode. Schema colocation is
+    # not feature coupling.
+    topoff_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    topoff_interval: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
     )
     # DWB-342: project-level Jira sync state. Used by the manual sync
     # endpoint to enforce single-sync concurrency, render the

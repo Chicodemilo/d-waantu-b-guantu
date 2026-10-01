@@ -5,6 +5,9 @@ A multi-agent workflow dashboard for Claude Code teams: ticket tracking, token a
 - **Token efficiency:** structured playbooks and slim API responses keep agent context spent on work, and budget monitoring warns when context files grow past their ceilings.
 - **Team visibility:** see what every agent is doing, which tickets are moving, and where things are stuck.
 - **Session continuity:** HANDOFF.md, playbooks, and project rules carry knowledge between sessions.
+- **Memory that forgets on purpose (beta, off by default):** an optional per-project mode that splits agent memory into four holders, a core that never fades, scars that decay to a resting floor and stay there, working facts that decay to a floor and are then moved into the journal, and a journal that costs nothing until you reach for it. Nothing is deleted by arithmetic: the decay floors at 1, and anything leaving memory is written to the journal before the row goes. Relevance is derived at read time from tier and sessions since the entry last fired, never stored, so the number cannot disagree with the rule.
+- **Top-off:** a periodic self-check fired by the session runner rather than by an agent remembering to run it, catching the loop where an answer gets revised twice, the ask quietly becomes what the agent decided to give, or a claim is made from a summary instead of the source.
+- **Mode switches are staged, not flag flips:** moving a project between memory models is a resumable, auditable transition that walks one entry at a time and journals anything it cannot carry.
 
 **Contributing:** DWB is open source. If something is broken or could work better, open a PR.
 
@@ -225,7 +228,7 @@ The non-obvious and automation endpoints:
 | POST | `/api/sessions/open`, `/api/sessions/{id}/close` | DWB session bounds; omit `opened_at` (server-stamped); `headline` required on AI closes; write-on-close gate on explicit closes |
 | GET | `/api/sessions/{id}` | DWB session detail rollup (by_role/by_ticket/overhead) |
 | POST | `/api/agents/identify`, `/api/agents/spawn-prepare` | Identity resolution; spawn-prepare returns the brief + full `memory_full` for prompt injection |
-| POST | `/api/agents/{id}/memory/append`, `.../session-complete` | Memory writes; refuse 400 over the 4500-token ceiling (no silent trim) |
+| POST | `/api/agents/{id}/memory/append`, `.../session-complete` | Memory writes; refuse 400 over the 12000-token ceiling (no silent trim) |
 | POST | `/api/agents/{id}/memory/condense` | Sanctioned full-file rewrite to get back under ceiling |
 | GET | `/api/projects/{id}/nodes`, `.../nodes/match?text=` | Node index: weighted tags + pointers; match derives neighbors |
 | POST | `/api/projects/{id}/nodeify` | Bootstrap/refresh the node index (idempotent renodify) |

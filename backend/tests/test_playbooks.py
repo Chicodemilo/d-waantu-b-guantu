@@ -643,7 +643,17 @@ class TestDeployHooksSettings:
     _EXPECTED_HOOK_EVENTS = {
         "SessionStart", "UserPromptSubmit", "SessionEnd", "Stop", "SubagentStop",
         "PostToolUse", "Notification", "PreCompact",
+        # DWB-589: the harness-memory guard. Runs a SCRIPT, not a curl; see
+        # _SCRIPT_HOOK_EVENTS below.
+        "PreToolUse",
     }
+
+    # Events whose hook runs a local script instead of curling the API. Split
+    # out rather than dropped from the check: the original assertion was "every
+    # hook points at the local DWB API", and weakening it to "every hook has a
+    # command" to accommodate one exception would stop it catching a hook
+    # pointed at the wrong place, which is the thing it exists to catch.
+    _SCRIPT_HOOK_EVENTS = {"PreToolUse"}
 
     def _deploy_or_skip(self, client, project_id):
         import pytest
@@ -683,11 +693,19 @@ class TestDeployHooksSettings:
         assert settings_path.is_file()
         contents = json.loads(settings_path.read_text(encoding="utf-8"))
         assert set(contents["hooks"].keys()) == self._EXPECTED_HOOK_EVENTS
-        # Each hook entry points at the local DWB API.
+        # Each hook entry points where it should: the API for the tracking
+        # hooks, the shipped script for the guard.
         for event in self._EXPECTED_HOOK_EVENTS:
             block = contents["hooks"][event][0]["hooks"][0]
             assert block["type"] == "command"
-            assert "http://localhost:8000/api/hooks/" in block["command"]
+            if event in self._SCRIPT_HOOK_EVENTS:
+                assert "block_harness_memory_writes.py" in block["command"], event
+                # Deployed into OTHER projects' .claude/, so it must not carry
+                # an absolute path into this checkout.
+                assert "$CLAUDE_PROJECT_DIR" in block["command"], event
+                assert "/Users/" not in block["command"], event
+            else:
+                assert "http://localhost:8000/api/hooks/" in block["command"], event
 
     def test_merges_into_existing_settings_json(
         self, client, make_project, tmp_path

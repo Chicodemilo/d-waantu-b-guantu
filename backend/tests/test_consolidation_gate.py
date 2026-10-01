@@ -7,7 +7,7 @@
 #                GET /api/projects/:id/consolidation-status, PATCH /api/sprints/:id (close), GET /api/projects/:id/token-budget
 # Data In:       Factory-created projects, sprints, agents + a temp repo for owner-mapping cases
 # Data Out:      Assertions on ack responses, status payload owner mapping, sprint-close blocks, override enforcement
-# Last Modified: 2026-06-19
+# Last Modified: 2026-10-01 (DWB-617: over-ceiling fixtures derived from TOKEN_CEILINGS)
 
 """Tests for the consolidation gate (DWB-style untracked feature, 2026-06-04).
 
@@ -26,44 +26,62 @@ from pathlib import Path
 
 import pytest
 
+from app.config.token_budget import TOKEN_CEILINGS, estimate_tokens
+
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
+def _over(category: str) -> str:
+    """A body comfortably OVER `category`'s ceiling, derived from the ceiling.
+
+    "word " is 5 chars, so estimate_tokens = max(chars//4, words) = 1.25 * words.
+    Two words per ceiling token puts the file at 2.5x its cap, and it tracks the
+    cap when a ticket moves it instead of going stale (DWB-617).
+    """
+    body = "word " * (TOKEN_CEILINGS[category] * 2)
+    assert estimate_tokens(body) > TOKEN_CEILINGS[category], category
+    return body
+
+
 def _make_repo(tmp_path: Path, prefix: str, agent_names: list[str]) -> Path:
     """Build a fake repo with files at each known owner level + memory dirs.
 
-    Word counts are sized FAR above each category's ceiling so the tests don't
-    silently regress when a future DWB-327-style rebalance raises the caps.
-    Token estimate is ``word_count * 1.3``; the rule is "make files 5-10× over
-    cap" so even an aggressive cap raise still leaves status='over'.
+    Every body is sized FROM its own category ceiling (see ``_over``), not from
+    a word-count literal. The previous version used literals with a comment
+    claiming they were "FAR above each category's ceiling so the tests don't
+    silently regress when a future rebalance raises the caps" - DWB-617 raised
+    the caps and four of those files landed UNDER their new ceiling, which is
+    exactly the regression the comment promised could not happen. An
+    over-ceiling fixture that quietly becomes under-ceiling makes every
+    over-ceiling assertion in this file pass for the wrong reason.
 
     PM-owned + worker-owned playbook/rules files are written too so over-ceiling
     coverage isn't fragile to a cap change on a single category.
     """
     repo = tmp_path / "repo"
-    # Root docs — way over any reasonable cap.
-    _write(repo / "ARCHITECTURE.md", "word " * 10000)                          # ~13000 tok, cap 4000
-    _write(repo / "HANDOFF.md", "word " * 5000)                                # ~6500 tok, cap 1500
-    # Agent definitions — assert against any reasonable agent_def ceiling.
-    _write(repo / ".claude" / "agents" / "backend-worker.md", "word " * 5000)  # ~6500 tok, cap 1500
-    _write(repo / ".claude" / "agents" / "pm.md", "word " * 5000)              # ~6500 tok
-    _write(repo / ".claude" / "agents" / "worker.md", "word " * 5000)          # ~6500 tok
-    # Playbooks (cap 2500) — sized firmly over.
-    _write(repo / ".claude" / "worker_playbook.md", "word " * 5000)            # ~6500 tok, cap 2500
-    _write(repo / ".claude" / "pm_playbook.md", "word " * 5000)                # ~6500 tok, cap 2500
-    # Project rules (cap 1000) — over.
-    _write(repo / ".claude" / "project_rules_pm.md", "word " * 5000)           # ~6500 tok, cap 1000
-    _write(repo / ".claude" / "project_rules_worker.md", "word " * 5000)       # ~6500 tok, cap 1000
+    # Root docs
+    _write(repo / "ARCHITECTURE.md", _over("architecture"))
+    _write(repo / "HANDOFF.md", _over("handoff"))
+    # Agent definitions
+    _write(repo / ".claude" / "agents" / "backend-worker.md", _over("agent_def"))
+    _write(repo / ".claude" / "agents" / "pm.md", _over("agent_def"))
+    _write(repo / ".claude" / "agents" / "worker.md", _over("agent_def"))
+    # Playbooks
+    _write(repo / ".claude" / "worker_playbook.md", _over("playbook"))
+    _write(repo / ".claude" / "pm_playbook.md", _over("playbook"))
+    # Project rules
+    _write(repo / ".claude" / "project_rules_pm.md", _over("project_rules"))
+    _write(repo / ".claude" / "project_rules_worker.md", _over("project_rules"))
     # Memory dirs. DWB-401: 2-file model (identity.md + memory.md). memory.md is
-    # seeded over its 4500 ceiling but is GATE-EXEMPT, so it must never block an
-    # ack or close.
+    # seeded over its ceiling but is GATE-EXEMPT, so it must never block an ack
+    # or close.
     for name in agent_names:
         mem = repo / ".dwb" / "memory" / prefix / name
         _write(mem / "identity.md", "word " * 100)
-        _write(mem / "memory.md", "word " * 5000)  # ~5000 tok, cap 4500 (exempt)
+        _write(mem / "memory.md", _over("memory_main"))
     return repo
 
 

@@ -6,16 +6,18 @@
 # Callees: app/models (Agent, Project), filesystem (agent memory.md)
 # Data In: db Session, Agent, since datetime
 # Data Out: bool / datetime
-# Last Modified: 2026-09-16 (DWB-564: effective_last_write_at = max(column, mtime))
+# Last Modified: 2026-09-29 (DWB-589: human_memory proves participation from agent_memories, not from stock memory.md)
 
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-from app.models.project import Project
+from app.models.agent_memory import AgentMemory
+from app.models.project import MemoryMode, Project
 
 # DWB-564 history: agent_wrote_since used to work by scanning memory.md for
 # an ISO 8601 UTC heading (every memory write stamps one, e.g.
@@ -146,18 +148,81 @@ def effective_last_write_at(db: Session, agent: Agent) -> datetime | None:
     return max(candidates) if candidates else None
 
 
+def _human_memory_wrote_since(
+    db: Session, agent: Agent, since: datetime | None
+) -> bool:
+    """DWB-589: participation proved from the human_memory store itself.
+
+    Counts rows in ``agent_memories``, and deliberately nothing else.
+
+    WHY NOT the two stock sources. On a switched project both of them lie in the
+    same direction, and a gate that can be satisfied by a store the project is
+    forbidden to use has no teeth:
+
+    1. ``memory.md`` mtime. A pre-switch write, or any direct file write, sits
+       in the window and passes an agent who never touched the new store.
+       ``.dwb/`` is writable - only the playbook warns against it - so this is
+       reachable, not theoretical.
+    2. ``agents.last_memory_write_at``. Stamped at write time by BOTH the stock
+       writes and DWB-586's raw write, so it cannot distinguish the two, and it
+       records when the column last moved rather than when the store gained a
+       row. A backdated or migrated row leaves the two disagreeing.
+
+    Both were shown failing against the old gate before this function existed;
+    the tests that caught them are in tests/test_human_memory_enforcement_dwb589.py.
+
+    WHY NOT journal entries. The journal is the STORY store (spec section 5) and
+    it is deliberately free to sprawl. Counting it would let an agent satisfy a
+    write-on-close gate with an episode instead of a lesson, which is the
+    distinction DWB-560 already fought for when it cut session narration out of
+    memory.md. Participation means a lesson landed.
+
+    ``created_at`` is the clock here rather than ``created_session_id``, because
+    the gate's window is a sprint's calendar span and a session reference cannot
+    be compared to it without a second join that answers the same question less
+    directly. Note this is NOT the decay clock: section 3's clock is sessions,
+    and nothing that decays reads this.
+    """
+    stmt = select(func.count()).select_from(AgentMemory).where(
+        AgentMemory.agent_id == agent.id
+    )
+    if since is not None:
+        # DB timestamps are naive UTC; normalise before comparing or the
+        # comparison silently does the wrong thing across the tz boundary.
+        bound = _as_utc(since).astimezone(timezone.utc).replace(tzinfo=None)
+        stmt = stmt.where(AgentMemory.created_at >= bound)
+    return db.execute(stmt).scalar_one() > 0
+
+
 def agent_wrote_since(db: Session, agent: Agent, since: datetime | None) -> bool:
     """True if the agent wrote to memory at/after ``since``.
 
-    DWB-564: reads effective_last_write_at (max of the column and mtime),
-    not memory.md's content - see the module comment for why the
-    heading-only design was replaced.
+    DWB-564: for a STOCK project this reads effective_last_write_at (max of the
+    column and mtime), not memory.md's content - see the module comment for why
+    the heading-only design was replaced.
+
+    DWB-589: for a ``human_memory`` project it reads the human_memory store
+    instead. Spec section 7 hard rule 1 seals stock memory on those projects, so
+    proving participation from a sealed store would be proving it from somewhere
+    the agent is forbidden to write. See _human_memory_wrote_since.
+
+    DWB-586's raw write stamps ``last_memory_write_at`` like every other memory
+    write, so the POSITIVE case needed no branch at all and this one changes
+    nothing about it. The branch exists for the NEGATIVE: without it an agent
+    with no row in the new store still passed on a stale stock mtime, and the
+    gate's teeth are entirely in the negative.
 
     ``since=None`` means "any write ever on record" - used when a sprint has no
     start_date to anchor a window. No evidence at all (column unset AND no
     usable mtime, or an unscoped agent) returns False: that is a genuine
     non-writer, which is the teeth of the gate.
     """
+    project = (
+        db.get(Project, agent.project_id) if agent.project_id is not None else None
+    )
+    if project is not None and project.memory_mode == MemoryMode.human_memory:
+        return _human_memory_wrote_since(db, agent, since)
+
     latest = effective_last_write_at(db, agent)
     if latest is None:
         return False

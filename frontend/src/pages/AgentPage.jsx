@@ -1,17 +1,18 @@
 // Path: src/pages/AgentPage.jsx
 // File: AgentPage.jsx
 // Created: 2026-03-29
-// Purpose: Displays agent detail view with applicable instructions (global, project, agent scoped) and the per-agent score ledger (DWB-428)
+// Purpose: Displays agent detail view with applicable instructions (global, project, agent scoped), the per-agent score ledger (DWB-428), and the human_memory panel (DWB-613)
 // Caller: App.jsx (route: /projects/:id/agents/:agentId)
-// Callees: react-router-dom, ../store/useStore, ../components/agents/AgentDetail, ../components/agents/AgentScoreLedger, ../components/instructions/InstructionView
+// Callees: react-router-dom, ../store/useStore, ../components/agents/AgentDetail, ../components/agents/AgentScoreLedger, ../components/agents/AgentMemoryPanel, ../components/instructions/InstructionView
 // Data In: Route params (id, agentId), instructions from Zustand store
 // Data Out: Default export AgentPage component
-// Last Modified: 2026-06-22
+// Last Modified: 2026-09-30 (DWB-613: added AgentMemoryPanel)
 
 import { useParams, Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import AgentDetail from '../components/agents/AgentDetail';
 import AgentScoreLedger from '../components/agents/AgentScoreLedger';
+import AgentMemoryPanel from '../components/agents/AgentMemoryPanel';
 import InstructionView from '../components/instructions/InstructionView';
 
 function AgentPage() {
@@ -35,6 +36,7 @@ function AgentPage() {
       </div>
       <AgentDetail agentId={agentId} />
       <AgentScoreLedger agentId={agentIdNum} projectId={projectId} />
+      <AgentMemoryPanel agentId={agentIdNum} />
       {applicable.length > 0 && (
         <div>
           <div className="page-title" style={{ marginTop: '24px' }}>Instructions</div>

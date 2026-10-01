@@ -82,11 +82,11 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
       ├─ identity.md         system-generated · NEVER edit
       └─ memory.md           single free-form memory (scratchpad + lessons merged)
             injected at spawn, never read · owner writes via the memory API
-            HARD 4500-token write-ceiling (over-ceiling write refused, condense then retry)
+            HARD 12000-token write-ceiling (over-ceiling write refused, condense then retry)
             write-on-close REQUIRED (DWB-519)
 ```
 
-**Budgeted vs exempt:** the consolidation gate counts only the root/project docs the TL owns; DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's job. Your `memory.md` is not part of the consolidation gate, but as of DWB-518 it is no longer "trim-free": it carries a HARD 4500-token ceiling enforced at WRITE time. An append / session-complete / compact / condense that would push the file past the ceiling is REFUSED (HTTP 400), nothing is silently dropped. You keep it under ceiling yourself by condensing (see Memory Writes). Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. Memory lives under `.dwb/` (writable) rather than `.claude/`; always write through the API so the server applies the ISO heading and enforces the ceiling.
+**Budgeted vs exempt:** the consolidation gate counts only the root/project docs the TL owns; DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's job. Your `memory.md` is not part of the consolidation gate, but as of DWB-518 it is no longer "trim-free": it carries a HARD 12000-token ceiling enforced at WRITE time. An append / session-complete / compact / condense that would push the file past the ceiling is REFUSED (HTTP 400), nothing is silently dropped. You keep it under ceiling yourself by condensing (see Memory Writes). Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. Memory lives under `.dwb/` (writable) rather than `.claude/`; always write through the API so the server applies the ISO heading and enforces the ceiling.
 
 ---
 
@@ -107,7 +107,7 @@ Before deleting or refactoring shared code another agent owns — especially the
 
 DWB-401 collapsed memory to a single free-form `memory.md` (identity.md is still system-generated). You never read it (it is injected at spawn, see On Spawn step 4); you only WRITE it, always through the API, so the FastAPI process applies the ISO heading and enforces the ceiling consistently. `memory.md` is THE only memory file: never create additional files, and keep durable *project* knowledge in `ARCHITECTURE.md` / `HANDOFF.md`, not here. Three write endpoints: append (a lesson), session-complete (your wrap-up lessons), condense (the over-ceiling fix path). `GET /api/agents/{id}/memory` reports `est_tokens`, `ceiling` and `headroom` when you need to know where you stand.
 
-**The 4500-token ceiling is a HARD write-gate (DWB-518).** `memory.md` has a 4500-token ceiling (`memory_main` in `token_budget.py`; the estimator is `max(len//4, words)`). There is no more silent trim. When an append or session-complete write would push the file past 4500 tokens, the server REFUSES it with **HTTP 400** and drops nothing. The 400 body names the current tokens + ceiling and tells you to condense first, then retry. **Condense, then retry the write, do not wait** and do not ask the TL: trimming your own memory is the work, not a blocker.
+**The 12000-token ceiling is a HARD write-gate (DWB-518).** `memory.md` has a 12000-token ceiling (`memory_main` in `token_budget.py`; the estimator is `max(len//4, words)`). There is no more silent trim. When an append or session-complete write would push the file past 12000 tokens, the server REFUSES it with **HTTP 400** and drops nothing. The 400 body names the current tokens + ceiling and tells you to condense first, then retry. **Condense, then retry the write, do not wait** and do not ask the TL: trimming your own memory is the work, not a blocker.
 
 **In-flight path: `POST /api/agents/{your_agent_id}/memory/append`** (DWB-358). Capture a note or lesson mid-ticket. Body:
 
@@ -124,7 +124,7 @@ DWB-401 collapsed memory to a single free-form `memory.md` (identity.md is still
 - Server prepends an ISO 8601 UTC heading (`## 2026-06-10T13:48:15+00:00`, or `## ... - session <id>` when you pass `session_id`).
 - Append-only. Existing content is never overwritten.
 - Returns 201 with `{agent_id, file, path, timestamp, bytes_written}` on success.
-- Errors: 422 (file outside the Literal enum); **400 (the write would exceed the 4500-token ceiling: condense then retry; also empty content, unscoped agent, no repo_path)**; 404 (agent or project missing); 500 (memory dir/file unwritable).
+- Errors: 422 (file outside the Literal enum); **400 (the write would exceed the 12000-token ceiling: condense then retry; also empty content, unscoped agent, no repo_path)**; 404 (agent or project missing); 500 (memory dir/file unwritable).
 
 **Wrap-up path: `POST /api/agents/{your_agent_id}/session-complete`.** The mandatory close write (see Sprint Close below). Send the wrap-up payload; as of DWB-560 the endpoint writes ONE timestamped block containing ONLY your `lessons` list, and a call with no lessons writes nothing at all. The summary and token count still travel in the request and reach the database, they just never land in `memory.md`. It obeys the same ceiling: an over-ceiling wrap-up returns **400**, so condense first, then re-post the wrap-up. Use the in-flight endpoint for everything before the wrap.
 
@@ -134,12 +134,12 @@ DWB-401 collapsed memory to a single free-form `memory.md` (identity.md is still
 { "file": "memory", "content": "<the whole memory.md, rewritten shorter>" }
 ```
 
-- The server stamps an ISO `## <timestamp> - condensed` heading, validates the result is under 4500 tokens, and **replaces** the file. Response: `{agent_id, file, path, tokens, ceiling, bytes_written, condensed_at}`.
+- The server stamps an ISO `## <timestamp> - condensed` heading, validates the result is under 12000 tokens, and **replaces** the file. Response: `{agent_id, file, path, tokens, ceiling, bytes_written, condensed_at}`.
 - Still over ceiling after your rewrite -> 400 (trim more and resubmit). `identity` -> 422. Empty content -> 400 (you cannot blank the file to pass).
 - Sibling `POST /api/agents/{your_agent_id}/memory/compact` is a plain full-file replace with **no** heading; it also 400s over ceiling. Use `condense` for the over-ceiling flow (it stamps the heading and is the path the refusal names); reach for `compact` only when you want a clean rewrite with no condensed-heading marker.
 
 **What goes in `memory.md`:** durable lessons only ("next time you migrate enums in MySQL, autogenerate misses them; hand-write"). A working note earns its place only as the lesson it became. Not session wrap-ups, not what you shipped, not ticket ids, dates or counts (DWB-560). Because the file is capped, prefer condensing old blocks over hoarding; future-you reads the distilled version, not the raw log.
-**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 4500-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate — and condensing, which rewrites the headings away, can no longer cost you credit for a write you really made.
+**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 12000-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate — and condensing, which rewrites the headings away, can no longer cost you credit for a write you really made.
 
 
 **Never edit `identity.md`.** It is system-generated and regenerated on scaffold. The write endpoints refuse it.
@@ -236,6 +236,14 @@ If you get blocked on the work itself, message the TL immediately, don't sit on 
 <!-- jira-only:end -->
 
 <!-- non-jira-only:start -->
+### Before you hand off: read the ACs against the CODE, one at a time
+
+Not against your memory of what the ticket wanted. Open the acceptance criteria and the built thing side by side and check each line.
+
+This is not a formality and it is not the same as believing you satisfied them. A worker doing exactly this hit "cutover happens only after a sweep returns empty", looked at the code, and found his cutover did not sweep, a gap that would have sealed away any lesson written between the last decision and the flip. He had the reasoning that produces that requirement and had applied it one step earlier in the same file.
+
+It is the same rule as everything else here, pointed at your own ticket: verify against the artifact, not against your belief about the artifact. **Cheap, mechanical, and it fires at a fixed moment**, which is why it is worth more than remembering to be thorough.
+
 ### Pick up -> work -> hand off (no Jira)
 
 This project is not linked to Jira (`project.jira_base_url` is null). All ticket transitions go directly through the DWB API. Do not invoke `dwb2jira` tools; do not write to `jira_issue_key`.
@@ -267,7 +275,7 @@ curl -X POST http://localhost:8000/api/agents/{your_agent_id}/session-complete \
   -d '{"session_id": "<cc-session-id>", "summary": "...", "tokens_used": N}'
 ```
 
-If that wrap-up is over the 4500-token ceiling it 400s (condense, then re-post): the ceiling and the write-on-close gate are both hard, so budget a condense pass into your wrap if your memory is full.
+If that wrap-up is over the 12000-token ceiling it 400s (condense, then re-post): the ceiling and the write-on-close gate are both hard, so budget a condense pass into your wrap if your memory is full.
 
 **Consolidation gate (opt-in, `force_consolidation`, default OFF, DWB-400/328).** When on, every sprint participant must POST `consolidate-complete` before the TL can close. The gate has TEETH: the ack REFUSES with HTTP 400 if your *owned* files are over ceiling, unless you pass per-file overrides with non-empty reasons.
 
@@ -284,7 +292,7 @@ curl -X POST http://localhost:8000/api/agents/{your_agent_id}/consolidate-comple
 
 201 on success. 409 if already acked. The naked ack passes clean for a worker; the over-ceiling refusal path (400 + per-file overrides) applies only to the TL's owned root/`project_rules` docs.
 
-You can curate `memory.md` any time with `POST /api/agents/{your_agent_id}/memory/condense {file: "memory", content}` (heading-stamped full replace) or `.../memory/compact` (plain full replace). As of DWB-518 both **400 if the result is still over the 4500-token ceiling** (the silent trim is gone): trim more and resubmit. Curate for clarity whenever you like; you are required to keep memory under ceiling to write at all, and to have written at least once before the sprint can close.
+You can curate `memory.md` any time with `POST /api/agents/{your_agent_id}/memory/condense {file: "memory", content}` (heading-stamped full replace) or `.../memory/compact` (plain full replace). As of DWB-518 both **400 if the result is still over the 12000-token ceiling** (the silent trim is gone): trim more and resubmit. Curate for clarity whenever you like; you are required to keep memory under ceiling to write at all, and to have written at least once before the sprint can close.
 
 ## Reporting Status
 
@@ -330,6 +338,430 @@ When the user signals the small-change waiver (see TL playbook § 4c) and the TL
 - **Inline text confirmations over modals.** For light confirm flows (mark closed, archive, dismiss, disable), the trigger swaps in-place to `confirm? yes / cancel` styled the same size as the trigger. Do not build modal components. Reference pattern: ProjectPage delete/disable flows, EpicList mark-as-closed.
 
 Project-specific style rules (CSS palette, framework bans, file structure) live in `.claude/project_rules_worker.md`. Read them at session start.
+
+## Lessons That Cost Us Something (S83)
+
+Each of these was learned by paying for it. They are here rather than in someone's memory because the next person will not have been there.
+
+### Reproduce a destructive bug on a throwaway project, never on the one the team is using
+
+Flipping a live project's `memory_mode` seals every agent's memory on it: writes 409, reads serve a pointer instead of content, and an agent spawned in that window gets no memory for its whole session, silently and permanently. Verifying a bug this way took DWB's own memory down for two minutes and was only noticed because an agent happened to be mid-write.
+
+**One throwaway per probe, created and deleted around it. Not a standing shared scratch project.** A shared scratch has the same defect as the shared test database: your state changes are invisible to whoever else is mid-probe on it, so two people verifying different things collide and each reads the other's state as their own result. A per-probe project cannot collide with anything.
+
+Creating one costs a single POST, which is exactly why nobody reaches for it in the moment. **A config flag that changes behaviour globally is a deployment, and testing it on the live project is testing in production.**
+
+The part that makes this expensive is not that you lose your own two minutes. It is that the person who discovers the outage is someone ELSE, mid-task, through a failure that looks like their own bug. That is how it surfaced here: an agent's memory write refused mid-condense, with no way to see why.
+
+### Do not freeze a contract that spans a seam you do not own
+
+Two workers each published a contract labelled frozen within minutes of each other, and they contradicted on the one point everything else rested on. Each was right about their own half. Neither could see it, because seeing it required reading both.
+
+Publish what is yours, cite what is not, and route the seam to the TL. Two people each holding a frozen contract is how you get two implementations that are individually correct and jointly broken.
+
+### Discovery by pattern needs its pattern revisited when the surface grows
+
+A source guard that discovers files by pattern rather than by a hand-written list is the right shape: a later file cannot escape it simply by being written after the test. But the author of that guard then nearly escaped it himself, by giving a new component a natural name that fell outside the pattern.
+
+**The mechanical form, because "revisit the pattern when the surface grows" is advice and nobody does advice:**
+
+> The non-empty assertion NAMES every component the guard is supposed to cover, so adding one without updating it fails.
+
+That converts remembering into a test failure, which is the only kind of remembering that survives a busy day. A pattern that matches nothing otherwise passes every check it guards, loudly and greenly.
+
+### A defensible argument with no deadline is how permanent defensive code gets written
+
+Not by careless people. By careful ones. A guard kept for a situation nobody has observed, defended by reasoning that is genuinely sound, with no mechanism that would ever force the question to be settled, stays forever and accumulates company.
+
+If you keep a line you cannot cover, **write the deadline into the comment**: what you will try, when, and what you will do with either outcome. "If it reproduces, replace this with the citation. If it cannot be reproduced, delete the line and say why." Either result is an answer; leaving it unresolved is not.
+
+The deadline does the work, not the quality of the reasoning.
+
+### Names are claims and nothing checks them
+
+A test named `test_wrapped_and_nested_lines_stay_with_their_bullet` contained no nested line. It passed, it was named for the case, and a reviewer reading the name stops looking. The name is exactly where a gap hides best, because it is the part that reads as coverage.
+
+### Write your memory when the ticket lands, not at sprint close
+
+The lesson is freshest the moment the work finishes and thinnest at close. Chasing writes at close concentrates every ask into the window where workers have already gone dark, and a dead agent cannot write. Land a `session-complete` when you flip your last ticket to `in_review`, while you are still holding the lesson.
+
+Do not do it because a gate asks. The gate uses a calendar date floor, so it can pass on the previous sprint's writes when two sprints share a day. **It will not ask for this sprint's lessons and it will not tell anyone it did not.** Write them because otherwise they do not exist.
+
+### A consistency check between two halves certifies a shared mistake
+
+A round trip proving `split(render(x)) == x` runs the same splitter on both passes while the renderer echoes what it was handed, so the two halves still agree. They just agree about the wrong thing. It catches drift between them, which is worth having, and it cannot catch either half being individually wrong.
+
+Agreement is necessary, not sufficient. Pair it with ground-truth assertions on each half, written against the format **as specified** rather than against what the code currently does, or the ground truth has the same defect one level up.
+
+**And a corpus cannot exercise a case the corpus does not contain.** The same round trip run over 343 entries from eight real files passed, while a single chainless paragraph broke it, because in a real file that shape is always the title block, so no real file contains one. The corpus test and the thing it was certifying shared the assumption that made both wrong.
+
+So when a decision rests on an invariant, test the MECHANISM directly as well as over the corpus, and write the invariant as a test that goes red if it ever stops holding. "It cannot happen" is the reasoning that keeps biting this project.
+
+**The same blindness applies in TIME: a test cannot exercise a case the system cannot yet reach.** An outcome test with a wrong harm predicate passed for weeks of a single afternoon because the dependency that produces the case had not landed. When it landed, the case appeared and the predicate was wrong. So a green test taken while a dependency is unbuilt proves nothing about the cases that dependency creates, and it is worth re-running the ones that matter after the missing half arrives.
+
+### Build correlations without regexes when the string crosses quoting layers
+
+A measurement returned a clean zero that measured nothing: the correlation key was a regex written through Python, into a file, into a JS template literal, where `\[(\w+)\]` collapsed into a character class and silently returned undefined. Every frame compared `null` to `null` and reported agreement.
+
+`indexOf` and explicit slicing are uglier and **cannot silently half-work**. Use them whenever the pattern has to survive more than one layer of quoting. Same escaping family as a report that silently lost every letter `s`.
+
+This is the other half of the probe rule: assert the precondition, and build the instrument out of things that fail loudly.
+
+### The symptom pattern is not the diagnosis, and it misleads in both directions
+
+Read the actual error text before the pattern it resembles. Two opposite attribution errors in ten minutes, both nearly made, both avoided the same way:
+
+- **Passes alone, fails in the suite** READS as a test-isolation defect. It was a teammate restructuring a model mid-run, and the error text said so: `TypeError: 'direction' is an invalid keyword argument`.
+- **Fails right after someone else's change** READS as theirs. Both were the author's own: one created two open runs where a generated column correctly forbids it, the other asserted a column that had moved.
+
+Recognising a signature feels like expertise and skips the evidence. The signature narrows where to look; it is not the answer, and it is confidently wrong in both directions.
+
+### A guard that passes because the dangerous case answers the same way as the safe one
+
+**The single shape behind every defect in the memory-transition lane, three for three:**
+
+| the guard asked | the safe case | the dangerous case |
+|---|---|---|
+| are any rows unfinished? | zero | zero |
+| did enumeration run? | zero rows | zero rows |
+| are all entries terminal? | yes, all written | yes, all skipped |
+
+Each guard returned a true answer. In each, the state it existed to prevent produced exactly the same answer as the state it was meant to allow.
+
+**The fix is never to tighten the existing signal. It is to find a signal that DIFFERS between the two cases.** A count could not separate "enumerated and found nothing" from "never enumerated", so the precondition became a timestamp. "Terminal" could not separate all-written from all-skipped, so it became "did anything survive".
+
+Tightening instead produces a guard that refuses the legitimate case too, which looks like rigour and makes the feature unusable for exactly the situations it was cheapest to support.
+
+**The generating question when you write a guard: what does the bad case answer here, and does the good case answer differently?** If not, you are measuring something other than what you meant to.
+
+**The same shape applies to TESTS, one level up, and it is the more common version.** A test named for a property can exercise that property and still pass against an implementation that gets it wrong. One meant to prove a diff was keyed by (agent, excerpt) rather than by excerpt alone passed under a mutation doing the latter, because with equal totals and rows arriving in agent order the counts work out either way. The two implementations only diverge when the DISTRIBUTION changes while the total does not, and the test never constructed that.
+
+**So the generating question for a test: does this distinguish the correct implementation from the plausible wrong one, or does it merely exercise the feature?** Those are different and only the first is a guard. The reliable way to find out is to write the plausible wrong implementation and check the test goes red, which is what a mutation battery is for.
+
+### A mutation battery must assert its own mutation landed
+
+Otherwise the tool is measuring itself. Every mutation is a string replace, and `str.replace` returns the ORIGINAL on a miss, so a typo, or a search string whose indentation does not match the file, silently changes nothing, the tests run against unmutated code, and the battery reports "the code survived this change".
+
+That is the exact false green this codebase keeps producing, sitting inside the instrument used to find false greens.
+
+**Assert `count == 1` on the replacement before writing the file.** Two mutations caught that way immediately failed loudly instead of passing quietly.
+
+**And the corollary for reading results: a SURVIVING mutation is the one to check.** A red proves the mutation applied and the test caught it. A green proves nothing on its own: it may mean the change was behaviourally neutral, or it may mean the change never happened. Find out which before recording either a test gap or an honest non-finding.
+
+**Asserting a match is necessary and not sufficient.** `count == 1` catches "never applied". It does not catch "applied somewhere unintended": a scripted edit on this team silently duplicated a line at two indentation levels, and it would have passed both a nonzero check and `>= 1`. Two different tools hit this in two days, found independently, with the identical fix. The general form is wider than mutation testing. Any scripted edit that does not assert its match count can report success for work it never did.
+
+The three steps, in order:
+
+1. Assert the match count is EXACTLY what you expect. Never merely print it. A printed count is read by someone who is looking for something else.
+2. Assert the result differs in the SPECIFIC way you intended. Step 1 catches never-applied. Step 2 catches applied-somewhere-unintended, which step 1 structurally cannot see.
+3. Only then run anything.
+
+**Prove the restore, not just the mutation.** The mutation is the interesting event and the restore feels like housekeeping, so the evidence is strong going in and thin coming out, every time. One battery here had three independent confirmations that the mutation landed and one that the restore did. A grep count returning to its original value is a PROPERTY of the file, not its IDENTITY: the original satisfies it, and so does any near-original. Use `shasum` against the saved copy, and state that copy's provenance when you report it. A hash against a file whose origin is unstated does not distinguish "identical to the pre-mutation file" from "identical to something I called the pre-mutation file".
+
+### Verifying one layer does not license a conclusion about the next
+
+This is subtler than not checking, because the check gets run and the check is sound. It just answers a different question than the one its result is used for.
+
+Worked example, and it nearly cost irrecoverable data. "Does skipping an entry destroy it?" was answered by reading the seal mechanism and confirming it has no destructive call: no unlink, no rename, no truncate, it returns a pointer instead of content. Correct, and verified rather than assumed. The conclusion drawn was "therefore recoverable by reverting", which depends on a SECOND mechanism nobody looked at. A revert renders the store back over the file, and a skipped entry has no row in the store, so the revert overwrites the intact original without it. **The recovery path was the deletion.**
+
+So when a verification result is about to carry a conclusion, ask which mechanism the conclusion actually rests on. If the sentence contains "therefore" and the second half names a different component, that component needs its own check.
+
+### A probe asserts its start state in the probe, before measuring anything
+
+**The rule, mechanically, because a rule phrased as advice about suspicion only fires for someone already suspicious:**
+
+> A probe that drives a system into a start state PRINTS that state and ASSERTS it, in the probe itself, after every setup step. Not in the reader's head, not afterwards.
+
+Setup steps fail. A setup step that fails silently turns every later result into a confident measurement of the wrong thing, and the output is indistinguishable from a real finding.
+
+Why it is worth a checklist item rather than a principle: a live probe of the transition edge matrix returned three anomalies at once, two of them apparently the mirror of the exact bug the lane existed to fix. All three dissolved under one cause. The probe's setup had driven the project to `adopting`, the next setup step was correctly refused by a fix that had just landed, and every later result was measured from a state the probe never checked it was in. **It reported what the final call returned without asserting the precondition held.**
+
+That is the failure family this whole sprint has been about, a mechanism reporting that it RAN rather than that it LANDED, built into the tool being used to audit somebody else's work. **Verification code is not exempt from the rule it exists to enforce.**
+
+**When several anomalies arrive together, suspect your harness before the system.** Real bugs rarely come three at a time in one subsystem. The cheapest hypothesis is that your setup is in the wrong state, and it is usually right.
+
+The honest coda from the worker who hit it: the near-miss was caught because one of the three anomalies contradicted a result he had measured himself an hour earlier, and it was too loud to ignore. **A single false result from a probe whose setup silently failed is still the thing he would have reported.** The fix is the precondition assertion, not anyone's judgement.
+
+### Re-read before reporting a timing-sensitive claim
+
+"Your guard is not in the file" was true when it was read and false when it was sent, because the author saved it in between. In a shared tree, a claim about the current state of a file expires in seconds.
+
+### Silencing a check's error channel turns a failure into an answer
+
+Eight instances across four people in one afternoon, every one producing a confident clean result, and not one caught by care. They fall into three families, and the families matter because **their detection moves do not transfer.**
+
+**1. CLOSED LOOP: a shared faulty component sits on BOTH sides, so an error cancels.** Three of the eight: a fixture built by `create_all` used to test `create_all`, with the models on both sides. A round trip asserting `split(render(split(x))) == split(x)`, where both branches pass through the same splitter, so mutating the splitter alone left it green. A stability pair on a fingerprint, where both readings ran the same broken pipeline and agreed perfectly on the hash of empty input.
+
+**AUTHORSHIP DOES NOT CLOSE A LOOP.** If "my output against my expectation" counted, every assertion anyone writes about their own code would be closed and the category would select nothing. Closure requires the cancellation, not the ownership.
+
+**AN INDEPENDENT INPUT DOES NOT OPEN A CLOSED COMPARISON.** The round trip takes a real file at the top and is still closed, because the independence is upstream of the shared component.
+
+*How you catch it:* break one side deliberately and confirm it goes red. That is what a mutation battery is for, and it is the only one of the three families a tool can close.
+
+**THE REMAINING SHAPE IS NOT A FOURTH FAMILY. IT IS THE FIRST ONE, WHICH THIS TAXONOMY DROPPED.**
+
+`str.replace` returning the original on a miss, a grep truncated by `head -8` and believed complete, a `find` whose error went to `/dev/null`. Nothing cancels, so they are not closed loops; and the false-case question does not catch them, because that move enumerates two states of the WORLD and these failed in a third state of the INSTRUMENT: it never ran. That is the family this project was built on, **a mechanism that reports it RAN rather than that it LANDED**, which fell out of the classification because we derived three families from one afternoon's instances and the older frame was not in the sample. A taxonomy built from a sample cannot contain what predates the sample.
+
+`grep -c` lines against occurrences, and a case-sensitive grep for a lesson present but capitalised, do merge into wrong target: the false-case question catches both before running.
+
+**The worked example, and it will bite anyone here writing a comparison check.** `diff` in this shell is aliased to `git diff --color -U0`, and it fails in TWO opposite ways.
+
+```
+diff -q A B                   rc=128 for identical, differing and missing alike
+                              (fatal: invalid diff option/value: -q)
+diff <tracked A> <tracked B>  rc=0 for two ENTIRELY DIFFERENT files,
+                              printing a real diff of one against its INDEX version
+diff <untracked A> <untracked B>   correct, because git auto-enables --no-index
+cmp -s                        correct in every case: 0 identical, 1 differing
+```
+
+`diff -q` is **loud**: fatal, visible the instant stderr is not suppressed. **Plain `diff` on tracked files is silent**: it returns success, prints a plausible diff of something else, and looks identical to a clean comparison WITH THE ERROR CHANNEL WIDE OPEN. Given two tracked paths, git reads them as pathspecs and diffs each against its own index rather than against each other. Both people who tested this alias tested it on untracked files and concluded plain `diff` was fine.
+
+**This is the one failure here that neither control catches.** Not suppressing stderr does nothing when there is no error, and recorded knowledge did not help either. **An instrument whose failure mode is a successful-looking correct answer to a DIFFERENT question is not caught by more care or a louder channel. Only by a different instrument.** Use `cmp -s`.
+
+The practical consequence: any comparison check written in this repo hits it, and on tracked files it reports agreement it never tested. One worker's mutation-battery restores were verified with plain `diff` across five files; three were tracked, so those "clean" reports carried no information. Re-checked with `cmp -s`, four were identical and the fifth differed benignly. His separate restore verification survived because he had used three instruments rather than one, and only two of the three were valid. **The habit of not trusting a single measure was his; the third leg's validity was luck. Those belong apart in a write-up, because the habit is the transferable part.**
+
+So: **verify what a command name resolves to before trusting its documented exit codes.** `type <name>` is one line. An alias replaces the semantics you assumed while leaving the name you reasoned about, and every conclusion downstream is about a different program. This is "open it or say you have not", pointed at tooling rather than code.
+
+**A DISTRIBUTION COMPUTED UNDER YOUR OWN CLASSIFICATION RULE CANNOT TEST THAT RULE.** Closed loop was reported as seven of eight, then three of eight, with **no instance changing**. The count was downstream of how loosely the word was being applied. It reads as empirical support and it is the definition restated with numbers attached, which matters because counts are the part people quote.
+
+**And on what to leave open: leave open what you would have to DECIDE; close what an INSTRUMENT decided for you.** Both bad collapses this day were decisions dressed as findings. A `type` command and a set of exit codes are the opposite shape, so the alias question is closed here while the rest of the regrouping stays open until someone has a ninth case and a clear head.
+
+*How you catch it:* ask what the check would say if the thing were FALSE. If both answers are the same, it is not measuring the question. **This is the same rule as "a guard that passes because the dangerous case answers identically to the safe one", at a different scale** - see that entry, because someone arriving from a guard bug and someone arriving from a verification bug are being told the same thing and will not recognise it. "Are any rows unfinished" answers no both for a run that finished and one that never started.
+
+**3. NO CHECK: a conclusion reasoned from a name and asserted as settled.** "SessionEnd is wired in settings.json, agents write memory at session end, therefore the harness writes memory at session end." Every step plausible, the conclusion about a code path never opened, passed on as the load-bearing argument for a design, and written faithfully into a ticket's acceptance criteria by someone downstream. Faithful transcription is how an upstream error becomes a system requirement.
+
+*How you catch it:* there is one self-move and it is weak. **Ask what artifact you would show.** If you cannot point at a diff, a hash, a test name or a query result, you reasoned rather than verified. It is weaker than the other two because the failure mode IS confidence, and confidence is what suppresses the question. Running a mutation or enumerating the false case are mechanical and survive being done by someone who is sure; this one requires doubting yourself at the moment you are least inclined to.
+
+**The ordering is the point: tool, self-question, other person.** Two of the three can be mechanised and the third cannot. That is why review is not overhead, and it is why the lead's wrong claim was caught by a worker rather than by the lead. None of these can be caught from the inside: the loop stays closed however hard you look at it, and it feels like verification while you are doing it.
+
+Keep the original sentence, because it is the memorable instance rather than the rule: **silencing a check's error channel turns a failure into an answer.** Do not write it as "avoid `2>/dev/null`", which people route around.
+
+And the corollary, from a worker who tripped his own precondition rule forty minutes after writing it and his own read-the-body rule an hour after learning it: **a rule in your own memory is not a second person.** Holding a rule and standing at the angle it protects against are different things.
+
+Cheapest operational form of all of it: when you are about to assert something about a code path, either open it or say that you have not.
+
+**COLLAPSE LATE.** "Be suspicious of tidiness" is unusable; people nod and do it again. The procedure is: keep the list longer than feels necessary, and let a merge be FORCED by cases that will not fit apart rather than PROPOSED because a pattern appeared.
+
+The bias is strongest exactly where the evidence is thinnest. Three instances is where a unifying story is easiest to build and least likely to hold, and both collapses today happened at three. Tidiness has a supply side, so you can always produce more of it.
+
+**And the reason this taxonomy survived being wrong twice:** every correction landed because the person being corrected had already written down the test that defeated them. A round trip fell to its author's own mutation battery. A collapse fell to its author's own does-the-detection-move-transfer test. A miscategorised grep fell to the ask-what-it-says-if-false question both had recorded an hour earlier. That is a property of the frame rather than of anyone's character, which matters because goodwill is not reproducible and a frame carrying the tests that can refute its author is.
+
+### A frozen tree can still be a wrong tree
+
+A source fingerprint was published as a stability baseline for a suite run: `9094beb8cdbe`. It was stable across reads, reproducible, and independently measured by two people. It was also the hash of the tree with a deliberately mutated file sitting in it, confirmed afterwards by reconstructing the mutation in scratch and reproducing the hash exactly. Had the suite come back green, a number certifying broken code would have been published, and nothing in the protocol would have objected.
+
+Every check in that protocol asks whether the tree is STILL. None asks whether it is RIGHT.
+
+This is the third time one sentence has applied in one day and the sharpest of the three. A fingerprint over too wide a set was unstable, because the suite writes playbook and identity files and the number changed every run. A fingerprint over too narrow a set was incomplete, because the narrowing dropped the directory holding the live harness hook. A fingerprint over a correct set at the wrong MOMENT is both stable and wrong. **Stability is not the same as sufficiency. A fingerprint over an empty set is perfectly stable.**
+
+Fixing the property you noticed can carry you straight past the property you needed, and too-wide and too-narrow are opposite failures reachable by moving in the same direction. After you fix a measure, ask separately what it must cover, and when.
+
+Two operational consequences:
+
+- **Run a mutation battery against a copy, not the working tree.** A battery that rewrites files in place makes a shared tree deliberately wrong for the length of the run. This is the throwaway-per-probe rule with a different object: mutating shared state to test it, while other people are measuring that state.
+- **Publish the command with the number.** A hash whose derivation lives only in a chat thread cannot be re-checked by anyone who was not in the thread, which is most people who will ever need it.
+
+### State the scope of a freeze, and the classes it excludes
+
+"I have stopped writing" was true and meant SOURCE. It was heard as everything. Ninety minutes later the same worker realised their own tests read every live `.dwb/memory/*/*/memory.md` as a corpus, which is a second input no source fingerprint can cover because `.dwb/` is gitignored, and that they had written to it after declaring the freeze. The run cleared it by ninety-five seconds, which is luck rather than sequencing.
+
+An unscoped freeze declaration is heard at its widest and meant at its narrowest, and the gap is invisible to the listener. Name the scope and the excluded classes: "stopped writing source, still writing memory" costs four words and surfaces the gap in one line instead of ninety minutes.
+
+The same applies to any number published over a frozen tree. A fingerprint over source implicitly claims the suite is reproducible from source. If a test reads anything else, a live corpus, a database, the clock, that claim is false and the caveat belongs in the same message as the number, because the number will outlive the conversation. Better still, publish a second hash covering the second input, which closes the gap rather than noting it.
+
+### Never git checkout, git restore or git stash a file on a shared uncommitted tree
+
+Copy it aside and restore from the copy. **Git's undo is relative to the last COMMIT, not to your last EDIT**, and on a tree nobody has committed today those are the whole day apart.
+
+A worker reverting a deliberate defect in their own test ran `git checkout app/routers/projects.py`. The file was uncommitted, so instead of undoing the experiment it discarded every uncommitted change in it: their own new endpoint, their own refusal wiring, and a second worker's transition-refusal call from a different ticket. Roughly fifteen minutes of a broken tree, during which someone else was measuring it.
+
+The worker's own diagnosis is the part worth keeping, and it is not the typo. They used copy-and-restore on their own test file in the SAME command, and reached for git on the router precisely BECAUSE the surrounding edits were not theirs. **The moment you are least entitled to revert a file is the moment reverting it feels safest**, because the changes you are about to destroy are the ones you were not tracking.
+
+What located it: they `cmp`-verified the test file was byte-identical to its backup, and the suite still showed 21 failures. Identical input, different result, so the damage had to be somewhere they were not looking. Without that step they would have assumed a bad restore and hunted in the wrong file. The verification run on the thing they had FIXED is what found the thing they had BROKEN.
+
+And a repair is where an unreviewed judgement is easiest to smuggle in. This reconstruction deliberately restored one refusal call where two had stood, on the grounds that one superseded the other. That happened to be correct and was verified afterwards at the endpoint layer. State a semantic change made during a recovery out loud, because nobody reviews a repair the way they review a change.
+
+### A fingerprint tells you THAT the tree moved and never WHAT moved
+
+Keep a per-file manifest beside the hash: the `--stat` of the tracked diff, a `shasum` line per untracked file, and a hash of the diff itself. Then drift is a two-line `diff` instead of a twenty-minute hunt.
+
+Both times the hash moved today, the manifest would have named the file immediately. The first time we did not have one and three people spent twenty minutes on it. The second time we did, and it printed `routers/projects.py 43 insertions -> 37` next to the expected test-file change, which is how a destroyed file was found before a worker reported it.
+
+**Do not report a per-file delta as the cause.** It names the file; the owner names the reason. A hash that tells you where to ask is worth more than one that tells you to go looking.
+
+**Store the command text next to the value and re-run the stored text rather than retyping it. Print the byte count going into the hash.**
+
+A runner's first post-run reads did not match, and nothing had changed: he had retyped both commands from memory, so he was comparing two different instruments and reading the difference as movement in the tree. One improvised command pointed at the wrong directory, found zero files and hashed the empty stream. The other hit the zsh trap where an unquoted variable does not word-split, so git received one pathspec containing spaces, matched nothing, exited 0, and returned a value.
+
+Both were the hash of empty input and **both were stable across two reads.** A stability pair does not prove the instrument is measuring anything. Three empty-hash results appeared in one afternoon looking exactly like real fingerprints, and the only reason none was published is that someone recognised the digests by sight, which is not a control.
+
+Publish positive controls with the number: how many bytes and how many files entered the hash. A fingerprint without its command is not a fingerprint, it is a number.
+
+**And the reason a second read is not a second instrument.** A second worker reproduced this bug within ten minutes of reading the warning about it, from the same zsh cause, and printed "MISMATCH: TREE MOVED" off 0 bytes and 0 files. Both of his reads would have been stable, because a hash of nothing is perfectly reproducible, and both wrong in the same direction, so comparing them to each other proved nothing.
+
+**Two agreeing instruments are only evidence when they can fail independently.** His were one instrument run twice. The byte count works where a second identical read does not, because it is not another reading at all: it is a check that the instrument had an input.
+
+Done right, it looks like the mtime cross-check that corroborated the closing number: no file in the repo had an mtime inside the run window except the run's own artifacts. Different mechanism, independent failure modes, genuine corroboration. This is the probe-precondition rule arriving one level up, at the measurement rather than the thing measured.
+
+### Print the ticket you were given, in full, when you pick it up
+
+The brief is the one artifact nobody has a backup of. The code is in git, the tests are in git, the spec is a file. A ticket description lives in one mutable row, and the activity feed records THAT a row was updated, not what it said before.
+
+That is not hypothetical. A TL PATCHed ticket id 1576 intending 1574, replaced the whole description of a ticket that was not the one in mind, and the original was unrecoverable from the system. It came back only because the worker who had been assigned it printed the full text when picking it up, hours earlier, for their own reference.
+
+Two rules fall out of it.
+
+**Carry the key AND the id in every brief, and assert the key before every write.** An id is one digit from another ticket and nothing in a PATCH objects. The response came back reading `PATCHED DWB-590 done`; the word "done" was what was being looked for and the key was read past.
+
+**A response is not a readback.** Assert the identity of the row you hit, then re-fetch and compare the stored value against what you sent. Every other instance of the silent-check family this sprint was a check returning nothing and being read as an answer. This one was a WRITE succeeding and being read as the write that was meant, which is the same defect with the arrow reversed.
+
+**Append to a description rather than replacing it**, unless replacement is the point. An append cannot destroy a brief it did not understand.
+
+### Never kill a run that HOLDS the lock; one still waiting may be stopped freely
+
+"Never kill a blocked run" was carried all day at the wrong altitude. It is true of a run
+holding the exclusive lock and mid-execution: kill it and the test database is left wherever
+the transaction reached, which is the case the lock has no answer for. It is false of a run
+BLOCKED WAITING to acquire, which has touched nothing.
+
+Distinguish them cheaply: `lsof` the lock to see whether you are the exclusive holder, and
+check whether your run has produced any output. Two bytes in the output file means pytest
+had not finished collection and had executed nothing.
+
+The over-broad version would have refused a safe stop on a rule that did not apply. Same
+mis-scoping as the freeze: a boundary drawn around the instance the author was thinking of.
+
+### A freeze is on anything that moves an INPUT, not on editing
+
+Three people scoped a freeze to the mechanism they had in mind, in three different
+directions, in one afternoon: a worker said "stopped writing" meaning source while still
+writing memory; a lead scoped it to writes when a test run also moves inputs; a runner made
+it a one-shot announcement when it needed to be a property of "a run is in flight".
+
+**The error is not ignorance of the rule. It is that the rule's boundary gets drawn around
+whatever the author was thinking about**, and the listener always hears the wider version.
+
+A test suite feels like a read and is not: it writes `.claude/` playbook files and touches
+`.dwb/memory/**/*.md`, which is exactly what a corpus fingerprint hashes. A verification run
+starting in the gap between another run finishing and its after-read landing voids that
+number, and the lock does not protect that window because the two runs never overlap.
+
+So: enumerate what moves the inputs and freeze that set, not the set you started with.
+
+### Too-wide and too-narrow are not symmetric failures
+
+A scope that is too narrow misses real drift silently. A scope that is too wide voids good
+runs on changes nobody reads.
+
+Both are the scope being wrong and only one announces itself, which makes the too-wide one
+look safer. Long-run it is more dangerous, because its failure mode is social: **a detector
+that cries wolf gets ignored, and then it gets removed.** A corpus hash globbing `*.md`
+pulled in eight `identity.md` files that the scaffold rewrites on every spawn, none of which
+any test reads.
+
+### A refusal that names its holder is falsifiable
+
+"A run is in flight" is unarguable and therefore untestable by the person it blocks.
+"Barry's run, PID 4821, started 12:18:07" can be checked, and if that process is gone the
+blocked agent knows the interlock is stuck rather than guessing.
+
+It turns a refusal into evidence rather than an assertion, and it is the same property as
+making a liveness check out of stored identity instead of a TTL: the thing being checked IS
+the run, so a dead run takes its interlock with it.
+
+
+### information_schema spans every database on the server
+
+```
+select column_type from information_schema.columns
+where table_name='agent_memories' and column_name='tier'
+```
+
+That looks like a question about this database. It is a question about all of them. Three databases here carry that column - the live one and two leftover probe and scratch databases - and `scalar()` hands back whichever row sorts first. It returned a stale probe schema, and the reading was one message away from being reported as a migration that had half-landed.
+
+**Always filter by `table_schema`, or use `SHOW COLUMNS`, which is scoped to the connected database by construction.** In a repo that spawns throwaway databases for probes, the first row is almost never the one you mean.
+
+This is the wrong-target family with an unusually convincing disguise: a real query, a true answer, about a different subject, returned without warning or error.
+
+### The mechanical swap belongs to whoever owns the FILE, not whoever owns the ticket
+
+A refactor that renames or removes something touches files all over a tree that several people are editing. The instinct is that the person whose ticket requires the change makes it everywhere, and that instinct puts one person editing live files under three others, on a tree where nothing is committed.
+
+The rule: **the ticket owner makes the change in the files they own, and every other owner makes it in theirs.** Coordinate through the lead, land them close together, and have the person who owns the migration name the window.
+
+Corollary from the same day: a worker who had finished with a file legitimately handed the semantic half of a change back to its owner, who applied it immediately rather than waiting for a round trip, because the intervening state was the dangerous one. That is the right exception and it has a test: **would waiting leave the tree in a state nobody should be able to observe?** If yes, close it and say so afterwards.
+
+### A gate that refuses perfectly still punishes you for arriving late
+
+The memory ceiling is the best-behaved instrument in this system. It reports the quantity (the exact token count against the exact cap), it refuses rather than degrading, and it leaves the previous state intact. Three people hit it in one day and every one of them arrived holding something they wanted to write, so every one paid a full rewrite instead of an append.
+
+The refusal is not the problem and softening it would be wrong. **The defence is spending idle time you do not yet need.** Condense in the quiet window, not at the wall.
+
+
+### A read is injection-shaped when it can be satisfied with no question at all
+
+Stan's rule, and it settled in one sentence a design argument three people had circled for an hour with worse vocabulary.
+
+The bad framing was "deliberate versus automatic", which is a claim about intent that no code can check and no test can enforce. The good one is structural: **can this call be satisfied with nothing in it?** `scored_memory()` could, so it can never be a consultation no matter who calls it or why. `journal.search_entries` cannot, because it refuses an unfiltered read, so it always is one.
+
+Three consequences fell straight out, including one nobody had reasoned to:
+
+- The firing had to leave `scored_memory()` entirely, not be flagged off. A flag is something a future caller passes wrong; a deleted call site is something they would have to rebuild on purpose.
+- The dashboard is injection-shaped. It renders what it is given and asks nothing.
+- **Triggering a consultation on a schedule does not change what kind of question it is.** So an interval-fired journal search still counts, which is the opposite of what "automatic versus deliberate" would have told you.
+
+When a distinction is hard to enforce, look for the structural version of it. "Does the caller mean it" is unanswerable; "does the call contain a question" is a property of the signature.
+
+### A ticket slate can have a hole that every ticket passes review around
+
+Thirteen tickets were built, reviewed against their acceptance criteria, and approved. Every one met its criteria. The feature did not exist: the buckets held rows and no mechanism moved anything between them.
+
+Then it happened again at smaller scale inside the lane built to fix it. One of the five movements got its detection mechanism in one ticket and never got an actor in any ticket. Nothing on the board said so. It was found by a worker reading the existing consumers before writing, and it would otherwise have surfaced as a permanently failing row with no ticket to explain it.
+
+**Reviewing each ticket against its own criteria cannot find this.** The criteria are met. The question that finds it is asked of the SET: does the sum of these tickets produce the thing, and is there a path from the feature's description to a line of code for every part of it.
+
+Two counters that work, both about where to look rather than what is wrong:
+
+- **Audit the criteria that LOOK FINISHED first.** A flimsy assertion announces itself and gets challenged. A well-formed one aimed slightly wrong reads as rigour and buys immunity.
+- **Audit absence-shaped tickets first.** Anything promising that something does NOT happen is satisfiable by the mechanism being absent entirely.
+
+### Build the functional test first and let it fail
+
+Not a unit test. A script driving the running system over real HTTP, against the live database, through the endpoints the real caller uses, that PRINTS what the consumer actually receives rather than asserting about it.
+
+Build it BEFORE the features, and expect it red across the board on day one. That is the deliverable. Written afterwards it is shaped by what got built; written first it is shaped by what was specified, and each ticket then turns exactly one row green.
+
+A pytest version could not have done this job. The fixture database is built by `create_all` from the same models as the code under test, so it proves the code matches the models and nothing about the deployed system. The functional version caught, on consecutive outings: a live outage from a model edit that had run ahead of its migration, a check that could not distinguish a broken compressor from a no-op one, and a movement with no implementation at all.
+
+Three states, never two: PASS, FAIL, and a named third for inputs that cannot discriminate (here, bodies too short for compression to be observable). Eight rows reporting "this input cannot confirm or deny it" teach the reader something; the same eight silently passing teach them something false.
+
+---
+
+## Top-Off: What `••TopOff Complete` Means (DWB-590)
+
+Periodically a line like this appears in your context:
+
+```
+••TopOff Complete http://localhost:5173/projects/1/topoff
+```
+
+That is not information. **It is an instruction to stop and run four checks on yourself**, and it is the whole content of the feature. The line is deliberately short and identical every time, because a wall of text every N prompts becomes wallpaper and wallpaper gets skipped exactly like the rule it replaced.
+
+When you see it, answer these four, honestly, before your next action:
+
+1. **Am I answering a question I already answered?** Two revisions of one answer means the premise is wrong, not the detail.
+2. **Is the user getting what they asked for, or what I decided to give them?**
+3. **What am I asserting from a summary, or from my own earlier message, rather than from the source?**
+4. **What have I been told once and drifted from?**
+
+If any answer is uncomfortable, say so in your next message rather than quietly correcting course. The check is worth nothing if it only ever passes.
+
+It fires on an interval the project sets, it is independent of `memory_mode`, and no agent has to switch it on. You cannot turn it off and you are not expected to acknowledge it.
+
+**Why the questions are here and not in the line itself.** The marker is the trigger; this section is the content. That makes the check a rule behind a reference, which is weaker than a rule in front of you, and the trade was made deliberately: one short constant line costs almost nothing per fire, where the four questions injected verbatim every interval is the flood that gets ignored. The consequence is that this section is load-bearing. If you do not know what the marker means, the feature does nothing.
+
+---
 
 ## STOP Means Stop
 

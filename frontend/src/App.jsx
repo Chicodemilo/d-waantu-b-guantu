@@ -3,10 +3,10 @@
 // Created: 2026-03-29
 // Purpose: Root application component that initializes data polling, mounts the RouteLogger (DWB-371) for backend-visible nav lifecycle, and defines all routes
 // Caller: main.jsx
-// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, components/common/RouteLogger, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/AuditsPage, pages/DocsPage, pages/SystemDocsPage, pages/SessionsPage, pages/SessionDetailPage, pages/ArchieChannelPage, pages/InterAgentCommsPage, pages/HelpPage, pages/NodesPage
+// Callees: react-router-dom, hooks/useAppData, components/layout/AppShell, components/common/RouteLogger, pages/DashboardPage, pages/ProjectPage, pages/TicketsPage, pages/TicketDetailPage, pages/SprintPage, pages/EpicPage, pages/AgentPage, pages/ProjectAgentsPage, pages/InstructionsPage, pages/TestResultsPage, pages/ProjectTestsPage, pages/AuditsPage, pages/DocsPage, pages/SystemDocsPage, pages/SessionsPage, pages/SessionDetailPage, pages/ArchieChannelPage, pages/InterAgentCommsPage, pages/HelpPage, pages/NodesPage, pages/JournalPage, pages/TopOffPage
 // Data In: None
 // Data Out: Exports App component (renders route tree inside AppShell)
-// Last Modified: 2026-09-15 (DWB-534)
+// Last Modified: 2026-09-30 (DWB-613: journal + topoff routes)
 
 import { Routes, Route } from 'react-router-dom';
 import useAppData from './hooks/useAppData';
@@ -35,6 +35,8 @@ import ArchieChannelPage from './pages/ArchieChannelPage';
 import InterAgentCommsPage from './pages/InterAgentCommsPage';
 import HelpPage from './pages/HelpPage';
 import NodesPage from './pages/NodesPage';
+import JournalPage from './pages/JournalPage';
+import TopOffPage from './pages/TopOffPage';
 
 function App() {
   useAppData();
@@ -60,6 +62,8 @@ function App() {
         <Route path="/projects/:id/sessions/current" element={<SessionCurrentPage />} />
         <Route path="/projects/:id/sessions/:sid" element={<SessionDetailPage />} />
         <Route path="/projects/:id/comms" element={<InterAgentCommsPage />} />
+        <Route path="/projects/:id/journal" element={<JournalPage />} />
+        <Route path="/projects/:id/topoff" element={<TopOffPage />} />
         <Route path="/archie-channel" element={<ArchieChannelPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/docs" element={<SystemDocsPage />} />

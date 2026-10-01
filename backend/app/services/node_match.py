@@ -7,11 +7,15 @@
 #          are NOT stored (DWB-522): two nodes are connected iff they have
 #          pointers sharing a ref, computed here at query time. This is the shape
 #          retrieval (DWB-524) and the graph view consume, so it is frozen early.
+#          Neighbor derivation is OPT-IN (with_neighbors): only the graph view
+#          reads it, and computing it unread is what stalled spawn-prepare.
 # Caller: app/routers/nodes.py
 # Callees: app/services/node_registry (node_tokens), app/models/node
 # Data In: db: Session, project_id: int, optional kind filter / query text
 # Data Out: Node lists; (query_tags, [(node, neighbors)]) for match
-# Last Modified: 2026-09-14 (DWB-523)
+# Last Modified: 2026-09-29 (neighbor derivation made opt-in: it cost ~0.4s per
+#                matched node and both retrieval callers discarded it, which
+#                stalled spawn-prepare at 107s)
 
 from __future__ import annotations
 
@@ -64,15 +68,26 @@ def list_nodes(
 
 
 def match_nodes(
-    db: Session, project_id: int, text: str
+    db: Session, project_id: int, text: str, *, with_neighbors: bool = False
 ) -> tuple[list[str], list[tuple[Node, list[Neighbor]]]]:
-    """Match query text to nodes and derive each match's neighbors.
+    """Match query text to nodes, optionally deriving each match's neighbors.
 
     Returns ``(query_tags, matches)`` where ``query_tags`` is the normalized +
     stemmed tokenization of ``text`` (same pipeline as registration, so the query
     tokens line up with stored tags) and ``matches`` is a weight-ordered list of
     (node, neighbors). A neighbor is any OTHER node in the project that shares a
     pointer ref with the matched node; ``shared_refs`` is the evidence.
+
+    ``with_neighbors`` is OPT-IN because neighbor derivation is the expensive
+    half of this function and only one caller reads it. It costs one join over
+    ``node_pointers`` PER MATCHED NODE, and those joins are wide: a project's
+    sprawling docs (playbooks, ARCHITECTURE.md) carry thousands of pointers
+    each, so a node touching them pulls back a large slice of the table. On DWB
+    project 1 that measured ~0.4s per matched node, and a spawn-prepare matching
+    263 nodes spent 107 seconds building neighbor lists that ``relevant_lessons``
+    then dropped on the floor - which is what blocked every ticketed spawn on
+    S83. Defaulting to False means the cost is paid only where it is read: a new
+    caller gets the cheap path unless it deliberately asks for more.
     """
     query_tags = sorted(node_tokens(text))
     if not query_tags:
@@ -90,6 +105,9 @@ def match_nodes(
     )
     if not matched:
         return query_tags, []
+
+    if not with_neighbors:
+        return query_tags, [(node, []) for node in matched]
 
     matches: list[tuple[Node, list[Neighbor]]] = []
     for node in matched:

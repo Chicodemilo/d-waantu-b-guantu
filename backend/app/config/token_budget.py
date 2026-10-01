@@ -6,7 +6,7 @@
 # Callees: -
 # Data In: file names + text
 # Data Out: ceilings (int), classifications (str), token estimates (int)
-# Last Modified: 2026-06-18 (DWB-399)
+# Last Modified: 2026-10-01 (DWB-617)
 
 """Canonical token-budget config.
 
@@ -24,26 +24,53 @@ kept as a floor-of-the-floor so whitespace-sparse content is not under-read.
 """
 
 # Per-category token ceilings.
+#
+# DWB-617 (2026-10-01): raised across the board. The previous table was not
+# tight, it was fiction - most categories were already exceeded, including
+# files DWB generates itself. Measured against the live tree that day, against
+# the OLD ceilings:
+#
+#   CLAUDE.md          2043 / 2000   OVER   project_rules_worker  3042 / 4000  ok
+#   HANDOFF.md         4245 / 1500   OVER   worker_playbook      18319 / 4000  OVER
+#   ARCHITECTURE.md   10649 / 8500   OVER   team_lead_playbook   14202 / 4000  OVER
+#   README.md          3764 / 3500   OVER   pm_playbook           6750 / 4000  OVER
+#   INITIAL.md         1752 / 2000   ok     identity.md (all 8) 615-664 / 600  OVER
+#                                           memory.md worst       4420 / 4500  98%
+#
+# Four of eight DWB agents sat at 91-98% of the memory ceiling, one write away
+# from an HTTP 400, and every identity.md was over its own ceiling while being
+# scaffold-generated, so DWB wrote a file it then refused. The playbooks ran
+# 3.5x to 4.9x over, advisory only, which means the number taught nobody
+# anything. Miles's instruction that day: raise the base ceilings across the
+# board, we have the context room, and make a newly opened project inherit the
+# new limits rather than the old ones.
+#
+# Known limitation, recorded rather than hidden: DWB-579 proposed raising the
+# memory cap and was CANCELLED with the condition "raise the body cap only
+# after retrieval replaces whole-file injection", because the cap exists to
+# bound what is pasted whole into a spawn prompt. That retrieval is the
+# `human_memory` memory_mode. It is built and proven, but every project is
+# still memory_mode='stock', so on stock the raised cap IS pasted whole. Miles
+# was shown that and instructed the raise anyway.
 TOKEN_CEILINGS = {
-    "agent_def": 1500,
-    "playbook": 4000,
-    "claude_md": 2000,
-    "project_rules": 4000,
-    "handoff": 1500,
-    # DWB-490: raised 7500 -> 8500. ARCHITECTURE.md hit the cap twice in one
-    # session (help-center + session-write-up features); per the repeated-pressure
-    # rule the doc is legitimately growing, so encode reality rather than
-    # lossily condense load-bearing reference detail.
-    "architecture": 8500,
-    "readme": 3500,
-    "initial": 2000,
-    "memory_identity": 600,
-    # DWB-401: single free-form memory.md replaces scratchpad+lessons+recent.
-    # 4500 = 2000 + 1500 + 1000 (sum of the three it replaces) so the collapse
-    # never tightens an agent's budget. This is a PASSIVE TRIM threshold only
-    # (the server trims oldest blocks past it); it NEVER blocks a close/ack gate
-    # (see GATE_EXEMPT + _gate_counts in agent_consolidation.py).
-    "memory_main": 4500,
+    "agent_def": 3000,
+    "playbook": 20000,
+    "claude_md": 4000,
+    "project_rules": 8000,
+    "handoff": 8000,
+    "architecture": 20000,
+    "readme": 8000,
+    "initial": 4000,
+    "memory_identity": 1500,
+    # memory_main is a HARD WRITE-TIME REFUSAL, not a trim. DWB-518 removed the
+    # passive drop-oldest behaviour: an append / session-complete / compact /
+    # condense whose projected size exceeds this ceiling is REFUSED with HTTP
+    # 400 and nothing is dropped (services/agent.py raises
+    # SessionCompleteError("over_ceiling", ...) / MemoryAppendError, and the
+    # detail string tells the agent to condense then retry). It is still NOT
+    # counted by the consolidation gate (see GATE_EXEMPT + _gate_counts in
+    # agent_consolidation.py).
+    "memory_main": 12000,
 }
 
 # Memory files scanned per active agent (filename -> category). DWB-401: 2-file

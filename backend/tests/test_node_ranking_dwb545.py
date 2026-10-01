@@ -308,7 +308,7 @@ class TestRelevantLessonsRanking:
         _ticket(make_ticket, prefix, 701, project_id=pid,
                 title="common unicorn work", assigned_agent_id=stan["id"], status="todo")
         project, agent = self._objs(db_session, pid, stan["id"])
-        lessons = nrv.relevant_lessons(db_session, project, agent)
+        lessons = nrv.relevant_lessons(db_session, project, agent).lessons
         assert lessons, "expected a non-empty lesson list"
         assert lessons[0]["tag"] == "unicorn"
         assert all(l["tag"] != "common" for l in lessons)
@@ -333,7 +333,7 @@ class TestRelevantLessonsRanking:
         _ticket(make_ticket, prefix, 702, project_id=pid, title=" ".join(words),
                 assigned_agent_id=stan["id"], status="todo")
         project, agent = self._objs(db_session, pid, stan["id"])
-        assert len(nrv.relevant_lessons(db_session, project, agent)) == nrv.MAX_PER_GROUP
+        assert len(nrv.relevant_lessons(db_session, project, agent).lessons) == nrv.MAX_PER_GROUP
 
     def test_spawn_prepare_returns_non_empty_lessons(
         self, client, db_session, make_project, make_agent, make_ticket, tmp_path

@@ -6,7 +6,7 @@
 # Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
-# Last Modified: 2026-09-16 (DWB-564: memory writes also stamp agents.last_memory_write_at directly)
+# Last Modified: 2026-10-01 (DWB-617: docstrings cite memory.md's ceiling by name instead of a stale 4500)
 
 import json
 import logging
@@ -23,6 +23,7 @@ from app.models.instruction import Instruction, InstructionScope
 from app.models.project import Project
 from app.models.project_agent import ProjectAgent
 from app.schemas.agent import AgentCreate, AgentUpdate
+from app.services import memory_mode
 
 logger = logging.getLogger(__name__)
 
@@ -248,7 +249,17 @@ def tl_memory_for_project(db: Session, project_id: int) -> str:
     )
     if tl is None:
         return ""
-    return _read_memory_full(_memory_dir(project, tl))
+    # DWB-589: hard rule 1 seals READS too, not only writes. Without this a
+    # switched project injects the frozen stock file into every session while
+    # writes land in the new store - two homes that both look authoritative and
+    # disagree, which section 7 opens by naming as THE failure mode.
+    # DWB-610: db + tl passed through so a human_memory project serves the
+    # TL's own assembled scored memory here instead of only the sealed
+    # pointer - tl is the specific agent this session belongs to, never a
+    # stand-in for whoever else is on the project.
+    return memory_mode.memory_full_for(
+        project, _read_memory_full(_memory_dir(project, tl)), db=db, agent=tl
+    )
 
 
 def _agent_visible_instructions(
@@ -376,7 +387,16 @@ def spawn_prepare_payload(
     )
     # DWB-517: the FULL memory.md, verbatim, so the TL injects it into the spawn
     # prompt without the agent having to read it. Empty string when none yet.
-    memory_full = _read_memory_full(memory_dir)
+    # DWB-589: sealed under human_memory - a spawned agent must not be handed
+    # stock memory it is forbidden to write back to.
+    # DWB-610: under human_memory this now serves the agent's own assembled
+    # scored memory (band 8-10 full text, 5-7 compressed) when there is any
+    # scored content, falling back to the sealed pointer only when there is
+    # not - `agent` here is the exact worker being spawned, so its memory is
+    # never mixed up with anyone else's.
+    memory_full = memory_mode.memory_full_for(
+        project, _read_memory_full(memory_dir), db=db, agent=agent
+    )
 
     rules = _boundary_instructions(db, project.id, agent.id)
     if rules:
@@ -392,16 +412,30 @@ def spawn_prepare_payload(
     # (pointers only; the TL pastes these alongside memory_full). Best-effort - a
     # retrieval failure or empty corpus degrades to an empty list, never blocks
     # the spawn bundle.
+    # The wall-clock bound lives INSIDE relevant_lessons, not here, so a future
+    # caller into that path inherits it rather than having to remember it. This
+    # except block covers only the exception case, which the bound cannot: the
+    # two failure modes are different and both now have their own status value.
     from app.services import node_retrieval
     try:
-        lessons = node_retrieval.relevant_lessons(db, project, agent)
+        retrieval = node_retrieval.relevant_lessons(db, project, agent)
     except Exception:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).warning(
             "spawn-prepare relevant_lessons failed for agent_id=%s", agent.id,
             exc_info=True,
         )
-        lessons = []
+        retrieval = node_retrieval.LessonRetrieval(
+            lessons=[], status=node_retrieval.FAILED
+        )
+    if retrieval.status in (node_retrieval.TRUNCATED, node_retrieval.FAILED):
+        # Loud on purpose. An empty or partial retrieval that looks identical to
+        # "nothing matched" is how this stayed invisible for a whole sprint.
+        import logging
+        logging.getLogger(__name__).warning(
+            "spawn-prepare retrieval %s for agent_id=%s (%d lessons)",
+            retrieval.status, agent.id, len(retrieval.lessons),
+        )
 
     return {
         "agent_id": agent.id,
@@ -411,7 +445,10 @@ def spawn_prepare_payload(
         # compat) so the TL can inject the whole file into the spawn prompt.
         "memory_full": memory_full,
         # DWB-524: pointer-only relevant lessons from other agents' memories.
-        "relevant_lessons": lessons,
+        "relevant_lessons": retrieval.lessons,
+        # What actually happened getting them. An empty list alone cannot say
+        # whether retrieval was skipped, found nothing, was cut short or failed.
+        "relevant_lessons_status": retrieval.status,
         "boundary_rules": boundary_section,
         # DWB-341: absolute memory_dir path so callers can reason about
         # where the agent's files live without having to rebuild it.
@@ -601,7 +638,7 @@ def _format_scratchpad_block(
     Miles ruling: boring "I did 50 tickets, their names were, their ids are,
     the time completed was" is noise. The dwb_sessions row, with its generated
     headline, summary and keyword tags, IS the session record; duplicating it
-    in memory burned the 4500-token ceiling and forced condense rewrites that
+    in memory burned the memory.md token ceiling and forced condense rewrites that
     can summarise a real lesson away (eight condenses across five agents in one
     night). So the summary and the token count no longer reach the file: they
     still travel to the caller and the database.
@@ -938,7 +975,7 @@ class MemoryReadError(Exception):
 def read_memory(db: Session, *, agent_id: int) -> dict:
     """DWB-532: the agent's memory.md verbatim plus the SERVER's token estimate.
 
-    The 4500-token ceiling that append / session-complete / condense enforce
+    The memory.md ceiling that append / session-complete / condense enforce
     is measured with config.token_budget.estimate_tokens; until now an agent
     condensing against it could only guess the count. This returns the same
     estimator's number for the file as it stands, the ceiling, and the

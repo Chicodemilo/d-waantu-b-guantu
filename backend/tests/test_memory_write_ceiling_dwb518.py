@@ -10,13 +10,29 @@
 # Callees: POST /api/agents/{id}/memory/append, /session-complete, /memory/condense
 # Data In: tmp_path filesystem, factory project + agent
 # Data Out: assertions on 400 refusals, no-drop invariant, condense replace + heading
-# Last Modified: 2026-09-14 (DWB-518)
+# Last Modified: 2026-10-01 (DWB-617: payload sized from the ceiling constant)
 
 from pathlib import Path
 
-# ~5000 tokens (20000 chars) - over the 4500 memory.md ceiling.
-OVER = "data " * 4000
+from app.config.token_budget import TOKEN_CEILINGS, estimate_tokens
+
+# A blob reliably OVER memory.md's ceiling, sized FROM the ceiling rather than
+# from a literal. DWB-617 raised memory_main 4500 -> 12000; the old hardcoded
+# ~5000-token payload would have slipped UNDER the new ceiling, and every
+# refusal test in this file would then have gone green against a refusal that
+# never fired - the dangerous case answering exactly like the safe one.
+# "data " is 5 chars, so estimate_tokens = max(chars//4, words) = 1.25 * words;
+# 2x the ceiling in words lands at 2.5x the ceiling in tokens.
+CEILING = TOKEN_CEILINGS["memory_main"]
+OVER = "data " * (CEILING * 2)
 UNDER = "condensed: kept the load-bearing facts, dropped the noise"
+
+# Precondition, asserted here rather than in the reader's head: if OVER ever
+# stops being over, these tests must fail at import, not pass vacuously.
+assert estimate_tokens(OVER) > CEILING, (
+    f"OVER estimates {estimate_tokens(OVER)} tokens, ceiling is {CEILING}"
+)
+assert estimate_tokens(UNDER) < CEILING
 
 
 def _mem_dir(repo_path, prefix, name):

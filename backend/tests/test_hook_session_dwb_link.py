@@ -55,6 +55,10 @@ def make_user_transcript(tmp_path):
             lines.append(json.dumps({
                 "type": "user",
                 "message": {"role": "user", "content": text},
+                # DWB-592: the scan treats an unstamped turn as harness-
+                # injected, so a genuine human turn must carry provenance.
+                "promptSource": "typed",
+                "origin": {"kind": "human"},
                 "timestamp": "2026-06-12T13:30:00.000Z",
             }))
         path.write_text(("\n".join(lines) + "\n") if lines else "")

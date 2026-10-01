@@ -7,7 +7,7 @@
 #                GET /api/projects/:id/team (DWB-313, DWB-387)
 # Data In:       Factory-created projects, tickets, test results via conftest fixtures
 # Data Out:      Assertions on HTTP status codes, JSON shapes, and cascade deletes
-# Last Modified: 2026-09-16 (DWB-571: runs_own_tests computed field in response shape + TestRunsOwnTests)
+# Last Modified: 2026-09-29 (DWB-590: topoff_enabled + topoff_interval in response shape)
 
 """Tests for /api/projects CRUD and filtering."""
 
@@ -63,6 +63,10 @@ class TestGetProject:
             "force_standards_audit",
             "force_consolidation",
             "capture_agent_comms",
+            "memory_mode",
+            "memory_schema_version",
+            "topoff_enabled",
+            "topoff_interval",
             "playbooks_deployed_at",
             "nodeified_at",
             "created_at", "updated_at",

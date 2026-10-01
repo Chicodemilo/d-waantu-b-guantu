@@ -6,14 +6,14 @@
 # Callees: pydantic, app/config/server_repo.py
 # Data In: JSON request body
 # Data Out: ProjectCreate, ProjectUpdate, ProjectRead, ProjectOverheadIncrement
-# Last Modified: 2026-09-16 (DWB-571: ProjectRead.runs_own_tests computed field)
+# Last Modified: 2026-09-29 (DWB-590: topoff_enabled + topoff_interval, no confirmation needed)
 
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
 from app.config.server_repo import runs_own_tests as _runs_own_tests
-from app.models.project import ProjectStatus
+from app.models.project import MemoryMode, ProjectStatus
 
 
 class ProjectCreate(BaseModel):
@@ -33,6 +33,18 @@ class ProjectCreate(BaseModel):
     force_coding_standards_md: bool = False
     force_standards_audit: bool = False
     force_consolidation: bool = False
+    # DWB-588: settable at creation with no confirmation. The switch warning
+    # exists because switching rewrites every memory the project has; a project
+    # being created has none, and the warning's own advice is to decide this at
+    # the start. There is nothing to warn about here.
+    memory_mode: MemoryMode = MemoryMode.stock
+    # DWB-590: TOP-OFF, and it takes NO CONFIRMATION, unlike memory_mode above.
+    # Deliberate and not an omission: switching memory modes rewrites every
+    # memory the project has, where toggling top-off changes nothing that
+    # already exists and is reversible by toggling it back. Independent of
+    # memory_mode by Miles's ruling, so nothing here reads it.
+    topoff_enabled: bool = False
+    topoff_interval: int = 10
 
 
 class ProjectUpdate(BaseModel):
@@ -57,6 +69,22 @@ class ProjectUpdate(BaseModel):
     force_consolidation: bool | None = None
     # DWB-446: per-project SendMessage agent-comms capture gate.
     capture_agent_comms: bool | None = None
+    # DWB-588: changing memory_mode is REFUSED unless memory_mode_confirmed
+    # rides along in the same body; the refusal carries the spec's warning.
+    # memory_mode_confirmed is a request flag, NOT a column: it is popped in
+    # services.project.update_project before the setattr loop. It is also not
+    # a switch on its own - confirming without naming a new mode changes
+    # nothing. memory_schema_version is absent on purpose: it is stamped by
+    # the system, never chosen by a caller.
+    memory_mode: MemoryMode | None = None
+    memory_mode_confirmed: bool = False
+    # DWB-590: TOP-OFF, and it takes NO CONFIRMATION, unlike memory_mode above.
+    # Deliberate and not an omission: switching memory modes rewrites every
+    # memory the project has, where toggling top-off changes nothing that
+    # already exists and is reversible by toggling it back. Independent of
+    # memory_mode by Miles's ruling, so nothing here reads it.
+    topoff_enabled: bool | None = None
+    topoff_interval: int | None = None
 
 
 class ProjectOverheadIncrement(BaseModel):
@@ -90,6 +118,10 @@ class ProjectRead(BaseModel):
     force_standards_audit: bool
     force_consolidation: bool
     capture_agent_comms: bool
+    memory_mode: MemoryMode
+    memory_schema_version: int
+    topoff_enabled: bool
+    topoff_interval: int
     playbooks_deployed_at: datetime | None
     nodeified_at: datetime | None
     created_at: datetime

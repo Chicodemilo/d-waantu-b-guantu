@@ -6,13 +6,13 @@
 # Callees: POST /api/agents/{id}/session-complete, POST /api/agents/identify, POST /api/agents/spawn-prepare, app.config.memory_rules
 # Data In: tmp_path repo, factory project + agent
 # Data Out: Assertions on memory.md contents after a wrap-up and on the rules string
-# Last Modified: 2026-09-15 (DWB-560)
+# Last Modified: 2026-10-01 (DWB-617: drop the hardcoded ceiling from the prose)
 
 """DWB-560 (Miles ruling): ONLY DURABLE LESSONS.
 
 Boring "I did 50 tickets, their names were, their ids are, the time completed
 was" is noise. The dwb_sessions row already IS the session record, so memory
-carrying it too just burns the 4500-token ceiling and forces condense rewrites
+carrying it too just burns the memory.md token ceiling and forces condense rewrites
 that can summarise a real lesson away.
 """
 

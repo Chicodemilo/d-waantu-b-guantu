@@ -6,7 +6,7 @@
 // Callees: ../components/project/TokenBudget, global fetch (stubbed)
 // Data In: Stubbed token-budget fetch response
 // Data Out: Test assertions
-// Last Modified: 2026-06-19
+// Last Modified: 2026-10-01 (DWB-617: stub ceilings match the raised TOKEN_CEILINGS)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
@@ -27,7 +27,7 @@ function memFile(name, category, overrides = {}) {
     category,
     agent_name: 'Freddie',
     tokens: 1000,
-    ceiling: 4500,
+    ceiling: 12000,
     status: 'ok',
     ...overrides,
   };
@@ -61,8 +61,8 @@ describe('TokenBudget memory grouping (DWB-401)', () => {
   it('renders the 2-file memory model (identity.md + memory.md) under the agent subgroup', async () => {
     await renderExpanded(
       budget([
-        memFile('identity.md', 'memory_identity', { tokens: 400, ceiling: 600 }),
-        memFile('memory.md', 'memory_main', { tokens: 1200, ceiling: 4500 }),
+        memFile('identity.md', 'memory_identity', { tokens: 400, ceiling: 1500 }),
+        memFile('memory.md', 'memory_main', { tokens: 1200, ceiling: 12000 }),
       ])
     );
     await waitFor(() => {
@@ -76,8 +76,8 @@ describe('TokenBudget memory grouping (DWB-401)', () => {
   it('excludes retired memory sub-category files (scratchpad/lessons/recent)', async () => {
     await renderExpanded(
       budget([
-        memFile('identity.md', 'memory_identity', { tokens: 400, ceiling: 600 }),
-        memFile('memory.md', 'memory_main', { tokens: 1200, ceiling: 4500 }),
+        memFile('identity.md', 'memory_identity', { tokens: 400, ceiling: 1500 }),
+        memFile('memory.md', 'memory_main', { tokens: 1200, ceiling: 12000 }),
         // Stale rows under old keys must NOT render anymore.
         memFile('scratchpad.md', 'memory_scratchpad'),
         memFile('lessons.md', 'memory_lessons'),
@@ -94,7 +94,7 @@ describe('TokenBudget memory grouping (DWB-401)', () => {
 
   it('shows the updated 2-file tooltip copy', async () => {
     await renderExpanded(
-      budget([memFile('memory.md', 'memory_main', { tokens: 1200, ceiling: 4500 })])
+      budget([memFile('memory.md', 'memory_main', { tokens: 1200, ceiling: 12000 })])
     );
     await waitFor(() => {
       expect(screen.getByText(/single free-form memory/i)).toBeInTheDocument();

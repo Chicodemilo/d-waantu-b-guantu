@@ -1,12 +1,12 @@
 // Path: src/components/layout/Sidebar.jsx
 // File: Sidebar.jsx
 // Created: 2026-03-29
-// Purpose: Navigation sidebar with links to dashboard, system tests, system docs, error log, the cross-project archie channel, the help center, and per-project sub-nav (tickets, team, sessions, tests, audits, docs, nodes, inter-agent comms, jira); collapses on mobile
+// Purpose: Navigation sidebar with links to dashboard, system tests, system docs, error log, the cross-project archie channel, the help center, and per-project sub-nav (tickets, team, sessions, tests, audits, docs, nodes, inter-agent comms, jira, and journal/top-off when the project runs human_memory); collapses on mobile
 // Caller: AppShell.jsx
 // Callees: react (useState), react-router-dom (NavLink, useLocation), useStore
 // Data In: projects from store, current location pathname, open prop, onNavClick callback
 // Data Out: default export Sidebar component
-// Last Modified: 2026-09-15 (DWB-534)
+// Last Modified: 2026-09-30 (DWB-613: journal + top-off nav entries, gated on memory_mode)
 
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -83,6 +83,20 @@ function Sidebar({ open, onNavClick }) {
                 inter-agent comms
               </NavLink>
             </li>
+            {p.memory_mode === 'human_memory' && (
+              <>
+                <li>
+                  <NavLink to={`/projects/${p.id}/journal`} className={linkClass} onClick={onNavClick}>
+                    journal
+                  </NavLink>
+                </li>
+                <li>
+                  <NavLink to={`/projects/${p.id}/topoff`} className={linkClass} onClick={onNavClick}>
+                    top-off
+                  </NavLink>
+                </li>
+              </>
+            )}
             {p.jira_project_key && (
               <li>
                 <NavLink to={`/projects/${p.id}/jira`} className={linkClass} onClick={onNavClick}>

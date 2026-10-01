@@ -132,8 +132,13 @@ class SpawnPrepareResponse(BaseModel):
     # injects the agent's complete memory into the spawn prompt with no read.
     memory_full: str
     # DWB-524: top-N memory-domain lessons from OTHER agents matched to this
-    # agent's assigned/queued tickets. Empty list when the corpus is empty.
+    # agent's assigned/queued tickets.
     relevant_lessons: list[RelevantLesson] = []
+    # What happened producing that list, because its length cannot say:
+    # not_attempted (no tickets, no query) / complete (ran; empty means nothing
+    # matched) / truncated (budget spent, list may be partial) / failed (raised).
+    # Read this before concluding anything from an empty relevant_lessons.
+    relevant_lessons_status: str = "complete"
     boundary_rules: str
     # DWB-341: absolute memory_dir path. The endpoint guarantees this dir +
     # its core files (identity.md, scratchpad.md, lessons.md,

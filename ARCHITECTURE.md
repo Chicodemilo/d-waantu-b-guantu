@@ -64,7 +64,23 @@ Agent (standalone)
 +-- FailureRecord (agent + logged_by_agent)
 +-- StatusHistory (changed_by_agent)
 +-- Instruction (scoped to agent)
++-- AgentMemory (human_memory mode, DWB-584)
++-- JournalEntry (human_memory mode, DWB-584)
 ```
+
+### human_memory Mode (beta, DWB-584)
+
+A per-project memory model that replaces the flat `memory.md` blob with rows. Off by default and gated behind `projects.memory_mode`, so a project that never enables it is unaffected. Spec: `docs/human_memory_spec.md`.
+
+- `agent_memories` holds the RULE. Tiers are `raw` (written untiered during a session), `core`, `scar`, `scar_context_bound` and `working`. Carries `cost`, `caught_by` and `surprised`, which are read against memories rather than against episodes: the context scan gates on `cost`, and `caught_by` aggregated across agents is the map of where a team's own checks do not look.
+- `journal_entries` holds the STORY. Never auto-loaded, queried by tag and date rather than read whole, and carries a permanent `retrieval_count` that never decays. Three retrievals promote an entry into memory.
+- **There is no `score` column and there must never be one.** Score is a pure function of tier and sessions since the entry last fired, derived at read time. A stored score is a second authoritative copy of a derived fact and drifts out of sync with the rule that produces it. The same reasoning excludes a stored band and a stored session count.
+- **The clock is sessions, not calendar days**, which is why reinforcement is `last_reinforced_session_id` rather than a timestamp. An agent idle for three weeks has forgotten nothing.
+- `tier` is NOT NULL with `raw` as a named value rather than a nullable column, so a scoring query has to name `raw` to exclude it; a nullable column would let a join drop untiered rows silently.
+
+Project-level columns added alongside: `memory_mode`, `memory_schema_version`, and `topoff_enabled` / `topoff_interval`. The top-off columns are deliberately unrelated to the memory columns beside them and share a migration for delivery reasons only; top-off is independent of memory mode and works on a `stock` project. `hook_sessions.prompt_count` supports the top-off interval.
+
+`ProjectRead` exposes `memory_mode` and `memory_schema_version`; `memory_schema_version` is system-stamped and never accepted on update. Switching modes requires an explicit confirmation flag and returns a verbatim warning on the unconfirmed attempt, because switching rewrites every memory the project has.
 
 ### Tables
 
@@ -134,7 +150,7 @@ Full OpenAPI reference at http://localhost:8000/docs (149 endpoints, 25 routers)
 - `GET /api/projects/{id}/team` (single-roundtrip roster) returns `{project_id, project_prefix, agents: [{agent_id, name, role, is_active, assigned_at, last_seen, presumed_live}]}`, active-only unless `?include_inactive=true`.
 - `GET /api/tracking/summary` `per_agent` rows aggregate `token_report` + `overhead_token_report` (a `tokens` total plus a separate `overhead_tokens`); `project_total.overhead_tokens` is the project-wide overhead figure.
 - `POST /api/agents/identify` + `/spawn-prepare` resolve `(role, name, project_prefix)`, accepting the short name or `<name>_<PREFIX>` form.
-- Agent memory (DWB-401) lives at `<repo>/.dwb/memory/<prefix>/<name>/` (outside `.claude/`, so subagents write it directly): `identity.md` (system-generated) + free-form `memory.md` (agent-written; merges old scratchpad + lessons, DB is the session index). Writes via `memory/append` + `session-complete`; `memory.md` has a 4500-token HARD write-ceiling (DWB-518): an over-ceiling write is refused with HTTP 400 and drops nothing, condense then retry. No passive drop-oldest trim exists any more. It is also not exempt from close: DWB-519 makes a memory write mandatory at least once per sprint for every active participant, and sprint close is refused, naming the non-writer, if one is missing.
+- Agent memory (DWB-401) lives at `<repo>/.dwb/memory/<prefix>/<name>/` (outside `.claude/`, so subagents write it directly): `identity.md` (system-generated) + free-form `memory.md` (agent-written; merges old scratchpad + lessons, DB is the session index). Writes via `memory/append` + `session-complete`; `memory.md` has a 12000-token HARD write-ceiling (DWB-518): an over-ceiling write is refused with HTTP 400 and drops nothing, condense then retry. No passive drop-oldest trim exists any more. It is also not exempt from close: DWB-519 makes a memory write mandatory at least once per sprint for every active participant, and sprint close is refused, naming the non-writer, if one is missing.
 - `GET /api/hooks/sessions?status=orphan&cutoff_minutes=60` returns stale active sessions for cleanup.
 - DWB session lifecycle: `POST /api/sessions/open` (omit `opened_at`), `.../close` (headline required on ai_confident/ai_asked; consolidation gate opt-in via `force_consolidation`, default OFF, TL-owned docs only), `.../reopen` (undoes a false close; 409 if another is open).
 - DWB session detection (DWB-402, Layer-2 Haiku retired): Layer-1 regex on open/close phrases, a SessionEnd transcript scan, slash commands (`/dwb-open`, `/dwb-close`), a 60-min idle sweeper. `ai_classifier` enum kept as a tombstone. Full reference: `docs/session_lifecycle.md`.
@@ -445,3 +461,60 @@ Deleting a project cascades through: alerts, test_results, activity_logs, instru
 
 ### Jira Integration
 Projects optionally link to a Jira project via `jira_project_key`. DWB tickets map 1:1 to Jira issues via `jira_issue_key` (unique constraint); a duplicate key returns a clean 409 on both create and update/PATCH (DWB-465/476), never a raw 500. `POST /api/projects/{id}/disable-jira` clears all Jira links from the project and its tickets. Jira data is never modified.
+
+---
+
+## 9. Operational Gotchas and Traps
+
+Hard-won properties of this environment. None of these are bugs anyone introduced; they are how the dev loop behaves, and each has cost a real outage.
+
+### Saving an ORM model is a schema change to the shared database
+
+`app/main.py` calls `Base.metadata.create_all(bind=engine)` in the FastAPI lifespan. Uvicorn runs with `--reload`. So the moment a model file is saved, the server restarts and creates any new tables in whatever database it is pointed at, which in development is the live one.
+
+The dangerous half is what it does NOT do: `create_all` creates missing tables, and never adds columns to tables that already exist. Adding a column to an existing model therefore produces the worst combination. The ORM begins selecting a column the schema does not have, and every read of that table returns 500 until the migration lands.
+
+Two consequences worth planning around:
+
+- **The outage window is avoidable for a purely additive migration, and only forced when the model and the schema changes depend on each other.** This paragraph previously said the window was unavoidable, full stop, and that is wrong. It was written from the column-added-to-an-existing-table case, where `create_all` cannot help you and the ORM starts selecting what the schema lacks the moment you save.
+
+  **If the migration only ADDS tables or widens an enum, apply the migration FIRST and save the models AFTER.** `create_all` then finds the table already present and does nothing, and there is no window at all. Proven on DWB-593: `/api/projects` returned 200 before, during and after.
+
+  **Save-then-apply is only necessary when the two changes are mutually dependent.** There you still keep the window to seconds: edit the migration first, prove it on a scratch database, and only then save the models and apply the DDL back to back.
+
+  **A MIXED migration, one that both adds a table and removes a column, has no safe order and you must plan for the race.** Save first and `create_all` builds the new table from the model before alembic reaches it, so the migration aborts partway with the version unmoved. Apply first and the old model selects a column the schema no longer has until you save. Proven on DWB-593, which hit the first of those. The mitigation when it happens is to drop what `create_all` made and re-run; the better move is to split the migration so the additive half can go first.
+
+- **A new table with a foreign key to `projects` must be added to the project delete cascade.** Every FK to `projects` here is NO ACTION, so a table missing from the cascade does not fail at the model layer, it 500s the delete endpoint. Found on DWB-593 by deleting a throwaway project and getting a 500 instead of a 204. The same applies to the ticket cascade for anything keyed on a ticket.
+- **A later `alembic upgrade head` can fail with "table already exists"**, because `create_all` got there first. That failure is not evidence the migration is wrong. Check whether the tables are empty and were created by startup before concluding anything about the migration file.
+
+Tell anyone working in the same tree before opening that window. A few seconds of missing-column errors looks exactly like their own bug.
+
+### A create_all schema and a migration schema are not the same schema
+
+They disagree about server defaults. Several `projects.force_*` columns are NOT NULL with no default on a migration-built database and NOT NULL with a default on a `create_all`-built one. There will be other cases; these are the ones found so far.
+
+This matters more than it sounds, because `lat_test` is built by `create_all` from the models while live is built by migrations. So a green test suite proves the code matches the MODELS. It does not prove the code matches PRODUCTION, and those are different claims. State which one you are making.
+
+Practical consequence: any test doing a raw INSERT is correct against one target and wrong against the other. Discover required columns from `information_schema` rather than hardcoding a list, because a hardcoded list is correct against exactly one of the two and the gap between them is what the test exists to span.
+
+### Alembic never calls create_all
+
+`alembic/env.py` contains no `create_all`. The only one in the backend is the startup call above. These are separate mechanisms with separate blast radii and conflating them produces wrong diagnoses: a migration failing on "already exists" points at the running API, not at alembic.
+
+`env.py` overwrites `sqlalchemy.url` from a module-level settings singleton, so setting it on a `Config` object in-process is silently ignored. The only override that survives is a subprocess with a different `MYSQL_DATABASE`, which has the side benefit of running the command a person would actually type.
+
+### Testing a migration against an empty database proves less than it looks
+
+Replaying from base into an empty database tests that a fresh clone gets the schema from migrations alone, which is a real requirement and worth keeping. It does not test the migration against a populated schema at the previous revision, which is the case that actually runs in anger.
+
+Both are needed. A migration can pass the first and fail the second, and `alembic current` reporting a revision is not evidence that any table was created. Introspect for the tables and columns, not the version number.
+
+### MySQL DDL is not transactional
+
+A migration that fails partway leaves the schema changed and `alembic_version` unmoved. The re-run then behaves as a silent no-op or fails on objects that already exist. Round-trip every migration down and up before landing it; a downgrade that merely exists has not been tested.
+
+Specifically: MySQL refuses to drop an index a foreign key still needs (errno 1553), so explicit `drop_index` calls before `drop_table` will fail. Dropping the table removes its indexes anyway.
+
+### Subagents cannot write under `.claude/`
+
+Permission dialogs for those paths kill a subagent in the ink renderer. The team lead runs with a human attached and is the only agent that can edit them. Agent memory lives in `.dwb/` for this reason and is written through the API, never by direct file edit.

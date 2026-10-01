@@ -6,13 +6,27 @@
 # Callees: alembic.command, sqlalchemy.inspect, sqlalchemy.schema.AddColumn
 # Data In: lat_test (already at head via conftest create_all)
 # Data Out: Assertions on schema after up/down round-trip
-# Last Modified: 2026-07-28 (DWB-505: forward-roll total_tokens back to the model's BIGINT type in teardown so later tests don't inherit the INT column the DWB-335 CREATE TABLE restores)
+# Last Modified: 2026-09-30 (DWB-593: discovery is now TRANSITIVE - memory_transitions references agent_memories which references dwb_sessions)
 
 """Round-trips the DWB-335 migration against the test database to verify the
 hand-written upgrade + downgrade both succeed and produce the expected
-schema. We can't replay the full migration history from scratch because
-older data-migrations (e.g. dwb287) assume existing rows, so the test
-strategy is:
+schema.
+
+CORRECTED 2026-09-29 (DWB-584). This docstring used to say "we can't replay the
+full migration history from scratch because older data-migrations (e.g. dwb287)
+assume existing rows". THAT IS NOT TRUE and was disproved by running it: the
+full chain replays from base into an empty database cleanly, all 71 revisions,
+and the data-migrations are no-ops against zero rows rather than failures.
+tests/test_human_memory_schema_dwb584.py does exactly that replay and asserts on
+the result. The claim is corrected here rather than deleted, because a removed
+line reads as "nobody looked" and this one was looked at.
+
+What remains true is the reason this file uses a one-step round trip anyway: it
+is testing ONE migration against a schema that already exists, which is cheaper
+and is the case an existing installation is in. The two strategies test
+different things and neither replaces the other.
+
+The strategy here:
 
 1. lat_test already has the full schema from `Base.metadata.create_all`
    (via conftest's session-scoped fixture).
@@ -44,23 +58,38 @@ THIS_REVISION = "dwb335a7b3c91"
 
 
 def _orm_tables_referencing_dwb_sessions():
-    """ORM tables (besides hook_sessions, whose FK the DWB-335 migration manages
-    itself) that carry a foreign key to dwb_sessions.
+    """ORM tables that must be dropped before `dwb_sessions` can be.
 
-    The create_all baseline is the full head schema, so any later table that
-    references dwb_sessions (e.g. DWB-417 tool_actions) blocks dropping
-    dwb_sessions on the single-step downgrade below. The round-trip drops these
-    first and rebuilds them from the ORM after the re-upgrade. Discovered from
-    Base.metadata so future referrers are picked up automatically - no sibling
-    line per ticket, matching the column/enum forward-roll already in finally.
+    TRANSITIVE, not one hop, and that distinction is what DWB-593 broke. The
+    original version collected tables with a direct FK to `dwb_sessions`, which
+    was complete for as long as nothing referenced THOSE. `memory_transitions`
+    then arrived pointing at `agent_memories`, which points at `dwb_sessions`,
+    so the drop of `agent_memories` failed on errno 3730 with
+    `memory_transitions` still holding a reference nobody had collected.
+
+    Computed as a closure rather than as a list of names, deliberately: a named
+    list is exactly what went stale here, and it goes stale silently because
+    the failure surfaces in an unrelated migration test rather than anywhere
+    near the table that was added.
+
+    `hook_sessions` is excluded because the DWB-335 migration manages its own
+    FK column; it is not dropped, so nothing that references it needs to be.
     """
-    out = []
-    for table in Base.metadata.sorted_tables:
-        if table.name in ("dwb_sessions", "hook_sessions"):
-            continue
-        if any(fk.column.table.name == "dwb_sessions" for fk in table.foreign_keys):
-            out.append(table)
-    return out
+    blocked = {"dwb_sessions"}
+    changed = True
+    while changed:
+        changed = False
+        for table in Base.metadata.sorted_tables:
+            if table.name in blocked or table.name == "hook_sessions":
+                continue
+            if any(fk.column.table.name in blocked for fk in table.foreign_keys):
+                blocked.add(table.name)
+                changed = True
+    # sorted_tables order is dependency order, parents first. Callers drop in
+    # REVERSE (DWB-584) and rebuild forwards.
+    return [
+        t for t in Base.metadata.sorted_tables if t.name in blocked - {"dwb_sessions"}
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -105,7 +134,17 @@ def test_migration_round_trip(alembic_cfg):
         # Drop them first; the finally block rebuilds them from the ORM.
         dependent_tables = _orm_tables_referencing_dwb_sessions()
         with engine.begin() as conn:
-            for table in dependent_tables:
+            # REVERSED (DWB-584): the list comes back in Base.metadata
+            # dependency order, parents first, which is the right order to
+            # CREATE in and the wrong order to DROP in. It went unnoticed until
+            # DWB-584 added the first pair of referrers with a foreign key
+            # between them - agent_memories points at journal_entries, and both
+            # reference dwb_sessions, so the forward loop tried to drop the
+            # parent while the child still referenced it (errno 3730). Nobody
+            # broke this; the loop was simply never handed two related tables
+            # before. The rebuild in `finally` needs no change: create_all sorts
+            # for itself.
+            for table in reversed(dependent_tables):
                 conn.execute(text(f"DROP TABLE IF EXISTS {table.name}"))
 
         # Downgrade one step.

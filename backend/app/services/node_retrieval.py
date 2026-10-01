@@ -7,20 +7,26 @@
 #          nodes and returns pointer-only lesson refs (source agent + entry heading
 #          + date, resolved from the agent's memory.md at query time);
 #          related_nodes() returns a ticket's related lessons / sessions / code
-#          files via the same match service. Both rank by SPECIFICITY (rare +
-#          multi-part tags first), drop the most popular tags, collapse code
-#          pointers to one per file, and cap each group. Empty corpus degrades to
-#          empty lists.
+#          files via the same match service. relevant_lessons is BOUNDED by a
+#          wall-clock budget and reports what happened (LessonRetrieval.status),
+#          because it sits on the spawn path and must never block a spawn.
+#          Both rank by SPECIFICITY (rare + multi-part tags first), drop the most
+#          popular tags, collapse code pointers to one per file, and cap each
+#          group. Empty corpus degrades to empty lists.
 # Caller: app/services/agent.spawn_prepare_payload, app/routers/tickets.py
 # Callees: app/services/node_match (match_nodes), app/models (Ticket, Node)
 # Data In: db: Session, project/agent/ticket + repo_path
-# Data Out: list[dict] lessons / dict of related node groups (pointers only)
-# Last Modified: 2026-09-15 (DWB-545: specificity ranking, popularity cutoff, per-file collapse, caps)
+# Data Out: LessonRetrieval (lessons + status) / dict of related node groups
+# Last Modified: 2026-09-29 (wall-clock budget + retrieval status moved INSIDE
+#                relevant_lessons, so a new caller inherits the bound rather
+#                than having to remember to apply it)
 
 from __future__ import annotations
 
 import math
 import re
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -67,6 +73,84 @@ _POPULARITY_MIN_NODES = 20
 
 # Hard cap per output group (lessons / sessions / code) and on relevant_lessons.
 MAX_PER_GROUP = 10
+
+
+# --- retrieval budget + outcome vocabulary -----------------------------------
+# relevant_lessons sits on the spawn-prepare path, so however slow it gets it
+# must not be able to stop an agent spawning. It once took 107s there and the
+# existing try/except did not save the spawn, because slow does not raise. A
+# handler covers the failure its author imagined; a deadline covers the one that
+# happened. So the bound lives INSIDE this function rather than at the call
+# site: DWB-578 adds another caller into this path, and a guard applied by the
+# caller is a guard someone has to remember. Here it is inherited by
+# construction and a new caller cannot opt out of it by accident.
+#
+# The budget is a BACKSTOP, not the mechanism. Retrieval is fast because the
+# wasted neighbor derivation was removed (see node_match.match_nodes), not
+# because it is capped: the healthy call is ~1.2s against a 3235-node corpus.
+# Hitting this budget means something has gone wrong and should be visible,
+# which is what the status below is for.
+DEFAULT_BUDGET_SECONDS = 5.0
+
+# What actually happened on a retrieval. Four values, and an empty lesson list
+# NEVER stands in for more than one of them - that ambiguity is the bug behind
+# the bug. relevant_lessons returned [] for an entire sprint and nobody noticed,
+# because empty could equally mean "no corpus", "no match" or "never ran".
+#
+# The fourth value is deliberate. Three states were specified (not attempted /
+# ran and found nothing / ran and cut short), but an exception is none of those,
+# and folding it into NOT_ATTEMPTED would reintroduce exactly the ambiguity this
+# vocabulary exists to kill. "Ran and found nothing" is COMPLETE with an empty
+# list, which is readable precisely because the other states have their own name.
+NOT_ATTEMPTED = "not_attempted"  # no active tickets, so there was no query
+COMPLETE = "complete"            # ran to the end; empty list means no matches
+TRUNCATED = "truncated"          # budget exhausted; lessons may be partial
+FAILED = "failed"                # raised; set by the caller, never returned here
+
+
+@dataclass
+class LessonRetrieval:
+    """Result of relevant_lessons: the lessons AND what happened getting them.
+
+    Returned as a pair on purpose. Handing back a bare list is what let the
+    status be dropped silently for a sprint; a caller that wants the lessons has
+    to hold the object that also carries why the list is the length it is.
+    """
+
+    lessons: list[dict] = field(default_factory=list)
+    status: str = COMPLETE
+
+    @property
+    def truncated(self) -> bool:
+        return self.status == TRUNCATED
+
+
+class _Budget:
+    """Wall-clock deadline with an injectable clock.
+
+    ``clock`` is injectable so tests are deterministic: a time-dependent bound
+    that tests assert on would otherwise flake on a loaded machine, which is the
+    real cost of putting the deadline inside the function rather than at the
+    call site. A budget of None disables the bound entirely.
+
+    LIMIT, stated plainly because the point of this class is a ceiling that
+    cannot be exceeded: expiry is checked BETWEEN units of work, so the true
+    ceiling is the budget plus the duration of the longest single indivisible
+    step (one SQL statement, one file read). It bounds the loops, which is where
+    the unbounded growth lives; it cannot interrupt a single slow query. A
+    statement-level timeout would be needed for that and is not built here.
+    """
+
+    def __init__(self, seconds: float | None, clock=time.monotonic):
+        self._clock = clock
+        self._deadline = None if seconds is None else clock() + seconds
+        self.expired = False
+
+    def check(self) -> bool:
+        """True when the budget is spent. Latches, so one expiry is final."""
+        if self._deadline is not None and self._clock() >= self._deadline:
+            self.expired = True
+        return self.expired
 
 # Length normalization for the file-scored code group. A file's score is divided
 # by (its pointer count ** this exponent). Without it the longest files win every
@@ -265,7 +349,9 @@ def relevant_lessons(
     agent,
     *,
     top_n: int = MAX_PER_GROUP,
-) -> list[dict]:
+    budget_seconds: float | None = DEFAULT_BUDGET_SECONDS,
+    clock=time.monotonic,
+) -> LessonRetrieval:
     """Top-N memory-domain lessons relevant to an agent's assigned/queued tickets.
 
     Matches the concatenated title+description of the agent's todo/in_progress
@@ -273,13 +359,22 @@ def relevant_lessons(
     Each lesson is POINTERS ONLY (no memory content - the TL already injects
     memory_full): tag, weight, score, the source agent, the memory.md ref, and the
     entry heading + date resolved from that file. The spawning agent's OWN memory
-    is skipped (already in memory_full). Empty corpus / no tickets -> [].
+    is skipped (already in memory_full). No tickets -> NOT_ATTEMPTED with an
+    empty list; an empty corpus -> COMPLETE with an empty list. Those are
+    different facts and the status is what tells them apart.
 
     DWB-545: tags are ordered by specificity_score (rare + multi-part first) with
     the popularity cutoff applied, then interleaved BREADTH-FIRST across tags so
     top_n surfaces DIVERSE concepts rather than one tag repeated across every
     agent that happened to mention it.
+
+    Bounded by ``budget_seconds`` (see DEFAULT_BUDGET_SECONDS). On expiry it
+    returns what it has with status TRUNCATED rather than running to completion,
+    because this sits on the spawn path and a slow retrieval must never be able
+    to stop an agent spawning. Returns a LessonRetrieval, never a bare list.
     """
+    budget = _Budget(budget_seconds, clock)
+
     tickets = list(
         db.execute(
             select(Ticket).where(
@@ -290,17 +385,31 @@ def relevant_lessons(
         ).scalars().all()
     )
     if not tickets:
-        return []
+        # No query to run, which is NOT the same as running and finding nothing.
+        return LessonRetrieval(lessons=[], status=NOT_ATTEMPTED)
 
     text = " ".join(f"{t.title} {t.description or ''}" for t in tickets)
+
+    if budget.check():
+        return LessonRetrieval(lessons=[], status=TRUNCATED)
     _query_tags, matches = match_nodes(db, project.id, text)
+    if budget.check():
+        return LessonRetrieval(lessons=[], status=TRUNCATED)
+    ranked = rank_matches(db, project.id, matches, text)
+
     repo_path = getattr(project, "repo_path", None)
 
     per_tag: list[list[dict]] = []
     seen: set[tuple[str, str]] = set()
-    for node, score in rank_matches(db, project.id, matches, text):
+    for node, score in ranked:
+        # Checked per node, and again per pointer below, because both loops grow
+        # with the corpus and the inner one does file IO per entry.
+        if budget.check():
+            break
         node_lessons: list[dict] = []
         for p in node.pointers:
+            if budget.check():
+                break
             if p.kind != NodePointerKind.memory:
                 continue
             source_agent = _agent_from_memory_ref(p.ref)
@@ -325,16 +434,11 @@ def relevant_lessons(
             per_tag.append(node_lessons)
 
     cap = min(top_n, MAX_PER_GROUP)
-    lessons: list[dict] = []
-    depth = 0
-    while len(lessons) < cap and any(depth < len(nl) for nl in per_tag):
-        for nl in per_tag:
-            if depth < len(nl):
-                lessons.append(nl[depth])
-                if len(lessons) >= cap:
-                    break
-        depth += 1
-    return lessons
+    lessons = _interleave(per_tag, cap)
+    return LessonRetrieval(
+        lessons=lessons,
+        status=TRUNCATED if budget.expired else COMPLETE,
+    )
 
 
 def _interleave(per_tag: list[list[dict]], cap: int) -> list[dict]:

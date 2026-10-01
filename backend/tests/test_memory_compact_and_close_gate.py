@@ -6,12 +6,13 @@
 # Callees: /api/agents/{id}/memory/compact, /api/agents/{id}/memory/append, /api/sessions/open, /api/sessions/{id}/close
 # Data In: tmp_path filesystem, factory project + agent
 # Data Out: assertions on replace semantics, over-ceiling refusal, and that memory is gate-exempt at close
-# Last Modified: 2026-09-14 (DWB-518: over-ceiling append/compact refuse; no passive trim)
+# Last Modified: 2026-10-01 (DWB-617: over-ceiling fixtures sized from the ceiling constant)
 
 """Memory compaction + the session-close compaction gate.
 
 DWB-401: the memory model is 2 files (identity.md + the single free-form
-memory.md), memory.md ceiling = 4500 tokens.
+memory.md). memory.md's ceiling is `memory_main` in config/token_budget.py
+(DWB-617 raised it 4500 -> 12000); nothing here hardcodes it.
 
 DWB-518 (Miles ruling: no silent eviction): the ceiling is a HARD gate on the
 WRITE path, not a passive trim - an over-ceiling append/compact is REFUSED 400
@@ -20,15 +21,26 @@ the session-CLOSE gate: memory is still gate-EXEMPT at close (an over-ceiling
 memory.md on disk never blocks a close), which the TestCloseNotBlockedByMemory
 class below still pins.
 
-estimate_tokens = max(len//4, words). memory.md ceiling = 4500 tokens, so a
-~20000-char blob (~5000 tokens) is reliably over; a short string is under.
+estimate_tokens = max(len//4, words). The over-ceiling blob below is sized
+FROM the ceiling constant, not from a literal: a hardcoded payload silently
+stops being over the day someone raises the cap, and every refusal test then
+passes against a refusal that never fired.
 """
 
 from pathlib import Path
 
-# ~5000 tokens (20000 chars) - over the 4500 memory.md ceiling.
-OVER = "data " * 4000
+from app.config.token_budget import TOKEN_CEILINGS, estimate_tokens
+
+# "data " is 5 chars, so estimate_tokens = 1.25 * words; 2x the ceiling in
+# words lands at 2.5x the ceiling in tokens.
+CEILING = TOKEN_CEILINGS["memory_main"]
+OVER = "data " * (CEILING * 2)
 UNDER = "compacted: shipped the gate, fixed the estimator"
+
+assert estimate_tokens(OVER) > CEILING, (
+    f"OVER estimates {estimate_tokens(OVER)} tokens, ceiling is {CEILING}"
+)
+assert estimate_tokens(UNDER) < CEILING
 
 
 def _mem_dir(repo_path, prefix, name):
@@ -51,9 +63,14 @@ class TestCompactEndpoint:
         # DWB-518: no silent trim. A multi-block over-ceiling submit is REFUSED
         # 400 (nothing written), not accepted-and-trimmed.
         _, agent = _project_and_agent(client, tmp_path, "CMP1")
+        # Sized from the ceiling: six blocks of CEILING//3 "data " words is
+        # 2.5x the cap, and it follows the cap when a ticket moves it.
+        block_words = CEILING // 3
         blocks = "".join(
-            f"## 2026-06-1{i}T00:00:00+00:00\n{'data ' * 600}\n" for i in range(6)
+            f"## 2026-06-1{i}T00:00:00+00:00\n{'data ' * block_words}\n"
+            for i in range(6)
         )
+        assert estimate_tokens(blocks) > CEILING, "submit must start over ceiling"
         path = _mem_dir(tmp_path, "CMP1", "Memo") / "memory.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("## seed\nkeep this\n", encoding="utf-8")
@@ -115,12 +132,15 @@ class TestAppendCeilingRefusal:
         _, agent = _project_and_agent(client, tmp_path, "TRIM1")
         path = _mem_dir(tmp_path, "TRIM1", "Memo") / "memory.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Seed several large OLD blocks well over the 4500 ceiling
-        # (~1200 tokens each x 5 = ~6000).
+        # Seed several large OLD blocks well over the ceiling. "x " is 2 chars
+        # so estimate_tokens = words; five blocks of CEILING//2 words is 2.5x
+        # the ceiling, and it scales when the ceiling moves (DWB-617).
+        block_words = CEILING // 2
         seed = "".join(
-            f"## 2026-06-0{i}T00:00:00+00:00\nOLDBLOCK{i} {'x ' * 1200}\n"
+            f"## 2026-06-0{i}T00:00:00+00:00\nOLDBLOCK{i} {'x ' * block_words}\n"
             for i in range(1, 6)
         )
+        assert estimate_tokens(seed) > CEILING, "seed must start over ceiling"
         path.write_text(seed, encoding="utf-8")
 
         r = client.post(f"/api/agents/{agent['id']}/memory/append", json={

@@ -6,11 +6,12 @@
 #          or close a DWB session.
 # Caller: pytest
 # Callees: app.services.hook_tracking._extract_user_message_texts,
-#          _is_synthetic_user_text, try_close_dwb_session_from_transcript,
+#          _is_synthetic_user_text, _is_human_authored_entry,
+#          try_close_dwb_session_from_transcript,
 #          POST /api/hooks/session-end, POST /api/hooks/user-prompt
 # Data In: factory fixtures (make_project), tmp_path-backed JSONL transcripts
 # Data Out: Assertions on extracted texts + DwbSession open/closed state
-# Last Modified: 2026-06-22
+# Last Modified: 2026-09-29 (DWB-592: provenance allowlist, prose relay coverage)
 
 """DWB-414: scope session open/close phrase detection to user-authored turns.
 
@@ -47,8 +48,23 @@ from sqlalchemy import select
 from app.models.dwb_session import DwbCloseMethod, DwbSession
 from app.services.hook_tracking import (
     _extract_user_message_texts,
+    _is_human_authored_entry,
     _is_synthetic_user_text,
 )
+
+
+# DWB-592: the prose relay wrapper, derived from the shape Claude Code
+# currently writes into transcripts rather than from anyone's idea of it: a
+# single line ending in a colon, with the relayed body starting on the very
+# next line and no blank line between. The wrapper line is harness text. The
+# body below is written here, by hand, on purpose: those turns quote the human
+# and user-authored text is never persisted (DWB-351), so no transcript
+# content appears in this file, the ticket, or any comment.
+RELAY_PROSE_PREFIX = "Another Claude session sent a message:"
+
+
+def _relay_prose(body):
+    return f"{RELAY_PROSE_PREFIX}\n{body}"
 
 
 # ---------------------------------------------------------------------------
@@ -75,18 +91,71 @@ def write_transcript(tmp_path):
     return _make
 
 
-def _user_str(text):
-    """A genuine human user turn: string content, no synthetic markers."""
-    return {
+@pytest.fixture
+def warnings_from_scan(monkeypatch):
+    """Warnings the scan emitted, captured WITHOUT touching global logging.
+
+    This deliberately does not use ``caplog``. Barry saw the all-synthetic
+    case go red under a full suite and green in isolation, which is the shape
+    of a test that depends on global logging state another test can disturb
+    (propagation flags, handler levels, logging.disable). Patching the
+    module's own logger removes that dependency entirely: the assertion is on
+    what this function called, not on where a record happened to end up.
+    """
+    from app.services import hook_tracking
+
+    captured: list[str] = []
+
+    class _Recorder:
+        def warning(self, msg, *args, **kwargs):
+            captured.append(msg % args if args else msg)
+
+        def __getattr__(self, name):
+            # Everything else on the module logger stays a no-op so an
+            # unrelated info/exception call cannot fail the test.
+            return lambda *a, **k: None
+
+    monkeypatch.setattr(hook_tracking, "logger", _Recorder())
+    return captured
+
+
+def _user_str(text, *, prompt_source="typed"):
+    """A genuine human user turn.
+
+    DWB-592: this helper used to omit ``promptSource`` entirely, which is the
+    very defect this ticket exists to fix sitting in the tests that were meant
+    to catch it: a fixture written from an idea of the format rather than the
+    format. Claude Code stamps every turn the human actually submits, and the
+    extractor now requires that stamp, so a fixture without one is not a
+    genuine turn - it is a relay wearing one's clothes.
+
+    ``prompt_source=None`` builds the un-stamped shape deliberately, for the
+    cases that assert harness-injected turns are excluded.
+    """
+    entry = {
         "type": "user",
         "message": {"role": "user", "content": text},
         "timestamp": "2026-06-22T12:00:00.000Z",
     }
+    if prompt_source is not None:
+        entry["promptSource"] = prompt_source
+        entry["origin"] = {"kind": "human"}
+    return entry
 
 
 def _teammate_msg(text):
-    """A teammate-message relay (role=user, harness-injected)."""
-    return _user_str(f'<teammate-message teammate_id="team-lead">\n{text}\n</teammate-message>')
+    """A teammate-message relay in the ANGLE-TAG shape (harness-injected, so
+    no promptSource stamp)."""
+    return _user_str(
+        f'<teammate-message teammate_id="team-lead">\n{text}\n</teammate-message>',
+        prompt_source=None,
+    )
+
+
+def _relay_prose_msg(text):
+    """A teammate-message relay in the PROSE shape: the dominant one, and the
+    one the pre-DWB-592 prefix test could not see."""
+    return _user_str(_relay_prose(text), prompt_source=None)
 
 
 def _tool_result(text):
@@ -104,7 +173,7 @@ def _tool_result(text):
 
 def _meta(text):
     """A meta entry (isMeta True, role=user)."""
-    e = _user_str(text)
+    e = _user_str(text, prompt_source=None)
     e["isMeta"] = True
     return e
 
@@ -165,6 +234,167 @@ class TestIsSyntheticUserText:
     ])
     def test_synthetic_wrappers_detected(self, text):
         assert _is_synthetic_user_text(text) is True
+
+
+# ---------------------------------------------------------------------------
+# DWB-592: provenance allowlist
+#
+# The defect: _is_synthetic_user_text was startswith over sixteen angle-bracket
+# literals, so a relay opening with PROSE could not match and was classified as
+# human-typed. That shape outnumbered the caught one by about ten to one.
+#
+# WHICH OF THESE CASES BITE. Everything under TestProseRelayIsNotHumanAuthored
+# names the defect and goes red if the allowlist is removed. TestNoOverCatch
+# guards the opposite risk, a filter widened until it swallows real input; its
+# cases pass under the old implementation too and are NOT evidence the fix is
+# present. TestUnseenWrapperFailsClosed is the design claim: it is built so the
+# discarded implementation could not satisfy it, because the wording it uses
+# appears on no list anywhere.
+# ---------------------------------------------------------------------------
+
+
+class TestProseRelayIsNotHumanAuthored:
+    """AC1: the prose relay shape is classified synthetic."""
+
+    def test_prose_relay_entry_is_not_human_authored(self):
+        entry = _relay_prose_msg("shut it down for the night")
+        assert _is_human_authored_entry(entry) is False
+
+    def test_prose_relay_is_excluded_from_the_scan(self, write_transcript):
+        path = write_transcript([_relay_prose_msg("shut it down for the night")])
+        assert _extract_user_message_texts(path, head=False) == []
+
+    def test_prose_relay_quoting_a_close_phrase_does_not_close(
+        self, client, db_session, hook_project, write_transcript
+    ):
+        pid = hook_project["id"]
+        _seed_open_session(client, pid)
+        path = write_transcript([_relay_prose_msg("shut it down for the night")])
+        r = client.post("/api/hooks/session-end", json={
+            "session_id": _session_id(),
+            "transcript_path": path,
+            "cwd": hook_project["repo_path"],
+            "hook_event_name": "SessionEnd",
+        })
+        assert r.status_code == 200, r.text
+        db_session.expire_all()
+        assert _active(db_session, pid) is not None
+
+    def test_the_old_prefix_test_could_not_have_caught_it(self):
+        """Pins WHY this needed a new mechanism: the prose shape does not start
+        with an angle bracket, so no prefix test over tag literals can see it.
+        If this ever goes red the relay format has changed and the numbers in
+        the ticket no longer describe reality."""
+        assert not RELAY_PROSE_PREFIX.startswith("<")
+        assert _is_synthetic_user_text(_relay_prose("anything")) is False
+
+
+class TestUnseenWrapperFailsClosed:
+    """AC4, the design claim: an unseen wrapper wording is synthetic by
+    default. Driven with wording that is on no list, so the discarded
+    implementation could not satisfy these by construction."""
+
+    @pytest.mark.parametrize("text", [
+        "Relayed from the mesh: shut it down for the night",
+        "Forwarded by the scheduler. shut it down for the night",
+        "[[inbox]] shut it down for the night",
+    ])
+    def test_unknown_prose_wrapper_without_provenance_is_synthetic(self, text):
+        assert _is_human_authored_entry(_user_str(text, prompt_source=None)) is False
+
+    def test_unknown_angle_wrapper_is_caught_by_shape_too(self):
+        # Belt and braces for the text-only call site: a kebab-case tag nobody
+        # has enumerated still reads as a wrapper.
+        assert _is_synthetic_user_text("<mesh-relay from='x'>close it</mesh-relay>") is True
+
+    def test_an_unrecognised_provenance_value_is_not_human(self):
+        # If CC adds a new source, it is not human until we say so.
+        assert _is_human_authored_entry(
+            _user_str("shut it down for the night", prompt_source="replayed")
+        ) is False
+
+
+class TestNoOverCatch:
+    """AC3. Widening a filter until it swallows real input trades a silent
+    failure for a louder one.
+
+    BE PRECISE ABOUT WHAT THESE PROVE. They all pass under the OLD
+    implementation, so they are NOT evidence the provenance allowlist exists.
+    But they are not idle either: they go red against the naive fix this
+    ticket forbids. Adding the prose wording to the text filter makes
+    test_human_typing_the_relay_wording_is_still_human fail, because a human
+    who types that sentence loses control of their own session. That is the
+    case this class is here to catch."""
+
+    def test_human_typing_the_relay_wording_is_still_human(self):
+        # The adversarial case. It passes BY CONSTRUCTION: provenance decides,
+        # so no wording a human can type changes the verdict.
+        entry = _user_str(_relay_prose("shut it down for the night"))
+        assert _is_human_authored_entry(entry) is True
+
+    def test_human_sentence_merely_starting_with_another_is_human(self):
+        assert _is_human_authored_entry(
+            _user_str("Another thing before we stop: shut it down for the night")
+        ) is True
+
+    def test_queued_prompts_are_human(self):
+        assert _is_human_authored_entry(
+            _user_str("shut it down for the night", prompt_source="queued")
+        ) is True
+
+    def test_human_typed_markup_is_not_mistaken_for_a_wrapper(self):
+        # <div> and <3 have no hyphen, so the kebab-case shape leaves them be.
+        assert _is_synthetic_user_text("<div>what does this render as</div>") is False
+        assert _is_synthetic_user_text("<3 that idea") is False
+
+    def test_a_human_close_phrase_still_closes(
+        self, client, db_session, hook_project, write_transcript
+    ):
+        pid = hook_project["id"]
+        _seed_open_session(client, pid)
+        path = write_transcript([_user_str("shut it down for the night")])
+        r = client.post("/api/hooks/session-end", json={
+            "session_id": _session_id(),
+            "transcript_path": path,
+            "cwd": hook_project["repo_path"],
+            "hook_event_name": "SessionEnd",
+        })
+        assert r.status_code == 200, r.text
+        db_session.expire_all()
+        assert _active(db_session, pid) is None
+
+
+class TestDegradationIsLoud:
+    """The cost of failing closed: if provenance ever stops arriving, phrase
+    detection stops rather than misfires. That must not be silent, because
+    silence is how the mis-classified turns accumulated unseen."""
+
+    def test_transcript_of_only_synthetic_turns_warns(
+        self, write_transcript, warnings_from_scan
+    ):
+        path = write_transcript([
+            _relay_prose_msg("shut it down for the night"),
+            _teammate_msg("and again"),
+        ])
+        assert _extract_user_message_texts(path, head=False) == []
+        assert any("none human-authored" in w for w in warnings_from_scan)
+
+    def test_no_warning_when_a_human_turn_is_present(
+        self, write_transcript, warnings_from_scan
+    ):
+        path = write_transcript([
+            _relay_prose_msg("shut it down for the night"),
+            _user_str("ship it"),
+        ])
+        assert _extract_user_message_texts(path, head=False) == ["ship it"]
+        assert not any("none human-authored" in w for w in warnings_from_scan)
+
+    def test_no_warning_on_an_empty_transcript(
+        self, write_transcript, warnings_from_scan
+    ):
+        path = write_transcript([])
+        assert _extract_user_message_texts(path, head=False) == []
+        assert not any("none human-authored" in w for w in warnings_from_scan)
 
 
 # ---------------------------------------------------------------------------

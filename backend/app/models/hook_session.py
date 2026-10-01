@@ -6,7 +6,7 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: HookSession, HookSessionStatus, HookSessionType
-# Last Modified: 2026-09-17 (DWB-581: ticket_source, which mechanism supplied ticket_id)
+# Last Modified: 2026-09-29 (DWB-584: prompt_count, storage for the DWB-590 top-off counter)
 
 import enum
 from datetime import datetime
@@ -107,6 +107,26 @@ class HookSession(Base):
     # full parse. NULL means "never swept", which reads as zero and lets the
     # first sweep look once.
     transcript_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # DWB-584 (storage for DWB-590's top-off): how many user prompts this
+    # Claude Code session has taken. STORED, not derived, and that was checked
+    # rather than defaulted: nothing in the schema records a prompt. This table
+    # is one row per session, not per prompt, and handle_user_prompt writes no
+    # row on any of its noop paths, so there is no existing count and no trace
+    # to count from.
+    #
+    # Keyed by session_id, which the hook payload already carries, making the
+    # counter per Claude Code session and therefore per agent - the same unit
+    # the top-off is injected into.
+    #
+    # NOT NULL default 0, so an existing row reads as "no prompts counted yet"
+    # rather than NULL. One edge belongs to DWB-590, not here: a prompt arriving
+    # before SessionStart has been processed has no row to count against, and
+    # that case needs a defined behaviour rather than an exception.
+    #
+    # Unrelated to memory mode. Top-off is orthogonal to human_memory by ruling.
+    prompt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     status: Mapped[HookSessionStatus] = mapped_column(
         Enum(HookSessionStatus), nullable=False, default=HookSessionStatus.active
     )

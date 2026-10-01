@@ -3,10 +3,11 @@
 # Created: 2026-03-29
 # Purpose: Agent HTTP endpoints — CRUD + identify + consolidation ack
 # Caller: app/main.py
-# Callees: app/services/agent.py, app/services/agent_consolidation.py
+# Callees: app/services/agent.py, app/services/agent_consolidation.py, app/services/raw_memory.py, app/services/memory_score.py
 # Data In: HTTP requests
 # Data Out: JSON responses (AgentRead, AgentIdentifyResponse, AgentConsolidationAckRead)
-# Last Modified: 2026-09-15 (DWB-537 redemption verdict on append; DWB-532 GET /{id}/memory)
+# Last Modified: 2026-09-30 (DWB-603/Miles ruling: GET /{id}/memory/scored is
+#                pure again - firing moved to memory_consult.consult_scars)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -38,8 +39,13 @@ from app.schemas.agent_consolidation_ack import (
     AgentConsolidationAckCreate,
     AgentConsolidationAckRead,
 )
+from app.schemas.agent_memory import RawMemoryCreate, RawMemoryResponse
+from app.schemas.memory_score import ScoredMemoryResponse
 from app.services import agent as svc
 from app.services import agent_consolidation as consolidation_svc
+from app.services import memory_mode as memory_mode_svc
+from app.services import memory_score as memory_score_svc
+from app.services import raw_memory as raw_memory_svc
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -150,6 +156,14 @@ def session_complete(
     so every worker fell back to the append path and the primary path's
     failure was invisible because the fallback always worked.
     """
+    # DWB-589: spec section 7 hard rule 1 - stock memory is not written on a
+    # human_memory project. Runs BEFORE the write so nothing lands, and names
+    # the endpoint to use instead (a refusal that cannot say what to do instead
+    # drops the lesson the agent is holding right now).
+    try:
+        memory_mode_svc.assert_stock_write_allowed(db, agent_id, "session-complete")
+    except memory_mode_svc.StockMemorySealed as e:
+        raise HTTPException(409, e.detail)
     try:
         return svc.record_session_complete(
             db,
@@ -298,6 +312,49 @@ def read_agent_memory(agent_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status, e.detail)
 
 
+@router.get("/{agent_id}/memory/scored", response_model=ScoredMemoryResponse)
+def read_scored_memory(agent_id: int, db: Session = Depends(get_db)):
+    """DWB-585: every memory for this agent with its DERIVED score and band,
+    plus the demote / evict / promote candidate lists.
+
+    THE LISTS ARE PRODUCED HERE, BY CODE, and that is the requirement rather
+    than an implementation detail. Miles's ruling: the consolidation math is
+    programmatic. The model does the SCAN and the rewrite; it does not decide
+    what to demote. A playbook paragraph saying "consider demoting things" is
+    the version this endpoint replaces, so nothing that reads this may fall
+    back to prose when the response is empty.
+
+    `computed` separates "nothing to do" from "nothing ran": three empty lists
+    are the right answer for a tidy agent AND for a project that never turned
+    human_memory on, and those are opposite facts.
+
+    NOTE FOR DWB-589, which refuses stock-memory operations when human_memory
+    is on: this route sits under the same `/memory` path as the stock file
+    endpoints but is NOT one of them. The refusal there has to be per-route. A
+    prefix-wide block would disable the endpoint that makes human_memory mode
+    work, in exactly the mode that needs it.
+
+    DWB-603/MILES-RULING (2026-09-30): THIS GET HAS NO SIDE EFFECT, AND MUST
+    NEVER GROW ONE. An earlier version of DWB-603 fired `fired_count` on every
+    scar-family row returned here, reasoning this was the only "reached for"
+    signal the store had. Miles ruled that reasoning wrong: this route is
+    called from spawn/SessionStart injection (`memory_context.py`) and from
+    DWB-613's dashboard panel, and neither is a deliberate consultation -
+    "deploy doesn't count as a read... outside of normal startup." A read
+    fires only when it is a genuine question ("have I made this error
+    before?"), which this endpoint, by construction, never asks - it always
+    returns everything, which is exactly why it must stay pure. The real
+    consultation path is `memory_consult.consult_scars` (DWB-603 cont'd).
+
+    Errors:
+      - 404: agent not found.
+    """
+    try:
+        return memory_score_svc.scored_memory(db, agent_id=agent_id)
+    except memory_score_svc.MemoryScoreError as e:
+        raise HTTPException(404, e.detail)
+
+
 @router.post(
     "/{agent_id}/memory/append",
     response_model=MemoryAppendResponse,
@@ -334,6 +391,14 @@ def append_agent_memory(
       - 404: agent or project not found.
       - 500: disk write failure (memory dir or file unwritable).
     """
+    # DWB-589: spec section 7 hard rule 1 - stock memory is not written on a
+    # human_memory project. Runs BEFORE the write so nothing lands, and names
+    # the endpoint to use instead (a refusal that cannot say what to do instead
+    # drops the lesson the agent is holding right now).
+    try:
+        memory_mode_svc.assert_stock_write_allowed(db, agent_id, "memory/append")
+    except memory_mode_svc.StockMemorySealed as e:
+        raise HTTPException(409, e.detail)
     try:
         return svc.append_memory(
             db,
@@ -386,6 +451,14 @@ def compact_agent_memory(
     Errors: 404 agent/project missing; 400 still over ceiling / bad file /
     empty content / unscoped agent / no repo_path; 500 disk write failure.
     """
+    # DWB-589: spec section 7 hard rule 1 - stock memory is not written on a
+    # human_memory project. Runs BEFORE the write so nothing lands, and names
+    # the endpoint to use instead (a refusal that cannot say what to do instead
+    # drops the lesson the agent is holding right now).
+    try:
+        memory_mode_svc.assert_stock_write_allowed(db, agent_id, "memory/compact")
+    except memory_mode_svc.StockMemorySealed as e:
+        raise HTTPException(409, e.detail)
     try:
         return svc.compact_memory(
             db, agent_id=agent_id, file=data.file, content=data.content
@@ -431,6 +504,14 @@ def condense_agent_memory(
     Errors: 404 agent/project missing; 400 still over ceiling / bad file /
     empty content / unscoped agent / no repo_path; 500 disk write failure.
     """
+    # DWB-589: spec section 7 hard rule 1 - stock memory is not written on a
+    # human_memory project. Runs BEFORE the write so nothing lands, and names
+    # the endpoint to use instead (a refusal that cannot say what to do instead
+    # drops the lesson the agent is holding right now).
+    try:
+        memory_mode_svc.assert_stock_write_allowed(db, agent_id, "memory/condense")
+    except memory_mode_svc.StockMemorySealed as e:
+        raise HTTPException(409, e.detail)
     try:
         return svc.condense_memory(
             db, agent_id=agent_id, file=data.file, content=data.content
@@ -475,3 +556,63 @@ def scaffold_memory(agent_id: int, db: Session = Depends(get_db)):
         "skipped": result.skipped,
         "skip_reason": result.skip_reason,
     }
+
+
+@router.post(
+    "/{agent_id}/memories",
+    response_model=RawMemoryResponse,
+    status_code=201,
+)
+def append_raw_memory(
+    agent_id: int,
+    data: RawMemoryCreate,
+    db: Session = Depends(get_db),
+):
+    """Append one RAW, untiered memory row for this agent (DWB-586).
+
+    Spec docs/human_memory_spec.md section 4: a session appends raw and
+    unsorted, because tiering in the moment rubber-stamps in-the-moment
+    salience, which is the judgment consolidation exists to make.
+
+    Body: { body, context_key?, cost?, caught_by?, surprised?, tier? }
+
+    cost / caught_by / surprised are spec section 4's moment-tags, and they live
+    on the MEMORY rather than the journal (section 6 as amended 2026-09-29):
+    all three are read against memories, and the SCAN gates on `cost`.
+
+    `tier` is refused, always, with the reason. Section 7 hard rule 5 puts CORE
+    behind a human ruling or logged cross-context evidence, and section 4 puts
+    every other tier behind consolidation. The field is accepted by the schema
+    only so the attempt can be answered rather than silently written as `raw`.
+
+    A write with NO open DWB session is ACCEPTED, not refused: losing the lesson
+    because the bookkeeping was not ready is the worse outcome. The response
+    says which happened in `session_state` (`open` | `none_open`) alongside
+    `created_session_id`, because a null id alone cannot distinguish "nothing
+    was open" from "nobody looked".
+
+    Stamps agents.last_memory_write_at like every other memory write, so the
+    DWB-519 write-on-close gate sees a human_memory agent's participation with
+    no mode-aware branch (DWB-589 verifies rather than rebuilds this).
+
+    Returns 201. Errors:
+      - 400: empty body, any tier at all, unscoped agent.
+      - 404: agent or project not found.
+    """
+    try:
+        return raw_memory_svc.append_raw_memory(
+            db,
+            agent_id=agent_id,
+            body=data.body,
+            context_key=data.context_key,
+            cost=data.cost,
+            caught_by=data.caught_by,
+            surprised=data.surprised,
+            tier=data.tier,
+        )
+    except raw_memory_svc.RawMemoryWriteError as e:
+        if e.code in ("agent_not_found", "project_not_found"):
+            status = 404
+        else:
+            status = 400
+        raise HTTPException(status, e.detail)

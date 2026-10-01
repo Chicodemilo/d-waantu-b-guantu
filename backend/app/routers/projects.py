@@ -6,7 +6,7 @@
 # Callees: app/services (project, project_agent, standards_audit, test_result, seed_demo, playbook_deploy, activity_log), models (ActivityLog, Agent, Alert, InterAgentMessage, ProjectAgent, Ticket)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-09-15 (DWB-546: GET /{id}/ticket-token-baseline)
+# Last Modified: 2026-09-30 (DWB-596: GET /{id}/memory-transition; DWB-593 transition refusal)
 
 import json
 import logging
@@ -27,6 +27,7 @@ from app.models.inter_agent_message import InterAgentMessage
 from app.models.project import ProjectStatus
 from app.models.project_agent import ProjectAgent
 from app.models.ticket import Ticket
+from app.schemas.memory_transition import MemoryTransitionStatusRead
 from app.schemas.project import (
     TicketTokenBaselineRead,
     ProjectCreate,
@@ -37,6 +38,7 @@ from app.schemas.project import (
 )
 from app.schemas.project_agent import ProjectTeamRead
 from app.schemas.test_result import TestResultRead
+from app.services import memory_transition as transition_svc
 from app.services import project as svc
 from app.services import project_agent as pa_svc
 from app.services import recap as recap_svc
@@ -571,7 +573,58 @@ def update_project(
             "disable Jira.",
         )
 
+    # DWB-588 + DWB-593: a memory_mode change is refused unless it is a LEGAL
+    # EDGE, confirmed where the spec requires it, and clear of in-flight
+    # transition entries. The refusal body IS the message, so the caller that
+    # tried the change is the one who reads it, and the frontend never keeps
+    # its own copy of the copy.
+    #
+    # DWB-593 superseded the old confirmation-only guard: a direct
+    # stock -> human_memory PATCH is now refused OUTRIGHT rather than merely
+    # warned about, because confirming it was never the missing precondition.
+    # The missing precondition was that the content had moved.
+    refusal = svc.memory_mode_transition_refusal(db, project, data)
+    if refusal:
+        raise HTTPException(400, refusal)
+
     return svc.update_project(db, project, data)
+
+
+@router.get(
+    "/{project_id}/memory-transition",
+    response_model=MemoryTransitionStatusRead,
+)
+def get_memory_transition(project_id: int, db: Session = Depends(get_db)):
+    """DWB-596: the project's memory-mode transition status, COMPUTED.
+
+    THE STATUS HAS NO WRITE PATH: no status column, no endpoint accepting one,
+    no request field carrying one. Miles's requirement is that this is
+    programmatic rather than an agent deciding to post an update, and the way
+    that holds is structural rather than by a rule: a rule would be followed
+    until the day it was not, and a stale status looks exactly like a live one.
+
+    SIBLING ROUTES UNDER THIS PREFIX DO WRITE, AND THAT IS A DIFFERENT SURFACE.
+    The pipeline has to write ENTRIES or nothing would ever progress; what must
+    not exist is a way to write the STATUS, because every count here is derived
+    from those entries at read time and therefore cannot go stale relative to
+    them. The writers are named, with reasons, in TRANSITION_WRITERS in
+    tests/test_memory_transition_status_dwb596.py, and a new one fails that
+    test until someone says why it is not writing a status.
+
+    An earlier version of this docstring said there was no sibling that writes.
+    That was true when written and stopped being true when the transition
+    pipeline landed; the distinction that replaced it is the substance, not a
+    weakening of it.
+
+    A project that never started a transition is answered with null run fields
+    and status `not_started`, not a 404: the caller already knows from
+    `memory_mode` whether to expect a run, and an error for an ordinary state
+    forces a try/catch around the normal case.
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return transition_svc.get_transition_status(db, project_id)
 
 
 @router.post("/{project_id}/overhead", response_model=ProjectRead)

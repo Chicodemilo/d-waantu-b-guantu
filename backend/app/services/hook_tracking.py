@@ -3,10 +3,13 @@
 # Created: 2026-04-09
 # Purpose: Hook-based tracking service - handles Claude Code lifecycle hook events + DWB session phrase detection (DWB-336 Layer-1 regex, DWB-343 OPEN retry on session-end, DWB-344 UserPromptSubmit fast path, DWB-353 ad_hoc routing + alert removal, DWB-373 hook_session.dwb_session_id linker, DWB-390 agent-id-aware pending-marker claim, DWB-395 grace-window resurrect, DWB-402 Layer-2 Haiku classifier retired)
 # Caller: app/routers/hooks.py
-# Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py
+# Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py, app/services/journal.py (DWB-612 top-off journal search), app/services/memory_consult.py (DWB-612 top-off scar consult), app/services/memory_consolidate.py (DWB-609 session-start consolidation)
 # Data In: db: Session, hook event JSON from Claude Code hooks
-# Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows
-# Last Modified: 2026-09-17 (DWB-581: ticket_source stamped at all six ticket_id writes; DWB-580: sessions are no longer frozen at their first turn - shared delta-aware token recorder, completed-guards removed from both hook paths, forward-only transcript recapture sweep)
+# Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows, memory movements via memory_consolidate (DWB-609)
+# Last Modified: 2026-09-30 (DWB-612: top-off's firing pass also consults scars
+#                via memory_consult.consult_scars, same term as the journal
+#                search, per Miles's "same pass, same term" ruling; previous
+#                entry: DWB-609 handle_session_start consolidation)
 #
 # DWB-417 (2026-06-22): handle_tool_use ingests the PostToolUse hook and
 # persists one tool_actions row per tool call, resolving agent/dwb_session/
@@ -55,6 +58,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.config.session_phrases import match_close, match_open
 from app.models.agent import Agent
 # DWB-353: app.models.alert imports removed - the only consumer in this
@@ -73,13 +77,16 @@ from app.models.hook_session import (
     HookSessionStatus,
     HookSessionType,
 )
-from app.models.project import Project
+from app.models.project import MemoryMode, Project
 from app.models.project_agent import ProjectAgent
 from app.models.sprint import Sprint, SprintStatus
 from app.models.inter_agent_message import InterAgentMessage
 from app.models.ticket import Ticket, TicketStatus
 from app.models.tool_action import ToolAction
 from app.services import dwb_session as dwb_svc
+from app.services import journal as journal_svc
+from app.services import memory_consolidate
+from app.services import memory_consult
 from app.services import tracking
 from app.services.activity_log import log_activity
 from app.services.failed_hook import log_failed_hook
@@ -240,6 +247,8 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
     5. Resolve agent, determine session type
     6. Create HookSession(status=active)
     7. Log start via tracking.py
+    8. DWB-609: run the memory consolidation job (human_memory projects,
+       resolved agent only; never fails the hook)
     """
     session_id = hook_data.get("session_id", "")
     if not session_id:
@@ -322,6 +331,28 @@ def handle_session_start(db: Session, hook_data: dict) -> HookSession:
     # the hook_session is persisted so attribution stays correct even when
     # phrase detection no-ops. Errors are swallowed inside the helper.
     try_open_dwb_session_from_transcript(db, project, transcript_path)
+
+    # DWB-609: the session-start consolidation job. Gated on human_memory
+    # mode and a resolved agent - a project in stock mode has no agent_memories
+    # rows to consolidate, and a session with no resolved agent (main CLI
+    # overhead, an unmatched name) has nothing to run it for. Never allowed to
+    # fail the hook: this endpoint must never 5xx (module docstring, hooks.py),
+    # and a consolidation bug is not a reason to lose session-start tracking,
+    # which has already succeeded by this point. Runs AT session start, which
+    # is precisely the moment Miles ruled is NOT a read - every function this
+    # calls into (see memory_consolidate.py) already avoids any fired_count /
+    # retrieval_count write site, so this call cannot fire anything by
+    # construction, not by remembering to pass a flag.
+    if agent is not None and project.memory_mode == MemoryMode.human_memory:
+        try:
+            memory_consolidate.consolidate_agent(db, agent_id=agent.id)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "DWB-609 consolidation failed for agent_id=%s session_id=%s",
+                agent.id, session_id,
+            )
 
     return session
 
@@ -1723,40 +1754,100 @@ def _resolve_ticket(db: Session, agent: Agent, project_id: int) -> Ticket | None
 _PHRASE_SCAN_LIMIT = 50
 
 
-# DWB-414: synthetic (non-human-authored) user-role content. Claude Code
-# records many entries with role/type "user" that the human never typed:
-# tool results, teammate-message relays, slash-command echoes + their stdout,
-# task notifications, injected system reminders, and meta entries. Session
-# open/close phrase detection must only fire on GENUINE user-authored turns,
-# otherwise a close phrase quoted inside a tool result, a relayed teammate
-# message, or an example block falsely closes the session (DWB-396). A
-# string-content turn is treated as synthetic when it begins with one of
-# these wrapper tags; isMeta and tool-result entries are skipped outright.
-_SYNTHETIC_USER_TAGS: tuple[str, ...] = (
-    "<teammate-message",
-    "<command-name>",
-    "<command-message>",
-    "<command-args>",
-    "<command-contents>",
-    "<local-command-stdout>",
-    "<local-command-stderr>",
-    "<local-command-caveat>",
-    "<task-notification>",
-    "<system-reminder>",
-    "<user-prompt-submit-hook>",
-    "<bash-input>",
-    "<bash-stdout>",
-    "<bash-stderr>",
-    "<user-memory-input>",
-)
+# DWB-414 / DWB-592: separating what the human typed from what the harness
+# injected. Claude Code records many entries with role/type "user" that the
+# human never typed: tool results, teammate-message relays, slash-command
+# echoes + their stdout, task notifications, injected system reminders, and
+# meta entries. Session open/close phrase detection must only fire on GENUINE
+# user-authored turns, otherwise a close phrase quoted inside a tool result, a
+# relayed teammate message, or an example block falsely closes the session
+# (DWB-396).
+#
+# DWB-592 INVERTED THE MECHANISM, and the inversion is the fix. The original
+# test was `startswith` over a hand-maintained tuple of wrapper tags, which
+# FAILS OPEN: any wording not on the list is promoted to human input and gets
+# to drive session lifecycle. That is how a relayed turn opening with the
+# PROSE line "Another Claude session sent a message:" was classified as
+# human-typed, and it is not a rare shape: measured over every transcript on
+# this machine, the prose relay outnumbered the angle-tag relay by about ten
+# to one. Adding the prose line to the tuple would have fixed that one
+# instance and left the failure direction exactly where it was.
+#
+# The replacement is an ALLOWLIST ON PROVENANCE. Claude Code stamps a turn the
+# human actually submitted with `promptSource`. Measured across 2349 user
+# turns from every project on this machine, on CC 2.1.181 and 2.1.272, with
+# isMeta and tool-result entries excluded:
+#
+#     promptSource   origin.kind         count  what it is
+#     typed          human                 907  human prose
+#     queued         human                  60  human prose
+#     system         task-notification      53  angle-tag wrappers
+#     (key absent)   (absent)             1309  990 prose relays + 319 tags
+#     (key absent)   human                  20  bash / slash-command echoes
+#
+# Zero overlap in either direction: no typed/queued turn is wrapper-shaped and
+# no wrapper-shaped turn is typed/queued. Note the last row, which is why
+# `origin.kind == "human"` is NOT usable as the signal: the human did type the
+# `!` or `/` that produced those echoes, so CC calls their origin human, but
+# the echo turns themselves are not prose the human addressed to anyone.
+#
+# THIS NOW FAILS CLOSED. A wrapper wording nobody here has seen, prose or
+# angle-bracket, arrives without `promptSource: typed`, so it is synthetic and
+# cannot drive lifecycle. The cost is the other direction: if CC ever stops
+# emitting the field, phrase detection stops firing rather than misfiring, and
+# the deterministic /dwb-open and /dwb-close commands are the fallback. That
+# is the right trade here - a missed open costs one command, a false close
+# silently ends the tracking window for the whole project - but it is a real
+# behaviour change, which is why _log_no_human_turns below makes it loud.
+_HUMAN_PROMPT_SOURCES: frozenset[str] = frozenset({"typed", "queued"})
+
+# Generic wrapper-tag shape, for the one call site that has no provenance to
+# read (see _is_synthetic_user_text). Every harness wrapper observed is
+# kebab-case: teammate-message, task-notification, local-command-stdout,
+# user-prompt-submit-hook. Requiring at least one hyphen generalises to
+# wrappers nobody has seen yet while leaving markup a human might plausibly
+# type (<div>, <b>, <3) alone. Measured against the same transcripts: it
+# matches all 390 angle-tag turns and none of the 967 human turns.
+_WRAPPER_TAG_RE = re.compile(r"^\s*</?[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?:\s|/?>)")
+
+
+def _is_human_authored_entry(entry: dict) -> bool:
+    """DWB-592: True when a transcript entry is a turn the HUMAN submitted.
+
+    Provenance allowlist, not a wrapper denylist: the entry must carry a
+    `promptSource` Claude Code only stamps on a real submission. Anything else
+    (a relay, an echo, a notification, a wrapper wording nobody has seen yet)
+    is synthetic by default rather than by enumeration.
+
+    The text-shape check is ANDed in as a second net, so it can only ever move
+    a verdict toward synthetic, never toward human. It costs nothing and keeps
+    the known wrappers caught if the provenance field is ever renamed.
+    """
+    if entry.get("promptSource") not in _HUMAN_PROMPT_SOURCES:
+        return False
+    content = (entry.get("message") or {}).get("content") or entry.get("content")
+    if isinstance(content, str) and _is_synthetic_user_text(content):
+        return False
+    return True
 
 
 def _is_synthetic_user_text(text: str) -> bool:
-    """DWB-414: True when a user-role string is Claude-Code-injected rather
-    than typed by the human (teammate relay, command echo/stdout, task
-    notification, system reminder, etc.). Such text must not drive session
-    open/close phrase detection."""
-    return text.lstrip().startswith(_SYNTHETIC_USER_TAGS)
+    """DWB-414: True when a user-role string is harness-injected rather than
+    typed by the human (teammate relay, command echo/stdout, task
+    notification, system reminder). Such text must not drive session
+    open/close phrase detection.
+
+    TEXT-ONLY, AND THAT IS A KNOWN LIMIT. This is the fallback for the
+    UserPromptSubmit path, whose hook payload carries the prompt string and no
+    provenance field, so the allowlist in _is_human_authored_entry cannot
+    reach it. A generic kebab-case tag pattern beats the sixteen literals it
+    replaces because it catches angle-bracket wrappers nobody has seen yet,
+    but it cannot catch an unseen PROSE wrapper: prose is indistinguishable
+    from prose without provenance. Closing that properly needs provenance in
+    the hook payload and is a follow-up, not something to fake here by
+    listing today's prose wording and calling it fixed.
+    """
+    return bool(_WRAPPER_TAG_RE.match(text))
 
 
 def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
@@ -1777,13 +1868,14 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
     ``head=False`` returns the last ``_PHRASE_SCAN_LIMIT`` (used for close
     detection on SessionEnd). Both bound I/O.
 
-    DWB-414: only GENUINE human-authored turns are returned. Claude Code
-    records tool results, teammate-message relays, slash-command echoes +
+    DWB-414 / DWB-592: only GENUINE human-authored turns are returned. Claude
+    Code records tool results, teammate-message relays, slash-command echoes +
     stdout, task notifications, injected system reminders, and meta entries
-    all with role/type "user". Those are filtered out (``isMeta`` entries,
-    ``toolUseResult`` entries, and string content beginning with a synthetic
-    wrapper tag) so a close phrase quoted in non-human text can no longer
-    trip a false open/close.
+    all with role/type "user". ``isMeta`` and ``toolUseResult`` entries are
+    skipped outright; everything else must pass ``_is_human_authored_entry``,
+    which allows a turn through only when Claude Code stamped it with a
+    human ``promptSource``. That is an allowlist, so a relay wording nobody
+    has seen yet is excluded by default rather than by enumeration.
 
     Returns an empty list on any read/parse error.
     """
@@ -1800,6 +1892,7 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
     iter_lines = lines if head else list(reversed(lines))
 
     out: list[str] = []
+    user_turns = 0
     for raw in iter_lines:
         raw = raw.strip()
         if not raw:
@@ -1829,6 +1922,15 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
         if "toolUseResult" in entry:
             continue
 
+        # Counted BEFORE the provenance gate: this is the denominator that
+        # makes an all-synthetic transcript distinguishable from an empty one.
+        user_turns += 1
+
+        # DWB-592: provenance allowlist. Replaces a wrapper-tag denylist that
+        # failed open, promoting any unlisted wording to human input.
+        if not _is_human_authored_entry(entry):
+            continue
+
         content = msg.get("content") or entry.get("content")
         text: str | None = None
         if isinstance(content, str):
@@ -1844,13 +1946,28 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
             if parts:
                 text = "\n".join(parts)
 
-        # DWB-414: drop synthetic string content (teammate relays, command
-        # echoes/stdout, task notifications, system reminders) that carries a
-        # user role but was injected by the harness, not typed by the human.
-        if text and not _is_synthetic_user_text(text):
+        if text:
             out.append(text)
         if len(out) >= _PHRASE_SCAN_LIMIT:
             break
+
+    # DWB-592: a transcript that HAS user turns and yields none of them is the
+    # state this fix degrades into if Claude Code stops stamping provenance,
+    # and it is indistinguishable from "working" at every other layer: phrase
+    # detection simply stops, quietly, exactly the way 331 mis-classified
+    # turns accumulated unseen. Say it out loud. Cheap because it can only
+    # fire once per scan and only when the scan found nothing.
+    if user_turns and not out:
+        logger.warning(
+            "transcript scan found %d user turn(s) but none human-authored "
+            "(promptSource in %s); session phrase detection cannot fire for "
+            "this transcript. If this is not a transcript of pure relays, "
+            "Claude Code may have changed how it stamps prompt provenance "
+            "(DWB-592). path=%s",
+            user_turns,
+            sorted(_HUMAN_PROMPT_SOURCES),
+            path,
+        )
 
     return out
 
@@ -1952,6 +2069,322 @@ def try_close_dwb_session_from_transcript(
         )
 
 
+# ---------------------------------------------------------------------------
+# DWB-590: TOP-OFF. A periodic self-check injected mid-session.
+#
+# It is NOT a memory reload and it is NOT gated on `memory_mode`. Miles ruled
+# top-off independent of memory mode, and spec section 8 reached the same
+# conclusion: "do not gate it. It is orthogonal, about repetition and drift,
+# not memory structure." The columns it reads share the `projects` table with
+# the memory columns because DWB-584 held the sprint's only migration slot.
+# Schema colocation is not feature coupling, and nothing below may read
+# `memory_mode`. A test asserts that at the source level.
+#
+# Why it is programmatic rather than a playbook instruction, ruled by Miles:
+# "Archies don't have to remember to turn on the top off tool! This is the
+# whole point." Anything depending on an agent remembering to switch it on
+# will eventually be off, and off in exactly the sessions going badly, because
+# that is when an agent is least likely to run housekeeping.
+# ---------------------------------------------------------------------------
+
+# WHAT GETS INJECTED IS ONE SHORT CONSTANT LINE, RULED BY MILES: "yes... but
+# its short and the same every time... not a flood of bs", with the form given
+# as `••TopOff Complete <link to its page in dwb>`.
+#
+# THE FOUR QUESTIONS ARE NOT INJECTED. Spec section 8 lists them and an earlier
+# build of this put them in the payload verbatim. Ten prompts apart, forever,
+# that is the flood Miles rejected - and section 8 itself predicts why he is
+# right: "Too frequent and it becomes wallpaper, and wallpaper gets skipped
+# exactly like the rule it replaced."
+#
+# THE COST IS REAL AND IS NOT HIDDEN HERE. The marker is now the TRIGGER rather
+# than the CONTENT, so the check depends on the agent knowing what the marker
+# means. That makes it a rule behind a reference, which is weaker than a rule in
+# front of you. The agent-facing home for the questions is the playbook; this
+# module deliberately does not keep a second copy, because two homes for one
+# rule is the failure the whole memory spec is about. For a reader here, the
+# questions are: am I answering a question I already answered; is the user
+# getting what they asked for or what I decided to give them; what am I
+# asserting from a summary rather than the source; what have I been told once
+# and drifted from.
+#
+# ONE THING IS MEASURED AND ONE IS NOT. Measured: `additionalContext` IS
+# delivered on this channel. The SessionStart lane proves it - the transcript
+# records it as an attachment of type `hook_additional_context` whose rendered
+# form is a `<system-reminder>` block, and content over about 2KB is truncated
+# to a preview plus a file on disk. NOT measured: whether Claude Code prints
+# any of it in the human's terminal. That is why the injected text is kept to
+# the one line Miles asked for rather than assuming he will not see it.
+TOPOFF_RECEIPT = "••TopOff Complete {link}"
+"""The whole human-visible payload. Short, constant, and the same every time."""
+
+TOPOFF_LINK_PATH = "/projects/{project_id}/topoff"
+"""Where the receipt points. THE PAGE DOES NOT EXIST YET and building it is a
+follow-up ticket, not this one. The path follows the dashboard's existing
+`/projects/:id/<thing>` shape so the view can be added under it without the
+link changing. Invented pages are worse than dead links: a dead link is
+obviously unfinished, where a wrong one sends the reader somewhere plausible."""
+
+# DWB-612: how much of the firing prompt becomes the journal search term.
+# Capped for two reasons, both real: a MySQL LIKE against an unbounded string
+# is wasted work, and a longer literal substring only makes an exact match
+# LESS likely, not more, which is the opposite of what a search is for.
+_TOPOFF_SEARCH_TERM_MAX_CHARS = 300
+
+# Prompts shorter than this are not searched. Ruled rather than left to fall
+# out of the LIKE clause: a term of "ok" or "yes" would match almost any
+# journal entry that happens to contain those two letters in sequence, which
+# would inflate retrieval_count on entries the prompt never actually
+# concerned. Below this length there is not enough prompt to be a term.
+_TOPOFF_SEARCH_TERM_MIN_CHARS = 12
+
+
+def _topoff_search_term(prompt: str | None) -> str | None:
+    """The ONE term both top-off consultations search with.
+
+    Factored out so journal and scar matching cannot drift into searching two
+    different slices of the same prompt. Miles's ruling on the scar extension
+    was explicitly "same pass, same term" - a single term computed once and
+    handed to both is what makes that literal, rather than two call sites that
+    happen to agree today and quietly diverge later.
+
+    Returns None when there is not enough prompt to be a term (see the
+    constant above for why that floor exists); both callers treat None the
+    same way, as "do not search".
+    """
+    if not prompt:
+        return None
+    stripped = prompt.strip()
+    if len(stripped) < _TOPOFF_SEARCH_TERM_MIN_CHARS:
+        return None
+    return stripped[:_TOPOFF_SEARCH_TERM_MAX_CHARS]
+
+
+def _topoff_journal_check(
+    db: Session, *, agent_id: int | None, term: str | None
+) -> dict:
+    """DWB-612: the journal half of top-off.
+
+    Miles's model, restated because it is the one this function exists to
+    close: "during top-off, if you are repeating a mistake you search the
+    journal, and that search increments the retrieval count, which is what
+    eventually promotes the entry to CORE." Before this ticket top-off never
+    touched the journal at all - it counted a prompt and injected one line.
+
+    WHAT THIS DOES NOT DO: decide whether a mistake is actually being
+    repeated. That is a judgment call spec section 3 and this whole audit
+    keep assigning to the model, never to a script ("the model only does the
+    SCAN"). What a script CAN do, and what was missing, is make the search
+    HAPPEN automatically at the moment top-off fires rather than depend on an
+    agent remembering to run it - the same reasoning DWB-590 already applied
+    to the counter itself.
+
+    THE TERM IS THE FIRING PROMPT, CAPPED, AND THIS IS A FIRST CUT, NOT A
+    CLAIM OF GOOD RECALL. `search_entries`' `term` filter is a literal SQL
+    LIKE substring match against each journal entry's body. A prompt that
+    happens to share exact wording with a past journal entry will find it; a
+    paraphrase will not. Better matching (tokenized, ranked, fuzzy) is
+    retrieval work and belongs to its own ticket, not this wiring one. What
+    this function guarantees is narrower and real: WHEN a match exists, it is
+    found and counted, through the one write site journal.py already owns.
+
+    NO SECOND INCREMENT SITE. This calls `journal_svc.search_entries`, which
+    is the function Stan's audit confirmed is the only place `retrieval_count`
+    is written in the application. Nothing here touches the column directly.
+
+    `term` is computed once by `_topoff_search_term` and shared with
+    `_topoff_scar_check` - this function no longer looks at the raw prompt at
+    all, so the two checks cannot search different slices of it.
+
+    Never raises: called from the fire-and-forget hook path, guarded the same
+    way `_topoff_for_prompt` guards the count.
+    """
+    if not agent_id:
+        return {"searched": False, "reason": "no_agent"}
+    if not term:
+        return {"searched": False, "reason": "prompt_too_short"}
+
+    try:
+        result = journal_svc.search_entries(db, agent_id=agent_id, term=term)
+        db.commit()
+    except journal_svc.JournalError as e:
+        db.rollback()
+        return {"searched": False, "reason": f"journal_error:{e.code}"}
+    except Exception:
+        db.rollback()
+        logger.exception("_topoff_journal_check failed for agent_id=%s", agent_id)
+        return {"searched": False, "reason": "error"}
+
+    return {
+        "searched": True,
+        "matched": result["count"],
+        "entry_ids": [e.id for e in result["entries"]],
+    }
+
+
+def _topoff_scar_check(db: Session, *, agent_id: int | None, term: str | None) -> dict:
+    """DWB-612 extension: the scar half of top-off, ruled 2026-09-30.
+
+    This is the resolution to the DWB-603/610/612 collision: a scar's
+    `fired_count` only means something when it is reinforced by a genuine
+    "have I made this error before?" consultation outside normal startup
+    (Miles, verbatim). Stripping the bad firing out of `scored_memory()`
+    (DWB-603/606) without replacing it would leave `fired_count` a column with
+    no writer again - the exact defect the audit opened with - so Miles ruled
+    top-off should BE that consultation: same trigger, same term, no agent has
+    to remember to ask.
+
+    Delegates entirely to `memory_consult.consult_scars`, which is to
+    `fired_count` what `journal_svc.search_entries` is to `retrieval_count`:
+    the one write site, firing only on an actual match, never on the plain
+    unfiltered read `scored_memory()` still serves to injection and the
+    dashboard. Nothing here touches `fired_count` directly.
+
+    SAME TERM, SAME HONESTY ABOUT IT. `term` comes from `_topoff_search_term`,
+    shared with `_topoff_journal_check` by Miles's own "same pass, same term"
+    ruling. The literal-substring limitation noted on the journal side applies
+    here identically, and now matters on two counters instead of one: a false
+    match is a false "I have been here before" that can eventually promote a
+    row to CORE, which never decays.
+
+    Never raises: same fire-and-forget contract as its journal sibling.
+    """
+    if not agent_id:
+        return {"searched": False, "reason": "no_agent"}
+    if not term:
+        return {"searched": False, "reason": "prompt_too_short"}
+
+    try:
+        result = memory_consult.consult_scars(db, agent_id=agent_id, term=term)
+        db.commit()
+    except memory_consult.ConsultError as e:
+        db.rollback()
+        return {"searched": False, "reason": f"consult_error:{e.code}"}
+    except Exception:
+        db.rollback()
+        logger.exception("_topoff_scar_check failed for agent_id=%s", agent_id)
+        return {"searched": False, "reason": "error"}
+
+    return {
+        "searched": True,
+        "matched": result["count"],
+        "memory_ids": [e.id for e in result["entries"]],
+    }
+
+
+def _topoff_for_prompt(
+    db: Session, *, project: Project, session_id: str | None, prompt: str | None = None
+) -> dict:
+    """Count this prompt and decide whether the top-off check fires.
+
+    RETURNS A DICT TO MERGE INTO THE CALLER'S RESPONSE. It never returns early
+    on the caller's behalf and it never raises: see the contract in
+    handle_user_prompt.
+
+    DELIBERATELY DOES NOT CALL `_is_synthetic_user_text`, and that is a ruling
+    rather than an oversight. Not because that filter is unreliable - it is not,
+    since DWB-592 - but because it answers a different question. Top-off counts
+    what HAPPENED in the session, and a relayed teammate turn is something that
+    happened. See the fuller note at the call site.
+
+    THE COUNTER IS PER CLAUDE CODE SESSION, keyed on the `session_id` the hook
+    payload already carries, which makes it per agent: the unit the check is
+    injected into.
+
+    THE PROMPT-BEFORE-SessionStart CASE, which DWB-584 flagged and left to this
+    ticket. A prompt can arrive before the SessionStart hook has been
+    processed, so there is no `hook_sessions` row to count against. The defined
+    behaviour is to skip the count and not fire, reporting `counted: false`
+    with a reason.
+
+    Creating a row here was considered and rejected: it would invent a
+    hook_sessions row with no transcript, no agent and no project attribution,
+    which token accounting keys on, so a housekeeping feature would be
+    corrupting the cost record to avoid missing one prompt. Missing the FIRST
+    prompt of a session is also the cheapest one to miss, since nothing has had
+    time to drift yet.
+    """
+    if not project.topoff_enabled:
+        # Nothing added to the response at all, so a project with top-off off
+        # sees byte-identical output to before this feature existed.
+        return {}
+
+    if not session_id:
+        return {"topoff": {"counted": False, "fired": False, "reason": "no_session_id"}}
+
+    hook_session = db.scalar(
+        select(HookSession).where(HookSession.session_id == session_id)
+    )
+    if hook_session is None:
+        return {
+            "topoff": {"counted": False, "fired": False, "reason": "no_hook_session"}
+        }
+
+    hook_session.prompt_count = (hook_session.prompt_count or 0) + 1
+    count = hook_session.prompt_count
+    db.commit()
+
+    interval = project.topoff_interval
+    if not interval or interval < 1:
+        # The column is a plain int and an operator can set it to 0. Modulo by
+        # zero would raise inside a fire-and-forget hook, so this is guarded
+        # rather than trusted, and it is reported rather than silently treated
+        # as "off".
+        return {
+            "topoff": {
+                "counted": True,
+                "fired": False,
+                "prompt_count": count,
+                "reason": "invalid_interval",
+            }
+        }
+
+    if count % interval != 0:
+        return {
+            "topoff": {
+                "counted": True,
+                "fired": False,
+                "prompt_count": count,
+                "interval": interval,
+            }
+        }
+
+    # DWB-612: both consultations, run only when the check actually FIRES -
+    # same cadence as the receipt, not every prompt. A search on every prompt
+    # would be a different, heavier feature (and would inflate the counts on
+    # whatever the prompt of the moment happened to contain); this runs at
+    # exactly the moment the agent is told to self-check.
+    #
+    # ONE TERM, COMPUTED ONCE, HANDED TO BOTH. Miles's ruling on the scar
+    # extension was explicitly "same pass, same term" - computing it twice
+    # (once per check) would let the two searches drift onto different
+    # slices of the prompt the moment either call site changed independently.
+    term = _topoff_search_term(prompt)
+    journal_check = _topoff_journal_check(db, agent_id=hook_session.agent_id, term=term)
+    scar_check = _topoff_scar_check(db, agent_id=hook_session.agent_id, term=term)
+
+    return {
+        "topoff": {
+            "counted": True,
+            "fired": True,
+            "prompt_count": count,
+            "interval": interval,
+            "journal_check": journal_check,
+            "scar_check": scar_check,
+        },
+        # The return channel Claude Code reads from the hook's stdout, the same
+        # one DWB-517 uses on SessionStart. `hookEventName` must match the hook
+        # that is firing.
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": TOPOFF_RECEIPT.format(
+                link=settings.DASHBOARD_BASE_URL
+                + TOPOFF_LINK_PATH.format(project_id=project.id)
+            ),
+        },
+    }
+
+
 def handle_user_prompt(
     db: Session,
     hook_data: dict,
@@ -2002,23 +2435,72 @@ def handle_user_prompt(
     Fire-and-forget: every exception is swallowed and logged to failed_hooks.
     Returns a small status dict either way; the router always returns 200.
     """
+    # DWB-590: bound before the try so the exception path below can merge it
+    # too. If top-off has already fired and counted, a later failure in the
+    # phrase ladders must not swallow the injected check: the prompt has been
+    # counted either way, so dropping the block here would skip that interval
+    # entirely rather than retry it.
+    extra: dict = {}
     try:
         prompt = hook_data.get("prompt")
         if not prompt:
             return {"status": "noop", "reason": "no_prompt"}
+
+        # DWB-590: project resolution moved ABOVE the synthetic check, because
+        # top-off needs the project row for topoff_enabled / topoff_interval
+        # and must run for synthetic turns too. Safe to move: _resolve_project
+        # is two SELECTs and nothing else, so the earlier position was an
+        # optimisation, never a correctness property.
+        cwd = hook_data.get("cwd", "")
+        project = _resolve_project(db, cwd)
+        if not project:
+            return {"status": "noop", "reason": "no_project_for_cwd"}
+
+        # DWB-590: count this prompt and decide whether the top-off check
+        # fires. `extra` is MERGED into every return below and this branch
+        # NEVER returns on its own.
+        #
+        # THAT IS A HARD REQUIREMENT, NOT A STYLE CHOICE. A prompt can be both
+        # the Nth AND a close phrase. If top-off returned early, that prompt
+        # would silently fail to close the session: a housekeeping feature
+        # eating a session boundary, which is strictly worse than the drift it
+        # exists to catch, and invisible for weeks because the top-off output
+        # would look perfectly correct while the session record lost its end.
+        extra.update(
+            _topoff_for_prompt(
+                db,
+                project=project,
+                session_id=hook_data.get("session_id"),
+                prompt=prompt,
+            )
+        )
 
         # DWB-414: scope phrase detection to genuine user-authored turns. If
         # the submitted prompt is itself harness-injected synthetic content
         # (a relayed teammate message, a slash-command echo, a re-injected
         # hook block), it is not the human commanding a close/open and must
         # not trip the regex ladders. Matched in-memory; nothing persisted.
+        #
+        # DWB-590: TOP-OFF DELIBERATELY DOES NOT USE THIS FILTER, and the
+        # reason is NOT that the filter is unreliable.
+        #
+        # An earlier version of this comment said "do not couple them, this
+        # filter is missing the dominant relay shape". That argument expires:
+        # DWB-592 fixed the filter, so a reason resting on its weakness invites
+        # coupling the moment it becomes trustworthy. Reworded on Freddie's
+        # point, which is the better one.
+        #
+        # The durable reason: TOP-OFF COUNTS WHAT HAPPENED IN THE SESSION, and
+        # a relayed teammate turn is something that happened. The count is a
+        # measure of elapsed work, not a judgement about who authored a turn.
+        # This filter answers a different question - "is the human commanding a
+        # close or open" - where a false positive destroys tracking data. Two
+        # questions, two answers, and the fact that one of them is now
+        # well-implemented does not make it the answer to the other.
+        #
+        # Two tests assert both relay shapes still count.
         if _is_synthetic_user_text(prompt):
-            return {"status": "noop", "reason": "synthetic_prompt"}
-
-        cwd = hook_data.get("cwd", "")
-        project = _resolve_project(db, cwd)
-        if not project:
-            return {"status": "noop", "reason": "no_project_for_cwd"}
+            return {"status": "noop", "reason": "synthetic_prompt", **extra}
 
         # ---- Open path (DWB-344) ----
         open_phrase = match_open(prompt)
@@ -2027,7 +2509,7 @@ def handle_user_prompt(
             # race-safe check, but short-circuit here so the common case
             # doesn't churn the transaction.
             if dwb_svc.get_active_session(db, project.id) is not None:
-                return {"status": "noop", "reason": "already_open"}
+                return {"status": "noop", "reason": "already_open", **extra}
 
             new_session, _existing = dwb_svc.open_session(
                 db,
@@ -2038,12 +2520,13 @@ def handle_user_prompt(
             )
             if new_session is None:
                 # Lost the race; another caller opened concurrently.
-                return {"status": "noop", "reason": "already_open"}
+                return {"status": "noop", "reason": "already_open", **extra}
             db.commit()
             return {
                 "status": "opened",
                 "dwb_session_id": new_session.id,
                 "open_phrase": open_phrase,
+                **extra,
             }
 
         # ---- Close path (DWB-377) ----
@@ -2051,7 +2534,7 @@ def handle_user_prompt(
         if close_phrase:
             active = dwb_svc.get_active_session(db, project.id)
             if active is None:
-                return {"status": "noop", "reason": "no_active_session"}
+                return {"status": "noop", "reason": "no_active_session", **extra}
             # close_session is idempotent: if another path (sweeper, explicit
             # endpoint) closed the row between our get_active_session and
             # here, the second call returns the row unchanged. The check
@@ -2069,13 +2552,14 @@ def handle_user_prompt(
                 "status": "closed",
                 "dwb_session_id": active.id,
                 "close_phrase": close_phrase,
+                **extra,
             }
 
         # ---- Neither ladder matched ----
         # DWB-402: the Layer-2 Haiku AI classifier fallback (DWB-382) was
         # retired. A non-matching prompt is simply a noop; the deterministic
         # slash commands, regex layer, and idle sweeper cover the rest.
-        return {"status": "noop", "reason": "no_phrase_match"}
+        return {"status": "noop", "reason": "no_phrase_match", **extra}
     except Exception as e:
         # DWB-351 privacy: the user's prompt is matched in-memory and must
         # NOT be persisted under any circumstance. Strip it from the raw
@@ -2093,7 +2577,7 @@ def handle_user_prompt(
             raw_payload=scrubbed,
             error=f"{type(e).__name__}: {e}",
         )
-        return {"status": "error", "detail": f"{type(e).__name__}: {e}"}
+        return {"status": "error", "detail": f"{type(e).__name__}: {e}", **extra}
 
 
 # ---------------------------------------------------------------------------

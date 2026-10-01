@@ -227,13 +227,19 @@ class TestSpawnPrepareHappyPath:
         data = r.json()
         # DWB-341 added memory_dir; DWB-352 added memory_usage_rules;
         # DWB-517 added memory_full (the full memory.md verbatim);
-        # DWB-524 added relevant_lessons (pointer-only retrieval).
+        # DWB-524 added relevant_lessons (pointer-only retrieval);
+        # relevant_lessons_status says WHY that list is the length it is, since
+        # an empty list alone cannot distinguish "no tickets" from "no matches"
+        # from "cut short" from "failed".
         assert set(data.keys()) == {
             "agent_id", "identity_prompt", "scratchpad_excerpt",
             "boundary_rules", "memory_dir", "memory_usage_rules",
-            "memory_full", "relevant_lessons",
+            "memory_full", "relevant_lessons", "relevant_lessons_status",
         }
-        assert data["relevant_lessons"] == []  # empty corpus on a fresh project
+        # Fresh project: the agent has no tickets, so retrieval never ran. That
+        # is not_attempted, NOT an empty successful run.
+        assert data["relevant_lessons"] == []
+        assert data["relevant_lessons_status"] == "not_attempted"
         assert data["agent_id"] == agent["id"]
         assert data["identity_prompt"].startswith("## Identity")
         assert data["scratchpad_excerpt"].startswith("## Recent Scratchpad")

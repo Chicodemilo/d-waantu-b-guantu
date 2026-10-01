@@ -54,11 +54,19 @@ from app.models.dwb_session import DwbOpenMethod, DwbSession
 def make_user_transcript(tmp_path):
     """Factory that writes a Claude Code-shape JSONL transcript file.
 
-    Each "message" in ``user_texts`` becomes a user turn line of the form::
+    Each "message" in ``user_texts`` becomes a GENUINE human user turn::
 
         {"type": "user",
          "message": {"role": "user", "content": "<text>"},
+         "promptSource": "typed", "origin": {"kind": "human"},
          "timestamp": "..."}
+
+    DWB-592: ``promptSource`` is not decoration. Claude Code stamps it on every
+    turn the human actually submits, and the transcript scan now treats its
+    absence as "harness-injected", which is what makes a relayed teammate
+    message unable to close a session. A fixture without it is not a human
+    turn, so omitting it here made these tests assert on a shape the harness
+    never writes.
 
     Pass ``[]`` (or omit) to write a transcript with no user lines (used to
     verify the no-match noop path).
@@ -74,6 +82,8 @@ def make_user_transcript(tmp_path):
                 json.dumps({
                     "type": "user",
                     "message": {"role": "user", "content": text},
+                    "promptSource": "typed",
+                    "origin": {"kind": "human"},
                     "timestamp": "2026-06-09T17:19:37.663Z",
                 })
             )

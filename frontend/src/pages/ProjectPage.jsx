@@ -1,12 +1,12 @@
 // Path: src/pages/ProjectPage.jsx
 // File: ProjectPage.jsx
 // Created: 2026-03-29
-// Purpose: Project detail page with tools (archive, delete, capture-agent-comms toggle), sprint gates (incl. force_consolidation), doc gates (incl. force_handoff_md), alerts, consolidation status panel, sprint progress, overhead, velocity, and epics
+// Purpose: Project detail page with tools (archive, delete, capture-agent-comms toggle, memory-mode toggle), sprint gates (incl. force_consolidation), doc gates (incl. force_handoff_md), alerts, consolidation status panel, sprint progress, overhead, velocity, and epics
 // Caller: App.jsx (route: /projects/:id)
-// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/StandardsAudits, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner
+// Callees: react, react-router-dom, ../store/useStore, ../components/project/ProjectHeader, ../api/projects, ../api/alerts, ../components/project/SprintProgress, ../components/project/ActivityFeed, ../components/project/LiveSessions, ../components/project/StandardsAudits, ../components/project/TokenBudget, ../components/project/ConsolidationStatus, ../components/project/MemoryModeToggle, ../components/project/MemoryTransitionOverlay, ../components/sprints/SprintVelocity, ../components/epics/EpicList, ../components/common/AlertBanner
 // Data In: Route param (id), project and alerts from Zustand store
 // Data Out: Default export ProjectPage component
-// Last Modified: 2026-08-12 (DWB-018)
+// Last Modified: 2026-09-30 (DWB-597: memory-mode section + transition status strip)
 
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -24,6 +24,8 @@ import LiveSessions from '../components/project/LiveSessions';
 import StandardsAudits from '../components/project/StandardsAudits';
 import TokenBudget from '../components/project/TokenBudget';
 import ConsolidationStatus from '../components/project/ConsolidationStatus';
+import MemoryModeToggle from '../components/project/MemoryModeToggle';
+import MemoryTransitionOverlay from '../components/project/MemoryTransitionOverlay';
 
 function ProjectPage() {
   const { id } = useParams();
@@ -179,6 +181,8 @@ function ProjectPage() {
   return (
     <div className="dashboard">
       <ProjectHeader project={project} />
+
+      <MemoryTransitionOverlay project={project} lastPolled={lastPolled} />
 
       <div className="project-tools">
         <button
@@ -338,6 +342,8 @@ function ProjectPage() {
                 </span>
               </div>
             </div>
+
+            <MemoryModeToggle project={project} />
 
             <div className="project-tools__section">
               <div className="project-tools__section-title">Jira Integration</div>

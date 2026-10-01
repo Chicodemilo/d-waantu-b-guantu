@@ -6,9 +6,9 @@
 # Callees: All model modules
 # Data In: None
 # Data Out: All model classes
-# Last Modified: 2026-08-12 (DWB-034: date sync; last content change was DWB-014's StandardsAudit re-export)
+# Last Modified: 2026-09-30 (DWB-593: MemoryTransition re-exports)
 
-from app.models.project import JiraSyncStatus, Project, ProjectStatus
+from app.models.project import JiraSyncStatus, MemoryMode, Project, ProjectStatus
 from app.models.sprint import Sprint, SprintStatus
 from app.models.epic import Epic, EpicStatus
 from app.models.agent import Agent
@@ -43,9 +43,21 @@ from app.models.entity_keyword import EntityKeyword
 from app.models.node import Node, NodePointer, NodePointerKind
 from app.models.node_exclusion import NodeExclusion
 from app.models.standards_audit import AuditVerdict, StandardsAudit
+from app.models.journal_entry import JournalEntry
+from app.models.memory_transition import (
+    MemoryTransition,
+    TransitionDirection,
+    TransitionState,
+)
+from app.models.agent_memory import (
+    AgentMemory,
+    MemoryCaughtBy,
+    MemoryCost,
+    MemoryTier,
+)
 
 __all__ = [
-    "Project", "ProjectStatus", "JiraSyncStatus",
+    "Project", "ProjectStatus", "JiraSyncStatus", "MemoryMode",
     "Sprint", "SprintStatus",
     "Epic", "EpicStatus",
     "Agent",
@@ -74,4 +86,7 @@ __all__ = [
     "EntityKeyword",
     "Node", "NodePointer", "NodePointerKind", "NodeExclusion",
     "StandardsAudit", "AuditVerdict",
+    "JournalEntry",
+    "AgentMemory", "MemoryTier", "MemoryCost", "MemoryCaughtBy",
+    "MemoryTransition", "TransitionDirection", "TransitionState",
 ]

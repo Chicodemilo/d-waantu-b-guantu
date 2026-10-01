@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body from Claude Code hooks
 # Data Out: HookEventInput (incl. SubagentStop + UserPromptSubmit fields), HookSessionRead
-# Last Modified: 2026-06-09
+# Last Modified: 2026-09-30 (DWB-613: HookSessionRead carries prompt_count for the top-off UI)
 
 from datetime import datetime
 
@@ -65,3 +65,6 @@ class HookSessionRead(BaseModel):
     created_at: datetime
     # Populated only when the row was returned via the `status=orphan` filter.
     elapsed_seconds: int | None = None
+    # DWB-613: the DWB-584 top-off counter, so the UI can show a project's live
+    # sessions against their own topoff_interval without a second endpoint.
+    prompt_count: int = 0

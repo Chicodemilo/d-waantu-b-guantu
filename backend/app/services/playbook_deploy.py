@@ -316,6 +316,29 @@ _HOOKS_SETTINGS_BLOCK: dict = {
             "timeout": 5,
         }],
     }],
+    # DWB-589: the harness-memory guard. UNLIKE EVERY OTHER ENTRY HERE, this
+    # one runs a SCRIPT rather than curling the API, and that is deliberate:
+    # a PreToolUse hook that needed the server up would deny or allow based on
+    # whether uvicorn happened to be running, and a hook that raises blocks the
+    # tool call it was inspecting. The script is self-contained, stdlib-only
+    # and always exits 0.
+    #
+    # `$CLAUDE_PROJECT_DIR` rather than an absolute path: this block is
+    # deployed into OTHER projects' `.claude/`, so a literal path here would
+    # point every one of them at this checkout. Kept byte-identical to DWB's
+    # own settings.json, which `test_block_matches_shipped_settings_json`
+    # enforces in both directions.
+    "PreToolUse": [{
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [{
+            "type": "command",
+            "command": (
+                'python3 "$CLAUDE_PROJECT_DIR/scripts/hooks/'
+                'block_harness_memory_writes.py"'
+            ),
+            "timeout": 5,
+        }],
+    }],
 }
 
 

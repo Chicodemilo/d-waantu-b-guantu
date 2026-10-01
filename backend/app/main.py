@@ -33,6 +33,8 @@ from app.routers import (
     hooks,
     instructions,
     jira,
+    journal,
+    memory_transitions,
     node_exclusions,
     nodes,
     repo_browse,
@@ -144,3 +146,6 @@ app.include_router(standards_audits.router)
 app.include_router(nodes.router)
 app.include_router(node_exclusions.router)
 app.include_router(repo_browse.router)
+app.include_router(journal.router)
+app.include_router(memory_transitions.router)
+app.include_router(memory_transitions.project_router)

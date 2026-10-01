@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # API
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
+    # DWB-590: base URL of the dashboard, used to build the top-off receipt
+    # link. A SETTING rather than a literal because this repo is cloned onto
+    # other machines and other ports (DWB-574 shipped a hardcoded home
+    # directory that leaked a username).
+    DASHBOARD_BASE_URL: str = "http://localhost:5173"
     API_RELOAD: bool = True
     ADMIN_API_KEY: str = "lat-admin-CHANGE-ME-TO-RANDOM-64-CHAR-HEX"
 
