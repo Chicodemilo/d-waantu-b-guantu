@@ -107,7 +107,24 @@ class ContextLiveness(str, enum.Enum):
 
     still_active = "still_active"  # a real, identifiable, still-open context
     finished = "finished"  # resolved to a closed ticket or a completed epic
+    # NO LONGER RETURNED BY `scan_context` (2026-10-06). Kept as a value, not
+    # deleted, for two reasons: `maybe_promote_scar` still compares against it,
+    # so the SCAR -> CORE edge stays spelled out and reviewable rather than
+    # vanishing into an unreachable branch nobody can find later; and the
+    # concept is the one a provenance-aware version would re-enable. See the
+    # long note at the bottom of `scan_context` for why every unresolvable key
+    # used to land here and what it cost.
     cannot_die = "cannot_die"  # a named context that resolves to nothing trackable
+    # A key was named and matched no ticket and no epic in this project.
+    #
+    # DISTINCT FROM `still_active`, which is a positive finding (a real, open
+    # context), and distinct from `cannot_die`, which is the positive claim
+    # that a scope is eternal. This is the honest third answer: the scan
+    # looked and found nothing. It takes NO ACTION - no promotion, no
+    # conclusion - which is the same behaviour `still_active` produces and for
+    # a completely different reason, and the reason is why it gets its own
+    # name instead of sharing one.
+    unresolvable = "unresolvable"
 
 
 class ScanError(Exception):
@@ -225,9 +242,64 @@ def scan_context(db: Session, memory: AgentMemory) -> ContextLiveness:
             else ContextLiveness.still_active
         )
 
-    # A context was named, but it resolves to nothing this project can
-    # track: no ticket key found in it, no epic name contained in it. That is
-    # not a lookup failure to apologise for - it is the definition of a
-    # context broad enough that nothing in the system could ever mark it
-    # closed, which is exactly Miles's "so broad it can never go away".
-    return ContextLiveness.cannot_die
+    # A context was named and resolves to nothing this project can track.
+    #
+    # THIS USED TO RETURN `cannot_die`, AND THAT IS THE DEFECT. The reading
+    # was "a context broad enough that nothing could ever mark it closed",
+    # which is true of a deliberately broad scope like "coding standards" and
+    # false of everything else that fails to resolve. The branch cannot tell
+    # those apart: it never reads what the key SAYS, only that no ticket and
+    # no epic matched it. So every unresolvable string became a positive claim
+    # that a scope is eternal, and `maybe_promote_scar` acted on it by writing
+    # `tier=core` - the tier that never decays and that `memory_decide.decide`
+    # refuses an agent outright on the grounds that only a human may grant it.
+    #
+    # WHAT MADE IT FIRE AT SCALE: DWB-611 started setting `context_key` from a
+    # memory's markdown HEADING PATH. A section heading is not a scope. So
+    # "## Shared code and test discipline" resolved to no ticket and no epic,
+    # was declared eternal, and promoted. Measured on 2026-10-06 by running
+    # this function over every stored scar: 381 of 455 classified `cannot_die`
+    # - 251 of 285 on DWB, 130 of 170 on IND. One project's team lead had 39
+    # promoted in a two-second batch at its next spawn, including 13 standing
+    # human rulings and a credential authorization, none of them human-ruled
+    # into CORE. The promotion also CLEARS `context_key`, which is why the
+    # rows afterwards look like they never had one.
+    #
+    # THE FIX IS THE MODULE'S OWN RULE, APPLIED TO THE THIRD CASE. The
+    # docstring already says it for an unresolvable project: "`cannot_die` is
+    # a POSITIVE claim ... Manufacturing that claim from 'I could not even
+    # look' would promote on missing data." The NULL-key branch above says the
+    # same. Both chose the side that takes no action. "I looked and found
+    # nothing I can track" is the same epistemic position as those two, and it
+    # was the one case still manufacturing the claim.
+    #
+    # WHAT THIS COSTS, stated plainly rather than buried: a genuinely broad
+    # lesson no longer auto-promotes. That was a real feature and it is gone
+    # on purpose, because it was indistinguishable from the failure mode. CORE
+    # is now reachable only by `fired_count >= 3` and by journal promotion -
+    # and no HTTP route reaches `promote_to_core`, so a human still cannot
+    # rule something CORE directly. That gap is now the only road and it needs
+    # building; it is tracked as human_memory v2.
+    #
+    # TO RESTORE AUTO-PROMOTION, do NOT revert this line. Give a deliberately
+    # broad scope a way to say so - a provenance flag distinguishing a key the
+    # author chose from one derived from a heading - and branch on that. The
+    # bug is not that this returned the wrong value; it is that the branch
+    # decided a positive claim from an absence.
+    #
+    # A DISTINCT VALUE RATHER THAN FOLDING INTO `still_active`, deliberately.
+    # Folding was the first version of this fix and it was wrong in a way that
+    # is easy to miss: `still_active` would then mean BOTH "I resolved this to
+    # a ticket that is open" and "I resolved it to nothing at all". Those are
+    # opposite epistemic states that happen to share an action, and a single
+    # value carrying two meanings is how the next reader builds a wrong
+    # conclusion on a true fact. It also silently destroyed the scoping tests
+    # that prove a ticket key from ANOTHER project does not match - with both
+    # outcomes collapsed, a cross-project match and a non-match became
+    # indistinguishable, so the test would have kept passing while no longer
+    # testing anything.
+    #
+    # Safe to add by construction: `maybe_promote_scar` acts only on
+    # `cannot_die` and `memory_scar_conclude` acts only on `finished`, both by
+    # equality, so a new member is inert at every existing call site.
+    return ContextLiveness.unresolvable

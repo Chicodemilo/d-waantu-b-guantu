@@ -107,11 +107,25 @@ class TestFiredThreeTimesPromotes:
 
 
 class TestContextCannotDiePromotes:
-    """ACCEPTANCE, half two: a scan of `cannot_die` promotes to core, and
-    Miles's own worked example (a general coding-standards lesson) is
-    reproduced literally."""
+    """THIS MOVEMENT IS CLOSED (2026-10-06), and the closure is the point.
 
-    def test_a_context_that_resolves_to_nothing_promotes(self, db_session, agent):
+    It used to promote any scar whose `context_key` matched no ticket and no
+    epic, reading that as "a scope nothing could ever close". The branch never
+    read what the key said, so it could not distinguish a deliberately broad
+    scope from a string that merely failed to resolve.
+
+    DWB-611 then derived `context_key` from markdown HEADING PATHS, and a
+    section heading is not a scope. 381 of 455 live scars classified
+    `cannot_die`; one team lead had 39 promoted in a two-second batch at its
+    next spawn, including 13 standing human rulings. CORE never decays and
+    `memory_decide.decide` refuses an agent that tier outright, so this was an
+    automatic road to a tier reserved for human judgement.
+
+    `scan_context` now answers `unresolvable` there, and this class asserts the
+    consequence rather than deleting itself - a movement that silently stops
+    existing is how it comes back."""
+
+    def test_an_unresolvable_context_no_longer_promotes(self, db_session, agent):
         scar = _memory(
             db_session, agent_id=agent["id"],
             context_key="general coding-standards lesson",
@@ -119,8 +133,8 @@ class TestContextCannotDiePromotes:
 
         reason = svc.maybe_promote_scar(db_session, scar)
 
-        assert reason == svc.ScarPromotionReason.context_cannot_die
-        assert _stored_tier(db_session, scar.id) == MemoryTier.core
+        assert reason is None
+        assert _stored_tier(db_session, scar.id) == MemoryTier.scar
 
     def test_a_scar_with_no_context_key_does_not_promote(self, db_session, agent):
         """DWB-611 changed this: post-collapse, all scars are context bound
@@ -186,11 +200,22 @@ class TestRetieringInPlace:
         assert row.fired_count == 3, "promotion must not erase the history that triggered it"
 
     def test_context_key_is_cleared_on_promotion(self, db_session, agent):
+        """Driven through the FIRED path, because the context path is closed.
+
+        The clearing behaviour is unchanged and still matters: it is why a
+        promoted row afterwards shows `context_key = NULL`, which reads as
+        evidence the context path never ran. An investigator used exactly that
+        NULL to rule out the mechanism that had in fact caused the promotion -
+        the output of the path mistaken for proof against it.
+        """
         scar = _memory(
             db_session, agent_id=agent["id"], tier=MemoryTier.scar,
+            fired_count=3,
             context_key="general coding-standards lesson",
         )
-        svc.maybe_promote_scar(db_session, scar)
+        assert svc.maybe_promote_scar(db_session, scar) == (
+            svc.ScarPromotionReason.fired_three_times
+        )
         db_session.expire_all()
         assert db_session.get(AgentMemory, scar.id).context_key is None
 

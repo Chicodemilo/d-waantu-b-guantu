@@ -93,7 +93,7 @@ def agent(make_project, make_agent):
 
 
 class TestAllMovementsFireTogether:
-    def test_one_call_fires_all_four_movements(
+    def test_one_call_fires_every_live_movement(
         self, db_session, agent, make_ticket
     ):
         agent_id, project_id = agent["id"], agent["project_id"]
@@ -125,8 +125,14 @@ class TestAllMovementsFireTogether:
             body="a scar whose context shipped",
         )
 
-        # (d) SCAR context cannot die.
-        durable_scar = _memory(
+        # (d) SCAR whose context resolves to nothing. This USED to be a
+        # fourth movement ("cannot die" -> CORE) and is now deliberately
+        # inert: the branch could not distinguish a broad scope from a key
+        # that merely failed to resolve, and once DWB-611 began deriving
+        # context_key from markdown headings it promoted 381 of 455 live
+        # scars into the never-decaying tier. Kept in this test as a NEGATIVE
+        # assertion rather than deleted, so a reintroduction fails here.
+        unresolvable_scar = _memory(
             db_session, agent_id=agent_id, tier=MemoryTier.scar,
             created_session_id=origin.id,
             context_key="general coding-standards lesson",
@@ -153,8 +159,17 @@ class TestAllMovementsFireTogether:
         assert len(result.concluded_scars) == 1
         assert result.concluded_scars[0].body == "a scar whose context shipped"
 
-        # (d)
-        assert (durable_scar.id, "context_cannot_die") in result.promoted_scars
+        # (d) The movement that no longer exists.
+        assert not any(
+            mid == unresolvable_scar.id for mid, _reason in result.promoted_scars
+        ), (
+            "an unresolvable context_key promoted to CORE again: that tier "
+            "never decays and an agent is refused it outright, so this edge "
+            "needs a provenance flag before it can come back"
+        )
+        assert not any(
+            reason == "context_cannot_die" for _mid, reason in result.promoted_scars
+        )
 
         # (e)
         assert len(result.promoted_journal) == 1
@@ -166,7 +181,12 @@ class TestAllMovementsFireTogether:
         assert db_session.get(AgentMemory, concluded_scar.id) is None
         # The two promoted scars survive, retiered to CORE in place.
         assert db_session.get(AgentMemory, fired_scar.id).tier == MemoryTier.core
-        assert db_session.get(AgentMemory, durable_scar.id).tier == MemoryTier.core
+        # Still a scar, and still present: the closed movement must leave
+        # the row alone rather than evict or retier it by another route.
+        assert (
+            db_session.get(AgentMemory, unresolvable_scar.id).tier
+            == MemoryTier.scar
+        )
 
         assert result.moved_anything is True
 

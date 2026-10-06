@@ -82,18 +82,66 @@ class TestNoContextRecorded:
 
 
 class TestCannotDie:
-    """The ONLY path to cannot_die post-collapse: a named, EXPLICIT context
-    that resolves to nothing the project can track."""
+    """`cannot_die` IS NO LONGER RETURNED, and that is the fix, not a regression.
 
-    def test_a_context_naming_nothing_trackable_cannot_die(self, db_session, agent):
-        """THE TICKET'S OWN WORDED EXAMPLE: a general coding-standards
-        lesson names a context, but not one this project can look up and
-        watch for closure. Structurally it can never conclude."""
+    It used to be reachable from any named key that resolved to nothing, on
+    the reading that such a context is "so broad it can never go away". The
+    branch never read what the key SAID - only that no ticket and no epic
+    matched - so it could not tell a deliberately broad scope from a string
+    that simply did not resolve.
+
+    DWB-611 then began deriving `context_key` from a memory's markdown HEADING
+    PATH, and a section heading is not a scope. Measured over the live store:
+    381 of 455 scars classified `cannot_die`, and `maybe_promote_scar` acts on
+    that by writing `tier=core` - the never-decaying tier that
+    `memory_decide.decide` refuses an agent outright because only a human may
+    grant it. One team lead had 39 promoted in a two-second batch, including
+    13 standing human rulings, none human-ruled.
+
+    The module already refused to manufacture this claim in two neighbouring
+    cases (an unresolvable project, a missing key), both on the stated grounds
+    that a positive claim must not be built from an absence. This is the third
+    case, now answered the same way."""
+
+    def test_an_unresolvable_context_does_not_promote(self, db_session, agent):
+        """The old worked example, asserted at its new answer.
+
+        A general coding-standards lesson names a context the project cannot
+        look up. That is no longer read as proof the context is eternal - it
+        is read as the scan having found nothing, which takes no action.
+        """
         memory = _memory(
             db_session, agent_id=agent["id"],
             context_key="general coding-standards lesson",
         )
-        assert svc.scan_context(db_session, memory) == svc.ContextLiveness.cannot_die
+        assert (
+            svc.scan_context(db_session, memory) == svc.ContextLiveness.unresolvable
+        )
+
+    def test_nothing_reaches_cannot_die_any_more(self, db_session, agent):
+        """The promotion edge is closed, asserted over the FUNCTION rather
+        than over one input.
+
+        A test naming a single unresolvable string would keep passing if some
+        other branch started returning `cannot_die` again. This asserts the
+        value is absent from every path `scan_context` can take, which is the
+        property the live store actually depends on.
+        """
+        import inspect
+
+        source = inspect.getsource(svc.scan_context)
+        returns = [
+            line.strip()
+            for line in source.splitlines()
+            if line.strip().startswith("return ContextLiveness.")
+        ]
+        assert returns, "scan_context has no returns; this test needs rewriting"
+        assert not any("cannot_die" in r for r in returns), (
+            "scan_context returns cannot_die again: that edge auto-promotes "
+            "scars into CORE, which never decays and which an agent is "
+            "refused outright. If this is deliberate, it needs a provenance "
+            "flag distinguishing a chosen scope from a derived heading."
+        )
 
 
 class TestFinished:
@@ -223,8 +271,15 @@ class TestResolutionOrderAndScoping:
         )
         memory = _memory(db_session, agent_id=agent["id"], context_key="OTHR-1")
         # OTHR-1 exists, but not in this agent's project, so it is invisible
-        # to the scan and the context resolves to nothing trackable here.
-        assert svc.scan_context(db_session, memory) == svc.ContextLiveness.cannot_die
+        # to the scan and resolves to nothing HERE.
+        #
+        # `unresolvable` rather than `still_active` is what keeps this test
+        # meaningful. Folding the two together would make a cross-project
+        # MATCH and a non-match return the same value, and this assertion
+        # would pass while no longer testing scoping at all.
+        assert (
+            svc.scan_context(db_session, memory) == svc.ContextLiveness.unresolvable
+        )
 
     def test_an_epic_name_from_another_project_does_not_match(
         self, db_session, agent, make_project, make_epic
@@ -237,7 +292,13 @@ class TestResolutionOrderAndScoping:
         memory = _memory(
             db_session, agent_id=agent["id"], context_key="Someone Elses Epic",
         )
-        assert svc.scan_context(db_session, memory) == svc.ContextLiveness.cannot_die
+        # Same scoping property as the ticket case above, and the same reason
+        # for `unresolvable`: a COMPLETED epic in another project would report
+        # `finished` if scoping leaked, so the three outcomes have to stay
+        # distinguishable for this to be a real test.
+        assert (
+            svc.scan_context(db_session, memory) == svc.ContextLiveness.unresolvable
+        )
 
 
 class TestScopeGuard:
