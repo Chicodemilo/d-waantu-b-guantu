@@ -23,11 +23,11 @@ every candidate at once - but it means the first consolidation sweeps after toni
 real work for the first time. Watch what they do rather than assuming they do nothing.
 
 **Memory writes go to `POST /api/agents/{id}/memories`.** `session-complete` is sealed
-under human_memory and returns 409. The playbook still documents only the sealed
-endpoints, so a worker following it at close gets 409 then 422 (`cost` is
-`none|low|high`, `caught_by` is `me|worker|human|ci`, not prose) and may conclude their
-write failed. **Fix the playbook early next session** - it hits people at the moment
-they are trying to leave.
+under human_memory and returns 409. The worker playbook now forks on `memory_mode`
+before any stock instruction, and again at the Sprint Close curl, which was the line
+workers actually hit on the way out. Verified live rather than read: 201 on a real
+write, 422 on prose in `cost`, 400 on any `tier`, and the write stamps
+`last_memory_write_at` so the close gate counts it.
 
 ## What was actually wrong, and what tonight established
 

@@ -92,6 +92,66 @@ Before deleting or refactoring shared code another agent owns — especially the
 
 ## Memory Writes: When and How
 
+### FIRST: check which memory mode your project runs (DWB-589)
+
+Everything below this subsection describes **stock** memory. On a project where
+`project.memory_mode == "human_memory"`, stock memory is SEALED and those endpoints
+refuse you. Check once, at spawn, before you plan any write:
+
+```bash
+curl -s http://localhost:8000/api/projects/{project_id} | python3 -c "import json,sys; print(json.load(sys.stdin)['memory_mode'])"
+```
+
+**`stock`** (the default): read on, everything below applies unchanged.
+
+**`human_memory`**: these four routes return **409**, not 400, and nothing lands:
+`memory/append`, `session-complete`, `memory/compact`, `memory/condense`. The 409 body
+names the endpoint to use instead, so read it rather than retrying. This is a mode
+conflict, not a permission error or a ceiling problem: there is no payload that makes
+the stock route work while the mode is on.
+
+A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
+
+```json
+{
+  "body": "The lesson, in your own words. Required, non-empty.",
+  "context_key": "optional: what this is bound to, when you already know",
+  "cost": "none | low | high",
+  "caught_by": "me | worker | human | ci",
+  "surprised": true
+}
+```
+
+- `cost`, `caught_by`, `surprised` are the moment-tags: **enums, not prose**. A sentence
+  in `cost` is a **422**. All three are optional, and tagging only what the moment
+  actually knows is the normal case, so an untagged memory is fine.
+- **Never send `tier`.** Any value at all is refused at 400, deliberately: tiering is
+  consolidation's judgment, not yours, and the field exists only so the attempt gets an
+  answer instead of silently landing as raw.
+- A write with no open DWB session is **accepted**, not refused. The response reports
+  `session_state` (`open` | `none_open`) so you can tell "nothing was open" from
+  "nobody looked". Never withhold a lesson over bookkeeping.
+- Returns 201. Errors: 400 (empty body, any tier, unscoped agent), 404 (agent or project
+  missing).
+
+An **episode** (what happened, in the voice of someone who was there) goes to
+**`POST /api/journal`** with `{agent_id, body, tags?}`. A sanitized entry is a useless
+entry: the value is the reasoning that felt correct and was not.
+
+**The write-on-close gate is satisfied the same way.** `POST .../memories` stamps
+`agents.last_memory_write_at` exactly like a stock write, so your DWB-519 participation
+is recorded with no extra step. You do not call `session-complete` at all on a
+human_memory project; it is one of the sealed routes.
+
+**Correcting a wrong memory:** `POST /api/agents/{id}/memories/{memory_id}/withdraw`.
+It stays open under human_memory on purpose, because it is the only path that can
+retract a lesson you now know is wrong.
+
+There is no 12000-token ceiling here. Rows are scored and tiered by consolidation, and
+decay runs on closed DWB sessions rather than on file size.
+
+### Stock memory (`memory_mode == "stock"`)
+
 DWB-401 collapsed memory to a single free-form `memory.md` (identity.md is still system-generated). You never read it (it is injected at spawn, see On Spawn step 4); you only WRITE it, always through the API, so the FastAPI process applies the ISO heading and enforces the ceiling consistently. `memory.md` is THE only memory file: never create additional files, and keep durable *project* knowledge in `ARCHITECTURE.md` / `HANDOFF.md`, not here. Three write endpoints: append (a lesson), session-complete (your wrap-up lessons), condense (the over-ceiling fix path). `GET /api/agents/{id}/memory` reports `est_tokens`, `ceiling` and `headroom` when you need to know where you stand.
 
 **The 12000-token ceiling is a HARD write-gate (DWB-518).** `memory.md` has a 12000-token ceiling (`memory_main` in `token_budget.py`; the estimator is `max(len//4, words)`). There is no more silent trim. When an append or session-complete write would push the file past 12000 tokens, the server REFUSES it with **HTTP 400** and drops nothing. The 400 body names the current tokens + ceiling and tells you to condense first, then retry. **Condense, then retry the write, do not wait** and do not ask the TL: trimming your own memory is the work, not a blocker.
@@ -200,6 +260,8 @@ If you get blocked on the work, message the TL, don't sit on it.
 
 **Write-on-close is mandatory and gate-enforced (DWB-519).** Miles's ruling: "you write for your work on close, no exceptions." At sprint close DWB checks that every ACTIVE sprint participant has written to their `memory.md` at least once within the sprint window (any `append` or `session-complete` counts; detection takes whichever is LATER of `agents.last_memory_write_at`, stamped directly by the write endpoints, and `memory.md`'s own file mtime — the old scan of your ISO write-headings was retired as a gate source in DWB-564, because condensing removes the headings and stranded agents who had written correctly). If you have no write on record, the sprint close is REFUSED with **HTTP 400** naming you. This gate is ALWAYS ON (not a per-project toggle); it is skipped only when the project has no `repo_path`. So land your wrap-up before you go idle:
 
+On a **stock** project:
+
 ```bash
 curl -X POST http://localhost:8000/api/agents/{your_agent_id}/session-complete \
   -H "X-Agent-ID: {your_agent_id}" \
@@ -208,6 +270,17 @@ curl -X POST http://localhost:8000/api/agents/{your_agent_id}/session-complete \
 ```
 
 If that wrap-up is over the 12000-token ceiling it 400s (condense, then re-post): the ceiling and the write-on-close gate are both hard, so budget a condense pass into your wrap if your memory is full.
+
+On a **human_memory** project the command above returns **409** and writes nothing. Land the lesson instead, which satisfies the same gate (see Memory Writes, first subsection):
+
+```bash
+curl -X POST http://localhost:8000/api/agents/{your_agent_id}/memories \
+  -H "X-Agent-ID: {your_agent_id}" \
+  -H "Content-Type: application/json" \
+  -d '{"body": "the lesson in your own words", "cost": "low", "caught_by": "me"}'
+```
+
+`cost` and `caught_by` are enums (`none|low|high`, `me|worker|human|ci`); prose in either one is a 422, and any `tier` at all is a 400. Check `memory_mode` on your project once at spawn rather than discovering the fork here, at the moment you are trying to leave.
 
 **Consolidation gate (opt-in, `force_consolidation`, default OFF, DWB-400/328).** When on, every sprint participant must POST `consolidate-complete` before the TL can close. The gate has TEETH: the ack REFUSES with HTTP 400 if your *owned* files are over ceiling, unless you pass per-file overrides with non-empty reasons.
 

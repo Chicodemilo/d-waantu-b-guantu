@@ -1,14 +1,16 @@
 # Project Rules — Team Lead
 
 > Project-specific rules for the TL. This file is NOT overwritten by deploy.
-> Last verified against the API: 2026-09-17.
+> Last verified against the API: 2026-10-06.
 
 ## DWB Project Context
 
-- **Project ID:** 5, **Prefix:** DWB, **Repo:** `/Users/mileschick/Dev/d-waantu-b-guantu`
+- **Project ID:** 1, **Prefix:** DWB, **Repo:** `/Users/mchick/Dev/d-waantu_b-guantu`
 - **DB name:** `local_agent_tracker` (legacy, don't change)
 - **No Jira** on this project — `jira_base_url` is null, so ticket writes refuse `jira_issue_key`. Never invoke `dwb2jira` here.
-- Current counters (verify, don't trust): sprints 4 (max id 25), tickets 36, epics 6 + 10.
+- **`memory_mode` is `human_memory`**, and DWB is the only project running it. Stock memory is sealed: `memory/append`, `session-complete`, `memory/compact` and `memory/condense` all return 409 here. Lessons go to `POST /api/agents/{id}/memories`, episodes to `POST /api/journal`. This applies to you too.
+- **`runs_own_tests` is true** — DWB runs its own suite rather than the generic runner.
+- Current counters (verify, don't trust): sprints 83 (max id 177), tickets 623 (max key DWB-636, max id 1631), epics 26 (max id 68).
 
 ## TL Behavioral Rules
 
@@ -20,15 +22,17 @@
 
 ## Team Composition (DWB)
 
-Roster is DB-authoritative — `GET /api/projects/5/team`. As of 2026-09-17:
+Roster is DB-authoritative — `GET /api/projects/1/team`. As of 2026-10-06:
 
-- Archie_DWB (id=11) — team-lead
-- Pam_DWB (id=12) — pm
-- Barry_DWB (id=13) — backend-worker
-- Freddie_DWB (id=14) — frontend-worker
-- Sylvie_DWB (id=15) — system-ops
-- Sage_DWB (id=16) — tester
-- Dolores_DWB (id=17) — docs-writer
+- Archie_DWB (id=13) — team-lead
+- Pam_DWB (id=14) — pm
+- Barry_DWB (id=21) — backend-worker
+- Stan (id=38) — backend-worker
+- Freddie (id=19) — frontend-worker
+- Sylvie (id=27) — system-ops
+- Dolores (id=28) — docs-writer
+
+No tester is on the roster. Spawn one as Sage_DWB if a sprint needs it; the old rules file listed Sage as current, which was wrong.
 
 CC teams do not survive a session — a roster row is registration, not a live process.
 
@@ -42,7 +46,7 @@ CC teams do not survive a session — a roster row is registration, not a live p
 
 - One active sprint, one in-progress epic — DB-enforced, a second returns 409.
 - Sprint names descriptive (from goal), not "Sprint N".
-- **Gates enabled (per `/api/projects/5/gate-status`):** `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_coding_standards_md`, `force_standards_audit`. OFF: `force_headers`. `force_team_md` was removed in DWB-321 (roster is DB-authoritative).
+- **Gates enabled (per `/api/projects/1/gate-status`):** `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_test_run`, `force_test_coverage`. OFF: `force_coding_standards_md`, `force_standards_audit`, `force_consolidation`, `force_headers`. `force_team_md` was removed in DWB-321 (roster is DB-authoritative).
 - Always-on close gates independent of toggles: write-on-close memory (DWB-519) and the failure-record review.
 
 ## Key Patterns Learned
