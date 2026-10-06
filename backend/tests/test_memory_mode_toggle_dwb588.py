@@ -37,6 +37,9 @@ runtime: parsing the doc would invert the source of truth and turn any doc edit
 into a red suite.
 """
 
+from datetime import datetime, timezone
+
+from app.models.dwb_session import DwbOpenMethod, DwbSession
 from app.models.project import MemoryMode
 from app.services.project import MEMORY_MODE_SWITCH_WARNING
 
@@ -127,7 +130,9 @@ class TestSwitchGuard:
         )
         assert _mode(client, project["id"]) == MemoryMode.stock.value
 
-    def test_confirmed_switch_is_allowed_through(self, client, make_project):
+    def test_confirmed_switch_is_allowed_through(
+        self, client, db_session, make_project
+    ):
         """Confirmation lets the transition BEGIN. What it lands in is not
         asserted here on purpose.
 
@@ -139,6 +144,18 @@ class TestSwitchGuard:
         covered by tests/test_memory_transitions_dwb593.py.
         """
         project = make_project()
+        # An adoption also requires an open DWB session: without one every
+        # memory it writes gets a NULL clock origin and is unreachable. That
+        # guard lives in the same refusal function as confirmation, so this
+        # test has to satisfy it to reach the thing it is actually asserting.
+        db_session.add(
+            DwbSession(
+                project_id=project["id"],
+                open_method=DwbOpenMethod.slash,
+                opened_at=datetime.now(timezone.utc),
+            )
+        )
+        db_session.flush()
         r = client.patch(
             f"/api/projects/{project['id']}",
             json={"memory_mode": "adopting", "memory_mode_confirmed": True},

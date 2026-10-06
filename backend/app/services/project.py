@@ -252,6 +252,58 @@ def memory_mode_transition_refusal(
     if edge == BEGIN and not data.memory_mode_confirmed:
         return MEMORY_MODE_SWITCH_WARNING
 
+    if edge == BEGIN and target == MemoryMode.adopting:
+        # AN ADOPTION WITH NO OPEN SESSION MINTS A STORE THAT CANNOT BE READ,
+        # AND THIS HAS NOW HAPPENED TWICE.
+        #
+        # `memory_decide.decide` stamps `created_session_id` from whatever
+        # `get_active_session` returns, including None. That rule is correct
+        # where it came from - the raw write path rules that a lesson with no
+        # origin beats a lesson lost - but adoption inherited it and at bulk
+        # scale it inverts. A row with neither `created_session_id` nor
+        # `last_reinforced_session_id` cannot be scored;
+        # `memory_score.scored_memory` excludes unscoreable rows from every
+        # candidate list, so `memory_context.assemble_session_context` returns
+        # empty and `memory_mode.memory_full_for` falls through to the sealed
+        # pointer. The flat file is sealed behind the mode by then, so there is
+        # no fallback: every agent on the project spawns amnesiac with a full
+        # store sitting behind it.
+        #
+        # The first occurrence (396 rows) is described in a comment above that
+        # `get_active_session` call and was closed as "an omission on ONE
+        # writer, not a missing capability". It recurred on the next migration
+        # - 293 of 295 rows on IND - because a comment is not a guard. This is
+        # the guard.
+        #
+        # REFUSED AT BEGIN rather than per-decision, for two reasons. The
+        # operator is present at exactly this moment and nowhere later, and
+        # enumeration has not run yet, so nothing has to be unwound. Refusing
+        # the 1st of 308 decisions would strand a half-judged run instead.
+        #
+        # `created_session_id` is an FK to `dwb_sessions`, so there is no
+        # synthetic origin to stamp instead - the session has to genuinely
+        # exist. Hence a precondition rather than a fallback.
+        #
+        # ADOPTION ONLY. `reverting` also travels a BEGIN edge and does not
+        # mint memory rows: DWB-595's revert renders the store back over the
+        # flat file, so it has no origin to lose.
+        from app.services import dwb_session as session_svc
+
+        if session_svc.get_active_session(db, project.id) is None:
+            return (
+                f"Adoption refused: {project.prefix} has no open DWB session.\n"
+                "\n"
+                "Every memory this adoption writes stamps its clock origin "
+                "from the session open at the time. With none open, all of "
+                "them store NULL, and a memory with no origin cannot be "
+                "scored - so it is excluded from retrieval and never reaches "
+                "an agent. The store would fill up and read as empty, with "
+                "the flat file sealed behind the mode and no fallback.\n"
+                "\n"
+                "Open a session first (/dwb-open, or POST /api/sessions/open) "
+                "and start the adoption again."
+            )
+
     if edge == CUTOVER:
         run = open_run(db, project.id)
         if run is None:

@@ -28,11 +28,15 @@ That is why there is a test asserting the shape of one comparison.
 """
 
 import ast
+from datetime import datetime, timezone
 import inspect
 import pathlib
 
 import pytest
 
+from app.models.dwb_session import DwbOpenMethod, DwbSession
+
+from app.models.agent import Agent
 from app.models.agent_memory import AgentMemory, MemoryTier
 from app.models.memory_transition import (
     TERMINAL_STATES,
@@ -113,6 +117,25 @@ def _give_agent_memory(repo_path, prefix, agent_name, body="## Lesson\nsomething
     return path
 
 
+def _open_session(db_session, project_id):
+    """An adoption requires an open DWB session, and that is load-bearing.
+
+    `memory_decide.decide` stamps each memory's clock origin from the session
+    open at the time. No session means a NULL origin, an unscoreable row, and a
+    store that fills up while reading as empty behind a sealed flat file. Every
+    fixture here used to omit it, so the suite modelled the outage exactly and
+    passed anyway.
+    """
+    row = DwbSession(
+        project_id=project_id,
+        open_method=DwbOpenMethod.slash,
+        opened_at=datetime.now(timezone.utc),
+    )
+    db_session.add(row)
+    db_session.flush()
+    return row
+
+
 @pytest.fixture
 def proj(db_session, make_project, make_agent, tmp_path):
     """A project whose agent HAS memory, so a transition has work to do.
@@ -124,6 +147,7 @@ def proj(db_session, make_project, make_agent, tmp_path):
     project = make_project(repo_path=str(tmp_path))
     agent = make_agent(project_id=project["id"])
     _give_agent_memory(tmp_path, project["prefix"], agent["name"])
+    _open_session(db_session, project["id"])
     return project["id"], agent["id"]
 
 
@@ -132,6 +156,7 @@ def empty_proj(db_session, make_project, make_agent, tmp_path):
     """A project with NO memory anywhere. Nothing to adopt."""
     project = make_project(repo_path=str(tmp_path))
     agent = make_agent(project_id=project["id"])
+    _open_session(db_session, project["id"])
     return project["id"], agent["id"]
 
 
@@ -839,3 +864,136 @@ class TestRunLifecycle:
         db_session.commit()
         r = client.delete(f"/api/projects/{project_id}")
         assert r.status_code == 204, r.text
+
+
+class TestAdoptionRequiresAnOpenSession:
+    """The outage that reproduced twice, and the guard that makes it unreachable.
+
+    `memory_decide.decide` stamps `created_session_id` from whatever
+    `get_active_session` returns, including None. That rule is correct where it
+    came from - the raw write path rules a lesson with no origin beats a lesson
+    lost - but adoption inherited it, and at bulk scale it inverts: when EVERY
+    row gets NULL the store is not imperfectly bookkept, it is 100% unreachable.
+    An unscoreable row is excluded from every candidate list, so
+    `assemble_session_context` returns empty and `memory_full_for` serves the
+    sealed pointer, with the flat file already sealed behind the mode.
+
+    The first occurrence (396 rows) was closed with a comment above that very
+    call. It recurred on the next migration - 293 of 295 rows - because a
+    comment is not a guard. The whole of this lane's test suite also ran without
+    an open session, so the fixtures modelled the outage and passed regardless.
+    """
+
+    def test_adoption_is_refused_with_no_open_session(
+        self, client, db_session, make_project, make_agent, tmp_path
+    ):
+        project = make_project(repo_path=str(tmp_path))
+        agent = make_agent(project_id=project["id"])
+        _give_agent_memory(tmp_path, project["prefix"], agent["name"])
+
+        r = client.patch(
+            f"/api/projects/{project['id']}",
+            json={"memory_mode": "adopting", "memory_mode_confirmed": True},
+        )
+
+        assert r.status_code == 400
+        detail = r.json()["detail"]
+        assert "no open DWB session" in detail
+        # The refusal must say what to DO. A refusal that only states the rule
+        # gets worked around by whoever is mid-migration at the time.
+        assert "/dwb-open" in detail
+        db_session.refresh(db_session.get(Project, project["id"]))
+        assert (
+            db_session.get(Project, project["id"]).memory_mode == MemoryMode.stock
+        )
+
+    def test_a_closed_session_does_not_count(
+        self, client, db_session, make_project, make_agent, tmp_path
+    ):
+        """The exact shape that caused the second occurrence.
+
+        A session WAS open on the project earlier that day and was closed
+        before the adoption ran, which looks like "the project has a session"
+        to anyone reading a list. Only an OPEN one can be an origin.
+        """
+        project = make_project(repo_path=str(tmp_path))
+        agent = make_agent(project_id=project["id"])
+        _give_agent_memory(tmp_path, project["prefix"], agent["name"])
+        row = _open_session(db_session, project["id"])
+        row.closed_at = datetime.now(timezone.utc)
+        db_session.flush()
+
+        r = client.patch(
+            f"/api/projects/{project['id']}",
+            json={"memory_mode": "adopting", "memory_mode_confirmed": True},
+        )
+
+        assert r.status_code == 400
+        assert "no open DWB session" in r.json()["detail"]
+
+    def test_reverting_is_not_blocked_by_the_guard(
+        self, client, db_session, make_project, make_agent, tmp_path
+    ):
+        """ADOPTION ONLY, and this is the half most likely to be over-applied.
+
+        `reverting` travels a BEGIN edge too, and DWB-595's revert renders the
+        store back over the flat file rather than minting memory rows - it has
+        no clock origin to lose. Blocking it would be a guard copied by shape
+        instead of by reason.
+        """
+        project = make_project(repo_path=str(tmp_path))
+        make_agent(project_id=project["id"])
+        _set_mode(db_session, project["id"], MemoryMode.human_memory)
+
+        r = client.patch(
+            f"/api/projects/{project['id']}",
+            json={"memory_mode": "reverting", "memory_mode_confirmed": True},
+        )
+
+        assert r.status_code == 200, r.text
+
+    def test_an_adopted_memory_is_actually_REACHABLE(
+        self, client, db_session, proj
+    ):
+        """THE ASSERTION THIS LANE NEVER HAD, and its absence is why the bug shipped.
+
+        Every other test here checks that rows were WRITTEN. None checked that
+        a written row can be read back by the thing that serves memory to an
+        agent, which is the only property any of it exists for. Both outages
+        passed a suite that was fully green.
+
+        Deliberately asserted through `memory_full_for` - the real spawn-prepare
+        path - rather than by querying `agent_memories` directly. A row count
+        proves storage; only this proves delivery.
+        """
+        project_id, agent_id = proj
+        client.patch(
+            f"/api/projects/{project_id}",
+            json={"memory_mode": "adopting", "memory_mode_confirmed": True},
+        )
+
+        pending = (
+            db_session.query(MemoryTransition)
+            .filter(MemoryTransition.project_id == project_id)
+            .all()
+        )
+        assert pending, "fixture produced nothing to adopt"
+        for row in pending:
+            client.post(
+                f"/api/memory-transitions/{row.id}/decide",
+                json={"tier": "working", "decided_by": "test"},
+            )
+
+        agent = db_session.get(Agent, agent_id)
+        served = seal_svc.memory_full_for(
+            db_session.get(Project, project_id),
+            "STOCK CONTENT MUST NEVER BE SERVED",
+            db=db_session,
+            agent=agent,
+        )
+
+        assert served != seal_svc.STOCK_MEMORY_SEALED_POINTER, (
+            "adopted memory came back as the sealed pointer: the rows exist but "
+            "cannot be scored, so nothing will ever reach an agent"
+        )
+        assert "STOCK CONTENT MUST NEVER BE SERVED" not in served

@@ -20,7 +20,11 @@ convenience would defeat the ticket, and it would look like an improvement.
 
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 import pytest
+
+from app.models.dwb_session import DwbOpenMethod, DwbSession
 
 from app.models.memory_transition import MemoryTransition, TransitionState
 from app.models.project import MemoryMode
@@ -41,10 +45,28 @@ def _write(tmp_path, prefix, name, text=FILE):
 
 
 @pytest.fixture
-def project_with_memory(client, make_project, make_agent, tmp_path):
+def project_with_memory(client, db_session, make_project, make_agent, tmp_path):
+    """A project with memory AND AN OPEN DWB SESSION.
+
+    The open session is not scenery. `memory_decide.decide` stamps a memory's
+    clock origin from the session open at the time, and a row with no origin
+    cannot be scored, so it is excluded from retrieval and never reaches an
+    agent. Every fixture in this lane used to omit the session, which meant the
+    whole suite adopted rows that were structurally unreachable and no test
+    noticed - the outage reproduced twice in production under conditions the
+    tests modelled exactly.
+    """
     project = make_project(repo_path=str(tmp_path))
     agent = make_agent(project_id=project["id"], name="Adoptee")
     path = _write(tmp_path, project["prefix"], "Adoptee")
+    db_session.add(
+        DwbSession(
+            project_id=project["id"],
+            open_method=DwbOpenMethod.slash,
+            opened_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.flush()
     return project, agent, path
 
 
