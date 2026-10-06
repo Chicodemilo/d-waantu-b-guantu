@@ -427,3 +427,92 @@ class TestExcerptRecovery:
                 db_session, transition_id=rows[0].id, tier="working", decided_by="test"
             )
         assert exc.value.code == "excerpt_unreadable"
+
+
+class TestReasonIsPersisted:
+    """The field was accepted and discarded on the tiering path.
+
+    `DecideRequest` carried `reason`, `decide_and_maybe_cut_over` passed it on,
+    and `decide()` did not declare the parameter - so the skip branch journaled
+    it and the tiering branch dropped it, while both answered 200. IND's
+    adoption lost 293 reasons that way and nothing anywhere reported a fault.
+
+    These are runtime assertions on the stored row rather than a signature
+    check, because a signature that accepts the argument and ignores it is the
+    exact bug and would satisfy an inspection.
+    """
+
+    def test_a_tiering_decision_stores_its_reason(self, db_session, adopting):
+        _project, _agent, _run, rows = adopting
+
+        row = memory_decide.decide(
+            db_session,
+            transition_id=rows[0].id,
+            tier="scar",
+            decided_by="test",
+            reason="tiered down pending human, this is a standing ruling",
+        )
+
+        db_session.refresh(row)
+        assert row.reason == (
+            "tiered down pending human, this is a standing ruling"
+        )
+
+    def test_a_skip_stores_its_reason_on_the_row_too(self, db_session, adopting):
+        """The journal note was the ONLY home for a skip's reason before this.
+
+        That made the two branches disagree about where a decision's reasoning
+        lives, so a reader had to know which path a row took before knowing
+        where to look. Now the row answers in both cases and the journal note
+        stays as well, since a skipped entry has no store row to hang on.
+        """
+        _project, _agent, _run, rows = adopting
+
+        row = memory_decide.skip(
+            db_session,
+            transition_id=rows[0].id,
+            decided_by="test",
+            reason="scaffolding, not a lesson",
+        )
+
+        db_session.refresh(row)
+        assert row.reason == "scaffolding, not a lesson"
+        entry = db_session.query(JournalEntry).one()
+        assert "scaffolding, not a lesson" in entry.body
+
+    def test_reason_survives_the_full_router_path(self, db_session, adopting):
+        """The parameter existed on the outer function and died one call in.
+
+        Driving `decide_and_maybe_cut_over` rather than `decide` is the point:
+        that is the seam the reason fell through, and a test that only ever
+        calls the inner function would have passed throughout the bug.
+        """
+        _project, _agent, _run, rows = adopting
+
+        row, _landed = memory_decide.decide_and_maybe_cut_over(
+            db_session,
+            transition_id=rows[0].id,
+            tier="working",
+            decided_by="test",
+            reason="box fact, fades harmlessly",
+        )
+
+        db_session.refresh(row)
+        assert row.reason == "box fact, fades harmlessly"
+
+    def test_omitting_a_reason_stores_null_not_empty(self, db_session, adopting):
+        """Optional stays optional, and absent stays distinguishable.
+
+        NULL means "not given"; an empty string would assert that someone was
+        asked and declined. Every row written before this column is the former,
+        and the distinction is what stops a later reader reading silence as a
+        considered blank.
+        """
+        _project, _agent, _run, rows = adopting
+
+        row = memory_decide.decide(
+            db_session, transition_id=rows[0].id, tier="working", decided_by="test"
+        )
+
+        db_session.refresh(row)
+        assert row.reason is None

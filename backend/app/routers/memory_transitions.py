@@ -74,6 +74,11 @@ def _serialize(row: MemoryTransition) -> dict:
         "source_excerpt": row.source_excerpt,
         "decided_tier": row.decided_tier.value if row.decided_tier else None,
         "decided_by": row.decided_by,
+        # Surfaced so the read-back endpoint can answer WHY, not only what. An
+        # agent correcting its own mis-tier remembers the call it regrets and
+        # looks the row up by id; the tier alone does not tell it whether the
+        # decision was considered or rushed.
+        "reason": row.reason,
         "target_memory_id": row.target_memory_id,
     }
 

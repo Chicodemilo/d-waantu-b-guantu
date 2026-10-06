@@ -140,6 +140,26 @@ class MemoryTransition(Base):
     # Free text, not an FK to agents: the decider may be an agent, a human or a
     # rule, and an FK would force the first and quietly lose the other two.
     decided_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # WHY the decider chose this tier, in their own words.
+    #
+    # THIS COLUMN EXISTS BECAUSE ITS ABSENCE COST A WHOLE MIGRATION'S
+    # REASONING. `DecideRequest` carried `reason` from the start and
+    # `decide_and_maybe_cut_over` passed it on, but only the SKIP branch did
+    # anything with it (the journal entry it writes). The tiering branch
+    # dropped it: `decide()` did not take the parameter at all. The API
+    # accepted the field and answered 200, so nothing anywhere reported a
+    # problem, and 293 reasons across seven agents were discarded in silence.
+    #
+    # The cost is not sentimental. An adopting agent flags the rows a human
+    # needs to revisit BY WRITING IT IN THE REASON - that is the only channel
+    # it has, since it sees one entry at a time and cannot hand over a list.
+    # Discarding the reason discards the flag, so the one thing the lane needs
+    # a human for arrives unmarked. A team lead went looking for fifteen such
+    # flags and found the column did not exist.
+    #
+    # Nullable because the field is optional on the request and because every
+    # row written before this column is legitimately unknown rather than empty.
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # The agent_memories row this produced. NULL until written, and NULL
     # forever for skipped and journaled rows.

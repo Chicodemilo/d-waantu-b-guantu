@@ -249,8 +249,18 @@ def decide(
     transition_id: int,
     tier: str,
     decided_by: str,
+    reason: str | None = None,
 ) -> MemoryTransition:
     """Record a tier for ONE candidate and write it into the store.
+
+    `reason` IS PERSISTED, and this parameter not existing is what made a whole
+    migration's reasoning disappear. The router and
+    `decide_and_maybe_cut_over` both carried the field; this signature did not
+    accept it, so the tiering branch silently discarded what the skip branch
+    kept. The failure was invisible from outside: a 200 came back either way.
+    Keep it a stored column rather than a passed-through log line - an agent
+    judging one entry at a time uses the reason to flag the rows a human must
+    revisit, and that flag is the lane's only channel to a person.
 
     Refuses `core` (hard rule 5) and `raw` (the absence of a judgement). The
     refusal names the rule, and for `core` it names the alternative, because
@@ -327,6 +337,7 @@ def decide(
 
     row.decided_tier = chosen
     row.decided_by = decided_by
+    row.reason = reason
     row.decided_at = _decision_now()
     row.target_memory_id = memory.id
     row.state = TransitionState.written
@@ -375,6 +386,7 @@ def skip(
     db.flush()
 
     row.decided_by = decided_by
+    row.reason = reason
     row.decided_at = _decision_now()
     row.state = TransitionState.skipped
     db.flush()
@@ -405,7 +417,11 @@ def decide_and_maybe_cut_over(
         row = skip(db, transition_id=transition_id, decided_by=decided_by, reason=reason)
     else:
         row = decide(
-            db, transition_id=transition_id, tier=tier, decided_by=decided_by
+            db,
+            transition_id=transition_id,
+            tier=tier,
+            decided_by=decided_by,
+            reason=reason,
         )
 
     agent = db.get(Agent, row.agent_id)
