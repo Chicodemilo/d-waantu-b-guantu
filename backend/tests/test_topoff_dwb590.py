@@ -116,21 +116,132 @@ class TestIndependentOfMemoryMode:
 
         assert [r["topoff"]["fired"] for r in results] == [False, False, True]
 
-    def test_topoff_source_never_reads_memory_mode(self):
-        """The code-level half of acceptance 1.
+    def test_topoff_source_reads_memory_mode_only_to_exclude_transitions(self):
+        """The code-level half of acceptance 1, NARROWED by a later ruling.
 
-        The runtime tests above would keep passing if someone added a
-        `memory_mode` check that happened to be true for the fixture. This
-        reads the source of the top-off function and fails if the name appears
-        at all, which is the only version of this assertion that cannot be
-        satisfied by luck.
+        THIS ASSERTION USED TO BE "the name `memory_mode` never appears at
+        all". That was the right shape for the ruling it encoded and it is now
+        too wide, so it is narrowed here deliberately rather than deleted.
+
+        The original ruling survives untouched: top-off is about repetition and
+        drift, not memory structure, so it must behave IDENTICALLY in `stock`
+        and in `human_memory`. The two runtime tests above are what hold that
+        line, and they still pass unchanged.
+
+        The later ruling (Miles, 2026-10-06): "top off shouldn't run while
+        transition is in". That is not a statement about memory structure. It
+        is a statement about the store being INCOMPLETE mid-flight, and the
+        firing pass promotes a scar to CORE at a threshold, so running it
+        against a half-migrated catalogue reaches the one tier `decide` refuses
+        to let an agent choose.
+
+        So the invariant is no longer "never reads the column" but "reads it
+        for one reason only". A check against anything in TRANSITION_MODES is
+        permitted; a check that could branch on stock vs human_memory is not,
+        because that is the ruling the original assertion existed to protect
+        and it is the one still worth protecting mechanically.
         """
-        tree = ast.parse(textwrap.dedent(inspect.getsource(svc._topoff_for_prompt)))
-        names = {
-            node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
-        } | {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-        assert "memory_mode" not in names
-        assert "memory_mode" not in inspect.getsource(svc._topoff_for_prompt)
+        source = inspect.getsource(svc._topoff_for_prompt)
+        tree = ast.parse(textwrap.dedent(source))
+
+        comparisons = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Compare)
+            and "memory_mode" in ast.dump(node)
+        ]
+        assert comparisons, (
+            "expected the transition guard to compare memory_mode; if the guard "
+            "moved, move this assertion with it rather than dropping it"
+        )
+
+        # Every memory_mode comparison must test membership of TRANSITION_MODES.
+        # A direct `== MemoryMode.stock` or `== MemoryMode.human_memory` is the
+        # thing this test exists to forbid, and it would read as reasonable in
+        # a diff, which is exactly why it is asserted rather than trusted.
+        for node in comparisons:
+            dumped = ast.dump(node)
+            assert "TRANSITION_MODES" in dumped, (
+                "top-off may consult memory_mode ONLY to exclude an in-flight "
+                "transition. Branching on stock vs human_memory is the "
+                "dependence DWB-590 ruled out."
+            )
+            assert "stock" not in dumped and "human_memory" not in dumped
+
+    def test_transition_modes_covers_every_in_flight_mode(self):
+        """TRANSITION_MODES must name every mode in which the store is partial.
+
+        A mode added to the enum later and forgotten here is the dangerous
+        direction: the firing pass would run against a half-migrated catalogue
+        and nothing would say so. Asserted against the enum rather than against
+        a second hand-written list, so adding a mode fails this test instead of
+        passing both copies.
+        """
+        settled = {MemoryMode.stock, MemoryMode.human_memory}
+        in_flight = set(MemoryMode) - settled
+        assert set(svc.TRANSITION_MODES) == in_flight
+
+    @pytest.mark.parametrize("mode", [MemoryMode.adopting, MemoryMode.reverting])
+    def test_does_not_fire_while_a_transition_is_in_flight(
+        self, db_session, topoff_project, mode
+    ):
+        """Miles, 2026-10-06: "top off shouldn't run while transition is in".
+
+        Parametrised over BOTH in-flight modes because `reverting` is the one
+        that would be forgotten: adoption is the direction everyone pictures,
+        and the store is just as partial on the way back out.
+        """
+        topoff_project.memory_mode = mode
+        db_session.flush()
+        _hook_session(db_session, project_id=topoff_project.id)
+
+        results = [_prompt(db_session, topoff_project) for _ in range(4)]
+
+        assert all(r["topoff"]["fired"] is False for r in results)
+        assert all(
+            r["topoff"]["reason"] == "transition_in_progress" for r in results
+        )
+        assert all(r["topoff"]["memory_mode"] == mode.value for r in results)
+
+    def test_the_transition_block_does_not_consume_the_interval(
+        self, db_session, topoff_project
+    ):
+        """The counter must not advance while the guard is holding.
+
+        Otherwise a long adoption silently burns the interval, and the first
+        prompt after cutover fires against a counter that has been ticking the
+        whole time - top-off would come back mid-cycle instead of on a clean
+        one, and nothing in the output would explain why.
+        """
+        topoff_project.memory_mode = MemoryMode.adopting
+        db_session.flush()
+        hook_session = _hook_session(db_session, project_id=topoff_project.id)
+
+        for _ in range(5):
+            _prompt(db_session, topoff_project)
+
+        db_session.refresh(hook_session)
+        assert not hook_session.prompt_count
+
+    def test_resumes_on_its_own_after_cutover(self, db_session, topoff_project):
+        """The guard is a pause, not an off switch.
+
+        A transition that blocked top-off forever would be a far worse bug than
+        the one it fixes, and it would present as "top-off stopped working"
+        long after anyone connected it to a migration.
+        """
+        topoff_project.memory_mode = MemoryMode.adopting
+        db_session.flush()
+        _hook_session(db_session, project_id=topoff_project.id)
+
+        for _ in range(3):
+            assert _prompt(db_session, topoff_project)["topoff"]["fired"] is False
+
+        topoff_project.memory_mode = MemoryMode.human_memory
+        db_session.flush()
+
+        results = [_prompt(db_session, topoff_project) for _ in range(3)]
+        assert [r["topoff"]["fired"] for r in results] == [False, False, True]
 
     def test_disabled_project_response_is_unchanged(self, db_session, make_project, tmp_path):
         """Top-off off means the response is byte-identical to before this

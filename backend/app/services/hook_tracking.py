@@ -6,7 +6,12 @@
 # Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py, app/services/journal.py (DWB-612 top-off journal search), app/services/memory_consult.py (DWB-612 top-off scar consult), app/services/memory_consolidate.py (DWB-609 session-start consolidation)
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows, memory movements via memory_consolidate (DWB-609)
-# Last Modified: 2026-10-01 (DWB-634: start_time and end_time normalised to
+# Last Modified: 2026-10-06 (top-off is suppressed while a memory transition is
+#                in flight: the firing pass promotes a scar to CORE at a
+#                threshold, and during adopting/reverting the store is partial,
+#                so it would reach the one tier `decide` refuses an agent on
+#                evidence from a catalogue that is still mostly in the old file;
+#                previous entry: DWB-634: start_time and end_time normalised to
 #                second precision at the transcript ingest boundary, so the
 #                column stops carrying two conventions; previous entry:
 #                DWB-612 top-off's firing pass also consults scars
@@ -2158,6 +2163,13 @@ _TOPOFF_SEARCH_TERM_MAX_CHARS = 300
 _TOPOFF_SEARCH_TERM_MIN_CHARS = 12
 
 
+# The modes in which a memory transition is mid-flight, so the store is known
+# to be partial. A named constant rather than an inline tuple: a mode added
+# later has to be considered here, and the dangerous direction is forgetting
+# one and letting the firing pass run against a half-migrated catalogue.
+TRANSITION_MODES = (MemoryMode.adopting, MemoryMode.reverting)
+
+
 def _topoff_search_term(prompt: str | None) -> str | None:
     """The ONE term both top-off consultations search with.
 
@@ -2327,6 +2339,35 @@ def _topoff_for_prompt(
         # Nothing added to the response at all, so a project with top-off off
         # sees byte-identical output to before this feature existed.
         return {}
+
+    if project.memory_mode in TRANSITION_MODES:
+        # TOP-OFF IS A BACK DOOR INTO CORE WHILE A TRANSITION IS MID-FLIGHT, and
+        # CORE is the tier adoption refuses to let an agent choose at all.
+        #
+        # The chain: the firing pass increments `fired_count` on every scar that
+        # matches the term, and `memory_promote.maybe_promote_scar` sends a scar
+        # to CORE at SCAR_FIRED_THRESHOLD. During `adopting` the store is being
+        # populated one entry at a time, so a scar adopted early can accumulate
+        # firings against a catalogue that is still most of the way in the old
+        # file. It would reach CORE - which never decays - on evidence drawn
+        # from a set that does not exist yet.
+        #
+        # `memory_decide.decide` refuses `core` outright for exactly this
+        # reason: "an agent adopting its own back catalogue" is neither a human
+        # ruling nor logged cross-context evidence. A concurrent top-off reaches
+        # the same tier by another road, so the two guards have to agree.
+        #
+        # Reported rather than silent: an operator who turned top-off on and
+        # sees nothing happen deserves to know it is the transition, not a
+        # broken feature, and that it resumes on its own at cutover.
+        return {
+            "topoff": {
+                "counted": False,
+                "fired": False,
+                "reason": "transition_in_progress",
+                "memory_mode": project.memory_mode.value,
+            }
+        }
 
     if not session_id:
         return {"topoff": {"counted": False, "fired": False, "reason": "no_session_id"}}
