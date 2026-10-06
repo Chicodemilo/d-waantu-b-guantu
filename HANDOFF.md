@@ -2,106 +2,87 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current state (2026-10-01, pushed and green)
+## READ FIRST
 
-**HEAD `ed50c3d`, pushed to master. 2934 passed, 0 failed**, taken on a tree whose
-content fingerprint was identical before and after the run. Three commits tonight:
-`b137bb5` (the human_memory lane), `3dea6b3` (ten defects), `ed50c3d` (the memory
-sorting mechanism, withdrawal, and the timestamp asymmetry).
+**`docs/project_page_cleanup.md`** — tomorrow's work. Miles parked the
+`/projects/:id` cleanup; the audit is already done against live data. Do not
+re-audit it. Tier 1 is three strict duplicates of pages that already exist, and
+the order is set in the doc.
 
-Seventeen tickets closed, DWB-617 through DWB-636. Working tree clean.
+**The biggest problem on that page is not layout.** 80 of 86 open alerts are
+reputation broadcasts raised to `critical`. That is DWB-598, in backlog, and
+fixing it does more for the page than any redesign.
 
-## READ THIS BEFORE THE NEXT SESSION STARTS
+## Current state (2026-10-06, pushed and green)
 
-**Closing a session starts a clock that has never run.** Every memory row shares one
-origin session because the whole catalogue was adopted inside it. Nothing has decayed,
-nothing has reached a floor, and no eviction has ever had a candidate. When sessions
-accumulate, rows reach their floors **in lockstep** rather than gradually.
+HEAD `fbfdf52` on master, 2948 passed, 0 failed. Five commits today, each a
+separate revertable fix. Working tree clean.
 
-That is not dangerous now - DWB-626 fixed the deletion path that would have failed on
-every candidate at once - but it means the first consolidation sweeps after tonight do
-real work for the first time. Watch what they do rather than assuming they do nothing.
+IND (project 40) migrated stock -> human_memory: 308 entries judged by seven
+agents, 293 adopted (209 scar, 84 working), 15 skipped and journaled. The nine
+stock `memory.md` files are byte-identical to the pre-toggle baseline — cutover
+sealed them rather than consuming them, and with the clock bug below they are
+currently the only readable copy. Do not close that door.
 
-**Memory writes go to `POST /api/agents/{id}/memories`.** `session-complete` is sealed
-under human_memory and returns 409. The worker playbook now forks on `memory_mode`
-before any stock instruction, and again at the Sprint Close curl, which was the line
-workers actually hit on the way out. Verified live rather than read: 201 on a real
-write, 422 on prose in `cost`, 400 on any `tier`, and the write stamps
-`last_memory_write_at` so the close gate counts it.
+## Four defects shipped as guards today
 
-## What was actually wrong, and what tonight established
+All four were the same shape: **a path that is honoured in part and answered
+200**. None announced itself.
 
-The lane shipped working and three days of use found what no test could.
+1. **top-off ran during a transition** and could promote a scar to CORE on
+   evidence drawn from a half-migrated store. Suppressed while `adopting` or
+   `reverting`.
+2. **`reason` was accepted and discarded** on the tiering path, kept only on
+   skips. 293 reasons lost on IND's migration before the column existed.
+3. **an adoption with no open session** mints rows with a NULL clock origin,
+   which cannot be scored and are therefore excluded from retrieval. Second
+   occurrence; the first was closed with a comment instead of a guard. Now
+   refused at BEGIN.
+4. **a markdown heading was read as a scope that can never close**, so
+   `scan_context` answered `cannot_die` and auto-promoted into the
+   never-decaying tier. 381 of 455 live scars were eligible. Now answers a new
+   `unresolvable` outcome and takes no action.
 
-**Nothing sorted the memories agents write.** The spec assigns that to consolidation at
-the session boundary. Consolidation runs at startup, performs four other movements, and
-never looked. So a docstring promised tiering, the promise read as a description, and 39
-real lessons sat unscoreable and unreachable. Now tiered from the write-time tags, with
-unjudged notes defaulting *down* to working - which is the safety mechanism, not a
-preference, because a working row is structurally outside the set that can be
-auto-promoted to the tier that never decays.
+## Open, needing Miles
 
-**A memory could not be withdrawn.** No PATCH, no DELETE, anywhere. A lesson known to be
-wrong was permanent. Worse, the two existing retirement paths could not delete an adopted
-row at all - they raised on a foreign key and the failure was swallowed inside a
-catch-and-log where a hard failure and a clean no-op render identically.
+- **The 39 + 86 already-promoted rows.** Before the bug fired, IND's team lead
+  had ZERO core rows — the entire CORE tier there is an artifact, including 13
+  standing rulings and the Jira credential authorization. Nothing in it carries
+  human-granted provenance because no route grants it. Current lean: revert to
+  scar and promote deliberately once a human path exists. Raw SQL either way.
+- **IND's 293 NULL clock origins.** Backfill pending a ruling. Argued (by the
+  other Archie_IND) for a synthetic session pinned to the adoption window rather
+  than stamping now, because stamping now asserts reinforcement that never
+  happened and the lie grows while the decision waits. Lockstep is not an
+  artifact to engineer away — those rows genuinely did enter in one hour.
+  **Not urgent:** `/memory/scored` serves rows regardless of scoring, so the
+  other window's spawn script already routes around it. Only a caller trusting
+  `memory_full` is affected.
+- **No human path to CORE at all.** `promote_to_core` has no HTTP route. After
+  defect 4 this is now the *only* road, so it went from a gap to the blocker.
+  Tracked for human_memory v2 along with the dedup hole and bundled rows.
+- **`memory_usage_rules`** from `spawn-prepare` still teaches `memory/append`
+  and `condense`, which 409 on a human_memory project. Server-generated, so this
+  morning's playbook fix did not cover it. Smallest open item.
 
-**Timestamps could store out of order.** A value carrying a fraction rounds up on
-storage; one generated at second precision does not. So a decision could record itself
-half a second in the future while a row created after it stored earlier. Five column
-pairs, four of them feeding the session rollup - the system measuring its own work.
+## Two Archie_INDs
 
-## The design questions that are genuinely yours
+A second interactive session runs IndependenceDay on another machine
+(`independenceday-99`), opened DWB session 2653. Both are agent_id 70 writing to
+the same store and neither can see the other, which is why a defect report
+arrived here attributed to a spawned teammate who correctly refused credit. That
+session has its own spawn script and is briefed on all four fixes. It
+deliberately does not raise things with Miles, to avoid double-asking.
 
-1. **A distinct human identity at the API.** There is no human actor. `award_human_score`
-   authenticates nothing; the human acts through an agent's id. This surfaced when
-   withdrawal was specified as "the owning agent plus the human" and Barry_DWB correctly
-   refused to invent an auth scheme to satisfy a clause, rather than make a security
-   decision in passing. Unticketed.
-2. **DWB-632 fixes the mechanism and builds neither the SCAN (spec section 2) nor any way
-   for an agent to re-judge a tier it disagrees with.** Both are named under a NOT BUILT
-   heading in that ticket, deliberately: the inference that a working mechanism means
-   section 4 is finished is exactly how the original defect survived.
+## The lesson worth carrying
 
-## Open tickets
+Three of today's four defects I walked into myself, and the clock-origin one I
+caused by closing a session on instruction. The tell in every case was a 200.
+The suites were green throughout both outages because every test asserted rows
+were WRITTEN and none asserted a memory could be READ BACK by the thing that
+serves it. A row count proves storage; only an end-to-end read proves delivery.
 
-- **DWB-636** - a consolidation failure is swallowed and reads identically to a clean
-  no-op. The only place this system acts unattended.
-- **DWB-625** - the stock read path is deliberately excused in the allowlist, but its
-  recorded reason says "inspected by a human" and nothing on that route can tell a human
-  from an agent. Documentation correctness in the one place documentation is load-bearing.
-- **DWB-618** - whether `identity.md` should carry a token ceiling at all, given it is
-  scaffold-generated and no agent can edit it.
-
-## The instrument worth keeping
-
-`backend/scripts/suite_fingerprint.py`. Eleven checking instruments failed in one
-evening, every one working exactly as written and answering a narrower question than the
-claim built on it. This is the one that survived inspection - and it survived *the
-inspections that were run on it*, which is a weaker claim and the right one. Promote it on
-its properties:
-
-- hashes file CONTENT per file. `git status --porcelain` emits `<XY> <path>` and carries
-  no content, so it cannot move on a content-only change to an already-dirty file - the
-  dominant shape when several lanes are live. That is a proof from the output format, not
-  an experiment.
-- derives its scope from what the SUITE READS, including the gitignored memory corpus that
-  no git view can see.
-- refuses PER ROOT on an empty scope, because a hash of nothing is perfectly stable.
-- states the ROLE beside every number: content hashes answer *did it change*, byte and file
-  counts answer *did it have input* and are not change detectors. A number whose role is
-  unstated gets promoted to evidence by the next reader.
-
-**A number without its tree is not a number.** The endpoint still reports a stale figure;
-post one only with its commit and the uncommitted work named beside it.
-
-## What this session actually taught
-
-Nobody caught their own scope error. Not one, all evening. Every correction came from
-someone reading a result without having run the check - and the person who ran it is
-structurally the worst placed to ask, because they chose the scope.
-
-That is a property of the arrangement rather than of anyone's diligence. It survives
-tiredness and it does not survive working alone. The lead's job is to put the two people
-either side of a seam in direct contact, not to review both halves personally - reviewing
-both halves means reading both from the same angle twice.
+That bit one more time tonight: the memory note pointing at the cleanup doc was
+written seconds after the regex layer closed the session, so it landed with a
+NULL origin — the exact defect, on the last write of the day. Stamped with its
+true session (2652) by hand. Hence this pointer existing in two places.
