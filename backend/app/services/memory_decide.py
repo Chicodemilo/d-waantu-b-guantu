@@ -5,11 +5,15 @@
 #          record the answer, write or journal-then-skip, and let the cutover
 #          fire when the last row lands. The phase the whole lane protects.
 # Caller: DWB-594's decide endpoint
-# Callees: app/services/memory_cutover, app/models/agent_memory,
-#          app/models/journal_entry, app/models/memory_transition
+# Callees: app/services/memory_cutover, app/services/memory_origin,
+#          app/models/agent_memory, app/models/journal_entry,
+#          app/models/memory_transition
 # Data In: db Session, agent_id, transition id, a tier
 # Data Out: the updated MemoryTransition; the mode landed in, if it cut over
-# Last Modified: 2026-10-01 (DWB-634: _decision_now delegates to the shared
+# Last Modified: 2026-10-07 (DWB-637: the session origin is a PRECONDITION of
+#                the decision now, refused per decision, rather than a stamp
+#                falling back to NULL; previous entry: DWB-634 _decision_now
+#                delegates to the shared
 #                app.services.timestamps helper, same expression, one owner;
 #                previous entry: DWB-633 decided_at is truncated to the second
 #                at source - MySQL rounds a microsecond value HALF-UP into a
@@ -71,8 +75,8 @@ from app.models.memory_transition import (
     TransitionState,
 )
 from app.models.project import MemoryMode, Project
-from app.services import dwb_session as session_svc
 from app.services import memory_format
+from app.services import memory_origin
 from app.services import timestamps
 
 # Tiers an adopting agent may choose. `core` and `raw` are both absent, for
@@ -269,6 +273,10 @@ def decide(
 
     Does not commit. The caller owns the transaction, so the memory row, the
     state change and any cutover it triggers land together or not at all.
+
+    Raises `memory_origin.MemoryOriginMissing` when no DWB session is open,
+    BEFORE touching the row, so a refused decision stays decidable rather than
+    stranding half-judged (DWB-637).
     """
     row = _load(db, transition_id)
 
@@ -310,17 +318,35 @@ def decide(
     # no memory; the flat file was sealed behind the mode, so there was no
     # fallback. An omission on ONE writer, not a missing capability.
     #
-    # NULL when no session is open is the RAW PATH'S OWN RULE and is kept
-    # deliberately rather than improved on here: losing the lesson because the
-    # bookkeeping was not ready is the worse outcome, and inventing a different
-    # rule for adoption is how the two writers drift apart again.
-    active = session_svc.get_active_session(db, row.project_id)
+    # DWB-637 OVERRULES THE PARAGRAPH THAT STOOD HERE, AND IT IS QUOTED RATHER
+    # THAN DELETED SO THE REVERSAL IS LEGIBLE. It read:
+    #
+    #   "NULL when no session is open is the RAW PATH'S OWN RULE and is kept
+    #    deliberately rather than improved on here: losing the lesson because
+    #    the bookkeeping was not ready is the worse outcome, and inventing a
+    #    different rule for adoption is how the two writers drift apart again."
+    #
+    # The second half was right and is now satisfied properly: both writers
+    # share a rule, and it lives in `memory_origin` rather than being restated
+    # in each. The first half is false. An unscoreable row is not a kept
+    # lesson - it is a lost one that still counts in a row count, which is
+    # worse than a refusal because nobody goes looking for it. The refusal
+    # writes nothing and the same decision succeeds once a session is open.
+    #
+    # PER DECISION, NOT ONCE. `project.py`'s BEGIN-edge guard runs at the mode
+    # flip; this runs on every one of the 308 decisions an adoption makes, so a
+    # session closing mid-run stops the run here instead of silently returning
+    # every remaining row to NULL.
+    origin = memory_origin.require_session_origin(
+        db, project_id=row.project_id, action="Adopt decision"
+    )
 
     memory = AgentMemory(
         agent_id=row.agent_id,
         tier=chosen,
         body=body,
-        created_session_id=active.id if active is not None else None,
+        # Never conditional. `origin` is a session or this line was not reached.
+        created_session_id=origin.id,
         # DWB-611: every scar is context-bound now, so context_key is set for
         # every `scar` row a heading path is available for, not a subset
         # gated by a second tier value. A row with no heading (or any other
@@ -412,6 +438,27 @@ def decide_and_maybe_cut_over(
     to run it will eventually not be run.
     """
     from app.services import memory_cutover
+
+    # DWB-637, criterion 2: the refusal is on the DECISION, which is this
+    # function, not only on the branch that inserts a memory row.
+    #
+    # `decide` below checks again at the insert. That is not redundant: this
+    # check exists so a SKIP is refused as well, and the one in `decide` exists
+    # because that is where the row is born and is what a future caller
+    # reaching `decide` directly will hit. Same rule, same module, two call
+    # sites, each load-bearing for a different path.
+    #
+    # Refusing skips is the sub-decision worth naming. A skip writes a journal
+    # entry, which is reachable by search whatever its origin, so a skip loses
+    # nothing on its own. But allowing skips while writes are refused lets an
+    # adoption run to completion with its keepers rejected and its noise
+    # recorded, and fire the cutover on that - a run that reads as finished and
+    # is not. Stopping the run is the behaviour the ticket asked for, and it
+    # costs one call to recover.
+    row = _load(db, transition_id)
+    memory_origin.require_session_origin(
+        db, project_id=row.project_id, action="Adopt decision"
+    )
 
     if tier is None:
         row = skip(db, transition_id=transition_id, decided_by=decided_by, reason=reason)

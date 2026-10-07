@@ -61,6 +61,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import text
 
+from app.models.dwb_session import DwbOpenMethod, DwbSession
 from app.models.memory_transition import (
     MemoryTransition,
     MemoryTransitionRun,
@@ -86,6 +87,19 @@ def adopting(db_session, make_project, make_agent, tmp_path):
     agent = make_agent(project_id=project_dict["id"])
     project = db_session.get(Project, project_dict["id"])
     project.memory_mode = MemoryMode.adopting
+
+    # DWB-637: a decision with no open DWB session is refused, because the
+    # memory it writes stamps its clock origin from one. This fixture sets the
+    # mode by hand rather than travelling the BEGIN edge, so it supplies the
+    # session the same way it supplies `enumerated_at` below.
+    db_session.add(
+        DwbSession(
+            project_id=project.id,
+            open_method=DwbOpenMethod.slash,
+            opened_at=datetime(2026, 10, 1, 10, 0, 0),
+        )
+    )
+    db_session.flush()
 
     run = MemoryTransitionRun(
         project_id=project.id,

@@ -45,6 +45,25 @@ from app.models.journal_entry import JournalEntry
 from app.services import memory_consolidate as svc
 
 
+def _open_session(db, project_id):
+    """An OPEN session, which (e) below needs and nothing else does.
+
+    DWB-637: journal-to-core MINTS an agent_memories row, and a minted row with
+    no clock origin cannot be scored, so the promotion is deferred when no
+    session is open. Open rather than closed matters twice over: only CLOSED
+    sessions tick the decay clock, so adding this one cannot move any session
+    gap the rest of this test asserts on.
+    """
+    from app.models.dwb_session import DwbOpenMethod
+    from app.services import dwb_session as session_svc
+
+    session, _existing = session_svc.open_session(
+        db, project_id=project_id, open_method=DwbOpenMethod.slash
+    )
+    db.flush()
+    return session
+
+
 def _closed_session(db, project_id, *, hours_ago=1):
     from app.models.dwb_session import DwbCloseMethod, DwbOpenMethod, DwbSession
 
@@ -145,6 +164,7 @@ class TestAllMovementsFireTogether:
         )
         db_session.add(journal_entry)
         db_session.flush()
+        _open_session(db_session, project_id)
 
         result = svc.consolidate_agent(db_session, agent_id=agent_id)
 

@@ -67,6 +67,7 @@ from pathlib import Path
 
 import pytest
 
+from app.models.dwb_session import DwbOpenMethod, DwbSession
 from app.models.memory_transition import (
     MemoryTransition,
     MemoryTransitionRun,
@@ -114,6 +115,19 @@ def adoption(db_session, make_project, make_agent, tmp_path):
             _render([f"{agent['name']} lesson one", f"{agent['name']} lesson two"]),
             encoding="utf-8",
         )
+
+    # DWB-637: every decision in this file now needs an open DWB session,
+    # because the memory it writes stamps its clock origin from one. Same shape
+    # as `enumerated_at` just below: this fixture sets the mode by hand instead
+    # of travelling the BEGIN edge, so it has to supply what that edge supplies.
+    db_session.add(
+        DwbSession(
+            project_id=project.id,
+            open_method=DwbOpenMethod.slash,
+            opened_at=datetime(2026, 10, 1, 10, 0, 0),
+        )
+    )
+    db_session.flush()
 
     run = MemoryTransitionRun(
         project_id=project.id,

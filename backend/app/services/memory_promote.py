@@ -10,13 +10,17 @@
 #         maybe_promote_scar and promote_journal_candidates; both call
 #         promote_to_core, which nothing else may
 # Callees: app/models/agent_memory, app/services/memory_scan,
-#          app/services/journal (DWB-608: promotion_candidates)
+#          app/services/journal (DWB-608: promotion_candidates),
+#          app/services/memory_origin (DWB-637: the insert needs an origin)
 # Data In: db Session, an AgentMemory (scar family), or an agent_id scope for
 #          the journal consumer
 # Data Out: the promoted/created AgentMemory; ScarPromotionReason | None;
 #           list[AgentMemory] newly created from journal entries
-# Last Modified: 2026-09-30 (DWB-608: journal-to-core consumer, idempotent on
-#                source_journal_id)
+# Last Modified: 2026-10-07 (DWB-637: the journal-to-core INSERT stamps a
+#                session origin and is deferred when there is none, instead of
+#                minting a CORE row that can never be scored or rendered;
+#                previous entry: DWB-608 journal-to-core consumer, idempotent
+#                on source_journal_id)
 
 """Scar to CORE, and the one door CORE is written through.
 
@@ -92,8 +96,10 @@ import enum
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.agent import Agent
 from app.models.agent_memory import AgentMemory, MemoryTier
 from app.services import journal as journal_svc
+from app.services import memory_origin
 from app.services import memory_scan
 
 # Spec section 2: "a scar fired three times broadens to CORE." Deliberately
@@ -134,6 +140,24 @@ def promote_to_core(
     (DWB-608). There is no existing AgentMemory row for a journal entry to
     retier, so this branch is a plain insert, not a promotion of something
     already in this table.
+
+    DWB-637: THE INSERT BRANCH NEEDS A SESSION ORIGIN AND THE RETIER BRANCH
+    DOES NOT, and that asymmetry is the whole of the change here. A retier
+    moves an existing row's tier and leaves its session references untouched -
+    the origin it already had is still true. An insert mints a row, and a minted
+    row with no origin cannot be scored, so it is excluded from every candidate
+    list and never reaches an agent. CORE makes that worse rather than better:
+    the curve scores it 10 in every bucket, so a CORE row is the one tier that
+    should never be missing from a context, and it was being written here with
+    no origin at all. This writer was not named in the ticket; it is the third
+    with the same defect, and a NOT NULL constraint on `created_session_id`
+    would have turned it into an IntegrityError inside a hook.
+
+    Raises `memory_origin.MemoryOriginMissing` on the insert branch when no
+    DWB session is open. The background caller below never reaches that raise
+    because it checks first and defers; the raise is here so that a future
+    caller of this function - the single write site for CORE - cannot mint an
+    unreachable row by not knowing to check.
     """
     if memory is not None:
         memory.tier = MemoryTier.core
@@ -141,10 +165,24 @@ def promote_to_core(
         db.flush()
         return memory
 
+    agent = db.get(Agent, agent_id)
+    if agent is None or agent.project_id is None:
+        raise memory_origin.MemoryOriginMissing(
+            f"Journal promotion refused: agent {agent_id} is missing or has no "
+            "project, so there is no project whose open DWB session could give "
+            "this memory a clock origin. A memory with no origin cannot be "
+            "scored and never reaches an agent."
+        )
+    origin = memory_origin.require_session_origin(
+        db, project_id=agent.project_id, action="Journal promotion"
+    )
+
     row = AgentMemory(
         agent_id=agent_id,
         tier=MemoryTier.core,
         body=body,
+        # Never conditional. `origin` is a session or this line was not reached.
+        created_session_id=origin.id,
         source_journal_id=source_journal_id,
     )
     db.add(row)
@@ -230,6 +268,28 @@ def promote_journal_candidates(
     created: list[AgentMemory] = []
     for entry in candidates:
         if entry.id in already_promoted:
+            continue
+        # DWB-637: DEFER, do not raise and do not write without an origin.
+        #
+        # This runs from the session-start consolidation pass, which has no
+        # caller to answer and must not block. Nothing is lost by skipping: the
+        # journal entry stays exactly where it is, `already_promoted` is
+        # recomputed from `source_journal_id` on every pass, so this candidate
+        # is proposed again unchanged by the next pass that has a session. A
+        # deferred promotion is recoverable; a CORE row that cannot be scored
+        # is not.
+        #
+        # Scoped per entry rather than once per call because this function's
+        # default scope is every agent, and agents on different projects have
+        # different sessions - a single check would read one project's state
+        # and apply it to another's.
+        agent = db.get(Agent, entry.agent_id)
+        if agent is None or agent.project_id is None:
+            continue
+        if (
+            memory_origin.deferrable_session_origin(db, project_id=agent.project_id)
+            is None
+        ):
             continue
         created.append(
             promote_to_core(

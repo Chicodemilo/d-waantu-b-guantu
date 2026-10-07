@@ -2,23 +2,37 @@
 # File: test_raw_memory_write_dwb586.py
 # Created: 2026-09-29 (DWB-586)
 # Purpose: Guard the raw memory write - that it writes `raw` and never NULL,
-#          that both session states are reported distinguishably, that no
-#          request shape sets a tier, and that it stamps the write-on-close gate.
+#          that a write with no open DWB session is REFUSED rather than stored
+#          without a clock origin, that no request shape sets a tier, and that
+#          it stamps the write-on-close gate.
 # Caller: pytest
 # Callees: app.services.raw_memory, POST /api/agents/{id}/memories
 # Data In: test DB rows via the factory fixtures
 # Data Out: Assertions on responses and on the persisted row
-# Last Modified: 2026-09-29 (DWB-586)
+# Last Modified: 2026-10-07 (DWB-637: AC1's "accepted without a session"
+#                case is now the refusal case - see the docstring below)
 
 """DWB-586 acceptance, spec section 4 and section 7 hard rule 5.
 
 The two acceptance criteria drive the two big classes here.
 
-AC1 is about AMBIGUITY, not about sessions. A write with no open session is
-accepted, and the caller must be able to tell that from a write that landed in
-one. So the tests assert the two responses DIFFER, not merely that each is
-individually plausible - a bug that reported `none_open` for everything passes
-every single-response assertion in isolation.
+AC1 WAS about AMBIGUITY: a write with no open session was ACCEPTED, and the
+caller had to be able to tell that from a write that landed in one, so the tests
+asserted the two responses DIFFER rather than that each was individually
+plausible.
+
+DWB-637 REMOVED THE AMBIGUOUS CASE RATHER THAN DISAMBIGUATING IT. A row written
+with a null `created_session_id` has no clock origin, so `memory_score` cannot
+score it, so it is excluded from every candidate list and never reaches an
+agent: it read as stored and behaved as lost, three times, for 612 rows. The
+write is now refused with 400.
+
+The SHAPE of AC1 survives and is what the tests below still assert, because the
+shape was the valuable part: hold both cases at once and assert they ANSWER
+DIFFERENTLY. A guard that passes because the dangerous case answers the same way
+as the safe one is the defect this whole lane keeps producing, and "every write
+is refused" passes every single-response assertion in isolation exactly as
+"every write says none_open" did.
 
 AC2 is about the refusal NAMING its reason. Asserting a 400 is not enough: a
 400 for the wrong reason (say, a Pydantic type error) reads identically to the
@@ -38,13 +52,29 @@ from app.services import raw_memory
 
 
 @pytest.fixture
-def human_memory_agent(make_project, make_agent):
-    """An agent on its own project, with no DWB session open.
+def human_memory_agent(client, make_project, make_agent):
+    """An agent on its own project, WITH a DWB session open (DWB-637).
 
     Its own project matters: the session lookup is per-project and the
     single-active invariant is a per-project UNIQUE index, so a shared project
     would let one test's open session leak into another's "no session" case.
+
+    The session is open because a write without one is now refused, and every
+    test in this file that is about something ELSE - tiers, moment-tags, the
+    write-on-close stamp - needs the write to succeed to assert anything at all.
+    Leaving it closed would make those tests pass or fail on the session rule
+    rather than on their own subject, which is the "400 for the wrong reason"
+    trap this module's docstring already warns about, one level up.
     """
+    project = make_project()
+    agent = make_agent(project_id=project["id"])
+    _open_session(client, project["id"])
+    return agent, project
+
+
+@pytest.fixture
+def agent_with_no_session(make_project, make_agent):
+    """An agent on its own project with NO session open: the refusal case."""
     project = make_project()
     return make_agent(project_id=project["id"]), project
 
@@ -59,12 +89,15 @@ def _open_session(client, project_id):
 
 
 class TestSessionStamping:
-    """AC1: both session states land, and they are distinguishable."""
+    """AC1 as DWB-637 leaves it: one state lands, the other is refused, and the
+    two outcomes are distinguishable."""
 
     def test_write_during_open_session_carries_that_session_id(
-        self, client, human_memory_agent
+        self, client, agent_with_no_session
     ):
-        agent, project = human_memory_agent
+        # Opens the session itself rather than taking the fixture's, so the id
+        # asserted below is one this test can see being created.
+        agent, project = agent_with_no_session
         session = _open_session(client, project["id"])
 
         r = client.post(
@@ -76,50 +109,115 @@ class TestSessionStamping:
         assert row["created_session_id"] == session["id"]
         assert row["session_state"] == raw_memory.SESSION_OPEN
 
-    def test_write_with_no_open_session_is_accepted_and_says_so(
-        self, client, human_memory_agent
+    def test_write_with_no_open_session_is_refused_and_names_the_fix(
+        self, client, agent_with_no_session
     ):
-        agent, _project = human_memory_agent
+        """DWB-637 criterion 1. The status AND the reason AND the fix.
+
+        Asserting only the 400 would pass against a refusal for any other
+        reason - an empty body, a bad tier, a Pydantic error - which reads
+        identically to the caller and sends them looking in the wrong place.
+        """
+        agent, _project = agent_with_no_session
 
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
             json={"body": "encoded with nobody watching"},
         )
-        # Accepted, not refused: losing the lesson because the bookkeeping was
-        # not ready is the worse outcome (spec section 4).
-        assert r.status_code == 201, r.text
-        row = r.json()
-        assert row["created_session_id"] is None
-        assert row["session_state"] == raw_memory.SESSION_NONE_OPEN
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "no open DWB session" in detail  # the reason
+        assert "cannot be scored" in detail  # why that matters
+        assert "/dwb-open" in detail and "/api/sessions/open" in detail  # the fix
+        # Role-neutral: opening a session is TL-only, so the line is phrased as
+        # a condition rather than an instruction to whoever happens to be here.
+        assert "is not yours to do" in detail
+        assert "Open a session first" not in detail
+        assert "Nothing was written" in detail  # what became of the lesson
 
-    def test_the_two_session_states_are_distinguishable(
+    def test_a_refused_write_persists_no_row(
+        self, client, db_session, agent_with_no_session
+    ):
+        """The refusal has to leave the table untouched, not write-then-complain.
+
+        Checked against a SELECT rather than inferred from the status code: the
+        whole bug class here is a row that exists and cannot be reached, and a
+        400 returned after a flush would reproduce it exactly.
+        """
+        agent, _project = agent_with_no_session
+        client.post(
+            f"/api/agents/{agent['id']}/memories", json={"body": "must not land"}
+        )
+        rows = (
+            db_session.query(AgentMemory)
+            .filter(AgentMemory.agent_id == agent["id"])
+            .all()
+        )
+        assert rows == []
+
+    def test_the_refused_write_succeeds_unchanged_once_a_session_opens(
+        self, client, agent_with_no_session
+    ):
+        """The refusal's own claim, tested rather than trusted.
+
+        The message tells the caller to send the request again unchanged. If
+        that is false the refusal is worse than useless, because it costs the
+        lesson AND misdirects the retry. Same bytes, both times.
+        """
+        agent, project = agent_with_no_session
+        payload = {"body": "the same lesson, byte for byte", "cost": "low"}
+
+        refused = client.post(f"/api/agents/{agent['id']}/memories", json=payload)
+        assert refused.status_code == 400, refused.text
+
+        session = _open_session(client, project["id"])
+        accepted = client.post(f"/api/agents/{agent['id']}/memories", json=payload)
+        assert accepted.status_code == 201, accepted.text
+        assert accepted.json()["created_session_id"] == session["id"]
+
+    def test_the_two_cases_answer_differently(
         self, client, make_project, make_agent
     ):
-        """The point of AC1, asserted directly rather than implied by the two
-        tests above.
+        """The point of AC1, kept through DWB-637 and asserted directly.
 
-        Both of those pass against a build that reports `none_open` for every
-        write, because each only ever sees one of the two cases. This one holds
-        both responses at once and asserts they differ, which is the only shape
-        that catches a collapsed vocabulary.
+        The tests above each see ONE of the two cases, so each passes against a
+        build that refuses every write, and each passes against a build that
+        accepts every write. This one holds both at once and asserts they
+        differ. That is the generating question for any guard: what does the
+        dangerous case answer here, and does the safe case answer differently?
+
+        Two projects because the single-active session invariant is a
+        per-project UNIQUE index - one project cannot be in both states.
         """
         closed_project = make_project()
         closed_agent = make_agent(project_id=closed_project["id"])
         open_project = make_project()
         open_agent = make_agent(project_id=open_project["id"])
-        _open_session(client, open_project["id"])
+        session = _open_session(client, open_project["id"])
 
         without = client.post(
             f"/api/agents/{closed_agent['id']}/memories", json={"body": "no session"}
-        ).json()
+        )
         within = client.post(
             f"/api/agents/{open_agent['id']}/memories", json={"body": "in session"}
-        ).json()
+        )
 
-        assert without["session_state"] != within["session_state"]
-        assert without["created_session_id"] != within["created_session_id"]
-        # And neither state is an absence of information: both are named.
-        assert without["session_state"] and within["session_state"]
+        assert without.status_code != within.status_code
+        assert (without.status_code, within.status_code) == (400, 201)
+        # The accepted one carries a real origin, not merely a non-null field.
+        assert within.json()["created_session_id"] == session["id"]
+        assert within.json()["session_state"] == raw_memory.SESSION_OPEN
+
+    def test_there_is_no_named_success_state_for_a_missing_session(self):
+        """DWB-637 criterion 4, asserted on the module rather than on a response.
+
+        `SESSION_NONE_OPEN` named a SUCCESSFUL outcome in which the written row
+        had no clock origin. A name for a bad state sitting in the success path
+        reads as a supported mode, and the next writer reaches for it. It is
+        removed, not re-documented, and this fails if it comes back.
+        """
+        assert not hasattr(raw_memory, "SESSION_NONE_OPEN")
+        assert raw_memory.SESSION_OPEN == "open"
 
 
 class TestTierIsNotSettable:
@@ -151,11 +249,18 @@ class TestTierIsNotSettable:
         """
         project = make_project()
         agent = make_agent(project_id=project["id"])
+        # A session, so a 400 here can only be about the tier. Without one every
+        # row would pass for the session reason and this test would certify
+        # nothing about tiers at all (DWB-637).
+        _open_session(client, project["id"])
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
             json={"body": "trying to tier at write time", "tier": tier},
         )
         assert r.status_code == 400, f"tier {tier!r} was accepted: {r.text}"
+        assert "tier" in r.json()["detail"], (
+            f"tier {tier!r} was refused for some other reason: {r.text}"
+        )
 
     def test_a_refused_write_persists_nothing(
         self, client, db_session, human_memory_agent
@@ -264,6 +369,7 @@ class TestWhatLandsInTheRow:
         the day it is added rather than silently rejected by a stale Literal."""
         project = make_project()
         agent = make_agent(project_id=project["id"])
+        _open_session(client, project["id"])
         for value in enum:
             r = client.post(
                 f"/api/agents/{agent['id']}/memories",

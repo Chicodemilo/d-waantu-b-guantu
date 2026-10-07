@@ -48,10 +48,22 @@ class RawMemoryCreate(BaseModel):
 class RawMemoryResponse(BaseModel):
     """The written row, plus what the session lookup found.
 
-    `session_state` exists because `created_session_id: null` on its own is
-    ambiguous - it cannot distinguish "no session was open" from "we never
-    looked". The two are different facts and only one of them is fine. Values:
-    `open` (id stamped) and `none_open` (write accepted, id null).
+    `session_state` used to exist because `created_session_id: null` on its own
+    is ambiguous - it cannot distinguish "no session was open" from "we never
+    looked" - and it carried two values, `open` and `none_open`.
+
+    DWB-637 REMOVED THE AMBIGUOUS CASE RATHER THAN DISAMBIGUATING IT. A row with
+    a null `created_session_id` has no clock origin, so it cannot be scored, so
+    it is excluded from every candidate list and never reaches an agent: it read
+    as stored and behaved as lost. That write is now refused with 400, and
+    `none_open` is gone rather than documented as unreachable, because a name for
+    a bad state sitting in the success path reads as a supported mode.
+
+    So `session_state` has exactly one value, `open`, and `created_session_id` is
+    never null on a response from this endpoint. The field is kept rather than
+    dropped: it is a positive confirmation that the row has an origin, which is
+    the fact this endpoint exists to guarantee, and a consumer reading `open` is
+    reading a checked claim rather than a default.
     """
 
     id: int

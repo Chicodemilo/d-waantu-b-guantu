@@ -8,7 +8,10 @@
 # Data In: db: Session, ProjectCreate/Update
 # Data Out: list[Project], Project, MEMORY_MODE_SWITCH_WARNING,
 #           memory_mode_transition_refusal() -> str | None
-# Last Modified: 2026-10-01 (DWB-624: complete the child enumeration and
+# Last Modified: 2026-10-07 (DWB-637: the adoption BEGIN-edge session guard is
+#                now defence in depth behind memory_origin's per-insert rule;
+#                its comment records that, and the guard itself is unchanged;
+#                previously DWB-624: complete the child enumeration and
 #                journal memories whose clock origin the teardown destroys;
 #                previously DWB-624: complete the delete_project child
 #                enumeration - nodes, node_pointers, node_exclusions,
@@ -275,10 +278,25 @@ def memory_mode_transition_refusal(
         # - 293 of 295 rows on IND - because a comment is not a guard. This is
         # the guard.
         #
+        # DWB-637: THIS GUARD IS NOW DEFENCE IN DEPTH, NOT THE ONLY GUARD, AND
+        # THE PARAGRAPH BELOW IS WHY IT WAS NOT ENOUGH ON ITS OWN.
+        #
+        # It stays because it is the only guard the OPERATOR sees, at the only
+        # moment they are present, and a refusal here costs them one command
+        # where a refusal 200 decisions in costs an agent its run. But it is no
+        # longer what keeps a NULL origin out of the table. That is
+        # `memory_origin.require_session_origin`, called at every site that
+        # inserts into `agent_memories`, which closes the hole this one
+        # structurally cannot: this runs ONCE, at the flip, and the stamp runs
+        # PER DECISION, so a session closing mid-run walked straight past it.
+        #
         # REFUSED AT BEGIN rather than per-decision, for two reasons. The
         # operator is present at exactly this moment and nowhere later, and
         # enumeration has not run yet, so nothing has to be unwound. Refusing
         # the 1st of 308 decisions would strand a half-judged run instead.
+        # (DWB-637 settled that trade the other way for the per-decision case:
+        # a stranded run is re-decidable in one call, where a run that finishes
+        # with NULL origins is not recoverable without a backfill.)
         #
         # `created_session_id` is an FK to `dwb_sessions`, so there is no
         # synthetic origin to stamp instead - the session has to genuinely

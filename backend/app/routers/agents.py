@@ -51,6 +51,7 @@ from app.services import memory_withdraw as withdraw_svc
 from app.services import agent_consolidation as consolidation_svc
 from app.services import memory_mode as memory_mode_svc
 from app.services import memory_score as memory_score_svc
+from app.services import memory_origin
 from app.services import raw_memory as raw_memory_svc
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -591,18 +592,21 @@ def append_raw_memory(
     every other tier behind consolidation. The field is accepted by the schema
     only so the attempt can be answered rather than silently written as `raw`.
 
-    A write with NO open DWB session is ACCEPTED, not refused: losing the lesson
-    because the bookkeeping was not ready is the worse outcome. The response
-    says which happened in `session_state` (`open` | `none_open`) alongside
-    `created_session_id`, because a null id alone cannot distinguish "nothing
-    was open" from "nobody looked".
+    A write with NO open DWB session is REFUSED with 400 (DWB-637). The reverse
+    of what this docstring said until then, and the reversal is the ticket: a
+    row accepted with a null `created_session_id` has no clock origin, cannot be
+    scored, is excluded from every candidate list and never reaches an agent, so
+    it reads as stored and behaves as lost. The refusal writes nothing, names
+    the fix, and the identical request succeeds once a session is open.
+    `session_state` therefore has one value now, `open`, and it is a confirmed
+    claim rather than a default.
 
     Stamps agents.last_memory_write_at like every other memory write, so the
     DWB-519 write-on-close gate sees a human_memory agent's participation with
     no mode-aware branch (DWB-589 verifies rather than rebuilds this).
 
     Returns 201. Errors:
-      - 400: empty body, any tier at all, unscoped agent.
+      - 400: empty body, any tier at all, unscoped agent, NO OPEN DWB SESSION.
       - 404: agent or project not found.
     """
     try:
@@ -616,6 +620,12 @@ def append_raw_memory(
             surprised=data.surprised,
             tier=data.tier,
         )
+    except memory_origin.MemoryOriginMissing as e:
+        # DWB-637. 400 rather than 409: the request is well-formed and the
+        # server state is not in conflict with it - the precondition for
+        # storing a memory at all is simply not met, and the body says which
+        # one and how to meet it.
+        raise HTTPException(400, e.detail)
     except raw_memory_svc.RawMemoryWriteError as e:
         if e.code in ("agent_not_found", "project_not_found"):
             status = 404

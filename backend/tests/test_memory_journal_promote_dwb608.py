@@ -33,6 +33,8 @@ guard gets proved rather than asserted.
 import pytest
 
 from app.models.agent_memory import AgentMemory, MemoryTier
+from app.models.dwb_session import DwbOpenMethod
+from app.services import dwb_session as session_svc
 from app.services import journal as journal_svc
 from app.services import memory_promote as svc
 
@@ -40,8 +42,23 @@ THRESHOLD = journal_svc.PROMOTION_THRESHOLD
 
 
 @pytest.fixture
-def agent(make_project, make_agent):
+def agent(db_session, make_project, make_agent):
+    """An agent on its own project, with a DWB session open.
+
+    DWB-637: the promotion INSERTS an agent_memories row, and an insert needs a
+    session to stamp its clock origin from. With none open the promotion is
+    DEFERRED rather than written with a NULL origin, which is the right
+    behaviour for a background pass with no caller to answer - but it would
+    make every test in this file assert on an empty list for a reason that has
+    nothing to do with promotion. The deferral is covered directly in
+    tests/test_memory_origin_dwb637.py; here the session is open so these tests
+    stay about what they are named for.
+    """
     project = make_project()
+    session_svc.open_session(
+        db_session, project_id=project["id"], open_method=DwbOpenMethod.slash
+    )
+    db_session.flush()
     return make_agent(project_id=project["id"])
 
 

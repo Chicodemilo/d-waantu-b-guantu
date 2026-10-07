@@ -60,8 +60,23 @@ def _write_stock_memory(repo_path, prefix, name, when: datetime):
 
 
 @pytest.fixture
-def human_memory_project(make_project, tmp_path):
-    return make_project(repo_path=str(tmp_path), memory_mode="human_memory")
+def human_memory_project(client, make_project, tmp_path):
+    """A human_memory project WITH an open DWB session.
+
+    DWB-637: a raw memory write with no session open is refused, because the
+    row it would write has no clock origin and an unscoreable row never reaches
+    an agent. Every test here that writes is about sealing and gates rather
+    than about sessions, so the session is part of the fixture - without it
+    those tests would be asserting against the session refusal instead of
+    against the thing they are named for.
+    """
+    project = make_project(repo_path=str(tmp_path), memory_mode="human_memory")
+    r = client.post(
+        "/api/sessions/open",
+        json={"project_id": project["id"], "open_method": "slash"},
+    )
+    assert r.status_code == 201, r.text
+    return project
 
 
 @pytest.fixture
@@ -358,11 +373,21 @@ class TestSprintCloseOnASwitchedProject:
     every helper test there is.
     """
 
-    def _setup(self, make_project, make_agent, make_sprint, make_ticket, tmp_path):
+    def _setup(
+        self, client, make_project, make_agent, make_sprint, make_ticket, tmp_path
+    ):
         project = make_project(
             repo_path=str(tmp_path),
             memory_mode="human_memory",
             force_handoff_md=False,
+        )
+        # DWB-637: the raw write below needs an open session to stamp.
+        assert (
+            client.post(
+                "/api/sessions/open",
+                json={"project_id": project["id"], "open_method": "slash"},
+            ).status_code
+            == 201
         )
         agent = make_agent(
             project_id=project["id"], name="Switched", role="backend-worker"
@@ -383,7 +408,7 @@ class TestSprintCloseOnASwitchedProject:
         self, client, make_project, make_agent, make_sprint, make_ticket, tmp_path
     ):
         project, agent, sprint = self._setup(
-            make_project, make_agent, make_sprint, make_ticket, tmp_path
+            client, make_project, make_agent, make_sprint, make_ticket, tmp_path
         )
         r = client.post(
             f"/api/agents/{agent['id']}/memories", json={"body": "a lesson worth keeping"}
@@ -399,7 +424,7 @@ class TestSprintCloseOnASwitchedProject:
     ):
         """The negative is where the teeth are."""
         project, agent, sprint = self._setup(
-            make_project, make_agent, make_sprint, make_ticket, tmp_path
+            client, make_project, make_agent, make_sprint, make_ticket, tmp_path
         )
         r = client.patch(f"/api/sprints/{sprint['id']}", json={"status": "completed"})
         assert r.status_code == 400, r.text
@@ -418,7 +443,7 @@ class TestSprintCloseOnASwitchedProject:
         forbidden to write is the gate having no teeth at all.
         """
         project, agent, sprint = self._setup(
-            make_project, make_agent, make_sprint, make_ticket, tmp_path
+            client, make_project, make_agent, make_sprint, make_ticket, tmp_path
         )
         _write_stock_memory(
             tmp_path, project["prefix"], "Switched", datetime.now(timezone.utc)

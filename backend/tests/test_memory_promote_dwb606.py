@@ -39,11 +39,27 @@ import pathlib
 import pytest
 
 from app.models.agent_memory import AgentMemory, MemoryTier
+from app.models.dwb_session import DwbOpenMethod
+from app.services import dwb_session as session_svc
 from app.services import journal as journal_svc
 from app.services import memory_promote as svc
 from app.services import memory_scan
 
 APP_DIR = pathlib.Path(__file__).resolve().parent.parent / "app"
+
+
+def _open_session(db, project_id):
+    """DWB-637: an insert into agent_memories needs a session to stamp.
+
+    Only the INSERT branch of promote_to_core needs it - a retier leaves the
+    existing row's session references alone - so the scar tests below are
+    untouched and only the two direct-insert tests reach for this.
+    """
+    session, _existing = session_svc.open_session(
+        db, project_id=project_id, open_method=DwbOpenMethod.slash
+    )
+    db.flush()
+    return session
 
 
 def _memory(db, *, agent_id, tier=MemoryTier.scar, fired_count=0, context_key=None):
@@ -225,6 +241,7 @@ class TestPromoteToCoreDirectly:
     DWB-608 will call this directly with no existing AgentMemory row."""
 
     def test_with_no_existing_memory_it_creates_a_new_row(self, db_session, agent):
+        session = _open_session(db_session, agent["project_id"])
         created = svc.promote_to_core(
             db_session, agent_id=agent["id"], body="promoted from a journal entry",
             source_journal_id=None,
@@ -232,8 +249,13 @@ class TestPromoteToCoreDirectly:
         assert created.id is not None
         assert created.tier == MemoryTier.core
         assert created.body == "promoted from a journal entry"
+        # DWB-637: a minted CORE row carries a clock origin. Without one it is
+        # unscoreable, and CORE is the tier that should never be missing from a
+        # context - the curve scores it 10 in every bucket.
+        assert created.created_session_id == session.id
 
     def test_source_journal_id_is_recorded_when_given(self, db_session, agent):
+        _open_session(db_session, agent["project_id"])
         # source_journal_id is a real FK (agent_memories -> journal_entries),
         # so the referenced row has to exist first.
         entry = journal_svc.create_entry(

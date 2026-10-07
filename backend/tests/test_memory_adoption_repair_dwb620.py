@@ -35,6 +35,7 @@ resolving to a CLOSED ticket makes the row `finished`, and
 """
 
 import importlib.util
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -192,17 +193,61 @@ class TestDecideStampsTheSessionOrigin:
     def test_the_stamp_matches_the_raw_path(self):
         """Parity, asserted structurally rather than by eye.
 
-        Both writers must resolve the origin the same way: the active session,
-        or NULL when none is open. A second rule for adoption is how the two
-        drift apart again.
+        Both writers must resolve the origin the SAME way. A second rule for
+        adoption is how the two drift apart again, and they did: DWB-620 fixed
+        one writer and left the other, and the shared expression this test used
+        to pin was `active.id if active is not None else None` - parity on a
+        rule that was itself wrong. Parity is necessary and was never
+        sufficient.
+
+        DWB-637: the shared rule is now a shared FUNCTION, in one module, and
+        there is no fallback. This asserts both halves - that each writer
+        resolves through `memory_origin`, and that neither one still carries a
+        conditional that can reach None - because "both call the helper" would
+        pass against a writer that calls it and then ignores it.
         """
         import inspect
 
-        from app.services import memory_decide, raw_memory
+        from app.services import memory_decide, memory_promote, raw_memory
 
-        expected = "active.id if active is not None else None"
-        assert expected in inspect.getsource(memory_decide.decide)
-        assert expected in inspect.getsource(raw_memory.append_raw_memory)
+        writers = {
+            "memory_decide.decide": memory_decide.decide,
+            "raw_memory.append_raw_memory": raw_memory.append_raw_memory,
+            "memory_promote.promote_to_core": memory_promote.promote_to_core,
+        }
+        # Named rather than discovered, and the count asserted, so a fourth
+        # writer of agent_memories does not quietly escape this check by being
+        # written after it. tests/test_memory_origin_dwb637.py is the half that
+        # discovers write sites from source; this is the half that pins the
+        # ones we know about.
+        assert len(writers) == 3
+
+        for name, fn in writers.items():
+            source = inspect.getsource(fn)
+            assert "memory_origin" in source, (
+                f"{name} does not resolve its session origin through the one "
+                "module that owns the rule"
+            )
+            # EVERY assignment of the column, not merely the presence of one
+            # good one. A writer that stamps `origin.id` on one branch and
+            # falls back to None on another satisfies an `in` check and is
+            # exactly the bug. Scoped to this column rather than looking for
+            # `else None` anywhere in the function, which is a different
+            # question: `decide` legitimately writes `context_key=... else
+            # None`, and a check that reds on that is measuring the wrong thing.
+            assignments = re.findall(
+                r"created_session_id\s*=\s*([^,\n]+)", source
+            )
+            assert assignments, (
+                f"{name} never assigns created_session_id; an unstamped row has "
+                "no clock origin and is excluded from every candidate list"
+            )
+            for expression in assignments:
+                assert expression.strip() == "origin.id", (
+                    f"{name} assigns created_session_id={expression.strip()!r}; "
+                    "the only permitted value is the resolved origin, because "
+                    "any conditional here can write NULL"
+                )
 
 
 def _load_repair_script():

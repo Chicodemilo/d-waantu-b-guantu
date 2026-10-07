@@ -3,14 +3,16 @@
 # Created: 2026-09-29 (DWB-586)
 # Purpose: The RAW memory write for human_memory mode. Appends one untiered
 #          agent_memories row, stamps the open DWB session, and refuses to
-#          mint a CORE memory.
+#          mint a CORE memory or a row with no session origin.
 # Caller: app/routers/agents.py (POST /api/agents/{id}/memories)
-# Callees: app/services/dwb_session.get_active_session,
+# Callees: app/services/memory_origin.require_session_origin,
 #          app/services/agent._record_memory_write, app/models/agent_memory
 # Data In: agent_id, body, optional context_key, the section 4 moment-tags,
 #          optional tier (refused)
 # Data Out: dict describing the written row, including session_state
-# Last Modified: 2026-09-29 (DWB-586)
+# Last Modified: 2026-10-07 (DWB-637: a write with no open DWB session is now
+#                REFUSED rather than accepted with a NULL origin - see
+#                app/services/memory_origin.py for the rule and the overrule)
 
 """Raw, untiered memory writes (spec section 4).
 
@@ -50,12 +52,28 @@ as amended 2026-09-29 (DWB-584). Sections 4 and 6 disagreed about where `cost`,
 each one, and all three are read against memories - section 2 gates the SCAN on
 `cost`, and the SCAN runs over scars, which are memory rows.
 
-**A write with no open session is ACCEPTED.** The alternative is losing the
-lesson because the bookkeeping was not ready, and section 4's whole point is
-that encoding is cheap and unconditional. The response says which happened
-through a named `session_state` rather than leaving the caller to infer it from
-a null id - an empty field cannot distinguish "no session was open" from "we
-never looked".
+**A WRITE WITH NO OPEN SESSION IS REFUSED (DWB-637). THIS REVERSES WHAT THIS
+PARAGRAPH SAID, AND THE OLD ARGUMENT IS LEFT HERE RATHER THAN DELETED.**
+
+It used to read: a write with no open session is ACCEPTED, because the
+alternative is losing the lesson because the bookkeeping was not ready, and
+section 4's whole point is that encoding is cheap and unconditional.
+
+That is wrong on its own terms. The row it accepted had no clock origin, so
+`memory_score` could not score it, so it was excluded from every candidate list
+and never reached an agent. The lesson was not kept; it was lost in a way that
+still counted in a row count, which is worse than losing it visibly because
+nobody goes looking. And the refusal costs nothing: it writes nothing, names
+the fix, and the same request succeeds once a session is open.
+
+`memory_origin.require_session_origin` owns the rule now, for this writer and
+every other. See that module for the full reasoning and for why we refuse
+rather than auto-open a session.
+
+`session_state` survives on the response, and `SESSION_OPEN` is the only value
+it can now hold. It is kept rather than dropped because it is a named positive
+confirmation that the row has an origin, which is the fact this endpoint exists
+to guarantee; a caller reading `open` is reading a checked claim, not a default.
 """
 
 from datetime import datetime, timezone
@@ -70,16 +88,21 @@ from app.models.agent_memory import (
     MemoryTier,
 )
 from app.models.project import Project
-from app.services import dwb_session as session_svc
+from app.services import memory_origin
 from app.services.agent import _record_memory_write
 
-# What the session lookup found. Named values, not a bare null id, for the same
-# reason node_retrieval names its four: an empty field is ambiguous between
-# "nothing was there" and "nobody looked", and that ambiguity is the bug behind
-# the bug. Two values here because there are exactly two outcomes - the lookup
-# is a single indexed read that cannot be truncated and does not fail softly.
+# What the session lookup found. ONE value, because after DWB-637 there is one
+# reachable outcome: a write that gets as far as returning a response has an
+# open session, and a write that does not is refused before any row is built.
+#
+# `SESSION_NONE_OPEN = "none_open"` USED TO SIT HERE AND IS GONE DELIBERATELY.
+# It named a SUCCESSFUL outcome in which the written row had no clock origin,
+# which is the outage this ticket closes - a name for a bad state, sitting in
+# the success path, reads as a supported mode rather than as a defect. It is
+# removed rather than re-documented as unreachable so that a future caller
+# cannot reach for it, and so that `session_state` has no value a consumer must
+# branch on.
 SESSION_OPEN = "open"  # created_session_id is that session's id
-SESSION_NONE_OPEN = "none_open"  # accepted anyway; created_session_id is null
 
 
 class RawMemoryWriteError(Exception):
@@ -125,6 +148,13 @@ def append_raw_memory(
       - empty_body
       - core_forbidden     (tier=core specifically, so the refusal cites the rule)
       - tier_not_settable  (any other tier)
+
+    Also raises `memory_origin.MemoryOriginMissing` (code `no_session_origin`)
+    when no DWB session is open for the agent's project. A separate exception
+    type rather than another code here, deliberately: the rule belongs to every
+    writer of `agent_memories`, not to this one, and giving it a local code
+    would let the next writer invent a second one that says the same thing in
+    different words.
     """
     if tier is not None:
         # CORE gets its own code and its own sentence. The generic refusal is
@@ -170,8 +200,12 @@ def append_raw_memory(
             f"agent id {agent_id} references project {agent.project_id} which is missing",
         )
 
-    active = session_svc.get_active_session(db, project.id)
-    session_state = SESSION_OPEN if active is not None else SESSION_NONE_OPEN
+    # DWB-637: the precondition, not a lookup with a fallback. Raises
+    # MemoryOriginMissing, which the router maps to 400; nothing has been added
+    # to the session at this point, so a refusal leaves the database untouched.
+    origin = memory_origin.require_session_origin(
+        db, project_id=project.id, action="Memory write"
+    )
 
     row = AgentMemory(
         agent_id=agent.id,
@@ -181,7 +215,8 @@ def append_raw_memory(
         cost=MemoryCost(cost) if cost is not None else None,
         caught_by=MemoryCaughtBy(caught_by) if caught_by is not None else None,
         surprised=surprised,
-        created_session_id=active.id if active is not None else None,
+        # Never conditional. `origin` is a session or this line was not reached.
+        created_session_id=origin.id,
     )
     db.add(row)
     db.flush()
@@ -200,7 +235,7 @@ def append_raw_memory(
         "caught_by": row.caught_by.value if row.caught_by is not None else None,
         "surprised": row.surprised,
         "created_session_id": row.created_session_id,
-        "session_state": session_state,
+        "session_state": SESSION_OPEN,
         "fired_count": row.fired_count,
         "created_at": row.created_at,
     }

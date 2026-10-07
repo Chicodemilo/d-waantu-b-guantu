@@ -37,7 +37,13 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.memory_transition import MemoryTransition, TransitionState
 from app.models.project import Project
-from app.services import memory_adopt, memory_cutover, memory_decide, memory_sweep
+from app.services import (
+    memory_adopt,
+    memory_cutover,
+    memory_decide,
+    memory_origin,
+    memory_sweep,
+)
 from app.services import project as project_svc
 
 router = APIRouter(prefix="/api/memory-transitions", tags=["memory_transitions"])
@@ -143,9 +149,11 @@ def decide_candidate(
     The cutover fires here when this is the last entry, because the mode change
     is the pipeline finishing rather than a separate act.
 
-    Errors: 400 for a refused tier or an already-decided row, 404 unknown,
-    409 when the decision completed a run that must not land (every entry
-    skipped, so nothing was preserved).
+    Errors: 400 for a refused tier, an already-decided row, or NO OPEN DWB
+    SESSION (DWB-637 - checked per decision, so a session closing mid-adoption
+    stops the run here rather than silently returning every remaining row to a
+    NULL clock origin); 404 unknown; 409 when the decision completed a run that
+    must not land (every entry skipped, so nothing was preserved).
     """
     try:
         row, landed = memory_decide.decide_and_maybe_cut_over(
@@ -155,6 +163,10 @@ def decide_candidate(
             decided_by=data.decided_by,
             reason=data.reason,
         )
+    except memory_origin.MemoryOriginMissing as e:
+        # DWB-637. Raised before the transition row is touched, so the entry is
+        # still decidable and the run resumes from here once a session is open.
+        raise HTTPException(400, e.detail)
     except memory_decide.DecideError as e:
         raise HTTPException(404 if e.code == "not_found" else 400, e.detail)
     except memory_cutover.CutoverRefused as e:

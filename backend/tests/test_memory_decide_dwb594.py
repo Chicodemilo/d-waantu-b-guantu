@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models.agent_memory import AgentMemory, MemoryTier
+from app.models.dwb_session import DwbOpenMethod, DwbSession
 from app.models.journal_entry import JournalEntry
 from app.models.memory_transition import (
     MemoryTransition,
@@ -51,11 +52,30 @@ def _entry_excerpt(body: str, chain=("Verification discipline",)) -> str:
 
 @pytest.fixture
 def adopting(db_session, make_project, make_agent):
-    """A project mid-adopt with two pending candidates for one agent."""
+    """A project mid-adopt with two pending candidates for one agent, AND an
+    open DWB session.
+
+    DWB-637: a decision now REFUSES when no session is open, because the memory
+    it writes stamps its clock origin from that session and a row with no origin
+    cannot be scored - it is excluded from every candidate list and never reaches
+    an agent. This fixture sets the mode by hand rather than travelling the BEGIN
+    edge, so it also bypassed the BEGIN-edge session guard; without the session
+    here every test in this file would be asserting against a refusal instead of
+    against the behaviour it is named for.
+    """
     project_dict = make_project()
     agent = make_agent(project_id=project_dict["id"])
     project = db_session.get(Project, project_dict["id"])
     project.memory_mode = MemoryMode.adopting
+
+    db_session.add(
+        DwbSession(
+            project_id=project.id,
+            open_method=DwbOpenMethod.slash,
+            opened_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.flush()
 
     run = MemoryTransitionRun(
         project_id=project.id,
@@ -183,6 +203,15 @@ class TestTierRules:
         agent = make_agent(project_id=project_dict["id"])
         project = db_session.get(Project, project_dict["id"])
         project.memory_mode = MemoryMode.adopting
+        # DWB-637: a decision with no open session is refused, and this test
+        # builds its own project rather than taking the `adopting` fixture.
+        db_session.add(
+            DwbSession(
+                project_id=project.id,
+                open_method=DwbOpenMethod.slash,
+                opened_at=datetime.now(timezone.utc),
+            )
+        )
         run = MemoryTransitionRun(
             project_id=project.id,
             direction=TransitionDirection.adopt,
