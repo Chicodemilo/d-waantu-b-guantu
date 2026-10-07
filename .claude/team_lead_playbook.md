@@ -26,34 +26,66 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 6. Check open alerts (API + `ALERTS_PENDING.md`)
 7. Jump to § 5 for the typical session flow
 
-### Memory mode: check once at spawn (DWB-589)
+<!-- human-memory-only:start -->
+### Memory mode: this project runs `human_memory`
 
-Everything this playbook says about `memory.md` describes **stock** memory. On a
-project where `project.memory_mode == "human_memory"`, stock memory is SEALED.
-Check once, at spawn, before you plan any write of your own or brief anyone else's:
+Stock `memory.md` is SEALED, for you and for everyone you brief. These four routes
+return **409**, not 400, and nothing lands: `memory/append`, `session-complete`,
+`memory/compact`, `memory/condense`. The 409 names the replacement. This is a mode
+conflict, not a permission error or a ceiling problem: no payload makes a stock route
+work while the mode is on. The stock branch was stripped out of your copy at deploy,
+so you are not choosing between two sets of instructions.
 
-```bash
-curl -s http://localhost:8000/api/projects/{project_id} | python3 -c "import json,sys; print(json.load(sys.stdin)['memory_mode'])"
-```
-
-**`stock`** (the default): everything below applies unchanged.
-
-**`human_memory`**: these four routes return **409**, not 400, and nothing lands:
-`memory/append`, `session-complete`, `memory/compact`, `memory/condense`. The 409 body
-names the endpoint to use instead, so read it rather than retrying. This is a mode
-conflict, not a permission error or a ceiling problem: there is no payload that makes
-the stock route work while the mode is on. Your own lessons and every worker's go to
-**`POST /api/agents/{agent_id}/memories`** `{body, cost, caught_by, surprised}` (`cost`
-and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`; prose in either is
-a 422, and any `tier` at all is a 400), episodes go to **`POST /api/journal`**
-`{agent_id, body, tags}`, and reads come from **`GET /api/agents/{id}/memory/scored`**.
-There is no 12000-token ceiling on this path.
+Your own lessons and every worker's go to **`POST /api/agents/{agent_id}/memories`**
+`{body, cost, caught_by, surprised}` (`cost` and `caught_by` are enums,
+`none|low|high` and `me|worker|human|ci`; prose in either is a 422, and any `tier` at
+all is a 400). Episodes go to **`POST /api/journal`** `{agent_id, body, tags}`. Reads
+come from **`GET /api/agents/{id}/memory/scored`**. There is no 12000-token ceiling on
+this path, so there is nothing to chase anyone to trim.
 
 **A `/memories` row satisfies the DWB-519 write-on-close gate with no extra step.** It
 stamps `agents.last_memory_write_at` exactly like a stock write. Nobody calls
-`session-complete` on a human_memory project; it is one of the sealed routes. This is
-the same statement as `.claude/worker_playbook.md` § Memory Writes and
-`.claude/pm_playbook.md` § Memory mode; if the three ever disagree, the API is the tiebreak.
+`session-complete` here; it is sealed. This is the same statement as
+`.claude/worker_playbook.md` § Memory Writes and `.claude/pm_playbook.md` § Memory
+mode; if the three ever disagree, the API is the tiebreak.
+
+#### What the gate is actually measuring, and what it is not
+
+The write-on-close gate checks ONE column, `agents.last_memory_write_at`, within the
+sprint window. It does not look at tier, score, or whether the lesson was any good. A
+participant who wrote one untagged throwaway row passes it. That is the gate working
+as designed, and it is the reason the gate is not your quality control.
+
+What decides whether a lesson survives is a different mechanism entirely, and you need
+it when you brief people rather than when you close:
+
+- **Four holders.** `raw` on write (untiered, unscored, in no candidate list),
+  then consolidation moves it to `core` (never decays), `scar` (floors at 6) or
+  `working` (floors at 1).
+- **The score is DERIVED and never stored.** No score column, no band column. It is
+  computed on read from (tier, CLOSED DWB sessions since last reinforced).
+  Reinforcement resets that count to zero and every tier is 10 at zero, so a memory
+  that gets used stays at the top.
+- **Bands decide what reaches a spawn prompt.** 8-10 is carried in full, 5-7 as a
+  single compressed line, 2-4 is flagged for demotion, 1 is the last pass before the
+  journal. The memory block you were handed at spawn was assembled exactly that way.
+- **`cost`, `caught_by` and `surprised` pick the tier**, via
+  `memory_consolidate.tier_for_raw`. Any ONE of `cost: high`, `surprised: true`, or
+  `caught_by` not `me` makes it a `scar`; everything else, including every untagged
+  row, becomes `working`.
+
+**Do not tell a worker to tag `high` so their lesson survives.** The `working` default
+is a structural guard: `working` sits outside the scar family, is never consulted,
+never raises a fired count, and so can never be promoted to `core`, the tier that never
+decays. Inflating tags disables the one mechanism stopping scratch notes from becoming
+permanent. Brief it as "tag what the moment actually knew".
+
+**One operational consequence for you.** A `/memories` write REQUIRES an open DWB
+session and is refused with 400 otherwise. Opening a session is yours alone. If a
+worker reports their memory write refused at the end of a sprint, that is a session you
+did not open, not a worker who ignored the gate. Nothing is lost: they re-send the
+identical request once you open one.
+<!-- human-memory-only:end -->
 
 ### Your Personal Memory Dir
 
@@ -95,11 +127,14 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
 └─ .dwb/                     DWB-401: agent memory lives here (writable, outside .claude/)
    └─ memory/<prefix>/<name>/   per-agent personal memory
       ├─ identity.md         system-generated · NEVER edit
-      └─ memory.md           single free-form memory (scratchpad + lessons merged)
-            injected at spawn, never read · owner writes via the memory API
-            HARD 12000-token write-ceiling (over-ceiling write refused, condense then retry)
-            write-on-close REQUIRED (DWB-519)
+      └─ memory.md           see below; what this file IS depends on the mode
 ```
+
+<!-- human-memory-only:start -->
+`memory.md` is SEALED here and holds nothing anyone owns. Memory is rows in the DWB
+store, with no file and no token ceiling; size is bounded by decay rather than a cap.
+Write-on-close is still REQUIRED (DWB-519) and a `/memories` row satisfies it.
+<!-- human-memory-only:end -->
 
 **Budgeted vs exempt:** the consolidation gate counts only the root/`project_rules_*` docs the TL owns. DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Every agent's `memory.md` is NOT counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time (over-ceiling append / session-complete / compact / condense refused with HTTP 400, nothing dropped; condense to get back under). On a `human_memory` project all four of those routes are sealed at 409 and there is no ceiling to enforce (§ Memory mode). Separately, DWB-519 requires every active participant, TL included, to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
 

@@ -6,7 +6,9 @@
 # Callees: app.services.playbook_deploy (render helpers + doc paths), app.main (FastAPI route introspection for Check A's endpoint half), grep (subprocess, for Check A's symbol half)
 # Data In: repo doc files on disk (.md), the live FastAPI route table
 # Data Out: list[str] of drifted playbook filenames (Check B); list[UnresolvedRef] (Check A)
-# Last Modified: 2026-09-16 (DWB-569)
+# Last Modified: 2026-10-07 (DWB-645: the deploy-drift re-render applies the
+#                memory-mode variant key as well as the jira one, or it would
+#                report permanent drift on every mode-gated playbook)
 
 """DWB-569: stop the next sweep from being needed.
 
@@ -34,7 +36,7 @@ from app.services.playbook_deploy import (
     DWB_REPO_ROOT,
     PLAYBOOK_FILES,
     _prepend_banner_if_needed,
-    _scrub_for_jira_target,
+    _scrub_variant_blocks,
 )
 
 DWB_CLAUDE_DIR = DWB_REPO_ROOT / ".claude"
@@ -53,11 +55,22 @@ def find_playbook_deploy_drift(
     claude_dir: Path,
     docs_dir: Path = DOCS_DIR,
     jira_enabled: bool,
+    human_memory: bool,
 ) -> list[str]:
     """Filenames (of PLAYBOOK_FILES) under ``claude_dir`` whose content
     differs from what ``deploy_bundle`` would write there from ``docs_dir``
-    for a project with the given ``jira_enabled`` flag. Empty list means the
-    deployed copies are in sync with source.
+    for a project with the given ``jira_enabled`` and ``human_memory`` flags.
+    Empty list means the deployed copies are in sync with source.
+
+    ``human_memory`` IS REQUIRED AND HAS NO DEFAULT (DWB-645). This function
+    re-renders the source and compares it byte-for-byte against the deployed
+    file, so it has to apply EVERY variant key the deploy applies. A default
+    would let a caller omit the mode key, render without the mode scrub,
+    compare against a file that was mode-scrubbed, and report permanent drift
+    on every playbook carrying a mode block - a detector that cries wolf, which
+    is the failure mode that gets a detector deleted. Defaulting it to the
+    common value would have made that omission silent; requiring it makes the
+    caller state which project it is rendering for.
 
     A file missing on either side is not reported here — existence is a
     different failure mode (deploy has never run / docs/ file was deleted);
@@ -71,8 +84,10 @@ def find_playbook_deploy_drift(
         dst = claude_dir / filename
         if not src.is_file() or not dst.is_file():
             continue
-        rendered = _scrub_for_jira_target(
-            src.read_text(encoding="utf-8"), jira_enabled=jira_enabled
+        rendered = _scrub_variant_blocks(
+            src.read_text(encoding="utf-8"),
+            jira_enabled=jira_enabled,
+            human_memory=human_memory,
         )
         rendered = _prepend_banner_if_needed(rendered, jira_enabled=jira_enabled)
         if dst.read_text(encoding="utf-8") != rendered:

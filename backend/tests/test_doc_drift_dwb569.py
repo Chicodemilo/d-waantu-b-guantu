@@ -141,13 +141,18 @@ class TestCheckB_PlaybookDeploySync:
     playbook carried a rule DWB-560 had already replaced in docs/."""
 
     def test_dwb_deployed_playbooks_match_source(self):
-        """DWB is a non-Jira project (see project_rules_worker.md banner),
-        so jira_enabled=False is DWB's own rendering target. If this fails,
-        redeploy: POST /api/projects/1/deploy-playbooks, or manually re-run
-        the render (see playbook_deploy.deploy_bundle)."""
+        """DWB is a non-Jira project (see project_rules_worker.md banner) and
+        runs memory_mode=human_memory, so jira_enabled=False /
+        human_memory=True is DWB's own rendering target. Both keys are
+        required: rendering with the wrong mode compares a mode-scrubbed
+        deployed file against an unscrubbed render and reports drift that is
+        not there (DWB-645). If this fails, redeploy: POST
+        /api/projects/1/deploy-playbooks, or manually re-run the render (see
+        playbook_deploy.deploy_bundle)."""
         drifted = doc_drift.find_playbook_deploy_drift(
             claude_dir=doc_drift.DWB_CLAUDE_DIR,
             jira_enabled=False,
+            human_memory=True,
         )
         assert drifted == [], (
             f"Deployed playbook(s) out of sync with docs/: {drifted}. "
@@ -181,7 +186,8 @@ class TestCheckB_PlaybookDeploySync:
                 encoding="utf-8",
             )
             drifted = doc_drift.find_playbook_deploy_drift(
-                claude_dir=tmp_claude, docs_dir=tmp_docs, jira_enabled=False
+                claude_dir=tmp_claude, docs_dir=tmp_docs,
+                jira_enabled=False, human_memory=True,
             )
             assert drifted == ["pm_playbook.md"]
 
@@ -194,11 +200,14 @@ class TestCheckB_PlaybookDeploySync:
         tmp_claude.mkdir()
         src_text = "# Worker Playbook\n\nSome canonical rule.\n"
         (tmp_docs / "worker_playbook.md").write_text(src_text, encoding="utf-8")
-        rendered = doc_drift._scrub_for_jira_target(src_text, jira_enabled=False)
+        rendered = doc_drift._scrub_variant_blocks(
+            src_text, jira_enabled=False, human_memory=True
+        )
         rendered = doc_drift._prepend_banner_if_needed(rendered, jira_enabled=False)
         (tmp_claude / "worker_playbook.md").write_text(rendered, encoding="utf-8")
         drifted = doc_drift.find_playbook_deploy_drift(
-            claude_dir=tmp_claude, docs_dir=tmp_docs, jira_enabled=False
+            claude_dir=tmp_claude, docs_dir=tmp_docs,
+            jira_enabled=False, human_memory=True,
         )
         assert drifted == []
 
@@ -213,6 +222,7 @@ class TestCheckB_PlaybookDeploySync:
         (tmp_docs / "team_lead_playbook.md").write_text("# TL\n", encoding="utf-8")
         # No matching file under tmp_claude.
         drifted = doc_drift.find_playbook_deploy_drift(
-            claude_dir=tmp_claude, docs_dir=tmp_docs, jira_enabled=False
+            claude_dir=tmp_claude, docs_dir=tmp_docs,
+            jira_enabled=False, human_memory=True,
         )
         assert drifted == []

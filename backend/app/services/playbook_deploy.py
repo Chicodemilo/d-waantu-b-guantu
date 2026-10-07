@@ -6,7 +6,11 @@
 # Callees: app/services/agent_memory.py, app/models/agent.py, pathlib, shutil, re, json
 # Data In: db: Session, project: Project
 # Data Out: DeployResult
-# Last Modified: 2026-09-14 (DWB-526: deploy re-grounds doc pointers via doc_pointers.ground_docs)
+# Last Modified: 2026-10-07 (DWB-645: the variant scrub is table-driven and
+#                takes a second key, project.memory_mode, alongside jira.
+#                _scrub_for_jira_target became _scrub_variant_blocks - see the
+#                rename note there. Previous: DWB-526 deploy re-grounds doc
+#                pointers via doc_pointers.ground_docs)
 
 import json
 import logging
@@ -20,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
+from app.models.project import MemoryMode
 from app.services import agent_memory
 # DWB-526: top-level import so doc_pointers registers its nodeify 'doc' provider
 # at app startup (this module is imported by the projects router on boot).
@@ -109,30 +114,160 @@ class DeployError(Exception):
 # edit to the playbook would have to land in both copies, and drift between
 # them is invisible until an agent reads the wrong one. Markers keep one
 # canonical source with the variant decisions explicit and grep-able.
-_JIRA_ONLY_BLOCK_RE = re.compile(
-    r"<!--\s*jira-only:start\s*-->.*?<!--\s*jira-only:end\s*-->\s*\n?",
-    re.DOTALL,
+#
+#   <!-- human-memory-only:start --> ... <!-- human-memory-only:end -->
+#       Kept when project.memory_mode is human_memory, stripped otherwise.
+#
+#   <!-- stock-memory-only:start --> ... <!-- stock-memory-only:end -->
+#       Inverse - kept on stock, stripped on human_memory.
+#
+# DWB-645 added the second key and made the set a TABLE rather than a second
+# if/else, so a third key is a row rather than another branch. The DWB-332
+# reasoning above carries over unchanged and is the reason this is not two
+# playbooks per mode: the content is ~90% shared, memory_mode is mutable (IND
+# flipped stock -> human_memory), and a redeploy re-derives where two files
+# would drift.
+
+
+def _block_re(name: str) -> re.Pattern:
+    """The marker pair for one variant key. One builder, so four keys cannot
+    drift into four slightly different regexes."""
+    return re.compile(
+        rf"<!--\s*{name}:start\s*-->.*?<!--\s*{name}:end\s*-->\s*\n?",
+        re.DOTALL,
+    )
+
+
+_JIRA_ONLY_BLOCK_RE = _block_re("jira-only")
+_NON_JIRA_ONLY_BLOCK_RE = _block_re("non-jira-only")
+_HUMAN_MEMORY_ONLY_BLOCK_RE = _block_re("human-memory-only")
+_STOCK_MEMORY_ONLY_BLOCK_RE = _block_re("stock-memory-only")
+
+# Every variant key, as (marker name, pattern, "keep this block when ...").
+# Adding a key is a row here plus a predicate at the call site; it is
+# deliberately not reachable any other way, so a new key cannot be introduced
+# without appearing in this list - which is what the balance checker and the
+# order-independence test enumerate.
+VARIANT_MARKER_NAMES = (
+    "jira-only",
+    "non-jira-only",
+    "human-memory-only",
+    "stock-memory-only",
 )
-_NON_JIRA_ONLY_BLOCK_RE = re.compile(
-    r"<!--\s*non-jira-only:start\s*-->.*?<!--\s*non-jira-only:end\s*-->\s*\n?",
-    re.DOTALL,
-)
 
 
-def _scrub_for_jira_target(text: str, *, jira_enabled: bool) -> str:
-    """Apply the variant rule: drop the inverse block, keep the matching one.
+def _scrub_variant_blocks(
+    text: str, *, jira_enabled: bool, human_memory: bool
+) -> str:
+    """Drop every inverse variant block; keep the matching ones.
 
-    Jira-enabled deploy: keep jira-only blocks, strip non-jira-only blocks.
-    Non-Jira deploy: strip jira-only blocks, keep non-jira-only blocks.
+    RENAMED FROM `_scrub_for_jira_target` (DWB-645). The old name was a claim
+    that stopped being true the moment this function also stripped
+    memory-mode blocks, and a function named for one key while silently
+    applying another is exactly the stale-name trap this codebase keeps
+    paying for. Behaviour for the two jira keys is byte-identical; the
+    existing jira tests cover that and were not touched.
+
+    UNMARKED CONTENT IS SHARED AND SHIPS TO EVERY PROJECT. That is a DECISION
+    (Miles, 2026-10-07), not an absence of one, and it is written here because a
+    default this quiet reads as something nobody chose. Two reasons it could not
+    have gone the other way: every existing line in all three playbooks is
+    unmarked, so any other default would empty the playbooks on the first
+    deploy; and it is what the jira keys have always done, so a second rule
+    would mean two keys behaving differently in the same file.
+
+    Mechanically it falls out of this function only ever REMOVING inverse
+    blocks. There is no "keep" pass and there must not be one: a keep-pass
+    implementation would have to decide what to do with unmarked text, and that
+    is exactly the decision this paragraph exists to prevent anyone re-opening.
 
     Marker-tags themselves are left in place on the kept side (HTML comments
-    don't render in markdown viewers and are useful when an agent grep's the
+    don't render in markdown viewers and are useful when an agent greps the
     deployed file for context). Tests assert presence/absence by content
     inside the blocks, not by marker presence.
+
+    NESTING COMPOSES; INTERLEAVING DOES NOT, AND CANNOT BE FIXED HERE. A block
+    wholly inside another resolves correctly whichever order the subs run in.
+    Markers that OVERLAP without nesting do not: each pattern pairs its own
+    nearest start/end, so a first pass that removes a span containing the other
+    pair's end marker leaves the second pass with an unclosed start, matching
+    nothing and reporting success. The two orders then leak in OPPOSITE
+    directions - measured on a non-jira stock target, jira-then-mode leaves the
+    mode tail and mode-then-jira leaves the jira head.
+
+    No regex fixes that, because the input is genuinely ambiguous. The guard is
+    `find_unbalanced_markers` below, asserted over the source playbooks by a
+    test, so an interleave is a named red before it can ever be deployed.
     """
+    out = text
     if jira_enabled:
-        return _NON_JIRA_ONLY_BLOCK_RE.sub("", text)
-    return _JIRA_ONLY_BLOCK_RE.sub("", text)
+        out = _NON_JIRA_ONLY_BLOCK_RE.sub("", out)
+    else:
+        out = _JIRA_ONLY_BLOCK_RE.sub("", out)
+    if human_memory:
+        out = _STOCK_MEMORY_ONLY_BLOCK_RE.sub("", out)
+    else:
+        out = _HUMAN_MEMORY_ONLY_BLOCK_RE.sub("", out)
+    return out
+
+
+# `[a-z0-9_-]` rather than `[a-z-]` so an UNDERSCORED near-miss
+# (`jira_only:start`) is seen and reported. With the narrower class the
+# token simply did not match, the marker was invisible to the checker, and
+# the docstring below claimed a protection the code did not provide - which
+# is the same stale-claim defect this module is full of guards against.
+_MARKER_TOKEN_RE = re.compile(r"<!--\s*([a-z0-9_-]+?):(start|end)\s*-->")
+
+
+def find_unbalanced_markers(text: str) -> list[str]:
+    """Every unbalanced or INTERLEAVED variant marker in `text`, as messages.
+
+    Empty list means the markers nest cleanly and `_scrub_variant_blocks` is
+    order-independent over them.
+
+    A stack walk rather than a regex, because the defect being caught is
+    precisely the one paired regexes cannot see. Push on `:start`, pop on
+    `:end`; a close whose name is not on top of the stack IS the interleave,
+    and anything left on the stack at the end is an unclosed block.
+
+    Only names in VARIANT_MARKER_NAMES are tracked. An unrelated HTML comment
+    is not a variant marker and must not be reported, or the check cries wolf
+    and gets removed - but a marker whose name is a near-miss of a real key
+    (`jira_only`, `human-memory`) is NOT silently ignored either; it is
+    reported, because a typo'd marker is a block that will never be stripped
+    and that is the failure this whole mechanism exists to prevent.
+    """
+    problems: list[str] = []
+    stack: list[tuple[str, int]] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        for name, kind in _MARKER_TOKEN_RE.findall(line):
+            if name not in VARIANT_MARKER_NAMES:
+                problems.append(
+                    f"line {lineno}: '{name}:{kind}' is not a known variant key "
+                    f"(expected one of {', '.join(VARIANT_MARKER_NAMES)}); a "
+                    "misspelled marker is never stripped"
+                )
+                continue
+            if kind == "start":
+                stack.append((name, lineno))
+            elif not stack:
+                problems.append(
+                    f"line {lineno}: '{name}:end' closes nothing"
+                )
+            elif stack[-1][0] != name:
+                open_name, open_line = stack[-1]
+                problems.append(
+                    f"line {lineno}: '{name}:end' closes while "
+                    f"'{open_name}:start' (line {open_line}) is still open - "
+                    "INTERLEAVED markers do not nest, and the two scrubs then "
+                    "leak in opposite directions depending on call order"
+                )
+                stack.pop()
+            else:
+                stack.pop()
+    for name, lineno in stack:
+        problems.append(f"line {lineno}: '{name}:start' is never closed")
+    return problems
 
 
 _NON_JIRA_BANNER = (
@@ -519,6 +654,12 @@ def deploy_bundle(db: Session, project) -> DeployResult:
     # playbooks because the content needs transformation; copy2's mtime
     # preservation isn't useful when we're rewriting bytes anyway.
     jira_enabled = bool(project.jira_base_url)
+    # DWB-645: the second variant key. Compared against the enum's VALUE so a
+    # project row carrying the plain string (as a raw SQL fixture can) resolves
+    # the same way as one carrying the enum member.
+    human_memory = getattr(
+        project.memory_mode, "value", project.memory_mode
+    ) == MemoryMode.human_memory.value
 
     deployed = []
     for key, filename in PLAYBOOK_FILES.items():
@@ -526,7 +667,9 @@ def deploy_bundle(db: Session, project) -> DeployResult:
         if not src.is_file():
             continue
         src_text = src.read_text(encoding="utf-8")
-        out_text = _scrub_for_jira_target(src_text, jira_enabled=jira_enabled)
+        out_text = _scrub_variant_blocks(
+            src_text, jira_enabled=jira_enabled, human_memory=human_memory
+        )
         out_text = _prepend_banner_if_needed(out_text, jira_enabled=jira_enabled)
         dst = target_dir / filename
         dst.write_text(out_text, encoding="utf-8")

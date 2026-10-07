@@ -67,36 +67,66 @@ Load instructions: `GET /api/instructions?scope=global`, `scope=project&project_
 
 The TL alone evaluates user intent and opens/closes DWB sessions; **the PM never opens or closes a DWB session.** Don't post to `/api/sessions/open` or `/api/sessions/{id}/close`, even if you think you spot an open/close phrase the TL missed. Surface it to the TL instead. PM tokens roll up under the open session automatically via hooks; you don't need to signal anything. Full user-facing reference: `.claude/session_lifecycle.md`.
 
-### Memory mode: check once at spawn (DWB-589)
+<!-- stock-memory-only:start -->
+### Memory mode: this project runs `stock`
 
-Everything this playbook says about `memory.md` describes **stock** memory. On a
-project where `project.memory_mode == "human_memory"`, stock memory is SEALED. Check
-once, at spawn, before you plan a write of your own or chase anyone else's:
+Everything this playbook says about `memory.md` applies as written. The
+`human_memory` branch was stripped out of your copy at deploy, so there is nothing to
+check and no second section to reconcile.
+<!-- stock-memory-only:end -->
 
-```bash
-curl -s http://localhost:8000/api/projects/{project_id} | python3 -c "import json,sys; print(json.load(sys.stdin)['memory_mode'])"
-```
+<!-- human-memory-only:start -->
+### Memory mode: this project runs `human_memory`
 
-**`stock`** (the default): everything below applies unchanged.
+Stock `memory.md` is SEALED. These four routes return **409**, not 400, and nothing
+lands: `memory/append`, `session-complete`, `memory/compact`, `memory/condense`. The
+409 names the replacement. No payload makes a stock route work while the mode is on.
+The stock branch was stripped out of your copy at deploy.
 
-**`human_memory`**: these four routes return **409**, not 400, and nothing lands:
-`memory/append`, `session-complete`, `memory/compact`, `memory/condense`. The 409 body
-names the endpoint to use instead, so read it rather than retrying. This is a mode
-conflict, not a permission error or a ceiling problem: there is no payload that makes
-the stock route work while the mode is on. Lessons go to
-**`POST /api/agents/{agent_id}/memories`** `{body, cost, caught_by, surprised}` (`cost`
-and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`; prose in either is
-a 422, and any `tier` at all is a 400), episodes go to **`POST /api/journal`**
-`{agent_id, body, tags}`, and reads come from **`GET /api/agents/{id}/memory/scored`**.
-There is no 12000-token ceiling on this path.
+Lessons go to **`POST /api/agents/{agent_id}/memories`**
+`{body, cost, caught_by, surprised}` (`cost` and `caught_by` are enums,
+`none|low|high` and `me|worker|human|ci`; prose in either is a 422, and any `tier` at
+all is a 400). Episodes go to **`POST /api/journal`**. Reads come from
+**`GET /api/agents/{id}/memory/scored`**.
 
-**A `/memories` row satisfies the DWB-519 write-on-close gate with no extra step.** It
-stamps `agents.last_memory_write_at` exactly like a stock write. Nobody calls
-`session-complete` on a human_memory project; it is one of the sealed routes. This is
-the same statement as `.claude/worker_playbook.md` § Memory Writes and
-`.claude/team_lead_playbook.md` § Memory mode; if the three ever disagree, the API is
-the tiebreak. It matters most to you, because chasing a non-writer with the wrong
-endpoint sends them into a 409 at the exact moment the sprint is trying to close.
+#### What blocks a close here, and what does not
+
+This is the part you need, because you do the close prep and the two gates behave
+differently under this mode.
+
+**Write-on-close (DWB-519, ALWAYS ON) still blocks.** A `/memories` row satisfies it:
+it stamps `agents.last_memory_write_at` exactly like a stock write, so there is no
+second call and no mode-aware branch to chase. When you ping a non-writer, name
+`/memories`, never `session-complete`, which would send them into a 409 at the exact
+moment the sprint is trying to close.
+
+**THE GATE CAN BE UNSATISFIABLE THROUGH NO FAULT OF THE PARTICIPANT.** A `/memories`
+write REQUIRES an open DWB session and is refused with 400 otherwise, and only the TL
+can open one. So "participant has no memory write" has two causes that look identical
+on your dashboard: they did not write, or there was no session open when they tried.
+Ask which before you chase, and route the second to the TL. Nothing is lost either
+way; the identical request succeeds once a session is open.
+
+**Consolidation (`force_consolidation`, opt-in) has nothing of theirs to count.**
+There is no `memory.md` and no token ceiling under this mode, so no participant can
+have an over-ceiling memory file. `owned_over_ceiling_files` is empty for everyone
+except possibly the TL and their root docs. Do not chase anyone to trim memory here;
+there is nothing to trim.
+
+**What neither gate measures.** Both check that a write HAPPENED. Neither looks at
+tier, score, or quality, so one untagged throwaway row passes write-on-close. That is
+the gate working as designed, and it is why the gate is not quality control. What
+decides whether a lesson survives is decay: a memory is scored from (tier, CLOSED
+sessions since reinforced), 8-10 is carried into the next session in full, 5-7 as one
+compressed line, 2-4 is flagged for demotion and 1 is the last pass before the journal.
+`cost`, `caught_by` and `surprised` pick the tier via
+`memory_consolidate.tier_for_raw`. Any ONE of `cost: high`, `surprised: true`, or
+`caught_by` not `me` makes a `scar`; everything else becomes `working`.
+
+**Do not turn that into a chase.** Telling people to tag `high` so their lessons
+survive disables the guard that stops unjudged notes reaching `core`, the tier that
+never decays. If you raise it at all, raise it as "tag what the moment knew".
+<!-- human-memory-only:end -->
 
 ### Your Personal Memory Dir
 
@@ -132,11 +162,20 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
 └─ .dwb/                     DWB-401: agent memory lives here (writable, outside .claude/)
    └─ memory/<prefix>/<name>/   per-agent personal memory
       ├─ identity.md         system-generated · NEVER edit
-      └─ memory.md           single free-form memory (scratchpad + lessons merged)
-            injected at spawn, never read · owner writes via the memory API
-            HARD 12000-token write-ceiling (over-ceiling write refused, condense then retry)
-            write-on-close REQUIRED (DWB-519)
+      └─ memory.md           see below; what this file IS depends on the mode
 ```
+
+<!-- stock-memory-only:start -->
+`memory.md` is a single free-form memory (scratchpad + lessons merged), injected at
+spawn, never read by its owner, written only through the memory API. HARD
+12000-token write-ceiling: an over-ceiling write is refused, condense then retry.
+Write-on-close REQUIRED (DWB-519).
+<!-- stock-memory-only:end -->
+<!-- human-memory-only:start -->
+`memory.md` is SEALED here and holds nothing anyone owns. Memory is rows in the DWB
+store, with no file and no token ceiling; size is bounded by decay rather than a cap.
+Write-on-close is still REQUIRED (DWB-519) and a `/memories` row satisfies it.
+<!-- human-memory-only:end -->
 
 **Budgeted vs exempt:** the consolidation gate counts only docs the TL owns (root docs + `project_rules_*`). DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Your `memory.md` is not counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time: an append / session-complete / compact / condense that would exceed it is refused (HTTP 400, nothing dropped), and you condense to get back under. On a `human_memory` project all four of those routes are sealed at 409 and there is no ceiling to enforce (§ Memory mode). `GET /api/agents/{id}/memory` (DWB-532) returns your current `est_tokens`, `ceiling` and `headroom`, and the file content itself, which is also how you recover something to rewrite from after a context compaction. Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (with a human attached) edits the other `.claude/` files.
 
@@ -418,7 +457,13 @@ Positive `delta` grants reputation, negative demerits. Enforced at the API (400 
 
 The human's `/carrot` and `/stick` commands are the human's; you (an agent) use the peer endpoint above.
 
-**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: half of the stick rounded up (`(abs(delta) + 1) // 2`, so a -3 stick returns +2), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it. **On a `human_memory` project this does not work at all.** Redemption is parsed only out of a `memory/append` body, and that route is sealed at 409 there; `POST .../memories` carries no redemption. There is no route that redeems a stick on a human_memory project, so do not spend a write trying.
+<!-- human-memory-only:start -->
+**Redeeming a stick does not work on this project.** Redemption is parsed only out of a `memory/append` body, which is sealed at 409 here; `POST .../memories` carries no redemption call at all. Nobody can redeem a stick under `human_memory`, so do not send an agent to try. Tracked as its own ticket.
+<!-- human-memory-only:end -->
+
+<!-- stock-memory-only:start -->
+**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: half of the stick rounded up (`(abs(delta) + 1) // 2`, so a -3 stick returns +2), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it.
+<!-- stock-memory-only:end -->
 
 ## 12. Sprint Evaluation Workflow
 
