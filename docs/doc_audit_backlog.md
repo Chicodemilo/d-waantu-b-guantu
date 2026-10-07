@@ -166,7 +166,7 @@ committed content.
   of the real one, which is the direction that makes an agent withhold a
   legitimate carrot.
 
-## Tier 3: stale labels and counters, no action taken on them
+## Tier 3: stale labels, counters, and gaps that state nothing false
 
 ### 10. `.claude/project_rules_worker.md:7` says "Five steps", then lists four.
 
@@ -177,6 +177,41 @@ committed content.
 - **Also:** the four items project_rules lists are not the four the playbook
   has. It substitutes "follow the spawn-time read order", which is a different
   section, for the memory step.
+
+### 11. The seal and the session requirement are independent, and nothing says so.
+
+- **The find, in one sentence:** the seal is per-route and per-mode, covering
+  the four stock write routes on `human_memory` only; the session requirement is
+  per-route and MODE-BLIND, covering `POST /api/agents/{id}/memories` alone, on
+  stock projects as well, because `backend/app/services/raw_memory.py` has no
+  mode check at all. Nobody notices the stock half because nothing on a stock
+  project calls `/memories`.
+- **Measured**, two throwaway projects, one of each mode, zero open sessions on
+  either, precondition asserted in the probe, both deleted afterwards. The table
+  is below, outside this list so it renders everywhere.
+- **Where it stands now:** each half is documented separately and correctly.
+  `docs/worker_playbook.md` § Memory Writes names the four sealed routes, and the
+  `/memories` bullet in the same section carries the session refusal. Neither
+  says the two rules are independent, so a reader holding both can still get the
+  interaction wrong.
+- **Why it earns an item at all, given both halves are already right:** two
+  people who had each read the code disagreed about one cell of this table
+  within the same hour, one of them asserting that `memory/compact` had gained a
+  session requirement it has not. That disagreement is the whole case for the
+  item. A documentation gap that only shows up when two informed readers diverge
+  will not show up any other way.
+- **Not a correctness fix.** Nothing currently written is false. This is a
+  missing statement, which is why it sits in tier 3 rather than tier 1.
+
+Every route POSTed with no open DWB session, on a project of each mode:
+
+| route | stock | human_memory |
+|---|---|---|
+| `memory/append` | 201 | 409 sealed |
+| `memory/compact` | 200 | 409 sealed |
+| `memory/condense` | 200 | 409 sealed |
+| `session-complete` | 200 | 409 sealed |
+| `memories` | 400 no session | 400 no session |
 
 ## Checked and found CORRECT
 

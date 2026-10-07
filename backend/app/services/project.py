@@ -259,11 +259,15 @@ def memory_mode_transition_refusal(
         # AN ADOPTION WITH NO OPEN SESSION MINTS A STORE THAT CANNOT BE READ,
         # AND THIS HAS NOW HAPPENED TWICE.
         #
-        # `memory_decide.decide` stamps `created_session_id` from whatever
-        # `get_active_session` returns, including None. That rule is correct
-        # where it came from - the raw write path rules that a lesson with no
-        # origin beats a lesson lost - but adoption inherited it and at bulk
-        # scale it inverts. A row with neither `created_session_id` nor
+        # `memory_decide.decide` USED TO STAMP `created_session_id` from
+        # whatever `get_active_session` returned, including None. That rule was
+        # held to be correct where it came from - the raw write path ruled that
+        # a lesson with no origin beats a lesson lost - but adoption inherited
+        # it and at bulk scale it inverted. (Past tense since DWB-637: both
+        # writers now refuse rather than stamping NULL. Kept because it is why
+        # this guard exists, and a reader who meets it in the present tense will
+        # go looking for a fallback that is no longer there.) A row with neither
+        # `created_session_id` nor
         # `last_reinforced_session_id` cannot be scored;
         # `memory_score.scored_memory` excludes unscoreable rows from every
         # candidate list, so `memory_context.assemble_session_context` returns

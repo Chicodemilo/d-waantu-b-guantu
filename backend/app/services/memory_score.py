@@ -11,7 +11,10 @@
 #          app/models/dwb_session, app/services/journal.promotion_candidates
 # Data In: agent_id, a DB session
 # Data Out: score(), band(), sessions_since_reinforced(), scored_memory()
-# Last Modified: 2026-09-30 (MILES RULING: fired_count's write site moved OUT
+# Last Modified: 2026-10-07 (DWB-637 follow-up: UNSCORED_NO_SESSION_ORIGIN's
+#                docstring named a write path that no longer exists; the state
+#                is still reachable, from two other sources, and now says which.
+#                Previous entry: MILES RULING: fired_count's write site moved OUT
 #                of this module entirely, to app/services/memory_consult.py.
 #                "Deploy doesn't count as a read... outside of normal
 #                startup" - scored_memory() is called from spawn/SessionStart
@@ -103,8 +106,21 @@ of a fresh row, not a defect. Excluded from scoring until it is tiered."""
 
 UNSCORED_NO_SESSION_ORIGIN = "no_session_origin"
 """Both last_reinforced_session_id and created_session_id are NULL, so the row
-has no point on the clock to count from. Reachable: DWB-586 accepts a write
-when no DWB session is open and records created_session_id as NULL.
+has no point on the clock to count from.
+
+STILL REACHABLE, BUT NO LONGER BY A WRITE (DWB-637). This used to read
+"Reachable: DWB-586 accepts a write when no DWB session is open and records
+created_session_id as NULL". That path is gone - every writer of
+`agent_memories` resolves its origin through
+`memory_origin.require_session_origin`, which refuses rather than stamping NULL.
+The constant still earns its place, because two sources remain:
+
+  - Rows written before that guard landed.
+  - `project.delete_project`, which NULLs `created_session_id` on memories whose
+    originating session is being deleted (project.py ~721) instead of deleting
+    the rows, because agents are global and must not lose lessons when an
+    unrelated project goes. That path INTENDS the NULL, which is why a NOT NULL
+    constraint on the column is a design question rather than a cleanup.
 
 This is deliberately NOT treated as "zero sessions elapsed", which would score
 it 10 forever, nor as "infinitely old", which would evict it. Both are guesses

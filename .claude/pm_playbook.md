@@ -67,10 +67,41 @@ Load instructions: `GET /api/instructions?scope=global`, `scope=project&project_
 
 The TL alone evaluates user intent and opens/closes DWB sessions; **the PM never opens or closes a DWB session.** Don't post to `/api/sessions/open` or `/api/sessions/{id}/close`, even if you think you spot an open/close phrase the TL missed. Surface it to the TL instead. PM tokens roll up under the open session automatically via hooks; you don't need to signal anything. Full user-facing reference: `.claude/session_lifecycle.md`.
 
+### Memory mode: check once at spawn (DWB-589)
+
+Everything this playbook says about `memory.md` describes **stock** memory. On a
+project where `project.memory_mode == "human_memory"`, stock memory is SEALED. Check
+once, at spawn, before you plan a write of your own or chase anyone else's:
+
+```bash
+curl -s http://localhost:8000/api/projects/{project_id} | python3 -c "import json,sys; print(json.load(sys.stdin)['memory_mode'])"
+```
+
+**`stock`** (the default): everything below applies unchanged.
+
+**`human_memory`**: these four routes return **409**, not 400, and nothing lands:
+`memory/append`, `session-complete`, `memory/compact`, `memory/condense`. The 409 body
+names the endpoint to use instead, so read it rather than retrying. This is a mode
+conflict, not a permission error or a ceiling problem: there is no payload that makes
+the stock route work while the mode is on. Lessons go to
+**`POST /api/agents/{agent_id}/memories`** `{body, cost, caught_by, surprised}` (`cost`
+and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`; prose in either is
+a 422, and any `tier` at all is a 400), episodes go to **`POST /api/journal`**
+`{agent_id, body, tags}`, and reads come from **`GET /api/agents/{id}/memory/scored`**.
+There is no 12000-token ceiling on this path.
+
+**A `/memories` row satisfies the DWB-519 write-on-close gate with no extra step.** It
+stamps `agents.last_memory_write_at` exactly like a stock write. Nobody calls
+`session-complete` on a human_memory project; it is one of the sealed routes. This is
+the same statement as `.claude/worker_playbook.md` § Memory Writes and
+`.claude/team_lead_playbook.md` § Memory mode; if the three ever disagree, the API is
+the tiebreak. It matters most to you, because chasing a non-writer with the wrong
+endpoint sends them into a 409 at the exact moment the sprint is trying to close.
+
 ### Your Personal Memory Dir
 
 Lives at `.dwb/memory/<project_prefix>/Pam_<PREFIX>/` (DWB-401: moved out of `.claude/`). File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. PM-flavored use: `memory.md` for PM-specific LESSONS (escalations that worked, tool quirks, ticket-shapes that came back as rework). Not a status log: per-sprint observations and blocker lists belong in the tickets and alerts that already carry them.
-**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 12000-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate — and condensing, which rewrites the headings away, can no longer cost you credit for a write you really made.
+**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 12000-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate. And condensing, which rewrites the headings away, can no longer cost you credit for a write you really made. On a `human_memory` project `session-complete` is sealed and none of this applies: a `POST /api/agents/{id}/memories` row stamps the same column and satisfies the same gate (see § Memory mode above).
 
 
 Session marker is TL-written (you can't create your own); see worker_playbook § On Spawn: Identity step 3.
@@ -107,7 +138,7 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
             write-on-close REQUIRED (DWB-519)
 ```
 
-**Budgeted vs exempt:** the consolidation gate counts only docs the TL owns (root docs + `project_rules_*`). DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Your `memory.md` is not counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time: an append / session-complete / compact / condense that would exceed it is refused (HTTP 400, nothing dropped), and you condense to get back under. `GET /api/agents/{id}/memory` (DWB-532) returns your current `est_tokens`, `ceiling` and `headroom`, and the file content itself — which is also how you recover something to rewrite from after a context compaction. Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (with a human attached) edits the other `.claude/` files.
+**Budgeted vs exempt:** the consolidation gate counts only docs the TL owns (root docs + `project_rules_*`). DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Your `memory.md` is not counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time: an append / session-complete / compact / condense that would exceed it is refused (HTTP 400, nothing dropped), and you condense to get back under. On a `human_memory` project all four of those routes are sealed at 409 and there is no ceiling to enforce (§ Memory mode). `GET /api/agents/{id}/memory` (DWB-532) returns your current `est_tokens`, `ceiling` and `headroom`, and the file content itself, which is also how you recover something to rewrite from after a context compaction. Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (with a human attached) edits the other `.claude/` files.
 
 ---
 
@@ -334,7 +365,7 @@ Positive `delta` grants reputation, negative demerits. Enforced at the API (400 
 
 The human's `/carrot` and `/stick` commands are the human's; you (an agent) use the peer endpoint above.
 
-**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: half of the stick rounded up (`(abs(delta) + 1) // 2`, so a -3 stick returns +2), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it.
+**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: half of the stick rounded up (`(abs(delta) + 1) // 2`, so a -3 stick returns +2), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it. **On a `human_memory` project this does not work at all.** Redemption is parsed only out of a `memory/append` body, and that route is sealed at 409 there; `POST .../memories` carries no redemption. There is no route that redeems a stick on a human_memory project, so do not spend a write trying.
 
 ## 12. Sprint Evaluation Workflow
 
@@ -350,12 +381,12 @@ The human's `/carrot` and `/stick` commands are the human's; you (an agent) use 
 
 Two gates can block a sprint close. Know both, because the PM does the close prep.
 
-**Write-on-close gate (DWB-519, ALWAYS ON).** Miles's ruling: "you write for your work on close, no exceptions." Every ACTIVE sprint participant must have written to their `memory.md` at least once within the sprint window (any `append` or `session-complete` counts; detection takes whichever is LATER of `agents.last_memory_write_at`, stamped directly by the write endpoints, and `memory.md`'s own file mtime — the old scan of your ISO write-headings was retired as a gate source in DWB-564, because condensing removes the headings and stranded agents who had written correctly). Any non-writer blocks close with HTTP 400 naming them. This is not a per-project toggle; it is skipped only when the project has no `repo_path`. So at close, chase non-writers to land a memory write (a `session-complete` wrap-up is the natural one), the same way you chase missing acks.
+**Write-on-close gate (DWB-519, ALWAYS ON).** Miles's ruling: "you write for your work on close, no exceptions." Every ACTIVE sprint participant must have landed a memory write at least once within the sprint window (on stock, any `append` or `session-complete` counts; on human_memory those are sealed and a `POST /api/agents/{id}/memories` row counts, stamping the same column; detection takes whichever is LATER of `agents.last_memory_write_at`, stamped directly by the write endpoints, and `memory.md`'s own file mtime; the old scan of your ISO write-headings was retired as a gate source in DWB-564, because condensing removes the headings and stranded agents who had written correctly). Any non-writer blocks close with HTTP 400 naming them. This is not a per-project toggle; it is skipped only when the project has no `repo_path`. So at close, chase non-writers to land a memory write: on stock the natural one is a `session-complete` wrap-up, on human_memory it is a `/memories` row. Chase them the same way you chase missing acks, and name the right endpoint for the project's mode.
 
 **Consolidation gate (`force_consolidation`, opt-in, default OFF, DWB-400).** When on, blocks close until every sprint participant has POSTed `consolidate-complete`. Gate has TEETH (DWB-328): a naked ack with over-ceiling files returns HTTP 400 with violations. **What it counts (DWB-397/399/401):** ONLY the TL-owned docs (root docs + all three `project_rules_*` files). Playbooks + agent defs are exempt, and every agent's `memory.md` is NOT counted by this gate (it is bounded by its own hard write-ceiling instead, DWB-518, so it is always under ceiling on disk). So no worker or PM ever has an over-ceiling file for the consolidation gate: your own ack, and theirs, is a clean naked ack. The PM's role at sprint close:
 
 1. **Verify gate state.** `GET /api/projects/{pid}/consolidation-status?sprint_id={sid}` returns `agents[]` with `acked: true/false` + `owned_over_ceiling_files` per agent, and `gate_satisfied` overall. Memory is not counted here, so `owned_over_ceiling_files` is empty for everyone except possibly the TL (their root/`project_rules` docs). Separately confirm every active participant has a memory write on record for the window (write-on-close gate above).
-2. **Chase missing acks AND missing memory writes, not trims.** If a participant hasn't acked, ping them to file the ack (it passes clean, nothing of theirs gates). If a participant has no memory write for the window, ping them to land one (append or session-complete) or the close 400s. Only the TL might have a real over-ceiling doc to trim; surface that to the TL.
+2. **Chase missing acks AND missing memory writes, not trims.** If a participant hasn't acked, ping them to file the ack (it passes clean, nothing of theirs gates). If a participant has no memory write for the window, ping them to land one (on stock, `append` or `session-complete`; on human_memory, a `/memories` row) or the close 400s. Only the TL might have a real over-ceiling doc to trim; surface that to the TL.
 3. **Self-ack + self-write.** PM files a clean naked ack (your memory is not counted, nothing to trim first), and make sure you yourself have a memory write on record for the sprint.
 
 ```bash

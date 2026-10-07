@@ -73,7 +73,7 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
             write-on-close REQUIRED (DWB-519)
 ```
 
-**Budgeted vs exempt:** the consolidation gate counts only the root/project docs the TL owns; DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's job. Your `memory.md` is not part of the consolidation gate, but as of DWB-518 it is no longer "trim-free": it carries a HARD 12000-token ceiling enforced at WRITE time. An append / session-complete / compact / condense that would push the file past the ceiling is REFUSED (HTTP 400), nothing is silently dropped. You keep it under ceiling yourself by condensing (see Memory Writes). Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. Memory lives under `.dwb/` (writable) rather than `.claude/`; always write through the API so the server applies the ISO heading and enforces the ceiling.
+**Budgeted vs exempt:** the consolidation gate counts only the root/project docs the TL owns; DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's job. Your `memory.md` is not part of the consolidation gate, but as of DWB-518 it is no longer "trim-free": it carries a HARD 12000-token ceiling enforced at WRITE time. An append / session-complete / compact / condense that would push the file past the ceiling is REFUSED (HTTP 400), nothing is silently dropped. On a `human_memory` project all four of those routes are sealed at 409 and there is no ceiling to enforce (§ Memory mode). You keep it under ceiling yourself by condensing (see Memory Writes). Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. Memory lives under `.dwb/` (writable) rather than `.claude/`; always write through the API so the server applies the ISO heading and enforces the ceiling.
 
 ---
 
@@ -128,11 +128,24 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
 - **Never send `tier`.** Any value at all is refused at 400, deliberately: tiering is
   consolidation's judgment, not yours, and the field exists only so the attempt gets an
   answer instead of silently landing as raw.
-- A write with no open DWB session is **accepted**, not refused. The response reports
-  `session_state` (`open` | `none_open`) so you can tell "nothing was open" from
-  "nobody looked". Never withhold a lesson over bookkeeping.
-- Returns 201. Errors: 400 (empty body, any tier, unscoped agent), 404 (agent or project
-  missing).
+- **A write with no open DWB session is REFUSED with 400, not accepted.** This
+  REVERSES earlier guidance, which said such a write landed and reported
+  `session_state: none_open`, and which told you never to withhold a lesson over
+  bookkeeping. If you learned that rule, it is the old one. `none_open` no longer
+  exists: `session_state` has exactly one value, `open`, and `created_session_id` is
+  never null on a response from this endpoint (DWB-637).
+  **The lesson is not lost, and you are not being asked to withhold it.** Nothing is
+  written on the refusal, so you re-send the identical request, unchanged, once a
+  session is open. The reasoning behind the reversal, because it is the part that makes
+  the new rule stick: a row with no clock origin cannot be scored, so it is excluded
+  from every candidate list and never rendered into any agent's context. It read as
+  stored and behaved as lost. A 400 that names the fix is recoverable in one call; a
+  null origin needed a human ruling and a backfill of 293 rows.
+  The refusal you will actually see begins `Memory write refused: <PREFIX> has no open
+  DWB session.` and ends `Nothing was written and nothing was lost.` Opening a session
+  is TL-only, so tell the TL rather than reaching for `/api/sessions/open` yourself.
+- Returns 201. Errors: 400 (empty body, any tier, unscoped agent, **no open DWB
+  session**), 404 (agent or project missing).
 
 An **episode** (what happened, in the voice of someone who was there) goes to
 **`POST /api/journal`** with `{agent_id, body, tags?}`. A sanitized entry is a useless
@@ -141,7 +154,9 @@ entry: the value is the reasoning that felt correct and was not.
 **The write-on-close gate is satisfied the same way.** `POST .../memories` stamps
 `agents.last_memory_write_at` exactly like a stock write, so your DWB-519 participation
 is recorded with no extra step. You do not call `session-complete` at all on a
-human_memory project; it is one of the sealed routes.
+human_memory project; it is one of the sealed routes. This is the same statement as
+`.claude/team_lead_playbook.md` § Memory mode and `.claude/pm_playbook.md` § Memory
+mode; if the three ever disagree, the API is the tiebreak.
 
 **Correcting a wrong memory:** `POST /api/agents/{id}/memories/{memory_id}/withdraw`.
 It stays open under human_memory on purpose, because it is the only path that can
@@ -297,7 +312,7 @@ curl -X POST http://localhost:8000/api/agents/{your_agent_id}/consolidate-comple
 
 201 on success. 409 if already acked. The naked ack passes clean for a worker; the over-ceiling refusal path (400 + per-file overrides) applies only to the TL's owned root/`project_rules` docs.
 
-You can curate `memory.md` any time with `POST /api/agents/{your_agent_id}/memory/condense {file: "memory", content}` (heading-stamped full replace) or `.../memory/compact` (plain full replace). As of DWB-518 both **400 if the result is still over the 12000-token ceiling** (the silent trim is gone): trim more and resubmit. Curate for clarity whenever you like; you are required to keep memory under ceiling to write at all, and to have written at least once before the sprint can close.
+**On stock only:** you can curate `memory.md` any time with `POST /api/agents/{your_agent_id}/memory/condense {file: "memory", content}` (heading-stamped full replace) or `.../memory/compact` (plain full replace). Both are sealed at 409 under `human_memory`, where there is no ceiling to curate against and a wrong lesson is retracted with `POST .../memories/{memory_id}/withdraw` instead. As of DWB-518 both **400 if the result is still over the 12000-token ceiling** (the silent trim is gone): trim more and resubmit. Curate for clarity whenever you like; you are required to keep memory under ceiling to write at all, and to have written at least once before the sprint can close.
 
 ## Reporting Status
 
@@ -328,7 +343,7 @@ Positive `delta` grants reputation, negative demerits. Rules are enforced at the
 
 The human's `/carrot` and `/stick` commands are theirs; agents use the peer endpoint above.
 
-**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: half of the stick rounded up (`(abs(delta) + 1) // 2`, so a -3 stick returns +2), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it.
+**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: half of the stick rounded up (`(abs(delta) + 1) // 2`, so a -3 stick returns +2), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it. **On a `human_memory` project this does not work at all.** Redemption is parsed only out of a `memory/append` body, and that route is sealed at 409 there; `POST .../memories` carries no redemption. There is no route that redeems a stick on a human_memory project, so do not spend a write trying.
 
 ## Ad Hoc Work (No Filed Ticket)
 
@@ -388,7 +403,7 @@ A test named `test_wrapped_and_nested_lines_stay_with_their_bullet` contained no
 
 ### Write your memory when the ticket lands, not at sprint close
 
-The lesson is freshest the moment the work finishes and thinnest at close. Chasing writes at close concentrates every ask into the window where workers have already gone dark, and a dead agent cannot write. Land a `session-complete` when you flip your last ticket to `in_review`, while you are still holding the lesson.
+The lesson is freshest the moment the work finishes and thinnest at close. Chasing writes at close concentrates every ask into the window where workers have already gone dark, and a dead agent cannot write. Land your write when you flip your last ticket to `in_review`, while you are still holding the lesson: a `session-complete` on stock, a `/memories` row on `human_memory`.
 
 Do not do it because a gate asks. The gate uses a calendar date floor, so it can pass on the previous sprint's writes when two sprints share a day. **It will not ask for this sprint's lessons and it will not tell anyone it did not.** Write them because otherwise they do not exist.
 
