@@ -3,10 +3,10 @@
 # Created: 2026-06-03
 # Purpose: Scaffold an agent's memory directory (DWB-401: .dwb/memory/<prefix>/<name>/) - identity.md + empty memory.md; DWB-431 prepends a live scoring-standing block; DWB-438 prepends a TL-channel unread block for team-leads
 # Caller: app/services/agent.create_agent, app/services/project_agent.create_project_agent, manual endpoint
-# Callees: app/models/agent, app/models/project, app/services/scoring (get_standing), app/services/tl_channel (unread_for_agent, mark_read), app/config/memory_rules (MEMORY_USAGE_RULES)
+# Callees: app/models/agent, app/models/project, app/services/scoring (get_standing), app/services/tl_channel (unread_for_agent, mark_read), app/services/memory_mode (memory_usage_rules_for, is_human_memory)
 # Data In: db: Session, agent_id: int
 # Data Out: ScaffoldResult (paths created, paths preserved, paths skipped)
-# Last Modified: 2026-09-17 (DWB-037: render the role-tailored spawn_section; identity.md defers to MEMORY_USAGE_RULES instead of restating it)
+# Last Modified: 2026-10-07 (DWB-638: identity.md's memory section is mode-aware - a human_memory agent is no longer told memory.md is its memory, nor to call session-complete)
 
 import logging
 from dataclasses import dataclass, field
@@ -15,9 +15,9 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.config.memory_rules import MEMORY_USAGE_RULES
 from app.models.agent import Agent
 from app.models.project import Project
+from app.services import memory_mode
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +302,34 @@ Root-level project docs (HANDOFF / ARCHITECTURE / README) belong to the team
 lead. Read ARCHITECTURE.md / README.md ONLY if your task is cross-cutting and
 the TL points you there; never maintain or create root-level docs. Your durable
 knowledge lives in your memory dir, not in root files."""
+
+    # DWB-638. identity.md is the third surface that pasted the stock memory
+    # rules at every agent regardless of mode, after identify and
+    # spawn-prepare. The selector lives in memory_mode so all three agree.
+    memory_rules = memory_mode.memory_usage_rules_for(project)
+    if memory_mode.is_human_memory(project):
+        memory_intro = (
+            "`memory.md` sits next to this file and is SEALED - not written, "
+            "not read, not consulted. Your durable memory is served to you at "
+            "spawn and written through the API:"
+        )
+        write_on_close = (
+            "You must land at least one memory row per sprint or the sprint "
+            "cannot close (DWB-519); a `POST /api/agents/{id}/memories` row "
+            "satisfies that gate with no extra step."
+        )
+    else:
+        memory_intro = (
+            "`memory.md` sits next to this file. You do NOT read it on spawn - "
+            "DWB-517 injects it into your session for you, so there is nothing "
+            "to open. Your only interaction with it is to WRITE, and only "
+            "through the API:"
+        )
+        write_on_close = (
+            "You must write to `memory.md` at least once per sprint or the "
+            "sprint cannot close (DWB-519); a `session-complete` wrap-up "
+            "satisfies that."
+        )
     return f"""# Identity - {agent.name}
 
 > System-generated. Do not edit by hand - `scaffold_agent_dir(agent_id={agent.id})` regenerates this file each time.
@@ -319,15 +347,13 @@ knowledge lives in your memory dir, not in root files."""
 
 ## Your memory
 
-`memory.md` sits next to this file. You do NOT read it on spawn - DWB-517
-injects it into your session for you, so there is nothing to open. Your only
-interaction with it is to WRITE, and only through the API:
+{memory_intro}
 
-{MEMORY_USAGE_RULES}
+{memory_rules}
 
-You must write to `memory.md` at least once per sprint or the sprint cannot
-close (DWB-519); a `session-complete` wrap-up satisfies that.
+{write_on_close}
 
 The rules above are generated from `app/config/memory_rules.py` - the single
-source of truth. Do not restate them here.
+source of truth, selected for this project's memory mode. Do not restate them
+here.
 """

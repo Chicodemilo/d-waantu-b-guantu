@@ -6,9 +6,9 @@
 # Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
-# Last Modified: 2026-10-01 (DWB-629: one top-level bullet per lesson so a
-#                wrap-up splits into one row per lesson; DWB-630: scratchpad_excerpt sealed under human_memory;
-#                _read_scratchpad requires the project so an ungated call cannot be written)
+# Last Modified: 2026-10-07 (DWB-638: memory_usage_rules is mode-aware on both
+#                identify and spawn-prepare, via memory_mode.memory_usage_rules_for;
+#                it was the third ungated field in the same bundle as DWB-630's)
 
 import json
 import logging
@@ -18,7 +18,6 @@ from pathlib import Path
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from app.config.memory_rules import MEMORY_USAGE_RULES
 from app.config.token_budget import ceiling_for_file, estimate_tokens
 from app.models.agent import Agent
 from app.models.instruction import Instruction, InstructionScope
@@ -180,9 +179,11 @@ def identify_agent(
         "memory_dir": memory_dir,
         "scratchpad_excerpt": scratchpad_excerpt,
         "instructions": instructions,
-        # DWB-352: condensed memory-usage rules inline. Same constant the
-        # spawn-prepare endpoint surfaces (single source of truth).
-        "memory_usage_rules": MEMORY_USAGE_RULES,
+        # DWB-352: condensed memory-usage rules inline. Same selector the
+        # spawn-prepare endpoint uses (single source of truth).
+        # DWB-638: mode-aware. A human_memory project must not be handed the
+        # stock block, which names routes the seal refuses with 409.
+        "memory_usage_rules": memory_mode.memory_usage_rules_for(project),
     }
 
 
@@ -477,7 +478,10 @@ def spawn_prepare_payload(
         "memory_dir": memory_dir,
         # DWB-352: condensed memory-usage rules inline (same single source
         # of truth that identify surfaces).
-        "memory_usage_rules": MEMORY_USAGE_RULES,
+        # DWB-638: mode-aware, via the same selector. This is the one that
+        # reaches every agent, because the TL pastes this payload into the
+        # spawn prompt whether or not anybody opens a playbook.
+        "memory_usage_rules": memory_mode.memory_usage_rules_for(project),
     }
 
 

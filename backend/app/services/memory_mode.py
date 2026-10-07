@@ -6,15 +6,17 @@
 #          the per-route write seal and the pointer the sealed read paths
 #          return in place of stock memory.md content.
 # Caller: app/routers/agents.py (write seal), app/services/agent.py
-#         (tl_memory_for_project, spawn-prepare memory_full)
-# Callees: app/models/agent, app/models/project, app/services/memory_context
+#         (tl_memory_for_project, spawn-prepare memory_full, memory_usage_rules),
+#         app/services/agent_memory.py (identity.md memory rules)
+# Callees: app/config/memory_rules (both usage-rule variants), app/models/agent,
+#          app/models/project, app/services/memory_context
 #          (DWB-610: assembled scored memory, in place of the pointer, when
 #          there is any to serve)
 # Data In: db Session, agent_id or Project
-# Data Out: bool / the pointer string / assembled memory text / StockMemorySealed
-# Last Modified: 2026-09-30 (DWB-610: memory_full_for takes optional db+agent
-#                and serves memory_context's assembled output over the sealed
-#                pointer when there is scored content)
+# Data Out: bool / the pointer string / assembled memory text / the mode's
+#           memory-usage rules / StockMemorySealed
+# Last Modified: 2026-10-07 (DWB-638: memory_usage_rules_for picks the mode's
+#                inline rules block, so spawn stops teaching sealed routes)
 
 """Hard rule 1, put in the API instead of in prose.
 
@@ -42,6 +44,10 @@ written about it.
 
 from sqlalchemy.orm import Session
 
+from app.config.memory_rules import (
+    HUMAN_MEMORY_USAGE_RULES,
+    MEMORY_USAGE_RULES,
+)
 from app.models.agent import Agent
 from app.models.project import MemoryMode, Project
 
@@ -163,6 +169,34 @@ def assert_stock_write_allowed(db: Session, agent_id: int, route: str) -> None:
         f"consulted, and is not a fallback, a cache or a second opinion. "
         f"Write to {replacement} instead. Episodes go to POST /api/journal."
     )
+
+
+def memory_usage_rules_for(project: Project | None) -> str:
+    """The inline memory-usage rules an identify / spawn-prepare bundle serves.
+
+    DWB-638, and it is the third member of the same family as
+    `stock_excerpt_for` and `memory_full_for`: one more field in the spawn
+    bundle that was read with no gate at all. The bundle carried the agent's
+    tiered memory and, in the same payload, a block of instructions telling it
+    to call `memory/append`, `session-complete` and `memory/condense` - the
+    exact routes `assert_stock_write_allowed` above refuses with 409. So DWB
+    was the thing teaching the sealed routes, to every agent, at spawn, and it
+    reached further than any playbook because nobody has to open it.
+
+    DWB-630's note applies verbatim here: grepping for `memory_mode` returned
+    only the SAFE callers. The two leaks found so far were both found by
+    reading the payload rather than by following the gate, which is why this
+    one takes the project and returns the text, instead of exposing a boolean
+    the call sites branch on themselves.
+
+    `None` means "cannot tell" and yields the stock block, matching
+    `is_human_memory`. That is the right default only because the mode is
+    opt-in: a project that cannot be resolved is not a sealed project, and the
+    stock rules are what every unsealed project needs.
+    """
+    if is_human_memory(project):
+        return HUMAN_MEMORY_USAGE_RULES
+    return MEMORY_USAGE_RULES
 
 
 def stock_excerpt_for(project: Project | None, stock_excerpt: str) -> str:

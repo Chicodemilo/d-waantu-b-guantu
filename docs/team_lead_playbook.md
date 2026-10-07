@@ -30,15 +30,44 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 6. Check open alerts (API + `ALERTS_PENDING.md`)
 7. Jump to § 5 for the typical session flow
 
+### Memory mode: check once at spawn (DWB-589)
+
+Everything this playbook says about `memory.md` describes **stock** memory. On a
+project where `project.memory_mode == "human_memory"`, stock memory is SEALED.
+Check once, at spawn, before you plan any write of your own or brief anyone else's:
+
+```bash
+curl -s http://localhost:8000/api/projects/{project_id} | python3 -c "import json,sys; print(json.load(sys.stdin)['memory_mode'])"
+```
+
+**`stock`** (the default): everything below applies unchanged.
+
+**`human_memory`**: these four routes return **409**, not 400, and nothing lands:
+`memory/append`, `session-complete`, `memory/compact`, `memory/condense`. The 409 body
+names the endpoint to use instead, so read it rather than retrying. This is a mode
+conflict, not a permission error or a ceiling problem: there is no payload that makes
+the stock route work while the mode is on. Your own lessons and every worker's go to
+**`POST /api/agents/{agent_id}/memories`** `{body, cost, caught_by, surprised}` (`cost`
+and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`; prose in either is
+a 422, and any `tier` at all is a 400), episodes go to **`POST /api/journal`**
+`{agent_id, body, tags}`, and reads come from **`GET /api/agents/{id}/memory/scored`**.
+There is no 12000-token ceiling on this path.
+
+**A `/memories` row satisfies the DWB-519 write-on-close gate with no extra step.** It
+stamps `agents.last_memory_write_at` exactly like a stock write. Nobody calls
+`session-complete` on a human_memory project; it is one of the sealed routes. This is
+the same statement as `.claude/worker_playbook.md` § Memory Writes and
+`.claude/pm_playbook.md` § Memory mode; if the three ever disagree, the API is the tiebreak.
+
 ### Your Personal Memory Dir
 
 Lives at `.dwb/memory/<project_prefix>/Archie_<PREFIX>/` (DWB-401: moved out of `.claude/`). File purposes + write rules in `.claude/worker_playbook.md § Memory Writes`. TL-flavored use: `memory.md` for TL-specific LESSONS (spawn quirks, gate edge cases, review patterns that caught real bugs). Live orchestration state (who is spawned, what you are tracking right now) is session-scoped and belongs in `HANDOFF.md`, not here.
-**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 12000-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate — and condensing, which rewrites the headings away, can no longer cost you credit for a write you really made.
+**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 12000-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate. And condensing, which rewrites the headings away, can no longer cost you credit for a write you really made. On a `human_memory` project `session-complete` is sealed and none of this applies: a `POST /api/agents/{id}/memories` row stamps the same column and satisfies the same gate (see § Memory mode above).
 
 
 TL is unique in writing **other agents' session markers** too, see § 4a Spawning Teams.
 
-**Memory model (canonical home, DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (`POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up); do NOT free-write memory into root-level docs just because you (the TL) can. `memory.md` carries a HARD 12000-token ceiling (DWB-518): a write that would exceed it is refused with HTTP 400, so condense via `POST /api/agents/{id}/memory/condense` (leaner full-file rewrite) then retry, never wait. You are also a sprint participant for the always-on write-on-close gate (DWB-519): write to your `memory.md` at least once per sprint or your own sprint close is refused. The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md`: durable lessons go in your `memory.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
+**Memory model (canonical home, DWB-enforced going forward).** Your durable memory lives ONLY in this dir, written through the API like every other agent (on a **stock** project: `POST /api/agents/{id}/memory/append` in-flight, `POST /api/agents/{id}/session-complete` at wrap-up; on **human_memory** both are sealed and everything goes to `POST /api/agents/{id}/memories`, see § Memory mode above); do NOT free-write memory into root-level docs just because you (the TL) can. On stock, `memory.md` carries a HARD 12000-token ceiling (DWB-518): a write that would exceed it is refused with HTTP 400, so condense via `POST /api/agents/{id}/memory/condense` (leaner full-file rewrite) then retry, never wait. On human_memory there is no ceiling and `memory/condense` is sealed, so there is nothing to condense. You are also a sprint participant for the always-on write-on-close gate (DWB-519): land at least one memory write per sprint or your own sprint close is refused (`memory.md` on stock, a `/memories` row on human_memory). The ONLY root-level docs the TL owns are `HANDOFF.md`, `ARCHITECTURE.md`, `README.md`. Do not create any other root-level `*.md`: durable lessons go in your `memory.md`, project continuity in `HANDOFF.md`, project/operational reference in `ARCHITECTURE.md` (§ Operational Gotchas & Traps). A `PreToolUse` hook (`.claude/hooks/guard-root-docs.py`, shipped via deploy-playbooks) blocks new root-level docs; if you hit that block, the file you were creating belongs in one of those homes instead.
 
 ### Playbook locations
 
@@ -76,7 +105,7 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
             write-on-close REQUIRED (DWB-519)
 ```
 
-**Budgeted vs exempt:** the consolidation gate counts only the root/`project_rules_*` docs the TL owns. DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Every agent's `memory.md` is NOT counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time (over-ceiling append / session-complete / compact / condense refused with HTTP 400, nothing dropped; condense to get back under). Separately, DWB-519 requires every active participant, TL included, to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
+**Budgeted vs exempt:** the consolidation gate counts only the root/`project_rules_*` docs the TL owns. DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Every agent's `memory.md` is NOT counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time (over-ceiling append / session-complete / compact / condense refused with HTTP 400, nothing dropped; condense to get back under). On a `human_memory` project all four of those routes are sealed at 409 and there is no ceiling to enforce (§ Memory mode). Separately, DWB-519 requires every active participant, TL included, to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
 
 ---
 
@@ -448,7 +477,7 @@ Subagent edits to ANY path under `.claude/` trigger a permission dialog that cra
 
 - **Workers cannot safely write anything under `.claude/`** - that includes `.claude/settings.json`, the playbooks, and the project_rules files. (DWB-401 moved agent memory OUT to `.dwb/memory/<prefix>/<name>/`, which is writable, so the memory dir is no longer in this danger zone, though writes still go through the API for the ISO heading + ceiling enforcement.)
 - **TL is the only agent that can directly Edit/Write `.claude/` files.** You run in the main CC window with a user attached for the permission dialog, so the prompt resolves instead of killing you. This is the hard exception to the TL-never-codes rule for harness-config edits.
-- **For worker memory writes**, route them through `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`. The FastAPI process has no permission dialog, so server-side writes are safe. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
+- **For worker memory writes**, route them through the API, never a file edit. The FastAPI process has no permission dialog, so server-side writes are safe. On a **stock** project that is `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`; on **human_memory** both are sealed at 409 and the route is `POST /api/agents/{agent_id}/memories` (§ Memory mode above). Brief the one your project actually runs: a worker handed the wrong pair burns its first write on a 409. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
 - Do NOT ticket a `.claude/settings.json` edit to a worker. Make the change yourself. The worker playbook carries the matching prohibition.
 
 ### SendMessage routes by EXACT name
@@ -560,7 +589,7 @@ Positive `delta` grants reputation, negative demerits. Enforced at the API (400 
 
 The human's `/carrot` and `/stick` commands are the human's; you (an agent) use the peer endpoint above.
 
-**Stick redemption (DWB-537)** is automatic and needs nothing from you: an agent puts `redeem:<score_event_id>` (the ledger row id on its agent score page) in its own memory append with its own `X-Agent-ID`, at least 120 characters of real lesson beyond the token, within 48 hours, and gets half of that one stick back once, rounded up (`(abs(delta) + 1) // 2`); the verdict is in the append response as `redemption {granted, reason}`, redemption rows are not redeemable, and reverting the stick reverts the redemption.
+**Stick redemption (DWB-537)** is automatic and needs nothing from you: an agent puts `redeem:<score_event_id>` (the ledger row id on its agent score page) in its own memory append with its own `X-Agent-ID`, at least 120 characters of real lesson beyond the token, within 48 hours, and gets half of that one stick back once, rounded up (`(abs(delta) + 1) // 2`); the verdict is in the append response as `redemption {granted, reason}`, redemption rows are not redeemable, and reverting the stick reverts the redemption. **This path runs through `memory/append`, which is sealed on a `human_memory` project.** `services/stick_redemption.py` is called only from the stock append route; `POST .../memories` has no redemption call at all, so on a human_memory project there is currently NO route that redeems a stick. Do not promise it to an agent there, and do not tell anyone to call `memory/append` to reach it: they get a 409 and the stick stays.
 
 ## 5. TL Workflow: Typical Session
 
@@ -579,7 +608,7 @@ The human's `/carrot` and `/stick` commands are the human's; you (an agent) use 
 
 Two gates can block a sprint close; the TL is the final witness on both.
 
-**Write-on-close gate (DWB-519, ALWAYS ON).** `PATCH /api/sprints/{id} {"status":"completed"}` is REFUSED with HTTP 400 if any active sprint participant has no `memory.md` write within the sprint window (any `append` or `session-complete` counts; detection takes whichever is LATER of `agents.last_memory_write_at`, stamped directly by the write endpoints, and `memory.md`'s own file mtime — the old scan of your ISO write-headings was retired as a gate source in DWB-564, because condensing removes the headings and stranded agents who had written correctly). The 400 names the non-writers. This is not a per-project toggle; it is skipped only when the project has no `repo_path`. So before closing, make sure every participant (you included) has landed a memory write, the natural one being their `session-complete` wrap-up. Chase non-writers the same way you chase missing acks.
+**Write-on-close gate (DWB-519, ALWAYS ON).** `PATCH /api/sprints/{id} {"status":"completed"}` is REFUSED with HTTP 400 if any active sprint participant has no memory write within the sprint window (on stock, any `append` or `session-complete` counts; on human_memory those are sealed and a `POST /api/agents/{id}/memories` row counts, stamping the same column; detection takes whichever is LATER of `agents.last_memory_write_at`, stamped directly by the write endpoints, and `memory.md`'s own file mtime; the old scan of your ISO write-headings was retired as a gate source in DWB-564, because condensing removes the headings and stranded agents who had written correctly). The 400 names the non-writers. This is not a per-project toggle; it is skipped only when the project has no `repo_path`. So before closing, make sure every participant (you included) has landed a memory write: on stock the natural one is their `session-complete` wrap-up, on human_memory it is a `/memories` row. Chase non-writers the same way you chase missing acks.
 
 **What the close itself mints (DWB-566).** Closing a sprint creates a test ticket for the NEXT sprint's work, but it lands on the sprint you just CLOSED, as `backlog`, unassigned, and fires no alert. Nothing pulls it forward for you: when the next sprint opens, move it or it strands. Ten tickets sat stranded on a stale placeholder for three months exactly this way.
 
@@ -610,7 +639,7 @@ Marking an agent inactive removes them from the gate. Use only when an agent has
 
 `HANDOFF.md` describes the state the next session will actually find. Write it last, after every state-changing action is finished, in this order:
 
-1. Workers land their wrap-ups (`session-complete` posts, final ticket transitions). Each `session-complete` (or any `append`) also satisfies that agent's write-on-close gate (§ 5a); a participant with no memory write will block the sprint close, so confirm everyone, you included, has written.
+1. Workers land their wrap-ups (on stock a `session-complete` post, on human_memory a `/memories` row; plus final ticket transitions either way). Each of those also satisfies that agent's write-on-close gate (§ 5a); a participant with no memory write will block the sprint close, so confirm everyone, you included, has written.
 2. Team disposition is settled and EXECUTED: if the team is shutting down, send the shutdown requests and confirm termination; if it stays parked, leave it alone.
 3. **Doc compaction (TL-only now, DWB-401).** An `ai_confident`/`ai_asked` close is REFUSED (422) by `POST /api/sessions/{id}/close` while a *gated* doc is over its token ceiling. As of DWB-401 the only gated docs are the ones YOU own: root continuity docs (`HANDOFF`/`ARCHITECTURE`/`README`/`INITIAL`/`CLAUDE.md`) and `project_rules`. Agent `memory.md` files are NOT part of this doc-compaction gate (their own hard write-ceiling keeps them bounded, DWB-518, so they never sit over ceiling), and shipped playbooks + agent defs are exempt too. So you do NOT need to fan out a compaction pass to the team, there's nothing of theirs to compact. (Note this is separate from the write-on-close gate in § 5a, which requires each participant to have WRITTEN memory, not trimmed it.) Just keep your own root docs under ceiling: if the close 422s, the body names the over file (it'll be one of yours), trim it, re-close. This whole step collapsed from a team-wide hard gate to a quick TL self-check.
 4. DWB session close fires (any layer) or you close it explicitly per § 4e.
