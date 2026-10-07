@@ -2,87 +2,83 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## READ FIRST
+## Current state (2026-10-07, pushed and green)
 
-**`docs/project_page_cleanup.md`** — tomorrow's work. Miles parked the
-`/projects/:id` cleanup; the audit is already done against live data. Do not
-re-audit it. Tier 1 is three strict duplicates of pages that already exist, and
-the order is set in the doc.
+HEAD `4f45674` on master, 3019 passed, 0 failed. Five commits today. Working
+tree clean. All five active projects deployed with mode-correct playbooks.
 
-**The biggest problem on that page is not layout.** 80 of 86 open alerts are
-reputation broadcasts raised to `critical`. That is DWB-598, in backlog, and
-fixing it does more for the page than any redesign.
+**Two projects run `human_memory`: IND (40) and DWB (1).** Not just IND. On both,
+`memory/append`, `memory/condense`, `memory/compact` and `session-complete`
+return 409; lessons go to `POST /api/agents/{id}/memories`, episodes to
+`POST /api/journal`. A `/memories` row satisfies the write-on-close gate.
 
-## Current state (2026-10-06, pushed and green)
+## What shipped
 
-HEAD `fbfdf52` on master, 2948 passed, 0 failed. Five commits today, each a
-separate revertable fix. Working tree clean.
+**IND's memory serves again.** 298 rows had no clock origin because an adoption
+run executed entirely in the gap between two sessions. Backfilled: 293 at origin
+2651, 5 at 2657. `spawn-prepare` for Archie_IND went 583 chars to 20253. Zero
+NULL-origin rows on IND at any tier.
 
-IND (project 40) migrated stock -> human_memory: 308 entries judged by seven
-agents, 293 adopted (209 scar, 84 working), 15 skipped and journaled. The nine
-stock `memory.md` files are byte-identical to the pre-toggle baseline — cutover
-sealed them rather than consuming them, and with the clock bug below they are
-currently the only readable copy. Do not close that door.
+The origin is a FLOOR, not a birth certificate. No row stamped 2651 was created
+during 2651; it is the last tick before the rows existed, which is correct for a
+consumer comparing strictly greater-than and false as provenance. Use `created_at`
+and `memory_transitions` for real provenance.
 
-## Four defects shipped as guards today
+**A memory can no longer be written without a session.** One module, one rule,
+every writer. Caller-facing writes refuse with 400; the background consolidation
+pass defers. The ticket named two writers; there were three.
 
-All four were the same shape: **a path that is honoured in part and answered
-200**. None announced itself.
+**DWB was the thing teaching the sealed routes.** The rules block pasted into
+every spawn bundle, `identity.md`, and eleven sites across four playbooks all
+told agents to call routes that 409.
 
-1. **top-off ran during a transition** and could promote a scar to CORE on
-   evidence drawn from a half-migrated store. Suppressed while `adopting` or
-   `reverting`.
-2. **`reason` was accepted and discarded** on the tiering path, kept only on
-   skips. 293 reasons lost on IND's migration before the column existed.
-3. **an adoption with no open session** mints rows with a NULL clock origin,
-   which cannot be scored and are therefore excluded from retrieval. Second
-   occurrence; the first was closed with a comment instead of a guard. Now
-   refused at BEGIN.
-4. **a markdown heading was read as a scope that can never close**, so
-   `scan_context` answered `cannot_die` and auto-promoted into the
-   never-decaying tier. 381 of 455 live scars were eligible. Now answers a new
-   `unresolvable` outcome and takes no action.
+**The wrong memory mode's sections are now stripped at deploy**, by the mechanism
+that already strips jira blocks. Unmarked content is shared — a decision, because
+every existing line is unmarked.
 
 ## Open, needing Miles
 
-- **The 39 + 86 already-promoted rows.** Before the bug fired, IND's team lead
-  had ZERO core rows — the entire CORE tier there is an artifact, including 13
-  standing rulings and the Jira credential authorization. Nothing in it carries
-  human-granted provenance because no route grants it. Current lean: revert to
-  scar and promote deliberately once a human path exists. Raw SQL either way.
-- **IND's 293 NULL clock origins.** Backfill pending a ruling. Argued (by the
-  other Archie_IND) for a synthetic session pinned to the adoption window rather
-  than stamping now, because stamping now asserts reinforcement that never
-  happened and the lie grows while the decision waits. Lockstep is not an
-  artifact to engineer away — those rows genuinely did enter in one hour.
-  **Not urgent:** `/memory/scored` serves rows regardless of scoring, so the
-  other window's spawn script already routes around it. Only a caller trusting
-  `memory_full` is affected.
-- **No human path to CORE at all.** `promote_to_core` has no HTTP route. After
-  defect 4 this is now the *only* road, so it went from a gap to the blocker.
-  Tracked for human_memory v2 along with the dedup hole and bundled rows.
-- **`memory_usage_rules`** from `spawn-prepare` still teaches `memory/append`
-  and `condense`, which 409 on a human_memory project. Server-generated, so this
-  morning's playbook fix did not cover it. Smallest open item.
-
-## Two Archie_INDs
-
-A second interactive session runs IndependenceDay on another machine
-(`independenceday-99`), opened DWB session 2653. Both are agent_id 70 writing to
-the same store and neither can see the other, which is why a defect report
-arrived here attributed to a spawned teammate who correctly refused credit. That
-session has its own spawn script and is briefed on all four fixes. It
-deliberately does not raise things with Miles, to avoid double-asking.
+- **DWB-644: reinforcement has never run in production.** `fired_count` 0 and
+  `last_reinforced_session_id` NULL on all 779 rows. The match relation is
+  backwards: a scar fires only when the user's whole prompt is a verbatim
+  substring of the lesson, i.e. when they are reciting it back. It also fires on
+  coincidence — `that is the` matches 8 scars — and three coincidental prompts
+  promote into CORE, which never decays. **Do not flip `topoff_enabled` as the
+  fix; the flag is the only thing keeping it latent.**
+- **DWB-643: `gate-status` reports `all_passing` while never evaluating three
+  gates sprint close enforces**, two of which are enabled here. The green light
+  on the project page is lying.
+- **DWB-640: stick redemption is unreachable** on human_memory. The redeem chain
+  only runs after a stock append.
+- **DWB-641: NOT NULL on `created_session_id`** is blocked on a design question —
+  `project.py`'s delete path nulls it deliberately so global agents do not lose
+  lessons when an unrelated project goes.
+- **DWB-642:** a raw row with no origin is indistinguishable from a normal fresh
+  one; `reason` reports `untiered` for both.
+- **DWB-646** (spec says "Not built" while eight files cite it) and **DWB-647**
+  (project_rules sends workers to `dwb2jira` on a project with no Jira). 647 is
+  the TL's — workers crash writing under `.claude/`.
+- **DWB-639** is a standing audit lane. `docs/doc_audit_backlog.md`, 11 items,
+  each verified against a running system.
 
 ## The lesson worth carrying
 
-Three of today's four defects I walked into myself, and the clock-origin one I
-caused by closing a session on instruction. The tell in every case was a 200.
-The suites were green throughout both outages because every test asserted rows
-were WRITTEN and none asserted a memory could be READ BACK by the thing that
-serves it. A row count proves storage; only an end-to-end read proves delivery.
+Four times today a number was true when read and false when sent, in a tree
+several people were writing at once — a line citation, a row count, a marker
+census, a suite result. No amount of re-checking fixes that; two careful reads
+give two correct-then-stale values. Cite symbols, not line numbers, and state
+the predicate beside every count.
 
-That bit one more time tonight: the memory note pointing at the cleanup doc was
-written seconds after the regex layer closed the session, so it landed with a
-NULL origin — the exact defect, on the last write of the day. Stamped with its
-true session (2652) by hand. Hence this pointer existing in two places.
+And the sharper one, from the doc side: correctness of every sentence does not
+imply correctness of the document, because the defect can be which sentences are
+PRESENT. Three deployed files carried the wrong mode's content after every line
+had been checked against the code. Review the output of a pipeline, never its
+input.
+
+## Team
+
+Shut down at Miles's request. Roster is DB-authoritative:
+`GET /api/projects/1/team`. Archie_DWB (13), Pam_DWB (14), Barry_DWB (21),
+Dolores (28), Stan (38) all participated and all have memory writes on record.
+CC teams do not survive a session; respawn via the full flow in
+`docs/team_lead_playbook.md` § 4a.
