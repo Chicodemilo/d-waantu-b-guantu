@@ -6,7 +6,7 @@
 # Callees: app/services (project, project_agent, standards_audit, test_result, seed_demo, playbook_deploy, activity_log), models (ActivityLog, Agent, Alert, InterAgentMessage, ProjectAgent, Ticket)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-10-01 (DWB-627: the four token-ceiling call sites use
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 #                ceiling_for_category instead of inlining 800/1000)
 
 import json
@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -68,6 +68,8 @@ def list_projects(
 
 
 class FromRepoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     repo_path: str
 
 

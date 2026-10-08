@@ -7,8 +7,12 @@
 # Callees: pydantic
 # Data In: dicts from app/services/memory_score
 # Data Out: ScoredMemoryEntry, ScoredMemoryResponse
-# Last Modified: 2026-09-30 (DWB-610: ScoredMemoryEntry carries `body`, so context
-#                assembly has one read path for score + content instead of two)
+# Last Modified: 2026-10-08 (DWB-658/659: ScoredMemoryEntry declares `condensed`
+#                and `keywords`. Undeclared keys are stripped from a response
+#                model by pydantic's default `extra=ignore`, so without this the
+#                service carries both fields and the endpoint serves neither.
+#                Previous entry: DWB-610: ScoredMemoryEntry carries `body`, so
+#                context assembly has one read path for score + content)
 
 from pydantic import BaseModel
 
@@ -31,6 +35,21 @@ class ScoredMemoryEntry(BaseModel):
     id: int
     tier: str
     body: str
+    # DWB-658/659. DECLARED HERE OR THEY NEVER REACH A CALLER. `_entry` puts
+    # both on the dict, but this model is `response_model` on
+    # GET /api/agents/{id}/memory/scored (app/routers/agents.py), and pydantic's
+    # default `extra` is `ignore` - an undeclared key is stripped from the
+    # response silently, with no error anywhere. The service would have been
+    # correct and the endpoint would have stayed exactly as uninformative as
+    # before, which is the same plausible-looking failure as a field that is
+    # accepted on a request and quietly dropped.
+    #
+    # It matters specifically because this endpoint is where DWB-659's own band
+    # text sends an agent to find out what it is about to lose. A bottom band
+    # that says "see /memory/scored" while that endpoint omits the keywords is
+    # a pointer to nothing.
+    condensed: str | None
+    keywords: list | None
     context_key: str | None
     fired_count: int
     scored: bool

@@ -290,5 +290,20 @@ class TestModeAtCreation:
         r = client.patch(
             f"/api/projects/{project['id']}", json={"memory_schema_version": 99}
         )
-        assert r.status_code == 200
-        assert r.json()["memory_schema_version"] == 1
+        # DWB-651 UPDATED THE MECHANISM, NOT THE INTENT. This used to assert a
+        # 200 whose body still read 1: the key was undeclared on ProjectUpdate,
+        # so pydantic dropped it and the write was a no-op the caller could not
+        # distinguish from success. ProjectUpdate now carries extra="forbid", so
+        # the attempt is refused by name instead of being quietly ignored.
+        assert r.status_code == 422, r.text
+        assert any(
+            e["type"] == "extra_forbidden"
+            and tuple(e["loc"])[-1] == "memory_schema_version"
+            for e in r.json()["detail"]
+        ), r.text
+
+        # The property this test exists for, asserted against the ROW rather
+        # than against the refusal: the caller did not move it.
+        after = client.get(f"/api/projects/{project['id']}")
+        assert after.status_code == 200, after.text
+        assert after.json()["memory_schema_version"] == 1

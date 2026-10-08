@@ -6,7 +6,8 @@
 # Callees: pydantic
 # Data In: JSON request body from the Claude Code PostToolUse / Notification / PreCompact hooks
 # Data Out: ToolUseInput, LifecycleEventInput (requests), ToolActionRead (response)
-# Last Modified: 2026-06-22 (DWB-421: LifecycleEventInput)
+# Last Modified: 2026-10-08 (DWB-651: left permissive on purpose; the reason
+#                and the caller are commented at the model)
 
 from datetime import datetime
 
@@ -26,6 +27,16 @@ class ToolUseInput(BaseModel):
     sibling tickets derive ``target`` / ``tool_metadata`` from it per tool type.
     """
 
+    # DWB-651: DELIBERATELY PERMISSIVE - no extra="forbid" here.
+    # CALLER: the Claude Code harness itself. `.claude/settings.json` pipes the raw
+    # hook stdin straight through (`-d "$(cat)"`), so this body carries whatever
+    # fields the harness version sends, and that field list is not our contract -
+    # it grows between Claude Code releases with no notice to us.
+    # WHY FORBIDDING IS WORSE HERE: these handlers document a delivery-gap-tolerance
+    # contract (always 200, degrade to a null-context row). A 422 would drop the
+    # whole event, and the hook is `curl -sf` with output discarded, so the loss is
+    # silent and total - token attribution for that session just never happens.
+    # Forbidding would trade a dropped FIELD for a dropped ROW.
     session_id: str | None = None
     tool_name: str | None = None
     tool_input: dict | None = None
@@ -47,6 +58,16 @@ class LifecycleEventInput(BaseModel):
     context, and the endpoint always returns 200.
     """
 
+    # DWB-651: DELIBERATELY PERMISSIVE - no extra="forbid" here.
+    # CALLER: the Claude Code harness itself. `.claude/settings.json` pipes the raw
+    # hook stdin straight through (`-d "$(cat)"`), so this body carries whatever
+    # fields the harness version sends, and that field list is not our contract -
+    # it grows between Claude Code releases with no notice to us.
+    # WHY FORBIDDING IS WORSE HERE: these handlers document a delivery-gap-tolerance
+    # contract (always 200, degrade to a null-context row). A 422 would drop the
+    # whole event, and the hook is `curl -sf` with output discarded, so the loss is
+    # silent and total - token attribution for that session just never happens.
+    # Forbidding would trade a dropped FIELD for a dropped ROW.
     session_id: str | None = None
     cwd: str | None = None
     hook_event_name: str | None = None

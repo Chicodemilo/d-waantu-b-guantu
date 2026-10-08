@@ -17,8 +17,10 @@ or not they open the full playbook.
 Pinned invariants:
 
   1. Both endpoints include a ``memory_usage_rules`` field in the response.
-  2. The field is <= 600 chars (hard cap; the module-level assert protects
-     against silent overflow on edits).
+  2. The field is <= MEMORY_USAGE_RULES_MAX_CHARS (hard cap; the
+     module-level assert protects against silent overflow on edits). The
+     number was 600 until DWB-661 moved it to 700; these tests read the
+     constant rather than a literal so there is one place to change.
   3. Both endpoints serve the same string (single source of truth: the
      ``MEMORY_USAGE_RULES`` constant in app.config.memory_rules).
   4. Key tokens are present so a future edit that drops an important rule
@@ -79,7 +81,7 @@ class TestMemoryUsageRulesSurfaced:
 
 
 # ---------------------------------------------------------------------------
-# 2. <= 600 char cap
+# 2. The char cap (MEMORY_USAGE_RULES_MAX_CHARS)
 # ---------------------------------------------------------------------------
 
 
@@ -90,7 +92,8 @@ class TestMemoryUsageRulesLengthCap:
         r = client.post("/api/agents/identify", json={
             "role": "backend-worker", "name": "Cap", "project_prefix": "MUR3",
         })
-        assert len(r.json()["memory_usage_rules"]) <= 600
+        from app.config.memory_rules import MEMORY_USAGE_RULES_MAX_CHARS
+        assert len(r.json()["memory_usage_rules"]) <= MEMORY_USAGE_RULES_MAX_CHARS
 
     def test_spawn_prepare_payload_under_cap(self, client, tmp_path):
         proj = _make_project(client, tmp_path, "MUR4")
@@ -98,18 +101,24 @@ class TestMemoryUsageRulesLengthCap:
         r = client.post("/api/agents/spawn-prepare", json={
             "role": "backend-worker", "name": "Cap", "project_prefix": "MUR4",
         })
-        assert len(r.json()["memory_usage_rules"]) <= 600
+        from app.config.memory_rules import MEMORY_USAGE_RULES_MAX_CHARS
+        assert len(r.json()["memory_usage_rules"]) <= MEMORY_USAGE_RULES_MAX_CHARS
 
     def test_constant_module_enforces_cap_at_import(self):
         """The module-level assert in app.config.memory_rules is the
-        load-bearing check. If a future edit pushes the constant past 600
-        chars, the import fails and every test that touches the API blows
-        up - exactly the right failure mode."""
+        load-bearing check. If a future edit pushes a constant past the cap,
+        the import fails and every test that touches the API blows up -
+        exactly the right failure mode.
+
+        The literal is pinned on purpose: moving the cap should be a
+        deliberate edit in two places, not a silent drift in one. DWB-661
+        moved it 600 -> 700 after trimming the human_memory block to its
+        floor; see the cap block in app/config/memory_rules.py."""
         from app.config.memory_rules import (
             MEMORY_USAGE_RULES,
             MEMORY_USAGE_RULES_MAX_CHARS,
         )
-        assert MEMORY_USAGE_RULES_MAX_CHARS == 600
+        assert MEMORY_USAGE_RULES_MAX_CHARS == 700
         assert len(MEMORY_USAGE_RULES) <= MEMORY_USAGE_RULES_MAX_CHARS
 
 

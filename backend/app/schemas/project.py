@@ -6,7 +6,7 @@
 # Callees: pydantic, app/config/server_repo.py
 # Data In: JSON request body
 # Data Out: ProjectCreate, ProjectUpdate, ProjectRead, ProjectOverheadIncrement
-# Last Modified: 2026-09-29 (DWB-590: topoff_enabled + topoff_interval, no confirmation needed)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -17,6 +17,8 @@ from app.models.project import MemoryMode, ProjectStatus
 
 
 class ProjectCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     prefix: str
     name: str
     description: str | None = None
@@ -48,6 +50,8 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     name: str | None = None
     description: str | None = None
     status: ProjectStatus | None = None
@@ -88,6 +92,8 @@ class ProjectUpdate(BaseModel):
 
 
 class ProjectOverheadIncrement(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     role: str  # "team_lead" or "pm"
     tokens_used: int = 0
     time_spent_seconds: int = 0

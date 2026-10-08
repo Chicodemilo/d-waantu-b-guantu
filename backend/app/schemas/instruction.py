@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: InstructionCreate, InstructionUpdate, InstructionRead
-# Last Modified: 2026-03-29
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -16,6 +16,8 @@ from app.models.instruction import InstructionScope
 
 
 class InstructionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     scope: InstructionScope
     project_id: int | None = None
     agent_id: int | None = None
@@ -24,6 +26,8 @@ class InstructionCreate(BaseModel):
 
 
 class InstructionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     scope: InstructionScope | None = None
     project_id: int | None = None
     agent_id: int | None = None

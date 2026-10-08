@@ -11,7 +11,10 @@
 #          app/models/dwb_session, app/services/journal.promotion_candidates
 # Data In: agent_id, a DB session
 # Data Out: score(), band(), sessions_since_reinforced(), scored_memory()
-# Last Modified: 2026-10-07 (DWB-637 follow-up: UNSCORED_NO_SESSION_ORIGIN's
+# Last Modified: 2026-10-08 (DWB-658/659: _entry carries `condensed` and
+#                `keywords`; see its docstring for the two consumers this one
+#                projection feeds and why both files move together.
+#                Previous entry: 2026-10-07 (DWB-637 follow-up: UNSCORED_NO_SESSION_ORIGIN's
 #                docstring named a write path that no longer exists; the state
 #                is still reachable, from two other sources, and now says which.
 #                Previous entry: MILES RULING: fired_count's write site moved OUT
@@ -225,11 +228,36 @@ def _entry(db: Session, memory: AgentMemory) -> dict:
     exactly the disagreement risk section 7 opens with. `body` is raw memory
     content, not a derived fact, so it does not touch either guard: no
     `score`/`band` column exists on the model and none is added here.
+
+    DWB-658/659 add `condensed` and `keywords` on exactly that reasoning: both
+    are stored, author-supplied content rather than derived facts, and the
+    alternative was a second query against `agent_memories` keyed on the ids
+    this function has already resolved.
+
+    THIS ONE PROJECTION FEEDS TWO CONSUMERS, AND THE SECOND IS EASY TO MISS:
+
+      1. `memory_context.assemble_session_context`, which renders the bands
+         into the text injected at spawn and SessionStart.
+      2. `GET /api/agents/{id}/memory/scored`, the public endpoint, through
+         `app/schemas/memory_score.ScoredMemoryEntry`.
+
+    That is recorded here rather than left in a ticket, because the ticket
+    stops being read and this does not. Anyone narrowing this dict to "what
+    context assembly needs" silently breaks the endpoint - and that endpoint is
+    where DWB-659's bottom bands send an agent to find out what it is about to
+    lose, so the damage is a pointer to nothing rather than a visible error.
+
+    AND ADDING A KEY HERE IS NOT SUFFICIENT TO SERVE IT THERE. Pydantic's
+    default `extra` is `ignore`, so `ScoredMemoryEntry` strips any field it
+    does not declare, with no error at any layer. The two files move together
+    or the service is correct and the response is unchanged.
     """
     base = {
         "id": memory.id,
         "tier": memory.tier.value,
         "body": memory.body,
+        "condensed": memory.condensed,
+        "keywords": memory.keywords,
         "context_key": memory.context_key,
         "fired_count": memory.fired_count,
     }

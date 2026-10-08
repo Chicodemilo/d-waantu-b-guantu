@@ -487,6 +487,31 @@ def seed_buckets(rig: Rig) -> dict:
             "rendering.\n"
             "Neither should this third line."
         ),
+        # DWB-658/659. The two author-supplied fields are REQUIRED at the write
+        # gate (DWB-657), and this rig writes rows directly, so without seeding
+        # them here the rig would keep passing while never once exercising the
+        # contract it exists to prove. A check pointed at a contract it does not
+        # touch is not evidence for that contract.
+        #
+        # The condensed line deliberately shares NO marker with the body's first
+        # line, so `check_band_assembly` can tell the stored-line path from the
+        # old truncation. If they overlapped, both implementations would produce
+        # output containing the same marker and the check could not discriminate.
+        condensed=f"{marker('SCAR-LONG-CONDENSED')}: the author's own line",
+        keywords=["compression", "band", "author-line"],
+    )
+
+    # Deliberately left with condensed=NULL and keywords=NULL: every one of the
+    # 832 rows that existed when these columns landed is in that state, and
+    # DWB-655 has not backfilled them, so the fallback path is the one real
+    # agents read today. A rig that seeded every row would stop covering it.
+    seeded["scar_long_null"] = _mk_memory(
+        rig, tier=MemoryTier.scar, gap=20,
+        body=(
+            f"{marker('SCAR-LONG-NULL')}: this row has no author-supplied "
+            "condensed line, which is what every pre-DWB-657 row looks like.\n"
+            "This second line must never appear either."
+        ),
     )
 
     db.commit()
@@ -745,26 +770,46 @@ def print_received_context(rig: Rig) -> tuple[str, str]:
     return memory_full, additional_context
 
 
-def _expected_compressed_line(body: str, cap: int = 160) -> str:
+def _expected_compressed_line(entry: dict, cap: int = 400) -> str:
     """Independent expectation for what a band 5-7 entry's one line should
-    read (spec section 3: "carried, compressed to one line"). Deliberately
-    NOT an import of app.services.memory_context._one_line: importing the
-    function under test would put the same component on both sides of the
-    comparison, so a bug in it cancels itself out and the check would pass
-    for the wrong reason - the exact closed-loop failure this project's own
-    lessons name. Hand-written from the spec's own description instead: the
-    first non-blank line, capped, with a truncation marker when cut. The cap
-    and marker were read out of the real implementation once so this checks
-    the right contract, but the comparison logic itself is independent - a
-    wrong cap or a wrong marker in the real code will not be silently agreed
-    with here, it will show up as neither PASS nor the full body matching.
+    read, REWRITTEN FOR DWB-658.
+
+    WHAT CHANGED AND WHY THIS FILE HAD TO CHANGE WITH THE FEATURE. This used to
+    reimplement the old `memory_context._one_line`: first non-blank line of the
+    body, capped at 160. That was correct until DWB-658, which made the 5-7
+    band render the AUTHOR'S stored `condensed` instead. Left alone, this
+    function would have expected the body's first line, found the author's line
+    instead, and reported NOT_ASSEMBLED for every compressed row - the
+    project's own end-to-end instrument calling a working feature broken, with
+    no way for a reader to tell which of the two to believe.
+
+    That is worth naming as a class: AN INDEPENDENT REIMPLEMENTATION IS THE
+    RIGHT DESIGN AND IT IS ALSO A SECOND COPY OF THE CONTRACT. It cannot drift
+    silently the way a shared helper does, but it does go stale, and it goes
+    stale by reporting FAILURE, which is the safe direction and still costs
+    somebody an afternoon. When the contract moves, this moves.
+
+    STILL DELIBERATELY NOT AN IMPORT of `memory_context._condensed_line`.
+    Importing the function under test puts the same component on both sides of
+    the comparison, so a bug in it cancels out and the check passes for the
+    wrong reason. Hand-written from the contract instead:
+      - an author's `condensed` renders as itself, bounded for display;
+      - a NULL `condensed` falls back to the body's first line, bounded, and
+        carries a marker saying it is not the author's line.
     """
-    for line in body.splitlines():
-        stripped = line.strip()
+    condensed = (entry.get("condensed") or "").strip()
+    if condensed:
+        return condensed[: cap - 1].rstrip() + "\u2026" if len(condensed) > cap else condensed
+
+    for line in (entry.get("body") or "").splitlines():
+        stripped = line.strip().lstrip("-*+").strip()
         if stripped:
-            if len(stripped) > cap:
-                return stripped[: cap - 1].rstrip() + "…"
-            return stripped
+            bounded = (
+                stripped[: cap - 1].rstrip() + "\u2026"
+                if len(stripped) > cap
+                else stripped
+            )
+            return f"{bounded} [auto-excerpt, not the author's line]"
     return ""
 
 
@@ -813,8 +858,14 @@ def check_band_assembly(rig: Rig, memory_full: str, entries: list[dict]) -> None
         if expect_full_text:
             outcome = "PASS" if full_present else "NOT_ASSEMBLED"
         else:
-            expected_line = _expected_compressed_line(full)
-            decisive = expected_line != full  # only true for scar_long today
+            expected_line = _expected_compressed_line(e)
+            # Decisive when the expected rendering is a DIFFERENT string
+            # from the full body - otherwise a correct render and a no-op
+            # render are byte-identical and the row cannot tell them
+            # apart. True for scar_long (an author's line that shares no
+            # text with the body) and scar_long_null (a long first line
+            # plus the excerpt marker).
+            decisive = expected_line != full
             line_present = bool(expected_line) and expected_line in memory_full
             if not decisive:
                 # A short, already-one-line body: full text and a correct

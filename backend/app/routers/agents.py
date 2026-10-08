@@ -6,8 +6,10 @@
 # Callees: app/services/agent.py, app/services/agent_consolidation.py, app/services/raw_memory.py, app/services/memory_score.py
 # Data In: HTTP requests
 # Data Out: JSON responses (AgentRead, AgentIdentifyResponse, AgentConsolidationAckRead)
-# Last Modified: 2026-09-30 (DWB-603/Miles ruling: GET /{id}/memory/scored is
-#                pure again - firing moved to memory_consult.consult_scars)
+# Last Modified: 2026-10-08 (DWB-649: POST /{id}/memories returns a real tier,
+#                derived at insert; the request `tier` field is still refused)
+# DWB-652: the withdraw route now COMMITS - it is the owner the flush-only
+#          services below it delegate to, and it never performed the commit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -575,22 +577,41 @@ def append_raw_memory(
     data: RawMemoryCreate,
     db: Session = Depends(get_db),
 ):
-    """Append one RAW, untiered memory row for this agent (DWB-586).
+    """Append one memory row for this agent, tiered on the spot (DWB-586/649).
 
-    Spec docs/human_memory_spec.md section 4: a session appends raw and
-    unsorted, because tiering in the moment rubber-stamps in-the-moment
-    salience, which is the judgment consolidation exists to make.
+    Spec docs/human_memory_spec.md section 4: a session appends unsorted,
+    because tiering in the moment rubber-stamps in-the-moment salience, which is
+    the judgment consolidation exists to make.
 
-    Body: { body, context_key?, cost?, caught_by?, surprised?, tier? }
+    DWB-649: the SERVER now makes that judgment at insert, by running
+    consolidation's own `tier_for_raw` over the moment-tags in the body. The
+    response carries a real tier - `scar` or `working`, never `raw` - so the row
+    is scoreable and appears in `GET /memory/scored` with no other call in
+    between. What section 4 forbids is the WRITER rubber-stamping its own
+    salience, and that is still forbidden; see below.
+
+    Body: { body, condensed, keywords, context_key?, cost?, caught_by?,
+            surprised?, tier? }
+
+    `condensed` and `keywords` are author-supplied and REQUIRED IN EFFECT
+    (DWB-657). They are Optional on the schema so the refusal can be a 400 that
+    says what the field is FOR, rather than pydantic's generic "Field required";
+    `raw_memory.append_raw_memory` enforces them. Because the model forbids
+    undeclared keys (DWB-651), a MISSPELLED name is a 422 `extra_forbidden` and
+    never reaches that 400 - a malformed request and an incomplete one are
+    different answers on purpose.
 
     cost / caught_by / surprised are spec section 4's moment-tags, and they live
     on the MEMORY rather than the journal (section 6 as amended 2026-09-29):
     all three are read against memories, and the SCAN gates on `cost`.
 
-    `tier` is refused, always, with the reason. Section 7 hard rule 5 puts CORE
-    behind a human ruling or logged cross-context evidence, and section 4 puts
-    every other tier behind consolidation. The field is accepted by the schema
-    only so the attempt can be answered rather than silently written as `raw`.
+    `tier` is refused, always, with the reason, and DWB-649 did not loosen that.
+    Section 7 hard rule 5 puts CORE behind a human ruling or logged
+    cross-context evidence, and section 4 puts every other tier behind
+    consolidation's rule rather than the caller's opinion. The field is accepted
+    by the schema only so the attempt can be ANSWERED rather than dropped -
+    a caller that names a tier and gets a 201 would believe it had tiered
+    something.
 
     A write with NO open DWB session is REFUSED with 400 (DWB-637). The reverse
     of what this docstring said until then, and the reversal is the ticket: a
@@ -606,7 +627,8 @@ def append_raw_memory(
     no mode-aware branch (DWB-589 verifies rather than rebuilds this).
 
     Returns 201. Errors:
-      - 400: empty body, any tier at all, unscoped agent, NO OPEN DWB SESSION.
+      - 400: empty body, any tier at all, unscoped agent, NO OPEN DWB SESSION,
+             missing/blank `condensed`, missing/blank/all-blank `keywords`.
       - 404: agent or project not found.
     """
     try:
@@ -619,6 +641,8 @@ def append_raw_memory(
             caught_by=data.caught_by,
             surprised=data.surprised,
             tier=data.tier,
+            condensed=data.condensed,
+            keywords=data.keywords,
         )
     except memory_origin.MemoryOriginMissing as e:
         # DWB-637. 400 rather than 409: the request is well-formed and the
@@ -669,7 +693,7 @@ def withdraw_agent_memory(
       - 404: no such memory.
     """
     try:
-        return withdraw_svc.withdraw_memory(
+        payload = withdraw_svc.withdraw_memory(
             db,
             agent_id=agent_id,
             memory_id=memory_id,
@@ -677,8 +701,54 @@ def withdraw_agent_memory(
             reason=data.reason,
         )
     except withdraw_svc.WithdrawError as e:
+        # Every WithdrawError is raised BEFORE journal_and_remove runs, so this
+        # path has written nothing and there is nothing to roll back. Closing
+        # the session discards any pending state anyway.
         status = {
             "memory_not_found": 404,
             "not_owner": 403,
         }.get(e.code, 400)
         raise HTTPException(status, e.detail)
+
+    # DWB-652: THE COMMIT, AND IT BELONGS HERE RATHER THAN IN get_db.
+    #
+    # Both services below this are flush-only BY CONTRACT and say so in their
+    # own docstrings - memory_withdraw.withdraw_memory "the router owns the
+    # transaction", memory_removal.journal_and_remove "Does NOT commit. The
+    # caller owns the transaction, so the journal entry, the FK break and the
+    # delete land together or not at all". That contract is right and is shared
+    # with the eviction movements. What was missing is that this route, the
+    # named owner, never performed the commit, so a withdrawal answered 200
+    # while the journal entry, the FK break and the delete were all discarded.
+    # The response even quoted a journal_entry_id for a row that was rolled
+    # back, which is a mechanism reporting that it RAN rather than that it
+    # LANDED.
+    #
+    # THE WIDE FIX WAS CONSIDERED AND REJECTED. Making get_db commit on clean
+    # exit would fix this and every other instance at once, and it is the wrong
+    # call here: 161 routes depend on get_db, 13 service modules document
+    # "the caller owns the transaction" as a deliberate contract, and two
+    # routers return an error as a JSONResponse rather than raising - which a
+    # commit-on-clean-exit would treat as success and commit. It also cannot be
+    # VERIFIED today: the test harness shares one rolled-back session
+    # (DWB-653), so no suite in this repo can observe a commit at all. Changing
+    # transaction semantics app-wide with no instrument that can see the change
+    # is the kind of thing that looks fine until it does not. That is a Miles
+    # call behind DWB-653, not a side effect of this bug fix.
+    #
+    # Inside its own try: if the commit fails there is no withdrawal, and the
+    # caller must not be told there was one (AC3). The rollback keeps the
+    # session usable and the 500 names what did not happen.
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            500,
+            f"memory {memory_id} was NOT withdrawn: the journal entry, the "
+            f"transition unlink and the delete could not be committed and have "
+            f"been rolled back together ({type(e).__name__}: {e}). The memory "
+            "is unchanged; nothing was lost.",
+        )
+
+    return payload

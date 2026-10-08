@@ -58,13 +58,29 @@ from app.models.project import MemoryMode, Project
 # memory lives in DWB, with the API shape." An empty string would be honest but
 # mute - an agent handed nothing cannot tell "this project has no memory yet"
 # from "your memory lives somewhere else now", and the second needs an action.
+#
+# THIS IS THE THIRD HOME OF THE WRITE SHAPE AND THE LEAST FORGIVING (DWB-661).
+# The other two are `HUMAN_MEMORY_USAGE_RULES` and the `docs/` playbooks. The
+# branch below serves THIS one only when assembled context is empty, so its
+# readers are first-session agents: nothing scored, nothing of their own to
+# check the instruction against. A stale shape here tells a brand new agent to
+# make a call the API refuses, on its first memory write, with no way to tell
+# whether the instruction was wrong or the API was. The other two sites have a
+# reader who can notice; this one does not. When the write contract changes,
+# this constant changes in the same commit.
 STOCK_MEMORY_SEALED_POINTER = (
     "This project runs `human_memory` mode. Stock DWB memory (memory.md) is "
     "sealed: not written, not read, not consulted (spec section 7, hard rule 1).\n"
     "Your durable memory lives in the memory store:\n"
     "  write   POST /api/agents/{agent_id}/memories "
-    '{"body": "...", "cost": "none|low|high", '
+    '{"body": "...", "condensed": "...", "keywords": ["...", "..."], '
+    '"cost": "none|low|high", '
     '"caught_by": "me|worker|human|ci", "surprised": true|false}\n'
+    "          body, condensed and keywords are REQUIRED. Omit or blank one and\n"
+    "          the write is refused with 400 naming it; nothing is stored.\n"
+    "          condensed is ONE line that IS the lesson, not the setup.\n"
+    "          keywords are two or three, as a JSON array of short strings.\n"
+    "          cost, caught_by and surprised are optional enums; never send tier.\n"
     "  read    GET  /api/agents/{agent_id}/memory/scored\n"
     "Episodes go to the journal, which is never read whole:\n"
     "  write   POST /api/journal {\"agent_id\": N, \"body\": \"...\", \"tags\": [...]}\n"

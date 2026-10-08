@@ -5,42 +5,15 @@
 # Caller: app/routers/dwb_sessions.py
 # Callees: pydantic
 # Data In: JSON request body
-# Data Out: DwbSessionCreate, DwbSessionUpdate, DwbSessionRead, DwbSessionOpenRequest, DwbSessionCloseRequest, DwbSessionOpenConflict, DwbSessionKeyword, DwbSessionListItem, DwbSessionByRoleEntry, DwbSessionByTicketEntry, DwbSessionDetail
-# Last Modified: 2026-06-25 (DWB-493: expose summary + weighted keywords on list + detail reads; DWB-500: keyword weight is now a TF-IDF relevance score)
+# Data Out: DwbSessionRead, DwbSessionOpenRequest, DwbSessionCloseRequest, DwbSessionOpenConflict, DwbSessionKeyword, DwbSessionListItem, DwbSessionByRoleEntry, DwbSessionByTicketEntry, DwbSessionDetail
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys;
+#                deleted the unused DwbSessionCreate/DwbSessionUpdate pair)
 
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.dwb_session import DwbCloseMethod, DwbCloseReason, DwbOpenMethod
-
-
-class DwbSessionCreate(BaseModel):
-    """Open a new DWB session. closed_at is always NULL on create — close is
-    a separate update flow. open_method is required; the caller signals
-    whether the open was a clean regex match, an AI-confident call, or an
-    AI-asked confirmation."""
-
-    project_id: int
-    opened_at: datetime
-    open_method: DwbOpenMethod
-    open_phrase: str | None = None
-
-
-class DwbSessionUpdate(BaseModel):
-    """Close (or amend) an open DWB session. Fields are all optional so the
-    same schema covers explicit close (closed_at + close_method + close_reason
-    + close_phrase) and the idle sweeper's close (closed_at + close_method=
-    idle_timeout + close_reason=idle, no phrase)."""
-
-    closed_at: datetime | None = None
-    close_phrase: str | None = None
-    close_method: DwbCloseMethod | None = None
-    close_reason: DwbCloseReason | None = None
-    total_tokens: int | None = None
-    total_time_seconds: int | None = None
-    # DWB-481: structured bulleted write-up (free-form JSON, synthesizer-owned).
-    summary: dict | list | None = None
 
 
 class DwbSessionRead(BaseModel):
@@ -69,8 +42,10 @@ class DwbSessionRead(BaseModel):
 class DwbSessionOpenRequest(BaseModel):
     """POST /api/sessions/open body (DWB-336).
 
-    Same shape as DwbSessionCreate but kept distinct so the endpoint signature
-    can evolve without disturbing model-level CRUD usage.
+    DWB-651 deleted the DwbSessionCreate / DwbSessionUpdate pair this docstring
+    used to point at. They were bound to no route and called by nothing, so the
+    "model-level CRUD usage" they were being kept distinct from did not exist.
+    This schema is the one and only body for opening a session.
 
     opened_at is OPTIONAL. Deterministic callers (the regex/transcript/slash
     hooks) may pass a real machine-clock anchor. The AI/manual TL layer
@@ -78,6 +53,7 @@ class DwbSessionOpenRequest(BaseModel):
     those methods and stamps the server clock, because a language-model-built
     timestamp can be hours wrong. When omitted on any method, the server
     defaults opened_at to datetime.now(UTC)."""
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     project_id: int
     opened_at: datetime | None = None
@@ -106,6 +82,7 @@ class DwbSessionCloseRequest(BaseModel):
     still parses and reaches the endpoint, which returns the helpful,
     window-aware message instead of a generic Pydantic validation error.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     close_method: DwbCloseMethod
     close_reason: DwbCloseReason

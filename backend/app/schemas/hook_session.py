@@ -6,7 +6,8 @@
 # Callees: pydantic
 # Data In: JSON request body from Claude Code hooks
 # Data Out: HookEventInput (incl. SubagentStop + UserPromptSubmit fields), HookSessionRead
-# Last Modified: 2026-09-30 (DWB-613: HookSessionRead carries prompt_count for the top-off UI)
+# Last Modified: 2026-10-08 (DWB-651: left permissive on purpose; the reason
+#                and the caller are commented at the model)
 
 from datetime import datetime
 
@@ -25,6 +26,16 @@ class HookEventInput(BaseModel):
     SubagentStop additionally sends: agent_type, agent_id, agent_transcript_path
     UserPromptSubmit additionally sends: prompt (the raw user prompt text)
     """
+    # DWB-651: DELIBERATELY PERMISSIVE - no extra="forbid" here.
+    # CALLER: the Claude Code harness itself. `.claude/settings.json` pipes the raw
+    # hook stdin straight through (`-d "$(cat)"`), so this body carries whatever
+    # fields the harness version sends, and that field list is not our contract -
+    # it grows between Claude Code releases with no notice to us.
+    # WHY FORBIDDING IS WORSE HERE: these handlers document a delivery-gap-tolerance
+    # contract (always 200, degrade to a null-context row). A 422 would drop the
+    # whole event, and the hook is `curl -sf` with output discarded, so the loss is
+    # silent and total - token attribution for that session just never happens.
+    # Forbidding would trade a dropped FIELD for a dropped ROW.
     session_id: str | None = None
     transcript_path: str | None = None
     cwd: str | None = None

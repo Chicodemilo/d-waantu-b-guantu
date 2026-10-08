@@ -3,10 +3,10 @@
 # Created: 2026-06-09
 # Purpose: Service-layer business logic for DWB session open/close/reopen + idle sweep (DWB-336, DWB-337, DWB-346 headline, DWB-351 privacy null-out on AI-layer phrases, DWB-382 ai_classifier added to AI-set, DWB-395 reopen_session, DWB-484 close-time write-up synthesis: headline/summary/keywords)
 # Caller: app/services/idle_sweeper.py (sweep loop), app/routers/dwb_sessions.py (open + close + reopen endpoints), app/services/hook_tracking.py (grace-window resurrect)
-# Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.models.entity_keyword, app.models.ticket, app.models.comment, app.models.inter_agent_message, app.services.dwb_session_rollup, app.services.keyword_extraction, app.services.session_synthesizer, app.database.SessionLocal
+# Callees: app.models.dwb_session, app.models.hook_session, app.models.tracking_log, app.models.entity_keyword, app.models.ticket, app.models.comment, app.models.inter_agent_message, app.services.dwb_session_rollup, app.services.keyword_extraction, app.services.session_synthesizer, app.services.memory_session_trigger (DWB-650, imported inside open_session to break a cycle), app.database.SessionLocal
 # Data In: SQLAlchemy Session + DwbSession instance (close) or project_id/opened_at (open)
 # Data Out: Open/closed DwbSession rows, idle-sweep counts
-# Last Modified: 2026-10-01 (DWB-634: _utcnow and _strip_tz drop the fractional second via app.services.timestamps, so the rollup window bounds cannot round forward past the server-stamped columns they are compared against)
+# Last Modified: 2026-10-08 (DWB-650: open_session now fires the memory consolidation pass for every agent on the project's roster - the open itself is the trigger, so nothing anywhere has to remember to run it)
 
 """DWB session business logic.
 
@@ -220,6 +220,35 @@ def open_session(
         db, project_id, None, "session", row.id, "session_opened",
         {"open_method": open_method.value},
     )
+
+    # DWB-650: THE SESSION OPEN IS THE TRIGGER. Every agent on this project's
+    # roster is consolidated here, on a human_memory project, because a session
+    # opening is the one event that reliably happens and that nobody performs
+    # FOR this. Miles: "this is programmatic. dwb sesh launch does this, no one
+    # has to remember."
+    #
+    # IN THE SERVICE AND NOT IN THE ROUTER. `POST /api/sessions/open` is one of
+    # three callers of this function - the other two are hook_tracking's
+    # phrase-matched opens - and a fourth will be added by someone who has not
+    # read this ticket. Wiring the router would make the trigger a thing a
+    # future caller must remember to attach, which is the failure mode the
+    # ticket exists to remove.
+    #
+    # AFTER THE FLUSH ABOVE, DELIBERATELY. `tier_raw_memories` stamps a row
+    # that has no clock origin with the session it is being judged in, and
+    # resolves that session through `get_active_session`. The row has to be
+    # visible in this transaction before the pass runs or that stamp finds
+    # nothing and those rows stay raw for another session.
+    #
+    # The import is function-local to break a real cycle:
+    # memory_consolidate imports THIS module for `get_active_session`.
+    # `on_session_opened` never raises, so it cannot fail the open.
+    from app.services import memory_session_trigger
+
+    memory_session_trigger.on_session_opened(
+        db, project_id=project_id, dwb_session_id=row.id
+    )
+
     return row, None
 
 

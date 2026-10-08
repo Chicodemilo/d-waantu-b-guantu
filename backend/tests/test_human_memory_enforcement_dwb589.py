@@ -182,7 +182,14 @@ class TestReadEndpointsStayOpen:
     ):
         agent = make_agent(project_id=human_memory_project["id"])
         r = client.post(
-            f"/api/agents/{agent['id']}/memories", json={"body": "the real store"}
+            f"/api/agents/{agent['id']}/memories", json={
+                "body": "the real store",
+                # DWB-657: condensed + keywords are mandatory on this endpoint.
+                # This test is about the STORE being reachable, not the write
+                # shape, so the payload is made valid and nothing else moves.
+                "condensed": "the new store is the one that accepts writes",
+                "keywords": ["human-memory", "store"],
+            }
         )
         assert r.status_code == 201, r.text
 
@@ -293,7 +300,12 @@ class TestWriteOnCloseGateOnASwitchedProject:
     ):
         agent_row = make_agent(project_id=human_memory_project["id"], name="Writer")
         r = client.post(
-            f"/api/agents/{agent_row['id']}/memories", json={"body": "a lesson"}
+            f"/api/agents/{agent_row['id']}/memories", json={
+                "body": "a lesson",
+                # DWB-657: mandatory fields; this test is about the gate stamp.
+                "condensed": "a lesson worth one line",
+                "keywords": ["gate", "participation"],
+            }
         )
         assert r.status_code == 201, r.text
         agent = db_session.get(Agent, agent_row["id"])
@@ -336,7 +348,15 @@ class TestWriteOnCloseGateOnASwitchedProject:
         """The window is still a window. A row from before `since` is not
         participation in THIS sprint."""
         agent_row = make_agent(project_id=human_memory_project["id"], name="Earlier")
-        client.post(f"/api/agents/{agent_row['id']}/memories", json={"body": "old"})
+        client.post(
+            f"/api/agents/{agent_row['id']}/memories",
+            json={
+                "body": "old",
+                # DWB-657: mandatory fields; this test is about the sprint window.
+                "condensed": "a lesson written before the window opened",
+                "keywords": ["window", "participation"],
+            },
+        )
         row = (
             db_session.query(AgentMemory)
             .filter(AgentMemory.agent_id == agent_row["id"])
@@ -411,7 +431,12 @@ class TestSprintCloseOnASwitchedProject:
             client, make_project, make_agent, make_sprint, make_ticket, tmp_path
         )
         r = client.post(
-            f"/api/agents/{agent['id']}/memories", json={"body": "a lesson worth keeping"}
+            f"/api/agents/{agent['id']}/memories", json={
+                "body": "a lesson worth keeping",
+                # DWB-657: mandatory fields; this test is about sprint close.
+                "condensed": "participation is what the close gate checks",
+                "keywords": ["sprint-close", "participation"],
+            }
         )
         assert r.status_code == 201, r.text
 

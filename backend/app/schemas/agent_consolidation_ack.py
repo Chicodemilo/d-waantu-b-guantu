@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AgentConsolidationAckCreate, AgentConsolidationAckRead
-# Last Modified: 2026-06-05
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class AgentConsolidationAckCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     sprint_id: int
     notes: str | None = None
     # DWB-328: per-file override map {filename: reason}. Required when the

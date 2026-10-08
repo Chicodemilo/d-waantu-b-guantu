@@ -8,7 +8,7 @@
 # Callees: app/services/memory_adopt, memory_decide, memory_sweep
 # Data In: HTTP requests
 # Data Out: JSON (the plan, one candidate, a decision result, a sweep result)
-# Last Modified: 2026-09-30 (DWB-594)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 """The decide loop's endpoints.
 
@@ -30,7 +30,7 @@ a second entry point would be a second copy of the rule.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -57,6 +57,7 @@ class DecideRequest(BaseModel):
     separate /skip route would let a caller reach the skip path without going
     through the code that journals, so the two share one entry point on purpose.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     tier: str | None = None
     decided_by: str

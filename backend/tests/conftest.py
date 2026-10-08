@@ -6,7 +6,9 @@
 # Callees:       app.main (FastAPI TestClient), app.database (engine, session)
 # Data In:       MySQL lat_test database connection
 # Data Out:      Rolled-back test transactions; factory-created API objects
-# Last Modified: 2026-09-15 (DWB-529: make_ticket key trailing number matches ticket_number)
+# Last Modified: 2026-10-08 (DWB-653: commit census installed suite-wide; the
+#                opt-in `persisting` fixture adds real-commit + second-connection
+#                readback for tests that assert PERSISTENCE rather than behaviour)
 
 """Shared fixtures for backend API tests.
 
@@ -31,7 +33,7 @@ os.environ["MYSQL_DATABASE"] = "lat_test"
 os.environ["TESTING"] = "1"
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient  # noqa: F401 - re-exported for tests
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -39,6 +41,30 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.schemas.ticket import ticket_number_from_key
+
+# DWB-657: the two fields every memory write must now carry. ONE DEFINITION,
+# imported by the memory test modules, because the write contract changed twice
+# in one day (DWB-649 derived the tier, DWB-657 made these mandatory) and the
+# second change cost 35 individually-edited inline payloads. The next change
+# costs one line here.
+#
+# Spread as `**MEMORY_WRITE_EXTRAS` FIRST in a payload literal, so an explicit
+# key in the test still wins - a test that deliberately sends a blank
+# `condensed` must not have it silently replaced by this.
+MEMORY_WRITE_EXTRAS = {
+    "condensed": "state the rule, not the anecdote",
+    "keywords": ["fixture", "contract"],
+}
+
+
+# DWB-653: the persistence instruments. `persisting` is re-exported so tests can
+# request it by name; the import is what makes pytest see the fixture.
+from tests.persistence_instrument import (  # noqa: E402,F401
+    CensusClient,
+    install_commit_spy,
+    persisting,
+    write_census,
+)
 
 # Build the test DB URL from the same settings (which now has MYSQL_DATABASE=lat_test)
 _TEST_DB_URL = (
@@ -62,6 +88,37 @@ _LAT_TEST_LOCK_PATH = (
 )
 
 
+
+def _truncate_all_tables() -> None:
+    """Empty every table in lat_test. Used at session START (see create_tables).
+
+    FOREIGN_KEY_CHECKS is disabled around the loop: there is no ordering of
+    these tables that satisfies every FK, and TRUNCATE will not drop a row a
+    foreign key still points at. Scoped to this connection and restored before
+    it is returned to the pool.
+
+    Shares its body with persistence_instrument._truncate_all rather than
+    importing it, because conftest must not depend on a module it also exports
+    fixtures from at import time.
+    """
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        names = [
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = DATABASE()"
+                )
+            )
+        ]
+        conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
+        for name in names:
+            conn.execute(text(f"TRUNCATE TABLE `{name}`"))
+        conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def create_tables():
     """Create all tables once per test session, drop after.
@@ -81,6 +138,41 @@ def create_tables():
     fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
     try:
         Base.metadata.create_all(bind=engine)
+        # DWB-653: CLEAN ON THE WAY IN, NOT ONLY ON THE WAY OUT.
+        #
+        # CLEANUP ON ENTRY COVERS EVERY EXIT PATH; CLEANUP ON EXIT COVERS ONLY
+        # THE GRACEFUL ONES. `drop_all` below and the `persisting` fixture's own
+        # teardown truncate both run only if the process gets that far. A run
+        # killed on the lock, crashed, or SIGKILLed inside a `persisting` test
+        # runs neither - and because `persisting` gives up rollback isolation to
+        # get a REAL commit, its rows are already on disk when that happens.
+        # `create_all` is a no-op against tables that already exist, so without
+        # this line the next run would start against another run's committed
+        # rows and fail somewhere unrelated on data it never created.
+        #
+        # THREE WAYS STATE SURVIVES A SESSION, AND THIS LINE IS THE ONLY THING
+        # THAT COVERS ALL THREE:
+        #   1. the process is killed (SIGKILL, crash, a run killed on the lock);
+        #   2. an exception propagates during the session - `drop_all` sits AFTER
+        #      the yield and INSIDE the try, with only the flock release in the
+        #      `finally`, so it is skipped on any such exit, which is far more
+        #      common than a kill;
+        #   3. the failed_hook logger, which predates all of this. Line 66 above
+        #      redirects `app.database.SessionLocal` at `TestingSession`, which
+        #      is bound to the ENGINE - so a service that builds its own session
+        #      commits on its own connection and the per-test rollback never
+        #      reaches it. Those rows have been surviving in lat_test all along.
+        # (3) is why this belongs in `create_tables` rather than in the
+        # `persisting` fixture: the leak is not that fixture's and a fix scoped
+        # to it would leave the oldest path open.
+        #
+        # This is not belt-and-braces for `drop_all`; it is the guarantee, and
+        # `drop_all` is the tidy-up. Measured at ~1.0s once per session against
+        # a full schema (3 repetitions). That cost does NOT show up as a
+        # reliable 1s in a full-run comparison - run-to-run noise on this suite
+        # is several seconds, so the number comes from timing the call itself
+        # rather than from differencing two 5-minute runs.
+        _truncate_all_tables()
         yield
         Base.metadata.drop_all(bind=engine)
     finally:
@@ -113,8 +205,55 @@ def db_session():
 
 @pytest.fixture
 def client(db_session):
-    """FastAPI test client wired to the test DB session."""
-    return TestClient(app)
+    """FastAPI test client wired to the test DB session.
+
+    DWB-653: this is a `CensusClient`, a TestClient subclass that records
+    whether any `Session.commit()` happened during each request. It is a drop-in
+    - same class, same methods, no behaviour change - and it is what lets the
+    whole suite be used as a driver for the commit census without touching one
+    of the 3000 tests. See tests/persistence_instrument.py.
+
+    NOTE WHAT THIS CLIENT STILL CANNOT DO: it shares `db_session` with the test,
+    so its writes are never committed for real and are rolled back at teardown.
+    A test that needs to assert PERSISTENCE must use the `persisting` fixture
+    instead, which gives up rollback isolation to get a real commit.
+    """
+    return CensusClient(app)
+
+
+# ---------------------------------------------------------------------------
+# DWB-653: the persistence instruments.
+#
+# Additive. Nothing above this point changed behaviour, and the ~3000 tests that
+# assert behaviour rather than persistence keep the rollback harness, which is
+# correct for them.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def engine_():
+    """The test engine, for fixtures that need a second, independent connection."""
+    return engine
+
+
+@pytest.fixture(scope="session")
+def session_factory_():
+    """Builds sessions on their OWN connection - the point being that such a
+    session has its own transaction and can only see COMMITTED rows."""
+    return TestingSession
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _dwb653_commit_census():
+    """Install the commit spy for the whole run and dump the census at the end.
+
+    Session-scoped and autouse so the census covers every test without any test
+    opting in. The spy wraps `Session.commit` and calls through to it, so it
+    changes no behaviour; it only counts.
+    """
+    install_commit_spy()
+    yield
+    write_census()
 
 
 # ---------------------------------------------------------------------------

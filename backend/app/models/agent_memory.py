@@ -18,6 +18,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -179,6 +180,31 @@ class AgentMemory(Base):
     source_journal_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("journal_entries.id"), nullable=True
     )
+    # DWB-654. AUTHOR-SUPPLIED, NOT DERIVED, and that is a ruling rather than a
+    # shortcut: an extractor pulls out what a text says most often, and what a
+    # text says most often is the SETUP. Only the author knows what the lesson
+    # is for. Nothing in this lane may populate either column from the body.
+    #
+    # `condensed` is one line carrying THE LESSON rather than the setup. TEXT
+    # and not a capped String: "one line" is a POLICY owned by DWB-657's write
+    # gate, and a length here would commit that gate to a number chosen in a
+    # migration. The schema holds the shape; 657 holds the limit.
+    condensed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Two or three terms. JSON to match `journal_entries.tags` rather than
+    # invent a second convention for the same thing - a short list of short
+    # strings on a memory-lane table. A comma-joined string would need an
+    # escaping rule the first time a keyword contains a comma, and nothing
+    # would notice the day one did.
+    keywords: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    #
+    # BOTH NULLABLE AT THE DATABASE LEVEL, AND THAT IS NOT THE END STATE. The
+    # API enforces mandatory (DWB-657); the backfill of the 831 pre-existing
+    # rows is DWB-655; the NOT NULL flip is DWB-656 and comes after it. A NOT
+    # NULL column with a server default would have been the worse option here:
+    # all 831 rows would silently acquire a condensed line nobody wrote, and it
+    # would be indistinguishable from an author-supplied one at every later
+    # read. NULL means "written before this was asked for", and it stays
+    # legible precisely because nothing invented a value.
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
     )

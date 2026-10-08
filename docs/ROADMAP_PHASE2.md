@@ -90,3 +90,64 @@
 | 22 | Test performance tab |
 | 23 | Failure analysis — backend (schema + API) |
 | 24 | Failure analysis — frontend (charts + views) |
+
+---
+
+# Memory Shape: Author-Supplied Condensed Line and Keywords
+
+> Added 2026-10-08. Decided with Miles in session; not yet ticketed.
+
+## Why
+
+Context assembly renders three bands. 8-10 comes in as full text, 5-7 as one
+line each, 2-4 and 1 as a bare aggregate count with a URL. The compressed band
+is produced by `memory_context._one_line`, which takes the first non-blank line
+of the body and truncates it at a character cap. For a lesson whose first line
+is the lesson that is fine. For one that opens with setup and lands the point
+three sentences in, the compressed band carries the setup and drops the lesson,
+silently, and the result still looks like a summary.
+
+The bottom two bands are worse: a count and nothing else. An agent cannot tell
+what it is about to lose.
+
+## The decision
+
+Two new columns on `agent_memories`, both supplied by the author at write time:
+
+- `condensed` - one line, the lesson rather than the setup. Used for the 5-7 band.
+- `keywords` - two or three, used to make the 2-4 and 1 bands inspectable.
+
+**Author-supplied, not server-derived.** A keyword extractor pulls what the text
+says most often; the author knows what the lesson is for, and for a lesson the
+second is the whole value. "A difference between two measurements is not a
+cause" extracts as measurement / runs / truncate, which names the subject and
+loses the point.
+
+This is a quality change, not a performance one. Assembly is already
+microseconds over a handful of rows. Nobody should later "optimise" it away on
+the grounds that caching a truncation is cheaper.
+
+## Sequencing, and the constraint that forces it
+
+The columns CANNOT be `NOT NULL` at the database level until the existing rows
+are backfilled, because the migration would fail against them. So:
+
+1. Columns added NULLABLE.
+2. Mandatory enforced AT THE API: a write missing either is refused 400, with
+   the error naming the field, saying what it is for, and showing a correct
+   body. Same pattern as `empty_body` and `tier_not_settable` - a refusal that
+   teaches, living next to the code rather than in a playbook that drifts.
+3. `assemble_session_context` uses stored `condensed` for 5-7. `_one_line` is
+   deleted so no second path silently works.
+4. Bottom bands render keywords instead of a bare count.
+5. Playbooks and the server-generated `memory_usage_rules` string updated. That
+   string is a second home for behaviour rules and goes stale silently; grep it
+   whenever a behaviour rule changes.
+6. Backfill of the existing rows: SEPARATE, LATER, its own ticket.
+7. Flip the columns to `NOT NULL`: after the backfill, its own ticket.
+
+## Open
+
+The backfill approach is undecided: derive `condensed` for old rows from the
+current truncation, or leave them legitimately blank behind a sentinel. Not to
+be settled until the lane above has shipped.

@@ -8,7 +8,7 @@
 # Callees: pydantic, app/models/standards_audit (AuditVerdict)
 # Data In: JSON request body
 # Data Out: StandardsAuditCreate, StandardsAuditRead, StandardsAuditListRead
-# Last Modified: 2026-08-11 (DWB-014)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -20,6 +20,14 @@ from app.models.standards_audit import AuditVerdict
 class Violation(BaseModel):
     """One standards violation found in the audited diff."""
 
+    # DWB-651: DELIBERATELY PERMISSIVE - no extra="forbid" on this nested model.
+    # CALLER: `scripts/standards_audit.py::build_payload`, which forwards
+    # `audit["violations"]` / `audit["scorecard"]` verbatim from the auditing agent's
+    # JSON output. That script validates only the four TOP-LEVEL keys (verdict,
+    # violations, scorecard, summary); the per-item shape is whatever the auditor
+    # wrote. An auditor adding a field would 422 the WHOLE audit, which blocks the
+    # force_standards_audit sprint gate. The parent StandardsAuditCreate IS forbid,
+    # so a mistyped top-level key is still refused.
     rule: str
     file: str | None = None
     line: int | None = None
@@ -31,12 +39,22 @@ class ScorecardEntry(BaseModel):
     """One per-agent carrot/stick suggestion. DWB-016 consumes these to apply
     reputation deltas; recording an audit does NOT apply them."""
 
+    # DWB-651: DELIBERATELY PERMISSIVE - no extra="forbid" on this nested model.
+    # CALLER: `scripts/standards_audit.py::build_payload`, which forwards
+    # `audit["violations"]` / `audit["scorecard"]` verbatim from the auditing agent's
+    # JSON output. That script validates only the four TOP-LEVEL keys (verdict,
+    # violations, scorecard, summary); the per-item shape is whatever the auditor
+    # wrote. An auditor adding a field would 422 the WHOLE audit, which blocks the
+    # force_standards_audit sprint gate. The parent StandardsAuditCreate IS forbid,
+    # so a mistyped top-level key is still refused.
     agent: str
     delta: int
     reason: str | None = None
 
 
 class StandardsAuditCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     sprint_id: int | None = None
     ticket_id: int | None = None

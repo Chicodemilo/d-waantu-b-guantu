@@ -6,10 +6,10 @@
 # Callees: app/services/tracking.py
 # Data In: HTTP requests
 # Data Out: JSON responses (TrackingLog events, project summary)
-# Last Modified: 2026-03-30
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -21,11 +21,15 @@ router = APIRouter(prefix="/api/tracking", tags=["tracking"])
 
 
 class StartStopRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     ticket_id: int
     agent_id: int
 
 
 class TokenReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     ticket_id: int
     agent_id: int
     tokens: int
@@ -33,6 +37,8 @@ class TokenReportRequest(BaseModel):
 
 
 class OverheadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     agent_id: int
 

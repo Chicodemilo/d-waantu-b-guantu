@@ -48,6 +48,11 @@ from datetime import datetime, timezone
 
 import pytest
 
+# DWB-657 made condensed + keywords mandatory on this endpoint. These tests
+# are about the SESSION ORIGIN, not the write shape, so they take the shared
+# fixture payload rather than restating it four times.
+from tests.conftest import MEMORY_WRITE_EXTRAS
+
 from app.models.agent import Agent
 from app.models.agent_memory import AgentMemory, MemoryTier
 from app.models.dwb_session import DwbOpenMethod, DwbSession
@@ -142,10 +147,12 @@ class TestTheRawWriteRefuses:
         session = _open_session(db_session, opened["id"])
 
         refused = client.post(
-            f"/api/agents/{closed_agent['id']}/memories", json={"body": LESSON}
+            f"/api/agents/{closed_agent['id']}/memories",
+            json={**MEMORY_WRITE_EXTRAS, "body": LESSON},
         )
         accepted = client.post(
-            f"/api/agents/{opened_agent['id']}/memories", json={"body": LESSON}
+            f"/api/agents/{opened_agent['id']}/memories",
+            json={**MEMORY_WRITE_EXTRAS, "body": LESSON},
         )
 
         assert (refused.status_code, accepted.status_code) == (400, 201), (
@@ -163,7 +170,8 @@ class TestTheRawWriteRefuses:
         project = make_project()
         agent = make_agent(project_id=project["id"])
         detail = client.post(
-            f"/api/agents/{agent['id']}/memories", json={"body": LESSON}
+            f"/api/agents/{agent['id']}/memories",
+            json={**MEMORY_WRITE_EXTRAS, "body": LESSON},
         ).json()["detail"]
 
         assert "no open DWB session" in detail  # the reason
@@ -499,7 +507,8 @@ class TestNoExistingRowIsModified:
         _open_session(db_session, project["id"])
         assert (
             client.post(
-                f"/api/agents/{agent['id']}/memories", json={"body": "a new lesson"}
+                f"/api/agents/{agent['id']}/memories",
+                json={**MEMORY_WRITE_EXTRAS, "body": "a new lesson"},
             ).status_code
             == 201
         )

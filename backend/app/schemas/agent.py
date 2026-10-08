@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AgentCreate, AgentUpdate, AgentRead
-# Last Modified: 2026-09-15 (DWB-545: additive score on RelevantLesson)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class AgentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     name: str
     description: str | None = None
@@ -23,6 +25,8 @@ class AgentCreate(BaseModel):
 
 
 class AgentUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     name: str | None = None
     description: str | None = None
     role: str | None = None
@@ -65,6 +69,8 @@ class AgentRead(BaseModel):
 # --- /identify endpoint -----------------------------------------------------
 
 class AgentIdentifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     role: str
     name: str
     project_prefix: str
@@ -102,6 +108,8 @@ class AgentIdentifyResponse(BaseModel):
 # --- /spawn-prepare endpoint -----------------------------------------------
 
 class SpawnPrepareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     role: str
     name: str
     project_prefix: str
@@ -159,6 +167,7 @@ class SessionCompleteRequest(BaseModel):
     endpoint rejected them, and the fallback succeeded, so the cost was
     invisible: a failure whose workaround always works is one nobody reports.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     # OPTIONAL (DWB-582). A subagent does not reliably know its own Claude Code
     # session id from inside its own process, and the workers who hit this were
@@ -202,6 +211,8 @@ class SessionCompleteResponse(BaseModel):
 # agent name/role/project so the call surface is just {session_id}.
 
 class MarkerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     session_id: str
 
 
@@ -234,6 +245,7 @@ class MemoryAppendRequest(BaseModel):
                 so a human reading the file can tie the entry to a CC
                 session. Omit when the append isn't session-scoped.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     file: Literal["memory"]
     content: str
@@ -287,6 +299,7 @@ class MemoryCompactRequest(BaseModel):
              verbatim, no heading is prepended). Refused if empty or if its
              estimated token count still exceeds the file's ceiling.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     file: Literal["memory"]
     content: str
@@ -313,6 +326,7 @@ class MemoryCondenseRequest(BaseModel):
              condensed-at heading). Refused if empty or if the stamped result
              still exceeds the ceiling.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     file: Literal["memory"]
     content: str

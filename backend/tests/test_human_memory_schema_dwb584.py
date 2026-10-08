@@ -93,6 +93,27 @@ AGENT_MEMORIES_COLUMNS = {
     "last_reinforced_session_id",
     "fired_count",
     "source_journal_id",
+    # DWB-654, and this set is a tripwire that wants the argument made here
+    # rather than in a commit message.
+    #
+    # Both are AUTHOR-SUPPLIED, which is the whole reason they are columns and
+    # not a derivation: an extractor surfaces what a text says most often, and
+    # what a text says most often is the SETUP. `condensed` is one line carrying
+    # THE LESSON; `keywords` is two or three terms. Nothing in this lane may
+    # populate either from the body.
+    #
+    # Both NULLABLE, and that is transitional rather than permanent. 832 rows
+    # predate them. The API gate is DWB-657, the backfill is DWB-655, and the
+    # NOT NULL flip is DWB-656 - in that order, because flipping before the
+    # backfill makes those 832 rows unwritable and blocks the backfill that
+    # would have fixed them. A server default would be worse than either: every
+    # pre-existing row would acquire a condensed line nobody wrote, and it would
+    # read as author-supplied forever after.
+    #
+    # If you are here because this set failed again, the question to answer is
+    # the same one: who writes this value, and what does NULL mean?
+    "condensed",
+    "keywords",
     "created_at",
     "updated_at",
 }

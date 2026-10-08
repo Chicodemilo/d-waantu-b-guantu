@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: EpicCreate, EpicUpdate, EpicRead
-# Last Modified: 2026-03-29
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -16,6 +16,8 @@ from app.models.epic import EpicStatus
 
 
 class EpicCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     name: str
     description: str | None = None
@@ -23,6 +25,8 @@ class EpicCreate(BaseModel):
 
 
 class EpicUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     name: str | None = None
     description: str | None = None
     status: EpicStatus | None = None

@@ -6,8 +6,9 @@
 #          colliding on the same row. Fires nothing: every movement called
 #          here only reads counts/signals something else already wrote and
 #          acts on them.
-# Caller: app/services/hook_tracking.handle_session_start, gated on
-#         project.memory_mode == human_memory
+# Caller: app/services/memory_session_trigger.on_session_opened (DWB-650, the
+#         roster fan-out at DWB session open), app/services/hook_tracking.
+#         handle_session_start (one agent), both gated on human_memory
 # Callees: app/services/memory_promote (maybe_promote_scar,
 #          promote_journal_candidates), app/services/memory_scar_conclude
 #          (evict_concluded_scars), app/services/memory_evict
@@ -15,7 +16,11 @@
 # Data In: db Session, agent_id
 # Data Out: ConsolidationResult - what each movement did, for the caller to
 #           log and for tests to assert against
-# Last Modified: 2026-09-30 (DWB-609)
+# Last Modified: 2026-10-08 (DWB-649: tier_for_raw gained a second caller -
+#                raw_memory.append_raw_memory runs it at INSERT, so
+#                tier_raw_memories is now a backlog drain, not the main path)
+# DWB-650: consolidate_project_roster fans consolidate_agent out over every
+#          agent in project_agents, called from dwb_session.open_session
 
 """Orchestrates the four movement consumers this lane now has, in the one
 order that is not arbitrary.
@@ -86,6 +91,8 @@ from sqlalchemy.orm import Session
 from app.models.agent_memory import AgentMemory, MemoryCaughtBy, MemoryCost, MemoryTier
 from app.models.journal_entry import JournalEntry
 from app.models.agent import Agent
+from app.models.project import MemoryMode, Project
+from app.models.project_agent import ProjectAgent
 from app.services import dwb_session, memory_evict, memory_promote, memory_scan, memory_scar_conclude
 
 
@@ -217,6 +224,16 @@ def tier_for_raw(memory: AgentMemory) -> MemoryTier:
     judgment. It is not a way for an agent to re-judge a tier it disagrees
     with. Neither exists yet. A working mechanism here must not be read as
     section 4 being finished.
+
+    TWO CALLERS NOW, NOT ONE (DWB-649). `raw_memory.append_raw_memory` calls
+    this at INSERT, so a new row never passes through `raw` at all. That is only
+    sound because of the purity stated above - three fields, written once at
+    insert and never assigned anywhere afterward - so there is no information at
+    consolidation time that was absent at insert. KEEP IT THAT WAY: if this
+    function ever needs to read the body, the clock, or another row, the insert
+    caller becomes wrong and has to be reverted to writing `raw` in the same
+    change. `tier_raw_memories` below is NOT dead either way; it still carries
+    the rows written before DWB-649.
     """
     if memory.cost == MemoryCost.high:
         return MemoryTier.scar
@@ -243,6 +260,13 @@ def _raw_candidates(db: Session, *, agent_id: int) -> list[AgentMemory]:
 
 def tier_raw_memories(db: Session, *, agent_id: int) -> list[tuple[int, str]]:
     """Move this agent's RAW rows out of `raw`. Does not commit.
+
+    AS OF DWB-649 THIS IS A BACKLOG DRAIN, NOT THE MAIN PATH. New rows are
+    tiered at insert by `raw_memory.append_raw_memory` and never arrive here.
+    What is left for this to find: rows written before DWB-649, and rows some
+    future writer of `agent_memories` leaves raw. A pass that moves nothing is
+    now the expected steady state, so an empty `tiered_raw` is not evidence that
+    anything is broken.
 
     THE INVARIANT THIS MAINTAINS: a row only leaves `raw` when it will be
     SCOREABLE once it gets there. Tiering a row that cannot be scored swaps one
@@ -329,5 +353,176 @@ def consolidate_agent(db: Session, *, agent_id: int) -> ConsolidationResult:
     # before any movement can act on it; the next pass judges it on equal terms
     # with everything else.
     result.tiered_raw = tier_raw_memories(db, agent_id=agent_id)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# DWB-650: the roster fan-out.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AgentConsolidationOutcome:
+    """What happened for ONE agent in a roster pass. Exactly one of `result`
+    and `error` is set, and that is the whole point of the type.
+
+    A plain `list[ConsolidationResult]` cannot express "this agent threw", so a
+    caller reading one could not tell a roster where nothing needed moving from
+    a roster where every agent blew up. DWB-636 is that failure in the existing
+    call site; this type is how this path refuses to repeat it.
+    """
+
+    agent_id: int
+    agent_name: str
+    result: ConsolidationResult | None = None
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None
+
+
+@dataclass
+class RosterConsolidationResult:
+    """What one session-open pass did across a whole project roster."""
+
+    project_id: int
+    ran: bool = False
+    """False means the pass was DECLINED, not that it was quiet. A stock-mode
+    project is the normal reason. Separating this from "ran and moved nothing"
+    is the same distinction `scored_memory`'s `computed` flag makes, and for
+    the same reason: three empty lists are the right answer for a tidy roster
+    AND for a project this never applied to, and those are opposite facts."""
+
+    reason: str | None = None
+    """Why it was declined, when `ran` is False."""
+
+    outcomes: list[AgentConsolidationOutcome] = field(default_factory=list)
+
+    @property
+    def attempted(self) -> int:
+        return len(self.outcomes)
+
+    @property
+    def succeeded(self) -> int:
+        return sum(1 for o in self.outcomes if o.ok)
+
+    @property
+    def failed(self) -> list[AgentConsolidationOutcome]:
+        return [o for o in self.outcomes if not o.ok]
+
+    @property
+    def moved_anything(self) -> bool:
+        return any(o.result.moved_anything for o in self.outcomes if o.result)
+
+
+SKIPPED_NOT_HUMAN_MEMORY = "project_not_in_human_memory_mode"
+SKIPPED_PROJECT_NOT_FOUND = "project_not_found"
+
+
+def project_roster_agent_ids(db: Session, *, project_id: int) -> list[int]:
+    """Every agent assigned to this project, oldest assignment first.
+
+    `project_agents` AND NOT `agents.project_id`. The join table is the roster
+    `GET /api/projects/{id}/team` reports and the one CLAUDE.md calls
+    DB-authoritative; `agents.project_id` is a single scalar that cannot express
+    an agent on two projects. They agreed on every row when this was written,
+    which is exactly when to pick the one that is defined rather than the one
+    that happens to match.
+
+    INACTIVE AGENTS ARE INCLUDED, and that is a deliberate departure from
+    `project_agent.list_project_team`, which defaults to active-only. A retired
+    agent still owns memory rows, and leaving them out would recreate this
+    ticket's own defect one population over: rows that no pass ever reaches,
+    stranded permanently, invisible in a way that still counts in a row count.
+    Consolidation moves nothing that is not already due, and every eviction
+    journals before it deletes, so the cost of including them is a few extra
+    no-op queries on a roster that is single digits.
+    """
+    return list(
+        db.execute(
+            select(ProjectAgent.agent_id)
+            .where(ProjectAgent.project_id == project_id)
+            .order_by(ProjectAgent.assigned_at.asc(), ProjectAgent.agent_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+
+def consolidate_project_roster(
+    db: Session, *, project_id: int
+) -> RosterConsolidationResult:
+    """Run `consolidate_agent` for EVERY agent on `project_id`. Does not commit.
+
+    DWB-650. The existing call site (`hook_tracking.handle_session_start`) runs
+    for the ONE agent a Claude Code SessionStart resolved to. A subagent's
+    identity is only resolved when its pending marker is renamed at its first
+    SubagentStop, so a subagent never produces a SessionStart row with an agent
+    attached and consolidation has never once run for one. Measured over seven
+    days across all projects: 275 SubagentStop hook_sessions against 10
+    SessionStart, and the only two agents holding a SessionStart row were the
+    two team leads. Fanning out over the roster is what reaches the other
+    population, and it reaches it without anyone being told to do anything.
+
+    ONE SAVEPOINT PER AGENT, which is what makes AC4 structural rather than
+    hopeful. `consolidate_agent` flushes as it goes, so an exception half way
+    through agent 3 leaves agent 3's partial writes pending in the transaction;
+    without a savepoint the caller's only safe move would be to roll the whole
+    thing back, taking agents 1 and 2 - and the session row - with it. The
+    savepoint discards exactly agent 3's work and the loop continues.
+
+    EXCEPTIONS ARE RECORDED, NOT SWALLOWED. Every failure lands in `outcomes`
+    with its repr, and `failed` / `succeeded` / `attempted` make a partial pass
+    arithmetically distinguishable from a clean one. This function deliberately
+    does NOT log, alert or decide what a failure means - that belongs to the
+    caller that knows why the pass was triggered (see
+    `memory_session_trigger.on_session_opened`). What it will not do is return a
+    result that looks the same either way.
+
+    NOT A READ. Nothing reachable from `consolidate_agent` writes `fired_count`
+    or `retrieval_count`; the application has exactly two write sites for those,
+    `memory_consult._fire` and `journal.search_entries`, and neither is in this
+    call graph. Fanning out over a roster multiplies the number of agents
+    visited, not the set of functions reached, so the property survives the
+    change by construction. `tests/test_memory_session_trigger_dwb650.py` walks
+    the import graph and asserts it rather than trusting this paragraph.
+    """
+    result = RosterConsolidationResult(project_id=project_id)
+
+    project = db.get(Project, project_id)
+    if project is None:
+        result.reason = SKIPPED_PROJECT_NOT_FOUND
+        return result
+    if project.memory_mode != MemoryMode.human_memory:
+        result.reason = SKIPPED_NOT_HUMAN_MEMORY
+        return result
+
+    result.ran = True
+
+    for agent_id in project_roster_agent_ids(db, project_id=project_id):
+        agent = db.get(Agent, agent_id)
+        agent_name = agent.name if agent is not None else f"<missing {agent_id}>"
+        try:
+            with db.begin_nested():
+                agent_result = consolidate_agent(db, agent_id=agent_id)
+        except Exception as exc:  # noqa: BLE001 - recorded below, never hidden
+            # The savepoint is already rolled back by the context manager, so
+            # the outer transaction (including the session row that triggered
+            # this) is intact and the next agent starts from clean state.
+            result.outcomes.append(
+                AgentConsolidationOutcome(
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            )
+            continue
+        result.outcomes.append(
+            AgentConsolidationOutcome(
+                agent_id=agent_id, agent_name=agent_name, result=agent_result
+            )
+        )
 
     return result

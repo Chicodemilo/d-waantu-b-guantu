@@ -8,7 +8,7 @@
 - **Project ID:** 1, **Prefix:** DWB, **Repo:** `/Users/mchick/Dev/d-waantu_b-guantu`
 - **DB name:** `local_agent_tracker` (legacy, don't change)
 - **No Jira** on this project — `jira_base_url` is null, so ticket writes refuse `jira_issue_key`. Never invoke `dwb2jira` here.
-- **`memory_mode` is `human_memory`**, and DWB is the only project running it. Stock memory is sealed: `memory/append`, `session-complete`, `memory/compact` and `memory/condense` all return 409 here. Lessons go to `POST /api/agents/{id}/memories`, episodes to `POST /api/journal`. This applies to you too.
+- **`memory_mode` is `human_memory`**, and DWB is the only project running it. Stock memory is sealed: `memory/append`, `session-complete`, `memory/compact` and `memory/condense` all return 409 here. Lessons go to `POST /api/agents/{id}/memories`, which REQUIRES `condensed` (one line carrying THE LESSON, not the setup) and `keywords` (two or three) alongside `body`; episodes to `POST /api/journal`. This applies to you too.
 - **`runs_own_tests` is true** — DWB runs its own suite rather than the generic runner.
 - Current counters (verify, don't trust): sprints 83 (max id 177), tickets 623 (max key DWB-636, max id 1631), epics 26 (max id 68).
 

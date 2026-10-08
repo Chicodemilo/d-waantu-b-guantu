@@ -4,13 +4,15 @@
 # Purpose: Guard the raw memory write - that it writes `raw` and never NULL,
 #          that a write with no open DWB session is REFUSED rather than stored
 #          without a clock origin, that no request shape sets a tier, and that
-#          it stamps the write-on-close gate.
+#          it stamps the write-on-close gate. DWB-649: the written tier is now
+#          DERIVED at insert, so the row is never `raw`.
 # Caller: pytest
 # Callees: app.services.raw_memory, POST /api/agents/{id}/memories
 # Data In: test DB rows via the factory fixtures
 # Data Out: Assertions on responses and on the persisted row
-# Last Modified: 2026-10-07 (DWB-637: AC1's "accepted without a session"
-#                case is now the refusal case - see the docstring below)
+# Last Modified: 2026-10-08 (DWB-649: the written tier is derived at insert,
+#                so test_the_written_tier_is_raw_and_not_null became
+#                test_the_written_tier_is_derived_and_not_null)
 
 """DWB-586 acceptance, spec section 4 and section 7 hard rule 5.
 
@@ -49,6 +51,7 @@ from app.models.agent_memory import (
     MemoryTier,
 )
 from app.services import raw_memory
+from tests.conftest import MEMORY_WRITE_EXTRAS
 
 
 @pytest.fixture
@@ -102,7 +105,7 @@ class TestSessionStamping:
 
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={"body": "the gate read the heading, not the column"},
+            json={**MEMORY_WRITE_EXTRAS, "body": "the gate read the heading, not the column"},
         )
         assert r.status_code == 201, r.text
         row = r.json()
@@ -122,7 +125,7 @@ class TestSessionStamping:
 
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={"body": "encoded with nobody watching"},
+            json={**MEMORY_WRITE_EXTRAS, "body": "encoded with nobody watching"},
         )
         assert r.status_code == 400, r.text
         detail = r.json()["detail"]
@@ -145,9 +148,26 @@ class TestSessionStamping:
         400 returned after a flush would reproduce it exactly.
         """
         agent, _project = agent_with_no_session
-        client.post(
-            f"/api/agents/{agent['id']}/memories", json={"body": "must not land"}
+        r = client.post(
+            f"/api/agents/{agent['id']}/memories",
+            json={**MEMORY_WRITE_EXTRAS, "body": "must not land"},
         )
+
+        # DWB-657 ADDED THE REASON ASSERTION, AND HERE IS WHY IT WAS MISSING.
+        # This test asserted only `rows == []`, which is indifferent to WHICH
+        # refusal fired. When DWB-657 put a condensed/keywords gate upstream of
+        # the session-origin check, the payload stopped reaching the session
+        # check at all - and the test went on passing, because an incomplete
+        # write persists no row either. It was green the whole time and had
+        # stopped testing DWB-637 entirely.
+        #
+        # It never appeared in the failure list. The 33 tests that broke were
+        # the ones asserting a reason; this one was silent precisely BECAUSE it
+        # asserted less. Pinning the reason is what makes the empty row set
+        # mean "refused for no session" rather than "refused for something".
+        assert r.status_code == 400, r.text
+        assert "no open DWB session" in r.json()["detail"], r.text
+
         rows = (
             db_session.query(AgentMemory)
             .filter(AgentMemory.agent_id == agent["id"])
@@ -165,7 +185,11 @@ class TestSessionStamping:
         lesson AND misdirects the retry. Same bytes, both times.
         """
         agent, project = agent_with_no_session
-        payload = {"body": "the same lesson, byte for byte", "cost": "low"}
+        payload = {
+            **MEMORY_WRITE_EXTRAS,
+            "body": "the same lesson, byte for byte",
+            "cost": "low",
+        }
 
         refused = client.post(f"/api/agents/{agent['id']}/memories", json=payload)
         assert refused.status_code == 400, refused.text
@@ -196,10 +220,10 @@ class TestSessionStamping:
         session = _open_session(client, open_project["id"])
 
         without = client.post(
-            f"/api/agents/{closed_agent['id']}/memories", json={"body": "no session"}
+            f"/api/agents/{closed_agent['id']}/memories", json={**MEMORY_WRITE_EXTRAS, "body": "no session"}
         )
         within = client.post(
-            f"/api/agents/{open_agent['id']}/memories", json={"body": "in session"}
+            f"/api/agents/{open_agent['id']}/memories", json={**MEMORY_WRITE_EXTRAS, "body": "in session"}
         )
 
         assert without.status_code != within.status_code
@@ -229,7 +253,7 @@ class TestTierIsNotSettable:
         agent, _project = human_memory_agent
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={"body": "a ruling", "tier": "core"},
+            json={**MEMORY_WRITE_EXTRAS, "body": "a ruling", "tier": "core"},
         )
         assert r.status_code == 400, r.text
         detail = r.json()["detail"]
@@ -255,7 +279,7 @@ class TestTierIsNotSettable:
         _open_session(client, project["id"])
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={"body": "trying to tier at write time", "tier": tier},
+            json={**MEMORY_WRITE_EXTRAS, "body": "trying to tier at write time", "tier": tier},
         )
         assert r.status_code == 400, f"tier {tier!r} was accepted: {r.text}"
         assert "tier" in r.json()["detail"], (
@@ -268,7 +292,7 @@ class TestTierIsNotSettable:
         agent, _project = human_memory_agent
         client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={"body": "should not land", "tier": "scar"},
+            json={**MEMORY_WRITE_EXTRAS, "body": "should not land", "tier": "scar"},
         )
         rows = (
             db_session.query(AgentMemory)
@@ -279,24 +303,33 @@ class TestTierIsNotSettable:
 
 
 class TestWhatLandsInTheRow:
-    """The written row is `raw`, and that is asserted against a row that exists."""
+    """The written row carries a real, derived tier, asserted against a row
+    that exists."""
 
-    def test_the_written_tier_is_raw_and_not_null(
+    def test_the_written_tier_is_derived_and_not_null(
         self, client, db_session, human_memory_agent
     ):
-        """DWB-584 chose `raw` as an enum value over a nullable tier so the
-        scoring query has to NAME it to exclude it. This asserts the write side
-        of that choice: a NULL here would let DWB-585 drop the row silently.
+        """DWB-584 chose an enum value over a nullable tier so the scoring query
+        has to NAME what it excludes. This asserts the write side of that choice:
+        a NULL here would let DWB-585 drop the row silently.
 
-        The absence claim (tier is not NULL) is made against a row this test can
-        SEE - it asserts the id, body and agent first. An absence assertion over
-        a result set that is empty for an unrelated reason passes trivially, and
-        that is the failure family this suite is trying not to join.
+        DWB-649 CHANGED THE VALUE AND NOT THE RULE. This test asserted
+        `MemoryTier.raw` until then. The write now derives the tier at insert
+        from the moment-tags, so an untagged row lands in `working`; `raw` from
+        this endpoint is now the FAILURE, because `memory_score.score` raises for
+        it and the row would be unscoreable from birth. Both halves are asserted
+        - the positive value and the explicit absence of `raw` - because
+        asserting only `is not None` would pass against the old behaviour too.
+
+        The claims are made against a row this test can SEE: it asserts the id,
+        body and agent first. An absence assertion over a result set that is
+        empty for an unrelated reason passes trivially, and that is the failure
+        family this suite is trying not to join.
         """
         agent, _project = human_memory_agent
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={"body": "raw and unsorted", "context_key": "node-index-v1"},
+            json={**MEMORY_WRITE_EXTRAS, "body": "unsorted at write time", "context_key": "node-index-v1"},
         )
         assert r.status_code == 201, r.text
         written = r.json()
@@ -304,11 +337,18 @@ class TestWhatLandsInTheRow:
         row = db_session.get(AgentMemory, written["id"])
         assert row is not None, "nothing was persisted; the checks below are vacuous"
         assert row.agent_id == agent["id"]
-        assert row.body == "raw and unsorted"
+        assert row.body == "unsorted at write time"
         assert row.context_key == "node-index-v1"
-        # Only now is the negative meaningful.
+        # Only now are the tier claims meaningful.
         assert row.tier is not None
-        assert row.tier == MemoryTier.raw
+        assert row.tier != MemoryTier.raw, (
+            "DWB-649: a new row must never be written `raw` - memory_score.score "
+            "raises for it, so the lesson would be unscoreable from birth"
+        )
+        assert row.tier == MemoryTier.working, (
+            "no tags were sent, and tier_for_raw's untagged default is `working`"
+        )
+        assert written["tier"] == "working", "the response must not disagree with the row"
 
     def test_the_moment_tags_land_on_the_memory_row(
         self, client, db_session, human_memory_agent
@@ -323,7 +363,7 @@ class TestWhatLandsInTheRow:
         agent, _project = human_memory_agent
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={
+            json={**MEMORY_WRITE_EXTRAS, 
                 "body": "the migration was already at head",
                 "cost": "high",
                 "caught_by": "human",
@@ -348,11 +388,11 @@ class TestWhatLandsInTheRow:
         """
         agent, _project = human_memory_agent
         unasked = client.post(
-            f"/api/agents/{agent['id']}/memories", json={"body": "nobody said"}
+            f"/api/agents/{agent['id']}/memories", json={**MEMORY_WRITE_EXTRAS, "body": "nobody said"}
         ).json()
         said_no = client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={"body": "expected it", "surprised": False},
+            json={**MEMORY_WRITE_EXTRAS, "body": "expected it", "surprised": False},
         ).json()
 
         assert db_session.get(AgentMemory, unasked["id"]).surprised is None
@@ -373,14 +413,14 @@ class TestWhatLandsInTheRow:
         for value in enum:
             r = client.post(
                 f"/api/agents/{agent['id']}/memories",
-                json={"body": f"tagging {field}", field: value.value},
+                json={**MEMORY_WRITE_EXTRAS, "body": f"tagging {field}", field: value.value},
             )
             assert r.status_code == 201, (field, value.value, r.text)
             assert r.json()[field] == value.value
 
     def test_empty_body_is_refused(self, client, human_memory_agent):
         agent, _project = human_memory_agent
-        r = client.post(f"/api/agents/{agent['id']}/memories", json={"body": "   "})
+        r = client.post(f"/api/agents/{agent['id']}/memories", json={**MEMORY_WRITE_EXTRAS, "body": "   "})
         assert r.status_code == 400, r.text
 
 
@@ -395,7 +435,7 @@ class TestWriteOnCloseGate:
         assert before is None, "fixture agent already had a memory write recorded"
 
         r = client.post(
-            f"/api/agents/{agent['id']}/memories", json={"body": "counts as a write"}
+            f"/api/agents/{agent['id']}/memories", json={**MEMORY_WRITE_EXTRAS, "body": "counts as a write"}
         )
         assert r.status_code == 201, r.text
 

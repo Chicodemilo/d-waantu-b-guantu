@@ -6,9 +6,9 @@
 # Callees: pydantic
 # Data In: service dicts from app.services.scoring, human award request body
 # Data Out: LeaderboardRow, ScoreLedgerEntry, AgentScoreDetail, HumanScoreRequest/Response
-# Last Modified: 2026-09-15 (DWB-559: broadcast_count documents comms notifications on the peer path)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class LeaderboardRow(BaseModel):
@@ -52,6 +52,8 @@ class AgentScoreDetail(BaseModel):
 class HumanScoreRequest(BaseModel):
     """Human carrot/stick (DWB-426). `agent` is a name or id; delta is signed
     (>0 carrot, <0 stick); reason optional."""
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     agent: str
     delta: int
     reason: str | None = None
@@ -72,6 +74,8 @@ class HumanScoreResponse(BaseModel):
 class PeerScoreRequest(BaseModel):
     """Peer carrot/stick (DWB-427). The actor is the X-Agent-ID caller; `subject`
     is a name or id; delta is signed (>0 grant, <0 demerit); reason optional."""
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     subject: str
     delta: int
     reason: str | None = None

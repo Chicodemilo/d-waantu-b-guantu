@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: SprintCreate, SprintUpdate, SprintRead
-# Last Modified: 2026-03-29
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import date, datetime
 
@@ -16,6 +16,8 @@ from app.models.sprint import SprintStatus
 
 
 class SprintCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     epic_id: int | None = None  # auto-assigned if omitted
     name: str | None = None
@@ -27,6 +29,8 @@ class SprintCreate(BaseModel):
 
 
 class SprintUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     epic_id: int | None = None
     name: str | None = None
     goal: str | None = None

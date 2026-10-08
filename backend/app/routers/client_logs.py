@@ -38,6 +38,16 @@ def post_client_logs(
     pydantic-strict batch validation would 422 the whole request on a
     single bad record, defeating the lenient ingestion contract spec'd
     in the ticket. The service re-validates each item.
+
+    DWB-651: this is the one write path in the API that does NOT refuse
+    undeclared keys, and it cannot. CALLER: `frontend/src/services/logger`,
+    which batches browser telemetry (nav, fetch lifecycle, render errors).
+    There is no request schema to put `extra="forbid"` on, because the body
+    is deliberately untyped; a per-item forbid in the service would reject
+    whole records for one stray key and lose the surrounding trail, which is
+    the opposite of the never-5xx contract above. An unknown key on a client
+    log is dropped silently - acceptable here, and nowhere else, because the
+    payload is append-only diagnostics that nothing reads back as state.
     """
     try:
         result = svc.insert_batch(db, records)

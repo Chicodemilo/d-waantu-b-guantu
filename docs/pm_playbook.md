@@ -57,7 +57,7 @@ If a TL asks you to close a Jira sprint, REFUSE and escalate to the human. This 
 
 ## On Startup
 
-**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker. As of DWB-517 you do NOT read your memory files: your full `memory.md` is injected into your spawn prompt via the TL's `spawn-prepare` handshake (`memory_full` field), so your prior notes are already in context. The dir + files are still auto-scaffolded on spawn (DWB-341) and you only ever WRITE them through the API. The identify response also carries `memory_usage_rules` (DWB-352): a condensed inline summary of the memory rules.
+**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker. As of DWB-517 you do NOT read your memory files: your full `memory.md` is injected into your spawn prompt via the TL's `spawn-prepare` handshake (`memory_full` field), so your prior notes are already in context. The dir + files are still auto-scaffolded on spawn (DWB-341) and you only ever WRITE them through the API. The identify response also carries `memory_usage_rules` (DWB-352, mode-aware since DWB-638): a short inline summary of the memory rules for your project's mode. On `human_memory` that includes the three fields the lesson write requires, `body`, `condensed` and `keywords`.
 
 Then read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`. Fetch live roster from `GET /api/projects/{project_id}/team` (DB-authoritative).
 
@@ -84,10 +84,21 @@ lands: `memory/append`, `session-complete`, `memory/compact`, `memory/condense`.
 The stock branch was stripped out of your copy at deploy.
 
 Lessons go to **`POST /api/agents/{agent_id}/memories`**
-`{body, cost, caught_by, surprised}` (`cost` and `caught_by` are enums,
-`none|low|high` and `me|worker|human|ci`; prose in either is a 422, and any `tier` at
-all is a 400). Episodes go to **`POST /api/journal`**. Reads come from
-**`GET /api/agents/{id}/memory/scored`**.
+`{body, condensed, keywords, cost, caught_by, surprised}`. `body`, `condensed` and
+`keywords` are REQUIRED; omit or blank any of them and the write is refused with 400
+(DWB-657). `condensed` is ONE LINE carrying THE LESSON and not the setup; `keywords`
+are two or three. Both are author-supplied rather than server-derived, because an
+extractor pulls what a text says most often and that names the subject while losing
+the point. Neither has a size rule: no character cap on `condensed`, and the keyword
+count is guidance rather than a limit. The gate refuses what is empty, never what is
+long, so a refusal you are chasing is a missing or blank field, not a long one. `cost` and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`;
+prose in either is a 422, and any `tier` at all is a 400. Episodes go to
+**`POST /api/journal`**. Reads come from **`GET /api/agents/{id}/memory/scored`**.
+
+**This is the one that bites at close.** When you chase a non-writer, name the two
+required fields along with the route. A participant who writes from an older
+four-field example gets a 400, not a row, and the write-on-close gate still has
+nothing on record for them.
 
 #### What blocks a close here, and what does not
 

@@ -6,12 +6,14 @@
 # Callees: pydantic
 # Data In: HTTP request body / service result dict
 # Data Out: PostCommitRequest, PostCommitResponse
-# Last Modified: 2026-06-10
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PostCommitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     repo_path: str = Field(..., description="Absolute path of the repository the commit landed in")
     commit_message: str = Field(..., description="Full commit message body")
     commit_sha: str = Field(..., description="Commit SHA (full or short)")

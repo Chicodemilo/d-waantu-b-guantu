@@ -162,13 +162,22 @@ class TestAssembleSessionContext:
         assert second_line_marker not in context
         assert "compressed (score 5-7)" in context
 
-    def test_demotion_band_is_counted_not_quoted(
+    def test_demotion_band_is_not_quoted(
         self, db_session, make_project, make_agent
     ):
         """WORKING at 20 sessions elapsed scores 4 (bucket 15-30), band
         demotion_candidate. Spec section 3's boundary: this is consolidation's
-        business, not the agent's reading material. The context may say HOW
-        MANY are flagged; it must not quote the body."""
+        business, not the agent's reading material, so the body must not be
+        quoted.
+
+        RENAMED BY DWB-659, WHICH MADE THE OLD NAME FALSE. This was
+        `test_demotion_band_is_counted_not_quoted`, and the band is no longer
+        a bare count - it renders each row's id and keywords. The assertions
+        here were and remain about the body NOT being quoted, which 659 did
+        not change, so the test is untouched. Only the claim in its name was
+        wrong, and a name is the part a reviewer reads instead of the
+        assertions. Keyword rendering is covered in
+        tests/test_memory_context_dwb659.py."""
         from app.models.agent import Agent
 
         project = make_project(memory_mode="human_memory")
@@ -192,11 +201,13 @@ class TestAssembleSessionContext:
         assert "flagged for consolidation" in context
         assert "/memory/scored" in context
 
-    def test_eviction_band_is_counted_not_quoted(
+    def test_eviction_band_is_not_quoted(
         self, db_session, make_project, make_agent
     ):
         """WORKING at 91+ sessions elapsed scores 1 (the open bucket), band
-        last_consolidation. Same boundary as demotion: counted, not quoted."""
+        last_consolidation. Same boundary as demotion: the body is not quoted.
+
+        Renamed by DWB-659 for the same reason as the demotion test above."""
         from app.models.agent import Agent
 
         project = make_project(memory_mode="human_memory")

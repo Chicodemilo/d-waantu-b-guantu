@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: TicketCreate, TicketUpdate, TicketRead, TicketTokenIncrement, TicketTokenIncrementResult, StaleCheckInput, StaleCheckResponse
-# Last Modified: 2026-09-15 (DWB-529: ticket_number optional on create, derived from ticket_key; 422 when both given and they disagree)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 import re
 from datetime import datetime
@@ -27,6 +27,8 @@ def ticket_number_from_key(ticket_key: str) -> int | None:
 
 
 class TicketCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     epic_id: int | None = None
     sprint_id: int | None = None  # auto-assigned if omitted
@@ -77,6 +79,8 @@ class TicketCreate(BaseModel):
 
 
 class TicketUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     epic_id: int | None = None
     sprint_id: int | None = None
     assigned_agent_id: int | None = None
@@ -107,6 +111,8 @@ class TicketTokenIncrement(BaseModel):
 
 
 class StaleCheckInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     ticket_id: int
     project_id: int
     minutes_stale: int

@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: POST body {pattern}; NodeExclusion ORM rows
 # Data Out: NodeExclusionRead
-# Last Modified: 2026-09-15
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 class NodeExclusionCreate(BaseModel):
     """Add one exclusion. Repo-relative path or glob; absolute paths and paths
     escaping the repo root are refused with a 400 naming why."""
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     pattern: str
 

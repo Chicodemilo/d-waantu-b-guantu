@@ -6,9 +6,9 @@
 # Callees: pydantic
 # Data In: service dicts from app.services.tl_channel, send/mark-read request bodies
 # Data Out: TlMessageCreate, TlChannelMessage, TlChannelList, MarkReadRequest, MarkReadResponse, SendResponse
-# Last Modified: 2026-09-14
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class TlMessageCreate(BaseModel):
@@ -18,6 +18,8 @@ class TlMessageCreate(BaseModel):
     Sender and any named recipient must both be role=team-lead (enforced
     server-side, 400 otherwise).
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     from_agent_id: int
     to_agent_id: int | None = None
     body: str
@@ -59,6 +61,8 @@ class MarkReadRequest(BaseModel):
     Provide ``message_id`` to mark one, or ``all: true`` to mark every message
     currently addressed-to / visible-to the agent as read. Exactly one mode.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     agent_id: int
     message_id: int | None = None
     all: bool = False

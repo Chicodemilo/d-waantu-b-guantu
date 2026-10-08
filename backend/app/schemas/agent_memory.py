@@ -6,12 +6,16 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: RawMemoryCreate, RawMemoryResponse
-# Last Modified: 2026-09-29 (DWB-586: moment-tags moved onto the memory row)
+# Last Modified: 2026-10-08 (DWB-649: response tier is derived at insert and is
+#                never `raw`; the request field is still refused)
+#                (DWB-651: both request models refuse undeclared keys)
+#                (DWB-657: condensed + keywords accepted here, enforced in the
+#                service so the refusal can teach rather than 422)
 
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class RawMemoryCreate(BaseModel):
@@ -28,11 +32,19 @@ class RawMemoryCreate(BaseModel):
                  everything the human had to catch is a map of where the agent's
                  own checks do not look.
     tier: accepted ONLY so that a request naming one can be refused with a reason.
-          Spec section 4 rules out tiering at write time and section 7 hard rule 5
-          rules out CORE outright. Dropping the field from the schema would make a
-          tiering attempt silently succeed-as-raw, which is worse than a 400: the
-          caller would believe it had tiered something.
+          Spec section 4 rules out the CALLER tiering at write time and section 7
+          hard rule 5 rules out CORE outright. Dropping the field from the schema
+          would make a tiering attempt silently succeed, which is worse than a 400:
+          the caller would believe its tier had been honoured when the server had
+          derived its own. DWB-649 note: the response `tier` is a real tier, set
+          at insert from the moment-tags below, never `raw`. The field being
+          refused on the way IN and populated on the way OUT is the point - the
+          tier is the server's answer, not the caller's assertion.
+    condensed / keywords: author-supplied at write time and MANDATORY in effect,
+          enforced by `raw_memory.append_raw_memory` (DWB-657). See the note
+          below on why they are declared Optional here.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     body: str
     context_key: str | None = None
@@ -43,6 +55,30 @@ class RawMemoryCreate(BaseModel):
     # between "was not surprised" and "was never asked" is a real one.
     surprised: bool | None = None
     tier: str | None = None
+
+    # DWB-657: condensed and keywords are REQUIRED IN EFFECT and declared
+    # OPTIONAL HERE ON PURPOSE. Read this before "fixing" them to required.
+    #
+    # A schema-level required field produces pydantic's generic 422 - "Field
+    # required", the field name, nothing about what the field is FOR. These two
+    # are the one part of a memory an extractor cannot produce, so an author who
+    # omits them needs to be told what to write, not merely that something is
+    # missing. Only the service layer can carry that sentence, so the refusal
+    # lives in `raw_memory.append_raw_memory` and returns 400 with it.
+    #
+    # Exactly the same reasoning as `tier` two lines up, in the opposite
+    # direction: `tier` is declared so a caller naming one can be ANSWERED
+    # instead of silently dropped; these are declared optional so a caller
+    # omitting one can be TAUGHT instead of generically rejected. Both exist to
+    # make the schema layer hand the question to the layer that can explain it.
+    #
+    # Note the asymmetry with undeclared keys: because this model forbids extras
+    # (DWB-651), a MISSPELLED key - `condense`, `keyword`, `key_words` - is a 422
+    # `extra_forbidden` from pydantic and never reaches the 400 below. A typo and
+    # an omission therefore return different codes, which is correct: one is a
+    # malformed request, the other is a complete request that did not do the work.
+    condensed: str | None = None
+    keywords: list[str] | None = None
 
 
 class RawMemoryResponse(BaseModel):
@@ -74,6 +110,11 @@ class RawMemoryResponse(BaseModel):
     cost: str | None
     caught_by: str | None
     surprised: bool | None
+    # DWB-657: echoed back for the same reason every other column is - a write
+    # response that omitted two columns it had just stored would be a quiet
+    # version of the defect this endpoint's gate exists to prevent.
+    condensed: str | None
+    keywords: list[str] | None
     created_session_id: int | None
     session_state: str
     fired_count: int
@@ -88,6 +129,7 @@ class MemoryWithdrawRequest(BaseModel):
     journal search filters on and a free-text reason in there would make every
     retraction its own unsearchable tag.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     reason: str | None = None
 

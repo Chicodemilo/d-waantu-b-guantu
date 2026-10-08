@@ -1,12 +1,12 @@
 # Path: app/config/memory_rules.py
 # File: memory_rules.py
 # Created: 2026-06-10
-# Purpose: Single source of truth for the inline memory-usage rules surfaced in identify + spawn-prepare responses (DWB-352); DWB-560 makes them lessons-only; DWB-638 adds the human_memory variant so a sealed project is never handed stock instructions
+# Purpose: Single source of truth for the inline memory-usage rules surfaced in identify + spawn-prepare responses (DWB-352); DWB-560 makes them lessons-only; DWB-638 adds the human_memory variant so a sealed project is never handed stock instructions; DWB-661 states the required condensed + keywords fields on the lesson write
 # Caller: app/services/memory_mode.py (memory_usage_rules_for), app/services/agent.py (identify_agent, spawn_prepare_payload), app/services/agent_memory.py (identity.md)
 # Callees: -
 # Data In: -
-# Data Out: MEMORY_USAGE_RULES: str, HUMAN_MEMORY_USAGE_RULES: str (each <=600 chars, enforced at import time)
-# Last Modified: 2026-10-07 (DWB-638: HUMAN_MEMORY_USAGE_RULES added; the stock constant is unchanged)
+# Data Out: MEMORY_USAGE_RULES: str, HUMAN_MEMORY_USAGE_RULES: str (each <=700 chars, enforced at import time)
+# Last Modified: 2026-10-08 (DWB-661: condensed + keywords stated as required in HUMAN_MEMORY_USAGE_RULES; cap 600 -> 700; the stock constant is unchanged)
 
 """Inline memory-usage rules for agent spawn responses (DWB-352).
 
@@ -37,9 +37,10 @@ per-route replacement (`memory_mode._WRITE_REPLACEMENT`), so the specific
 mapping is served at the moment it is needed rather than memorised in advance.
 The playbooks under `docs/` name all four explicitly, where length is free.
 
-Hard contract: each constant is <= 600 chars. The module asserts this at
-import time so a future edit that overflows fails the test run instead of
-silently bloating the response.
+Hard contract: each constant is <= 700 chars (600 until DWB-661; see the
+cap block at the bottom for why it moved and in what order). The module
+asserts this at import time so a future edit that overflows fails the test
+run instead of silently bloating the response.
 """
 
 MEMORY_USAGE_RULES: str = (
@@ -60,26 +61,43 @@ MEMORY_USAGE_RULES: str = (
 # a replacement rather than an addition: an agent must receive one or the
 # other, never both, because two sets of memory instructions that both look
 # authoritative is the exact failure DWB-589 exists to prevent.
+#
+# DWB-661 adds `condensed` and `keywords`, both REQUIRED on the lesson write
+# (DWB-657 refuses the write at 400 without them). They are named here and not
+# left to the refusal alone because this block is the only memory instruction
+# some agents ever read, and a required field an agent does not know about
+# costs it a round trip on its first write of the session.
 HUMAN_MEMORY_USAGE_RULES: str = (
-    "HUMAN_MEMORY MODE: stock memory.md is SEALED on this project.\n"
-    "Every stock memory write route 409s and writes nothing, whatever an older\n"
-    "playbook told you to call. The 409 names the replacement; read it.\n"
-    "DURABLE LESSONS ONLY; not ticket ids, dates, counts or what you shipped.\n"
-    "- Lesson: POST /api/agents/{id}/memories {body, cost:'none|low|high',\n"
-    "  caught_by:'me|worker|human|ci', surprised:bool}. Enums not prose (422);\n"
-    "  never send tier (400).\n"
+    "HUMAN_MEMORY MODE: stock memory.md is SEALED. Every stock write route\n"
+    "409s and writes nothing; the 409 names the replacement.\n"
+    "DURABLE LESSONS ONLY: no ticket ids, dates, counts or status.\n"
+    "- Lesson: POST /api/agents/{id}/memories. {body, condensed, keywords}\n"
+    "  ALL REQUIRED else 400. condensed = ONE line that IS the lesson, not\n"
+    "  the setup. keywords = two or three. Optional cost:'none|low|high',\n"
+    "  caught_by:'me|worker|human|ci', surprised:bool; enums not prose (422),\n"
+    "  no tier (400).\n"
     "- Episode: POST /api/journal {agent_id, body, tags}\n"
     "- Read: GET /api/agents/{id}/memory/scored\n"
-    "A /memories row satisfies write-on-close. No ceiling here."
+    "/memories satisfies write-on-close. No ceiling."
 )
 
 
-# Enforce the 600-char cap at import time. The DWB-352 spec mandates this:
-# if a constant overflows, refactor or trim rather than letting the
-# response silently bloat. Both variants are capped, not just the stock one:
-# a cap that only one of two interchangeable payloads has to meet is not a cap
-# on the response.
-MEMORY_USAGE_RULES_MAX_CHARS = 600
+# Enforce the cap at import time. The DWB-352 spec mandates this: if a
+# constant overflows, refactor or trim rather than letting the response
+# silently bloat. Both variants are capped, not just the stock one: a cap that
+# only one of two interchangeable payloads has to meet is not a cap on the
+# response, so there is ONE number here and both must meet it.
+#
+# THE CAP MOVED 600 -> 700 IN DWB-661, AND THE TRIM CAME FIRST. Two required
+# fields with semantics attached do not fit in the slack the 600 left. The
+# first draft that stated them ran 773 chars; trimming the prose around them
+# (the sealed-routes sentence, the lessons-only exclusion list, the closing
+# line) brought it to 629 without dropping a route, an enum value or a refusal
+# code. There was no further cut that did not delete something an agent acts
+# on, so the number moved rather than the content. That is the order to repeat:
+# trim to the floor, then move the cap by exactly what the floor needs. A cap
+# that rises to meet whatever was written has stopped being a cap.
+MEMORY_USAGE_RULES_MAX_CHARS = 700
 for _name, _rules in (
     ("MEMORY_USAGE_RULES", MEMORY_USAGE_RULES),
     ("HUMAN_MEMORY_USAGE_RULES", HUMAN_MEMORY_USAGE_RULES),

@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AlertCreate, AlertUpdate, AlertRead, SendToTeamResponse
-# Last Modified: 2026-06-24 (DWB-462: category taxonomy)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -16,6 +16,8 @@ from app.models.alert import AlertCategory, AlertSeverity, AlertStatus
 
 
 class AlertCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     raised_by_agent_id: int
     recipient_agent_id: int | None = None
@@ -28,6 +30,8 @@ class AlertCreate(BaseModel):
 
 
 class DismissAllRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int | None = None
 
 
@@ -36,6 +40,8 @@ class DismissAllResponse(BaseModel):
 
 
 class RunTestsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     raised_by_agent_id: int | None = None
 
@@ -50,6 +56,8 @@ class RunTestsResponse(BaseModel):
 
 
 class AlertUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     status: AlertStatus | None = None
     resolved_at: datetime | None = None
 

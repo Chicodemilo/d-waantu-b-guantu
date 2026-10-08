@@ -6,14 +6,16 @@
 # Callees: pydantic
 # Data In: HTTP request bodies
 # Data Out: Validated error log data
-# Last Modified: 2026-04-09
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ErrorLogCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int | None = None
     agent_id: int | None = None
     source: str = "frontend"

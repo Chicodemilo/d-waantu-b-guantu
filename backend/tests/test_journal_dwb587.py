@@ -500,8 +500,17 @@ class TestMomentTagsAreNotOnTheJournal:
     def test_the_create_endpoint_does_not_accept_them(self, client, journal_agent):
         """Extra keys must not be silently swallowed into a stored entry.
 
-        Pydantic ignores unknown fields by default, so this asserts the entry
-        comes back WITHOUT them rather than asserting a 422 that will not fire.
+        DWB-651 UPDATED THE MECHANISM, NOT THE INTENT. This test used to assert
+        a 201 whose body came back without the tags, and said so: "pydantic
+        ignores unknown fields by default, so this asserts the entry comes back
+        WITHOUT them rather than asserting a 422 that will not fire." The 422
+        now fires, because JournalEntryCreate carries extra="forbid".
+
+        That is strictly stronger than what was asserted before. Swallowed-and-
+        dropped and refused-outright both leave the tags off the stored entry,
+        so the old assertion could not tell them apart; a refusal additionally
+        tells the CALLER its tags went nowhere, which is the point of the class
+        this test lives in.
         """
         r = client.post(
             "/api/journal",
@@ -513,11 +522,56 @@ class TestMomentTagsAreNotOnTheJournal:
                 "surprised": True,
             },
         )
-        assert r.status_code == 201, r.text
-        returned = r.json()
+        assert r.status_code == 422, r.text
+        refused = {
+            tuple(e["loc"])[-1]
+            for e in r.json()["detail"]
+            if e["type"] == "extra_forbidden"
+        }
+        assert refused == {"cost", "caught_by", "surprised"}, r.text
+
+        # The original property, still asserted: nothing was stored. A refusal
+        # that still wrote a row would pass the status check above. The read
+        # carries `term` because agent_id alone is refused by this file's own
+        # AC3 guard above - scoping a dump is not narrowing one.
+        listed = client.get(
+            "/api/journal",
+            params={"agent_id": journal_agent["id"], "term": "an entry"},
+        )
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["count"] == 0, listed.text
+
+        # The same POST WITHOUT the tags still lands, so the refusal above is
+        # about the undeclared keys and not about the endpoint being broken.
+        ok = client.post(
+            "/api/journal",
+            json={"agent_id": journal_agent["id"], "body": "an entry"},
+        )
+        assert ok.status_code == 201, ok.text
+        returned = ok.json()
         assert "cost" not in returned
         assert "caught_by" not in returned
         assert "surprised" not in returned
+
+        # POSITIVE CONTROL for the count==0 above, and it is load-bearing rather
+        # than decorative. That assertion claims "the refused POST stored
+        # nothing". On its own it cannot distinguish that from a query which
+        # finds nothing BECAUSE IT MATCHES NOTHING - a wrong filter name, a term
+        # that does not search the body, a typo. Both answer zero, which is the
+        # standing defect in this codebase: a check that returns the same value
+        # for the safe case and the dangerous one. Re-running the IDENTICAL
+        # query now that an entry with that exact body definitely exists is what
+        # separates them, so a zero above is a measured absence rather than a
+        # silent instrument.
+        found = client.get(
+            "/api/journal",
+            params={"agent_id": journal_agent["id"], "term": "an entry"},
+        )
+        assert found.status_code == 200, found.text
+        assert found.json()["count"] == 1, (
+            "the query used to prove nothing was stored cannot find an entry "
+            "that IS stored, so its earlier zero proved nothing: " + found.text
+        )
 
 
 class TestSectionThreeDecayIsNotBuilt:

@@ -7,7 +7,7 @@
 # Callees: pydantic, app/services/journal (PROMOTION_THRESHOLD)
 # Data In: JSON request body
 # Data Out: JournalEntryCreate, JournalEntryRead, JournalSearchResponse
-# Last Modified: 2026-09-29 (DWB-587)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 from typing import Literal
@@ -37,6 +37,7 @@ class JournalEntryCreate(BaseModel):
     account from a sanitized one, and a check that pretended to would just teach
     writers the shape that passes.
     """
+    model_config = ConfigDict(extra="forbid")  # DWB-651
 
     agent_id: int
     body: str

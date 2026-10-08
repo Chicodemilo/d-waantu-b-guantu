@@ -49,11 +49,27 @@ work while the mode is on. The stock branch was stripped out of your copy at dep
 so you are not choosing between two sets of instructions.
 
 Your own lessons and every worker's go to **`POST /api/agents/{agent_id}/memories`**
-`{body, cost, caught_by, surprised}` (`cost` and `caught_by` are enums,
-`none|low|high` and `me|worker|human|ci`; prose in either is a 422, and any `tier` at
-all is a 400). Episodes go to **`POST /api/journal`** `{agent_id, body, tags}`. Reads
-come from **`GET /api/agents/{id}/memory/scored`**. There is no 12000-token ceiling on
+`{body, condensed, keywords, cost, caught_by, surprised}`. `body`, `condensed` and
+`keywords` are REQUIRED; omit or blank any of them and the write is refused with 400
+(DWB-657). `condensed` is ONE LINE carrying THE LESSON and not the setup, and it is
+what the 5-7 band carries instead of a truncation of the body's first line (DWB-658).
+`keywords` are two or three, and they are what makes the 2-4 and 1 bands inspectable
+instead of a bare count (DWB-659). Both are author-supplied, never server-derived: an
+extractor pulls what a text says most often, which names the subject and loses the
+point. NEITHER HAS A SIZE RULE: there is no character cap on `condensed` and the
+keyword count is guidance, not a limit, so do not brief either as one. The gate
+refuses what is empty, never what is long. A misspelled key is a pydantic **422**
+`extra_forbidden` rather than the teaching 400, which is worth knowing before you
+debug a worker's refusal. `cost` and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`;
+prose in either is a 422, and any `tier` at all is a 400. Episodes go to
+**`POST /api/journal`** `{agent_id, body, tags}`. Reads come from
+**`GET /api/agents/{id}/memory/scored`**. There is no 12000-token ceiling on
 this path, so there is nothing to chase anyone to trim.
+
+**Brief the two required fields when you spawn.** An agent arriving with an older
+playbook in context knows the four-field body and will burn its first write on a 400.
+The refusal names the field and shows a correct body, so nothing is lost, but it costs
+a round trip you can spend by stating the shape once in the brief.
 
 **A `/memories` row satisfies the DWB-519 write-on-close gate with no extra step.** It
 stamps `agents.last_memory_write_at` exactly like a stock write. Nobody calls
@@ -526,7 +542,7 @@ Subagent edits to ANY path under `.claude/` trigger a permission dialog that cra
 
 - **Workers cannot safely write anything under `.claude/`** - that includes `.claude/settings.json`, the playbooks, and the project_rules files. (DWB-401 moved agent memory OUT to `.dwb/memory/<prefix>/<name>/`, which is writable, so the memory dir is no longer in this danger zone, though writes still go through the API for the ISO heading + ceiling enforcement.)
 - **TL is the only agent that can directly Edit/Write `.claude/` files.** You run in the main CC window with a user attached for the permission dialog, so the prompt resolves instead of killing you. This is the hard exception to the TL-never-codes rule for harness-config edits.
-- **For worker memory writes**, route them through the API, never a file edit. The FastAPI process has no permission dialog, so server-side writes are safe. On a **stock** project that is `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`; on **human_memory** both are sealed at 409 and the route is `POST /api/agents/{agent_id}/memories` (§ Memory mode above). Brief the one your project actually runs: a worker handed the wrong pair burns its first write on a 409. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
+- **For worker memory writes**, route them through the API, never a file edit. The FastAPI process has no permission dialog, so server-side writes are safe. On a **stock** project that is `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`; on **human_memory** both are sealed at 409 and the route is `POST /api/agents/{agent_id}/memories` (§ Memory mode above), which REQUIRES `condensed` and `keywords` alongside `body` (DWB-657). Brief the route AND those two fields: a worker handed the wrong pair burns its first write on a 409, and a worker handed the right route with the old four-field body burns it on a 400. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
 - Do NOT ticket a `.claude/settings.json` edit to a worker. Make the change yourself. The worker playbook carries the matching prohibition.
 
 ### SendMessage routes by EXACT name

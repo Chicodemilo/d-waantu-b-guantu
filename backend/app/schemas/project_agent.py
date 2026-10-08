@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: ProjectAgentCreate, ProjectAgentRead, ProjectTeamMember, ProjectTeamRead
-# Last Modified: 2026-06-12
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class ProjectAgentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     agent_id: int
 

@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: FailureRecordCreate, FailureRecordUpdate, FailureRecordRead
-# Last Modified: 2026-09-14 (DWB-510: reviewed flag)
+# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
 
 from datetime import datetime
 
@@ -14,6 +14,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class FailureRecordCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     project_id: int
     ticket_id: int | None = None
     sprint_id: int
@@ -32,6 +34,8 @@ class FailureRecordCreate(BaseModel):
 
 
 class FailureRecordUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
     ticket_id: int | None = None
     failure_type: str | None = None
     severity: str | None = None

@@ -7,7 +7,8 @@
 # Callees: pydantic
 # Data In: JSON request body from the SendMessage hook; DB rows for the list view
 # Data Out: AgentMessageInput (request), InterAgentMessageRead (list row)
-# Last Modified: 2026-06-24
+# Last Modified: 2026-10-08 (DWB-651: left permissive on purpose; the reason
+#                and the caller are commented at the model)
 
 from datetime import datetime
 
@@ -26,6 +27,14 @@ class AgentMessageInput(BaseModel):
     Agent message bodies ARE stored (they are not user text).
     """
 
+    # DWB-651: DELIBERATELY PERMISSIVE - no extra="forbid" here.
+    # CALLER: the PostToolUse SendMessage hook in `.claude/settings.json`. Today a
+    # python one-liner there narrows the raw harness payload down to four keys
+    # (to, message, summary, session_id), all declared below, so a forbid would
+    # pass right now. It stays open anyway for two reasons: that filter lives in a
+    # deployed settings file each cloning repo owns and may widen, and this
+    # endpoint shares the same always-200 delivery-gap contract as the other hook
+    # ingress points - a 422 loses the message row entirely and nothing reports it.
     to: str | None = None
     message: str | None = None
     summary: str | None = None
