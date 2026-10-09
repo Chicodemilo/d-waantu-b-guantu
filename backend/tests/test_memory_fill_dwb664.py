@@ -8,8 +8,9 @@
 # Callees: app.services.memory_fill, POST /api/agents/{id}/memories/{mid}/fill
 # Data In: test DB rows via the factory fixtures
 # Data Out: Assertions on the persisted row, before and after
-# Last Modified: 2026-10-09 (DWB-667: the assignment guard is now per FUNCTION,
-#                so `rekey_memory` is proved never to assign `condensed`)
+# Last Modified: 2026-10-09 (DWB-664: gate parity - filling `keywords` now
+#                runs the same reachability and subject checks as a fresh
+#                write, asserted behaviourally and per call site)
 
 """DWB-664: the constraints ARE the deliverable.
 
@@ -31,12 +32,25 @@ any UPDATE touches it. It is named in the allowed set rather than suppressed:
 freezing it would make the row lie about when it last changed, and a test that
 simply ignored it would also ignore a route that started writing it by hand.
 
-THE STRUCTURAL GUARD IS THE ONE THAT SURVIVES A REWRITE. `test_the_service_
-assigns_exactly_two_attributes` walks the AST of memory_fill and asserts that
-the only attribute assignments on a memory object are `condensed` and
-`keywords`. Behavioural tests prove the route does not change `tier` TODAY; the
-AST guard is what fails the day somebody adds a third assignment, including one
-reachable only from a branch no test covers.
+THE STRUCTURAL GUARD IS THE ONE THAT SURVIVES A REWRITE. `test_each_function_
+assigns_only_its_allowed_row_attributes` walks the AST of memory_fill and
+asserts, per function, exactly which attributes it may assign on a memory
+object. Behavioural tests prove the route does not change `tier` TODAY; the AST
+guard is what fails the day somebody adds an assignment, including one reachable
+only from a branch no test covers.
+
+IT WAS CALLED `..._assigns_exactly_two_attributes` UNTIL THE FILL PATH HONESTLY
+NEEDED THREE, AND THE NAME IS PART OF THE GUARD. A name carrying a number goes
+on asserting that number after the number is no longer the property being
+guarded, and a reviewer reading the name stops looking. The property was never
+"two" - it is "only these, per function, and nothing else on the row".
+
+THE GATE-PARITY GUARD IS THE OTHER STRUCTURAL ONE. `TestFillRunsTheSameGates`
+asserts that filling `keywords` goes through the same `keyword_reachability`
+checks as a fresh write. This route shipped before those gates existed and was
+a hole straight through both of them; a behavioural test proves it is closed
+today, and the AST guard is what fails the day a third write path is added
+without them.
 """
 
 import ast
@@ -99,17 +113,22 @@ class TestTheFillItself:
             f"/api/agents/{agent_id}/memories/{memory_id}/fill",
             json={
                 "condensed": "grade the account, not the headline",
-                "keywords": ["retraction", "accounting"],
+                "keywords": ["retraction", "mechanism"],
+                "situation": (
+                    "I am weighing a retraction where the conclusion held and "
+                    "the mechanism was wrong"
+                ),
             },
             headers={"X-Agent-ID": str(agent_id)},
         )
         assert r.status_code == 200, r.text
-        assert r.json()["filled"] == ["condensed", "keywords"]
+        assert r.json()["filled"] == ["condensed", "keywords", "situation"]
 
         after = _row_snapshot(db_session, memory_id)
         assert after["condensed"] == "grade the account, not the headline"
-        assert after["keywords"] == ["retraction", "accounting"]
+        assert after["keywords"] == ["retraction", "mechanism"]
         assert isinstance(after["keywords"], list)
+        assert after["situation"].startswith("I am weighing a retraction")
 
     def test_only_condensed_keywords_and_updated_at_change(
         self, client, db_session, make_project, make_agent
@@ -127,19 +146,24 @@ class TestTheFillItself:
 
         r = client.post(
             f"/api/agents/{agent_id}/memories/{memory_id}/fill",
-            json={"condensed": "one line", "keywords": ["a", "b"]},
+            json={
+                "condensed": "one line",
+                "keywords": ["alembic", "downgrade"],
+                "situation": "I am about to run alembic downgrade on a live schema",
+            },
             headers={"X-Agent-ID": str(agent_id)},
         )
         assert r.status_code == 200, r.text
 
+        allowed = {"condensed", "keywords", "situation", "updated_at"}
         after = _row_snapshot(db_session, memory_id)
         changed = {k for k in before if before[k] != after[k]}
-        assert changed <= {"condensed", "keywords", "updated_at"}, (
-            f"the fill changed columns it must not: {changed - {'condensed', 'keywords', 'updated_at'}}"
+        assert changed <= allowed, (
+            f"the fill changed columns it must not: {changed - allowed}"
         )
         # Asserted positively too: a route that changed NOTHING would also
         # satisfy the subset check above.
-        assert {"condensed", "keywords"} <= changed
+        assert {"condensed", "keywords", "situation"} <= changed
         # The fields withdraw-and-repost would have destroyed, named
         # individually because they are the reason this route exists.
         for field in (
@@ -168,9 +192,16 @@ class TestTheFillItself:
         headers = {"X-Agent-ID": str(agent_id)}
         url = f"/api/agents/{agent_id}/memories/{memory_id}/fill"
 
-        first = client.post(url, json={"keywords": ["only", "keywords"]}, headers=headers)
+        first = client.post(
+            url,
+            json={
+                "keywords": ["pgrep", "pytest"],
+                "situation": "I am waiting on pgrep for pytest to finish",
+            },
+            headers=headers,
+        )
         assert first.status_code == 200, first.text
-        assert first.json()["filled"] == ["keywords"]
+        assert first.json()["filled"] == ["keywords", "situation"]
         assert first.json()["condensed"] is None
 
         second = client.post(url, json={"condensed": "now the line"}, headers=headers)
@@ -179,7 +210,7 @@ class TestTheFillItself:
 
         after = _row_snapshot(db_session, memory_id)
         assert after["condensed"] == "now the line"
-        assert after["keywords"] == ["only", "keywords"]
+        assert after["keywords"] == ["pgrep", "pytest"]
 
 
 class TestTheRefusals:
@@ -213,8 +244,12 @@ class TestTheRefusals:
         )
         headers = {"X-Agent-ID": str(agent_id)}
         url = f"/api/agents/{agent_id}/memories/{memory_id}/fill"
+        # Only `condensed`, because this test is about the already_set refusal
+        # on `condensed`. The keyword half now needs a situation to be checked
+        # against (DWB-667/669), and carrying one here would make the setup a
+        # second test of the gates rather than a setup.
         assert client.post(
-            url, json={"condensed": "the first one", "keywords": ["a"]}, headers=headers
+            url, json={"condensed": "the first one"}, headers=headers
         ).status_code == 200
 
         again = client.post(url, json={"condensed": "second thoughts"}, headers=headers)
@@ -286,7 +321,7 @@ class TestTheRefusals:
 
         nothing = client.post(url, json={}, headers=headers)
         assert nothing.status_code == 400
-        assert "naming neither" in nothing.json()["detail"]
+        assert "naming none" in nothing.json()["detail"]
 
         after = _row_snapshot(db_session, memory_id)
         assert after["condensed"] is None and after["keywords"] is None
@@ -297,7 +332,7 @@ class TestTheServiceCannotTouchAnythingElse:
     fails the day a third assignment appears, including on a branch no test
     reaches."""
 
-    def test_the_service_assigns_exactly_two_attributes(self):
+    def test_each_function_assigns_only_its_allowed_row_attributes(self):
         """Every attribute assignment in the module, GROUPED BY THE FUNCTION IT
         IS IN AND BY WHAT IT IS ASSIGNED ON, and the whole mapping asserted.
 
@@ -352,9 +387,15 @@ class TestTheServiceCannotTouchAnythingElse:
             # The exception carrying its own code and detail. Not a row.
             "__init__": {"self": {"code", "detail"}},
             # The ONLY row attributes the FILL path may ever set. `situation`
-            # is absent here deliberately: fill completes the two DWB-654
-            # columns and nothing else.
-            "fill_memory": {"memory": {"condensed", "keywords"}},
+            # WAS absent here, on the stated grounds that fill completes the two
+            # DWB-654 columns and nothing else. That reason died: DWB-667/669
+            # made `keywords` and `situation` a PAIR, so a fill that writes
+            # keywords has to write or read the sentence they were demonstrated
+            # against, and a route that could set one without the other is how
+            # rows get stored that `POST /memories` would refuse. The guard is
+            # not weakened - it is still the complete list, and `body`, `tier`,
+            # the moment-tags and both session ids are still absent from it.
+            "fill_memory": {"memory": {"condensed", "keywords", "situation"}},
             # The ONLY row attributes the REKEY path may ever set, and
             # `condensed` is absent here deliberately and is the point of the
             # separation. Rekey repairs an index; it may not revise a lesson.
@@ -418,3 +459,231 @@ class TestTheWriteGateStillRefusesTheseRows:
             json={**MEMORY_WRITE_EXTRAS, "body": "with both"},
         )
         assert full.status_code == 201, full.text
+
+
+class TestFillRunsTheSameGates:
+    """DWB-667 and DWB-669 reached `/memories` and `/rekey` and NOT `/fill`.
+
+    A route that can store what the write gate refuses makes the write gate
+    advisory, and the rows it produces are indistinguishable afterwards from
+    rows written properly - which is the whole failure this lane keeps finding,
+    one layer out. Each test below asserts the REASON, because a refusal for
+    the wrong reason reads identically to the caller.
+    """
+
+    def test_keywords_with_no_situation_anywhere_are_refused_not_stored(
+        self, client, db_session, make_project, make_agent
+    ):
+        """The hole itself. Keywords alone cannot be checked, so they are not
+        stored - a pointer nobody ever showed could be followed."""
+        agent_id, memory_id = _unfilled_memory(
+            client, db_session, make_project, make_agent
+        )
+        r = client.post(
+            f"/api/agents/{agent_id}/memories/{memory_id}/fill",
+            json={"keywords": ["alembic", "downgrade"]},
+            headers={"X-Agent-ID": str(agent_id)},
+        )
+        assert r.status_code == 400, r.text
+        assert "situation" in r.json()["detail"]
+
+        after = _row_snapshot(db_session, memory_id)
+        assert after["keywords"] is None, "refused and stored anyway"
+        assert after["situation"] is None
+
+    def test_a_keyword_the_situation_cannot_reach_is_refused_naming_it(
+        self, client, db_session, make_project, make_agent
+    ):
+        """DWB-667's check, with the author's own sentence as the corpus."""
+        agent_id, memory_id = _unfilled_memory(
+            client, db_session, make_project, make_agent
+        )
+        r = client.post(
+            f"/api/agents/{agent_id}/memories/{memory_id}/fill",
+            json={
+                "keywords": ["alembic", "self-exempt"],
+                "situation": "I am about to run alembic downgrade on a live schema",
+            },
+            headers={"X-Agent-ID": str(agent_id)},
+        )
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "self-exempt" in detail, detail
+
+        after = _row_snapshot(db_session, memory_id)
+        assert after["keywords"] is None and after["situation"] is None
+
+    def test_a_keyword_naming_no_subject_is_refused(
+        self, client, db_session, make_project, make_agent
+    ):
+        """DWB-669's rule. `before i` clears the match floor on its own and
+        every token of it names nothing, so it fires on any sentence containing
+        the phrase - and it would have passed the reachability check, because an
+        author who writes `before i` writes "before I" in the sentence beside
+        it. That is exactly why the subject rule runs first."""
+        agent_id, memory_id = _unfilled_memory(
+            client, db_session, make_project, make_agent
+        )
+        r = client.post(
+            f"/api/agents/{agent_id}/memories/{memory_id}/fill",
+            json={
+                "keywords": ["before i", "alembic"],
+                "situation": "before I run alembic I check the downgrade",
+            },
+            headers={"X-Agent-ID": str(agent_id)},
+        )
+        assert r.status_code == 400, r.text
+        assert "before i" in r.json()["detail"].lower()
+
+        after = _row_snapshot(db_session, memory_id)
+        assert after["keywords"] is None and after["situation"] is None
+
+    def test_a_filled_pair_is_one_the_write_gate_would_have_accepted(
+        self, client, db_session, make_project, make_agent
+    ):
+        """The positive half, and it is not optional. Without it the gates
+        could be satisfied by refusing everything, and every refusal assertion
+        above would still pass."""
+        from app.services import keyword_reachability
+
+        agent_id, memory_id = _unfilled_memory(
+            client, db_session, make_project, make_agent
+        )
+        keywords = ["alembic", "downgrade"]
+        situation = "I am about to run alembic downgrade on a live schema"
+        r = client.post(
+            f"/api/agents/{agent_id}/memories/{memory_id}/fill",
+            json={"keywords": keywords, "situation": situation},
+            headers={"X-Agent-ID": str(agent_id)},
+        )
+        assert r.status_code == 200, r.text
+
+        after = _row_snapshot(db_session, memory_id)
+        assert after["keywords"] == keywords
+        assert after["situation"] == situation
+        # Asserted against the gates THEMSELVES rather than against a status
+        # code, so this keeps meaning what it says if the route is rewritten.
+        keyword_reachability.require_subject_bearing_keywords(after["keywords"])
+        keyword_reachability.require_reachable_keywords(
+            after["keywords"], after["situation"]
+        )
+
+    def test_a_situation_that_cannot_recall_the_stored_keywords_is_refused(
+        self, client, db_session, make_project, make_agent
+    ):
+        """Filling `situation` alone still has to leave a COHERENT pair, and the
+        refusal names `/rekey` because this route cannot repair the half that is
+        wrong - it refuses already-set keywords by design."""
+        agent_id, memory_id = _unfilled_memory(
+            client, db_session, make_project, make_agent
+        )
+        row = db_session.get(AgentMemory, memory_id)
+        row.keywords = ["passes-today", "stale-numbers"]
+        db_session.flush()
+
+        r = client.post(
+            f"/api/agents/{agent_id}/memories/{memory_id}/fill",
+            json={"situation": "I am about to run alembic downgrade on a live schema"},
+            headers={"X-Agent-ID": str(agent_id)},
+        )
+        assert r.status_code == 400, r.text
+        assert "rekey" in r.json()["detail"]
+
+        after = _row_snapshot(db_session, memory_id)
+        assert after["situation"] is None, "refused and stored anyway"
+        assert after["keywords"] == ["passes-today", "stale-numbers"], "keywords moved"
+
+    def test_a_situation_alone_lands_when_it_recalls_the_stored_keywords(
+        self, client, db_session, make_project, make_agent
+    ):
+        """The other side of the same rule. Without this the refusal above could
+        be implemented by refusing every situation-only fill."""
+        agent_id, memory_id = _unfilled_memory(
+            client, db_session, make_project, make_agent
+        )
+        row = db_session.get(AgentMemory, memory_id)
+        row.keywords = ["alembic", "downgrade"]
+        db_session.flush()
+
+        r = client.post(
+            f"/api/agents/{agent_id}/memories/{memory_id}/fill",
+            json={"situation": "I am about to run alembic downgrade on a live schema"},
+            headers={"X-Agent-ID": str(agent_id)},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["filled"] == ["situation"]
+        assert _row_snapshot(db_session, memory_id)["situation"] is not None
+
+    def test_an_already_set_situation_is_refused_like_the_other_fields(
+        self, client, db_session, make_project, make_agent
+    ):
+        agent_id, memory_id = _unfilled_memory(
+            client, db_session, make_project, make_agent
+        )
+        row = db_session.get(AgentMemory, memory_id)
+        row.situation = "the sentence already on the row"
+        db_session.flush()
+
+        r = client.post(
+            f"/api/agents/{agent_id}/memories/{memory_id}/fill",
+            json={"situation": "a second thought about the moment"},
+            headers={"X-Agent-ID": str(agent_id)},
+        )
+        assert r.status_code == 409, r.text
+        assert (
+            _row_snapshot(db_session, memory_id)["situation"]
+            == "the sentence already on the row"
+        )
+
+    def test_fill_runs_the_same_reachability_gates_as_the_write_gate(self):
+        """STRUCTURAL, and it is the one that survives the next route.
+
+        The behavioural tests above prove the hole is closed today. This proves
+        it per CALL, by comparing the set of `keyword_reachability` functions
+        `fill_memory` calls against the set `raw_memory.append_raw_memory`
+        calls. The two drifted once already - fill shipped before the gates
+        existed and nothing noticed, because a route that stores something
+        answers exactly like a route that stores something correctly.
+
+        Compared as a SET rather than asserted against a hardcoded list, so a
+        gate added to the write path in future fails here until fill gets it
+        too, rather than silently applying to one write path out of two.
+        """
+        fill_tree = ast.parse(SERVICE_PATH.read_text())
+        raw_path = SERVICE_PATH.parent / "raw_memory.py"
+        raw_tree = ast.parse(raw_path.read_text())
+
+        def gates_called_in(tree, func_name):
+            found = set()
+            for func in ast.walk(tree):
+                if (
+                    isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and func.name == func_name
+                ):
+                    for node in ast.walk(func):
+                        if (
+                            isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute)
+                            and isinstance(node.func.value, ast.Name)
+                            and node.func.value.id == "keyword_reachability"
+                        ):
+                            found.add(node.func.attr)
+            return found
+
+        write_gates = gates_called_in(raw_tree, "append_raw_memory")
+        fill_gates = gates_called_in(fill_tree, "fill_memory")
+        rekey_gates = gates_called_in(fill_tree, "rekey_memory")
+
+        assert write_gates, (
+            "no keyword_reachability calls found in append_raw_memory - this "
+            "guard is reading the wrong function and would pass against a fill "
+            "route with no gates at all"
+        )
+        assert write_gates <= fill_gates, (
+            f"fill_memory is missing {sorted(write_gates - fill_gates)}, which "
+            f"the write gate runs. A fill that skips a gate stores rows POST "
+            f"/memories would refuse, and nothing downstream can tell them apart."
+        )
+        assert write_gates <= rekey_gates, (
+            f"rekey_memory is missing {sorted(write_gates - rekey_gates)}"
+        )

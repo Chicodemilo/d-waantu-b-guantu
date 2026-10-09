@@ -13,7 +13,8 @@
 #         Live caller today: hook_tracking._topoff_scar_check (DWB-612).
 # Callees: app/models/agent, app/models/agent_memory,
 #          app/services/dwb_session (get_active_session),
-#          app/services/memory_scan (SCAR_FAMILY)
+#          app/services/memory_scan (SCAR_FAMILY, imported for the scar
+#          definition; the search population is CONSULTED_TIERS, defined here)
 # Data In: db Session, agent_id, a situation (what the agent is doing)
 # Data Out: dict {agent_id, count, entries: list[AgentMemory],
 #           matched_keywords, considered, unmatchable, situation_tokens} -
@@ -73,10 +74,17 @@ evidence the agent has been here before (Archie's framing of Miles's own
 words). A search that found nothing is not evidence of anything, so a scar
 that was searched FOR and not found gets no increment - approaching the
 question and getting a negative answer does not count as having asked it
-successfully. Scoped to `memory_scan.SCAR_FAMILY` rather than a second
-tier list of its own: there is exactly one definition in this codebase of
-"what is a scar" and this module imports it rather than keeping a second one
-that could drift from the first.
+successfully.
+
+DWB-668 CHANGED WHICH TIERS ARE SEARCHED, NOT WHAT A MATCH MEANS. This used to
+be scoped to `memory_scan.SCAR_FAMILY`, on the reasoning that there is exactly
+one definition of "what is a scar" and this module should import it rather than
+keep a second one that could drift. That reasoning is intact and SCAR_FAMILY is
+still the one definition of a scar. What it could not express is that "what a
+consultation searches" is a DIFFERENT question which happened to have the same
+answer - and while it had the same answer, promotion to CORE removed a lesson
+from the only path that could ever recall it. The search population now has its
+own name, `CONSULTED_TIERS`, defined below with the measurement that forced it.
 """
 
 import re
@@ -85,9 +93,65 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-from app.models.agent_memory import AgentMemory
+from app.models.agent_memory import AgentMemory, MemoryTier
 from app.services import dwb_session as session_svc
 from app.services.memory_scan import SCAR_FAMILY
+
+# DWB-668: WHAT A CONSULTATION SEARCHES. Its own concept, its own name, in the
+# module that owns consultation - NOT a widening of `memory_scan.SCAR_FAMILY`.
+#
+# The tempting one-line fix was to add `core` to SCAR_FAMILY. That constant
+# answers "what is a scar", it has exactly one definition on purpose, and
+# DWB-611 collapsed two scar tiers into one specifically to stop a second tier
+# list drifting from the first. "What gets searched" is a different question
+# that happens to have had the same answer, and the day the two diverge is the
+# day a tier silently joins or leaves the scar family because somebody wanted
+# it findable. `SCAR_FAMILY` is still imported and still used - by the firing
+# tests and by everything that genuinely means "is this a scar".
+#
+# WHY CORE IS IN HERE. Before this ticket `consult_scars` searched scars only,
+# so promotion to CORE - the reward for a lesson that proved itself three times
+# - REMOVED THE LESSON FROM THE ONLY PATH THAT COULD EVER RECALL IT AGAIN.
+# Combined with the absence of a demote path (DWB-665), a promoted row could not
+# decay, could not be recalled, could not be corrected by use and could not be
+# demoted. Measured: 126 CORE rows across the project, 86 on one agent, every
+# one of them unreachable. Archie's ruling, 2026-10-09: "a memory tier whose
+# contents can never be recalled is not a memory tier."
+#
+# ORDER IS NOT SIGNIFICANCE. This tuple is a membership test in a SQL `IN`,
+# not a ranking. Nothing here scores or orders by tier, and a reader looking
+# for CORE-first behaviour will not find it because there is none.
+CONSULTED_TIERS: tuple[MemoryTier, ...] = (MemoryTier.core, MemoryTier.scar)
+
+# WHAT A CORE ROW'S `fired_count` MEANS, because a counter with a writer and no
+# consumer is the DWB-603 defect returning by a different door.
+#
+# A CORE row that matches a situation increments `fired_count` and moves
+# `last_reinforced_session_id`, exactly as a scar does. Neither changes its
+# score - CORE's curve is flat at 10 in every bucket - and that is the point
+# rather than a problem: the count is not feeding the decay model, it is the
+# only record that a CORE row has ever been used for anything. DWB-665's
+# demotion ruling rests on it; without it, a human asked whether a CORE row
+# deserves its tier has nothing to look at.
+#
+# `maybe_promote_scar` cannot be reached by a CORE row - it raises `not_a_scar`
+# for any tier outside SCAR_FAMILY, and `memory_consolidate` only ever hands it
+# scar-family candidates - so firing a CORE row cannot re-promote it and there
+# is no second trigger to guard.
+#
+# THERE IS DELIBERATELY NO AUTOMATIC DEMOTION NOMINATION KEYED ON THIS COUNT,
+# and the next person will want to build one, so here is why not. The obvious
+# rule is "a CORE row still at fired_count 0 after N sessions is a demotion
+# candidate". On the day DWB-668 shipped, all 126 CORE rows read 0 - because
+# the tier was unsearchable, not because the rows were bad. That rule would
+# have nominated the entire tier on its first run and would have been measuring
+# this ticket's bug rather than the rows. The safe case and the dangerous case
+# answer identically, which is the shape this lane keeps finding.
+#
+# A real version needs a clock that starts WHEN THE TIER BECAME SEARCHABLE, and
+# nothing records that. Not `created_session_id` (when the row was written),
+# not `last_reinforced_session_id` (null on every one of them). Adding that
+# clock is the prerequisite, not the nomination rule.
 
 
 class ConsultError(Exception):
@@ -366,7 +430,7 @@ def match_scars(db: Session, *, agent_id: int, situation: str) -> dict:
     live store cannot promote anything to CORE by running.
 
     Returns the three numbers a measurement needs next to the matches
-    themselves: how many scars were `considered`, how many were `unmatchable`
+    themselves: how many rows were `considered`, how many were `unmatchable`
     (fewer than `_MATCH_TOKENS_REQUIRED` keyword tokens in total, so they could
     not have matched whatever the situation said), and how many tokens the
     situation contributed. A count with no population beside it is not comparable to
@@ -387,7 +451,7 @@ def match_scars(db: Session, *, agent_id: int, situation: str) -> dict:
             select(AgentMemory)
             .where(
                 AgentMemory.agent_id == agent_id,
-                AgentMemory.tier.in_(SCAR_FAMILY),
+                AgentMemory.tier.in_(CONSULTED_TIERS),
             )
             .order_by(AgentMemory.id.asc())
         )

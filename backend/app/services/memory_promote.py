@@ -130,10 +130,28 @@ def promote_to_core(
     """THE ONLY WRITE SITE for `tier = MemoryTier.core` in the application.
 
     `memory` given: retier that EXISTING row in place. Its id, fired_count,
-    created_at and session references all survive untouched - only `tier`
-    changes and `context_key` is cleared, because a context-bound scar's
-    whole reason for carrying one stops applying the moment it is no longer
-    context-bound at all.
+    created_at, session references AND `context_key` all survive untouched -
+    only `tier` changes.
+
+    DWB-665/668: `context_key` IS NO LONGER CLEARED, AND THAT IS A BEHAVIOUR
+    CHANGE RATHER THAN A TIDY-UP. It used to be, on the reasoning that a
+    context-bound scar's reason for carrying one stops applying once it is no
+    longer context-bound. That was defensible while promotion was a ONE-WAY
+    DOOR: nothing came back from CORE, so nothing could ever need the value
+    again. DWB-665 built the way back, and the moment a row can return to
+    `scar` the clearing becomes destruction of something only this row had.
+    Demotion restores the tier; it cannot restore a context nobody kept.
+
+    The rows promoted BEFORE this change have already lost theirs and are not
+    repaired here - there is no backup column and inventing one to reconstruct
+    data that was deliberately discarded would be guessing. A row demoted today
+    whose context_key was cleared years ago comes back as a scar with
+    `context_key` NULL, which `memory_scan` already handles as "the context has
+    not been named yet" rather than as an error.
+
+    The scan reading a context_key on a CORE row is harmless: `scan_context`
+    raises `not_a_scar` for any tier outside SCAR_FAMILY, so the value is
+    carried and not consulted until the row is a scar again.
 
     `memory` omitted: construct a NEW row from `agent_id` and `body`, with
     `source_journal_id` set when the content came from a journal entry
@@ -161,7 +179,6 @@ def promote_to_core(
     """
     if memory is not None:
         memory.tier = MemoryTier.core
-        memory.context_key = None
         db.flush()
         return memory
 

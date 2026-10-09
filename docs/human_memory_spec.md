@@ -63,6 +63,7 @@ You keep *don't touch hot things*; you lose the afternoon you learned it.
 
 - **CORE** — always true, always loaded, **10 forever**. Two entry paths: *ruled* by the human,
   or *promoted* from a scar after a recurrence proved the lesson was scoped too narrowly.
+  **CORE is consulted** (DWB-668) and **CORE can be left** (DWB-665); see the note below.
 - **SCAR** — **a real tier with a resting place at 6.** A scar decays to 6 and stays there.
   It does not expire on a clock and it is not on probation.
 - **SCAR · context-bound** — the exception. Dropped when its context dies, and journaled.
@@ -134,6 +135,43 @@ it means the true scope is wider than where it was born.
 loosely-applied graduation bar rebuilds the graveyard one tier up — and CORE is worse, because
 it is always loaded. The bar must be logged evidence (which contexts, when), not "this feels
 universal."
+
+#### What promotion costs and what it no longer costs (DWB-668 / DWB-665, 2026-10-09)
+
+For its first nine days, **promotion was a one-way exit from retrieval.** The consultation
+searched scars only, so the moment a lesson was promoted it left the only path that could ever
+fire it again — the reward removed the thing being rewarded. Measured before the fix: 126 CORE
+rows across the project, 86 on a single agent, `fired_count` 0 on every one, and no path off
+the tier. A promoted row could not decay, could not be recalled, could not be corrected by use
+and could not be demoted.
+
+Three things changed, and the second two only matter because of the first:
+
+1. **CORE is in the search population.** Its own constant,
+   `memory_consult.CONSULTED_TIERS`, not a widened `memory_scan.SCAR_FAMILY` — "what gets
+   searched" is a different question from "what is a scar" and they must not share one list.
+2. **A recalled CORE row records it.** `fired_count` increments and
+   `last_reinforced_session_id` moves, exactly as for a scar. Neither changes the score — the
+   curve is flat at 10 — and that is the point: the count is not feeding decay, it is the only
+   evidence a CORE row has ever been used. There is deliberately **no automatic demotion
+   nomination** keyed on it; see `memory_consult` for why a rule keyed on `fired_count == 0`
+   would have nominated the whole tier on its first run.
+3. **Promotion is no longer lossy, and there is a way back.** `promote_to_core` used to clear
+   `context_key`; it no longer does, because clearing data that cannot be recovered was only
+   defensible while nothing came back from CORE. `memory_demote.demote_from_core` is the one
+   path off the tier: owner-only, a written reason required, journaled, and **it does not reset
+   the decay clock** — a row demoted after 400 sessions lands on its new curve at the floor,
+   because resetting it would reward the mis-promotion.
+
+⚠️ **Rows promoted before 2026-10-09 lost their `context_key` and it was not reconstructed.**
+There is no backup column and inventing a value for one would be guessing. A row demoted today
+may return as a scar with `context_key` NULL, which the scan reads as "not named yet".
+
+⚠️ **A tier being searchable does not make its contents reachable.** The DWB-667 keyword pass
+covered scars only, so the CORE rows carry the pre-667 filing labels — 50% hyphenated compounds
+against 6% on scars, zero situation lines against 302, and 2 of 126 reachable by a 38-sentence
+probe that reached 56 of 604 scars. Making the tier searchable is the mechanism; the index is a
+separate job.
 
 ### Context death
 

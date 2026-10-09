@@ -50,12 +50,15 @@ from app.schemas.agent_memory import (
     MemoryRekeyRequest,
     MemoryRekeyResponse,
     MemoryWithdrawRequest,
+    MemoryDemoteRequest,
+    MemoryDemoteResponse,
     MemoryWithdrawResponse,
     RawMemoryCreate,
     RawMemoryResponse,
 )
 from app.schemas.memory_score import ScoredMemoryResponse
 from app.services import agent as svc
+from app.services import memory_demote as demote_svc
 from app.services import memory_withdraw as withdraw_svc
 from app.services import agent_consolidation as consolidation_svc
 from app.services import memory_mode as memory_mode_svc
@@ -712,11 +715,19 @@ def fill_agent_memory(
     last_reinforced_session_id and every memory_transitions row pointing at it.
     Changing one label must not cost a row its history.
 
-    Body: { condensed?, keywords? } - at least one. Any other key is a 422, and
-    that is the enforcement of "nothing else is mutable" rather than a
-    formality: a silently-dropped `tier` would look identical to an honoured
-    one at the call site, and `tier` is the field memory_decide deliberately
-    keeps behind a human.
+    Body: { condensed?, keywords?, situation? } - at least one. Any other key
+    is a 422, and that is the enforcement of "nothing else is mutable" rather
+    than a formality: a silently-dropped `tier` would look identical to an
+    honoured one at the call site, and `tier` is the field memory_decide
+    deliberately keeps behind a human.
+
+    FILLING `keywords` RUNS THE SAME TWO GATES AS A FRESH WRITE - DWB-667's
+    reachability check and DWB-669's subject rule - so a situation must be
+    available, sent here or already on the row, and a request with keywords and
+    no sentence anywhere is refused rather than stored. Before those gates
+    reached this route it could write rows `POST /memories` would have refused,
+    which makes the write gate advisory and leaves the result indistinguishable
+    from a row written properly.
 
     "Not sent" and "sent as null" are different requests. `model_fields_set` is
     what tells them apart - comparing to None would make an omitted field and
@@ -725,7 +736,9 @@ def fill_agent_memory(
 
     Returns 200 with the row AND the history fields it did not touch, so the
     caller can see they survived rather than trust that they did. Errors:
-      - 400: neither field sent, blank value, no X-Agent-ID, wrong agent.
+      - 400: no field sent, blank value, no X-Agent-ID, wrong agent, keywords
+             with no situation available, unreachable keywords, a keyword that
+             names no subject.
       - 403: you are not the owning agent.
       - 404: no such memory.
       - 409: that field already carries a value - a revision is a new lesson.
@@ -744,6 +757,9 @@ def fill_agent_memory(
             keywords=(
                 data.keywords if "keywords" in sent else memory_fill_svc.UNSET
             ),
+            situation=(
+                data.situation if "situation" in sent else memory_fill_svc.UNSET
+            ),
         )
     except memory_fill_svc.MemoryFillError as e:
         status = {
@@ -752,6 +768,11 @@ def fill_agent_memory(
             "already_set": 409,
         }.get(e.code, 400)
         raise HTTPException(status, e.detail)
+    except keyword_reachability.KeywordUnreachable as e:
+        # The same two gates `/rekey` and `POST /memories` run. A fill that
+        # could store keywords the write gate refuses would make that gate
+        # advisory, and the rows would be indistinguishable afterwards.
+        raise HTTPException(400, e.detail)
     except raw_memory_svc.RawMemoryWriteError as e:
         # The shared validators. Same rule broken, same code, same sentence the
         # write gate would have given - see memory_fill's module docstring.
@@ -954,3 +975,77 @@ def withdraw_agent_memory(
         )
 
     return payload
+
+@router.post(
+    "/{agent_id}/memories/{memory_id}/demote",
+    response_model=MemoryDemoteResponse,
+)
+def demote_agent_memory(
+    agent_id: int,
+    memory_id: int,
+    data: MemoryDemoteRequest,
+    db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None, alias="X-Agent-ID"),
+):
+    """DWB-665: move one of your OWN rows off CORE. The only path that exists.
+
+    `memory_promote.promote_to_core` is the single write site for `tier = core`
+    and nothing anywhere wrote `core` to any other tier, so a row promoted by
+    mistake was permanent - CORE's curve is flat at 10, so it could not decay
+    into a candidate list either, and the ruling had nowhere to write.
+
+    WHY THIS MATTERS MORE AFTER DWB-668. While CORE was outside the search
+    population a mis-promoted row was inert. It is now a live route into an
+    agent's context, at the top band, on a tier that never decays.
+
+    OWNERSHIP: `X-Agent-ID` must equal the agent that owns the row, the same
+    policy withdrawal and re-keywording use. There is no human actor at this
+    API, so the human acts through the owner's id.
+
+    A `reason` is REQUIRED. A demotion overturns a promotion the system made on
+    recorded evidence, so the record has to say what the human knew that the
+    evidence did not.
+
+    Returns 200 with the movement and `journal_entry_id`. The clock fields and
+    `fired_count` come back untouched and are returned so the caller can see
+    that rather than take it on trust. Errors:
+      - 400: no X-Agent-ID, the memory is not on the named agent, the row is
+        not CORE, an invalid target tier, or a blank reason.
+      - 403: the caller is not the owner.
+      - 404: no such memory.
+    """
+    try:
+        payload = demote_svc.demote_from_core(
+            db,
+            agent_id=agent_id,
+            memory_id=memory_id,
+            acting_agent_id=x_agent_id,
+            to_tier=data.to_tier,
+            reason=data.reason,
+        )
+    except demote_svc.DemoteError as e:
+        # Every DemoteError is raised before the journal entry is created and
+        # before the tier moves, so this path has written nothing.
+        status = {"memory_not_found": 404, "not_owner": 403}.get(e.code, 400)
+        raise HTTPException(status, e.detail)
+
+    # The commit belongs here for the same reason DWB-652 moved withdrawal's
+    # here: `demote_from_core` is flush-only by contract and says so, and a
+    # route that never commits answers 200 while the journal entry and the tier
+    # change are both discarded - a mechanism reporting that it RAN rather than
+    # that it LANDED. The journal entry and the tier move land together or
+    # neither does, which is what keeps a demoted row from existing with no
+    # record of who ruled it.
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            500,
+            f"memory {memory_id} was NOT demoted: the journal entry and the "
+            f"tier change could not be committed and have been rolled back "
+            f"together ({type(e).__name__}: {e}). The memory is unchanged.",
+        )
+
+    return payload
+

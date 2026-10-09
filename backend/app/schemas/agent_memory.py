@@ -139,7 +139,7 @@ class RawMemoryResponse(BaseModel):
 class MemoryFillRequest(BaseModel):
     """POST /api/agents/{agent_id}/memories/{memory_id}/fill body (DWB-664).
 
-    BOTH FIELDS OPTIONAL, AND `extra="forbid"` IS THE LOAD-BEARING LINE. The
+    EVERY FIELD OPTIONAL, AND `extra="forbid"` IS THE LOAD-BEARING LINE. The
     ticket's third constraint is that nothing else on the row is mutable - not
     `body`, not `tier`, not the moment-tags, not either session id. Forbidding
     extras makes that STRUCTURAL rather than something the service remembers:
@@ -151,16 +151,25 @@ class MemoryFillRequest(BaseModel):
     Optional rather than required because a row can be half-filled - condensed
     set, keywords not - and a both-or-nothing request would leave that row
     permanently incomplete. At least one is required; the service refuses a
-    request naming neither rather than returning a 200 that did nothing.
+    request naming none rather than returning a 200 that did nothing.
 
     "Not sent" and "sent as null" are different requests, and the router tells
     them apart with `model_fields_set` rather than by comparing to None.
+
+    `situation` is the third fillable field and arrived with the gates
+    (DWB-667/669). `keywords` and `situation` are a PAIR - the index and the
+    sentence it was demonstrated against - so a fill that sets keywords needs a
+    situation available, in this request or already on the row, and the service
+    refuses the combination that has neither. Without it this route could store
+    keywords `POST /memories` would have refused, which makes the write gate
+    advisory.
     """
 
     model_config = ConfigDict(extra="forbid")  # DWB-651 / DWB-664
 
     condensed: str | None = None
     keywords: list[str] | None = None
+    situation: str | None = None
 
 
 class MemoryFillResponse(BaseModel):
@@ -176,6 +185,7 @@ class MemoryFillResponse(BaseModel):
     agent_id: int
     condensed: str | None
     keywords: list[str] | None
+    situation: str | None
     filled: list[str]
     tier: str
     created_at: datetime
@@ -241,6 +251,48 @@ class MemoryWithdrawRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")  # DWB-651
 
     reason: str | None = None
+
+
+class MemoryDemoteRequest(BaseModel):
+    """DWB-665: the ruling that moves a row off CORE.
+
+    `reason` is REQUIRED here where withdrawal's is optional, and the asymmetry
+    is deliberate. A withdrawal says "this lesson is wrong", which the removed
+    content itself largely explains. A demotion overturns a promotion the
+    SYSTEM made on evidence it recorded - three firings, or a context the scan
+    judged unable to conclude - so the record has to say what the human knew
+    that the evidence did not. Without it the row reads as having been re-tiered
+    by the consolidation machinery, which is the one thing DWB-665 criterion 2
+    forbids.
+    """
+
+    model_config = ConfigDict(extra="forbid")  # DWB-651
+
+    to_tier: Literal["scar", "working"]
+    reason: str
+
+
+class MemoryDemoteResponse(BaseModel):
+    """What moved, what did NOT move, and who ruled.
+
+    The clock fields and `fired_count` are returned rather than described,
+    because "the demotion left them alone" is a claim and these are the values.
+    A caller can check them against what it sent and see for itself that a
+    demotion is a tier change and nothing else.
+    """
+
+    memory_id: int
+    agent_id: int
+    previous_tier: str
+    tier: str
+    reason: str
+    ruled_by_agent_id: int
+    created_session_id: int | None
+    last_reinforced_session_id: int | None
+    fired_count: int
+    context_key: str | None
+    journal_entry_id: int
+    journal_tags: list[str]
 
 
 class MemoryWithdrawResponse(BaseModel):

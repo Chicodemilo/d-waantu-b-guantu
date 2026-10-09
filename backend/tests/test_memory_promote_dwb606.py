@@ -215,14 +215,27 @@ class TestRetieringInPlace:
         assert row is not None
         assert row.fired_count == 3, "promotion must not erase the history that triggered it"
 
-    def test_context_key_is_cleared_on_promotion(self, db_session, agent):
-        """Driven through the FIRED path, because the context path is closed.
+    def test_context_key_SURVIVES_promotion(self, db_session, agent):
+        """DWB-665 REVERSED THIS. It used to assert the opposite and it was
+        renamed rather than edited, so anyone holding the old behaviour sees
+        the change instead of a test that quietly means something else.
 
-        The clearing behaviour is unchanged and still matters: it is why a
-        promoted row afterwards shows `context_key = NULL`, which reads as
-        evidence the context path never ran. An investigator used exactly that
-        NULL to rule out the mechanism that had in fact caused the promotion -
-        the output of the path mistaken for proof against it.
+        WHAT THE ORIGINAL WAS PROTECTING, because it was a real hazard and it
+        is worth carrying forward: a promoted row showed `context_key = NULL`,
+        which READS as evidence the context path never ran. An investigator
+        used exactly that NULL to rule out the mechanism that had in fact
+        caused the promotion - the output of a path mistaken for proof against
+        it. That hazard is now GONE for anything promoted from here on, because
+        the value survives and no longer carries a false signal. It remains
+        true of rows promoted BEFORE 2026-10-09, whose keys were really cleared
+        and are not reconstructed.
+
+        WHY THE BEHAVIOUR CHANGED: clearing was defensible while promotion was
+        a one-way door - nothing came back from CORE, so nothing could ever
+        need the value. DWB-665 built the way back, and a demotion can restore
+        a tier but not a context nobody kept. Archie's ruling, 2026-10-09.
+
+        Driven through the FIRED path, because the context path is closed.
         """
         scar = _memory(
             db_session, agent_id=agent["id"], tier=MemoryTier.scar,
@@ -233,7 +246,12 @@ class TestRetieringInPlace:
             svc.ScarPromotionReason.fired_three_times
         )
         db_session.expire_all()
-        assert db_session.get(AgentMemory, scar.id).context_key is None
+        row = db_session.get(AgentMemory, scar.id)
+        # The original property, kept as the first assertion: the promotion
+        # really happened. A context_key check alone would pass against a
+        # promotion that never ran.
+        assert row.tier == MemoryTier.core
+        assert row.context_key == "general coding-standards lesson"
 
 
 class TestPromoteToCoreDirectly:

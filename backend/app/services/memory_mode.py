@@ -139,12 +139,23 @@ OPEN_UNDER_HUMAN_MEMORY = {
     # a stock memory.md write under any reading. Sealing them would leave the
     # authoritative store as the one that cannot be completed or corrected, which
     # is backwards from what the seal is for.
-    "memories/{memory_id}/fill": "completes `condensed` or `keywords` on a row "
-    "in the human_memory store that predates those columns; owner-only, and not "
-    "a stock memory.md write",
+    "memories/{memory_id}/fill": "completes `condensed`, `keywords` or "
+    "`situation` on a row in the human_memory store that predates those "
+    "columns; owner-only, runs the same reachability and subject gates as a "
+    "fresh write when it sets keywords, and not a stock memory.md write",
     "memories/{memory_id}/rekey": "replaces a dead keyword set on a row in the "
     "human_memory store so the lesson can be reached at all; owner-only, never "
     "touches `condensed`, and not a stock memory.md write",
+    # DWB-665. Same category argument again: `agent_memories` IS the
+    # human_memory store, so this is not a stock memory.md write. The direction
+    # argument is the strongest of the four - CORE had no exit at all, and
+    # DWB-668 put CORE into the search population, so a mis-promoted row is now
+    # served into agents' contexts at the top band on a tier that never decays.
+    # Sealing the only way out would leave the store that matters most holding
+    # the errors it cannot shed.
+    "memories/{memory_id}/demote": "the only path that moves a row's tier off "
+    "`core` in the human_memory store; owner-only, requires a written reason, "
+    "journals the ruling, and not a stock memory.md write",
 }
 
 

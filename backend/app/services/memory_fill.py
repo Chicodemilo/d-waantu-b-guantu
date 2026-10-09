@@ -2,9 +2,10 @@
 # File: memory_fill.py
 # Created: 2026-10-08 (DWB-664)
 # Purpose: Two owner-only operations on an EXISTING agent_memories row, and
-#          nothing else on it. `fill_memory` completes a missing `condensed` or
-#          `keywords`; `rekey_memory` (DWB-667) REPLACES a dead keyword set and
-#          never touches `condensed`.
+#          nothing else on it. `fill_memory` completes a missing `condensed`,
+#          `keywords` or `situation`, under the same gates as a fresh write;
+#          `rekey_memory` (DWB-667) REPLACES a dead keyword set and never
+#          touches `condensed`.
 # Caller: app/routers/agents.py (POST /{agent_id}/memories/{memory_id}/fill,
 #         POST /{agent_id}/memories/{memory_id}/rekey)
 # Callees: app/services/raw_memory._require_condensed / _require_keywords,
@@ -12,8 +13,9 @@
 # Data In: agent_id, memory_id, acting agent id, the fields being written
 # Data Out: dict describing the row afterwards, including the history
 #           fields the caller can check were untouched
-# Last Modified: 2026-10-09 (DWB-667: rekey_memory; ownership extracted to
-#                _require_owned_memory so both operations share one definition)
+# Last Modified: 2026-10-09 (DWB-664: `situation` is fillable and the fill of
+#                `keywords` now runs DWB-667's reachability gate and DWB-669's
+#                subject rule, which this route had been a hole through)
 
 """Complete a memory that predates `condensed` and `keywords` (DWB-664).
 
@@ -43,9 +45,41 @@ FOUR REFUSALS, AND EACH IS A DIFFERENT CLAIM.
   BLANK (400). Same validators as the write gate, imported rather than
   reimplemented - see below.
 
-  NOTHING TO DO (400). A request naming neither field is refused rather than
+  NOTHING TO DO (400). A request naming no field is refused rather than
   silently succeeding, because a 200 that changed nothing is the shape this
   whole lane keeps finding.
+
+  UNREACHABLE (400). Filling `keywords` goes through the SAME two gates a
+  fresh write goes through - DWB-667's reachability check and DWB-669's subject
+  rule - which is why `situation` is a third fillable field here. See THE
+  KEYWORD HALF below; this route shipped before those gates existed and was
+  writing rows that `/memories` would have refused.
+
+THE KEYWORD HALF IS A PAIR, NOT A FIELD. `keywords` and `situation` are the
+index and the sentence the index was demonstrated against, and DWB-667's whole
+mechanism is that the second is checked against the first with the comparison
+retrieval will later use. So filling keywords with no situation is not a
+partial fill, it is an incoherent one: it stores a pointer nobody ever showed
+could be followed. This route therefore requires a situation to be AVAILABLE
+when keywords are filled - sent in the same request, or already on the row -
+and runs both gates before assigning anything.
+
+Without that, fill was a hole straight through both gates: it could write
+keywords that are unreachable from any sentence, or made entirely of words
+naming no subject, onto a row that `POST /memories` would have refused outright.
+A route that can store what the write gate rejects makes the write gate
+advisory, and the rows it produces are indistinguishable afterwards from ones
+written properly.
+
+FILLING `situation` ALONE RUNS REACHABILITY BUT NOT THE SUBJECT RULE, and the
+asymmetry is deliberate rather than an oversight. Reachability is about the
+PAIR, so a new sentence that cannot recall the keywords already on the row is an
+incoherent pair and is refused, with the message naming `rekey` - the one route
+that can replace both halves together. The subject rule is about the KEYWORDS
+ALONE, and those keywords are already set, so fill refuses to touch them with
+`already_set`. Enforcing it here would strand the row: refused for a defect this
+route has no power to repair. Rekey runs that rule, and rekey is where such a
+row belongs.
 
 PER-FIELD RATHER THAN BOTH-OR-NOTHING, which is a deliberate choice. Refusing
 the whole request when EITHER field is already set would make a half-filled row
@@ -189,10 +223,11 @@ def fill_memory(
     acting_agent_id: int | None,
     condensed=UNSET,
     keywords=UNSET,
+    situation=UNSET,
 ) -> dict:
-    """Set `condensed` and/or `keywords` on one existing row. Does not commit.
+    """Set `condensed`, `keywords` and/or `situation` on one row. No commit.
 
-    Only the two fields are ever assigned. There is no code path here that
+    Only those three fields are ever assigned. There is no code path here that
     writes `body`, `tier`, the moment-tags, either session id, `fired_count` or
     `source_journal_id` - which is the point, and is asserted structurally in
     tests/test_memory_fill_dwb664.py rather than left to review.
@@ -208,9 +243,12 @@ def fill_memory(
       - actor_required        (400)
       - not_owner             (403)
       - nothing_to_fill       (400)
+      - situation_required    (400)
       - already_set           (409)
-    and `raw_memory.RawMemoryWriteError` for a blank value, unchanged from the
-    write gate.
+    plus `raw_memory.RawMemoryWriteError` for a blank value and
+    `keyword_reachability.KeywordUnreachable` for a keyword set that cannot be
+    reached or carries no subject - both unchanged from the write gate, because
+    the same rule was broken.
     """
     memory = _require_owned_memory(
         db, agent_id=agent_id, memory_id=memory_id, acting_agent_id=acting_agent_id
@@ -218,12 +256,13 @@ def fill_memory(
 
     wants_condensed = condensed is not UNSET
     wants_keywords = keywords is not UNSET
-    if not wants_condensed and not wants_keywords:
+    wants_situation = situation is not UNSET
+    if not wants_condensed and not wants_keywords and not wants_situation:
         raise MemoryFillError(
             "nothing_to_fill",
-            "send `condensed`, `keywords`, or both. A request naming neither "
-            "would return 200 having changed nothing, which is the silent "
-            "success this lane keeps finding.",
+            "send `condensed`, `keywords`, `situation`, or any combination of "
+            "them. A request naming none would return 200 having changed "
+            "nothing, which is the silent success this lane keeps finding.",
         )
 
     # Refusals BEFORE any assignment, so a request that is going to be refused
@@ -243,7 +282,17 @@ def fill_memory(
             f"memory {memory_id} already has keywords, and this route fills "
             "rather than edits. See the condensed refusal for the reasoning; a "
             "revised keyword set is a revision, and revisions belong in a new "
-            "row.",
+            "row. To REPLACE a keyword set that cannot be reached, use "
+            "`/rekey`, which exists for exactly that and checks the "
+            "replacement against a situation.",
+        )
+    if wants_situation and _is_set(memory.situation):
+        raise MemoryFillError(
+            "already_set",
+            f"memory {memory_id} already has a situation line, and this route "
+            "fills rather than edits. A situation is the sentence its keywords "
+            "were demonstrated against, so replacing it means re-demonstrating "
+            "the pair: send both to `/rekey` instead.",
         )
 
     if wants_condensed:
@@ -251,11 +300,72 @@ def fill_memory(
     if wants_keywords:
         _require_keywords(keywords)
 
-    # THE ONLY TWO ASSIGNMENTS IN THIS MODULE.
+    # THE TWO GATES, IN THE SAME ORDER `raw_memory.append_raw_memory` RUNS
+    # THEM, because a row filled here must be one the write gate would have
+    # accepted. Before DWB-667 and DWB-669 this route had neither, so it could
+    # store keywords that no sentence can reach and keywords made entirely of
+    # words naming no subject - onto rows `POST /memories` refuses outright.
+    #
+    # The situation may arrive in THIS request or already be on the row. Both
+    # are a real fill of an incomplete row; what is not allowed is keywords
+    # with no sentence anywhere, because that stores a pointer nobody ever
+    # showed could be followed.
+    effective_situation = situation if wants_situation else memory.situation
+    if wants_keywords:
+        if not _is_set(effective_situation):
+            raise MemoryFillError(
+                "situation_required",
+                f"memory {memory_id} has no situation line, so keywords sent "
+                "on their own cannot be checked and will not be stored. Send "
+                "`situation` in the same request: ONE LINE, in your own words, "
+                "naming the moment this lesson applies. Your keywords are "
+                "matched against it with the SAME comparison that later decides "
+                "whether this lesson is recalled, which is the only thing that "
+                "makes a keyword set more than a filing label.",
+            )
+        keyword_reachability.require_situation(effective_situation)
+        # DWB-669 before DWB-667's reachability check, matching the write gate:
+        # a keyword made of ordinary words is MORE likely to appear in its own
+        # author's sentence, so reachability would pass it and the author would
+        # never learn it fires on everything.
+        keyword_reachability.require_subject_bearing_keywords(keywords)
+        keyword_reachability.require_reachable_keywords(keywords, effective_situation)
+    elif wants_situation:
+        keyword_reachability.require_situation(situation)
+        # The PAIR must be coherent, so a new sentence that cannot recall the
+        # keywords already on the row is refused. The SUBJECT rule deliberately
+        # does not run here: those keywords are already set, this route refuses
+        # to touch them, and enforcing a rule against a value it cannot repair
+        # would strand the row. `/rekey` replaces both halves together and runs
+        # both rules; the refusal below names it.
+        if _is_set(memory.keywords):
+            try:
+                keyword_reachability.require_reachable_keywords(
+                    list(memory.keywords), situation
+                )
+            except keyword_reachability.KeywordUnreachable as exc:
+                # Same type and same code, so a caller branching on either is
+                # unaffected and the write gate's own words still arrive intact.
+                # One sentence is appended because this refusal has a different
+                # remedy from the write gate's: there, you rewrite the keywords
+                # you are about to send; here, they are already stored and this
+                # route cannot touch them.
+                raise keyword_reachability.KeywordUnreachable(
+                    exc.code,
+                    f"{exc.detail} NOTE: these keywords are already stored on "
+                    f"memory {memory_id} and `/fill` cannot replace them. If the "
+                    "sentence above is the honest one, the keywords are what is "
+                    "wrong: send both to `/rekey`, which replaces the pair "
+                    "together.",
+                ) from exc
+
+    # THE ONLY THREE ASSIGNMENTS IN THIS MODULE'S FILL PATH.
     if wants_condensed:
         memory.condensed = condensed
     if wants_keywords:
         memory.keywords = keywords
+    if wants_situation:
+        memory.situation = situation
     db.flush()
 
     return {
@@ -263,9 +373,14 @@ def fill_memory(
         "agent_id": memory.agent_id,
         "condensed": memory.condensed,
         "keywords": memory.keywords,
+        "situation": memory.situation,
         "filled": [
             name
-            for name, wanted in (("condensed", wants_condensed), ("keywords", wants_keywords))
+            for name, wanted in (
+                ("condensed", wants_condensed),
+                ("keywords", wants_keywords),
+                ("situation", wants_situation),
+            )
             if wanted
         ],
         # Echoed back so the CALLER can see its history survived, rather than

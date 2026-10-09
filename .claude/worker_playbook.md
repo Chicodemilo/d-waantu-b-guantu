@@ -119,7 +119,10 @@ you have already been choosing how fast.
 yet judged, and deliberately so, because judging salience in the moment just
 rubber-stamps whatever felt important at the time. Consolidation then moves it to
 one of three real tiers: `core` (never decays), `scar` (floors at 6), or `working`
-(floors at 1). A `raw` row has no score at all and is in no candidate list until it
+(floors at 1). `core` and `scar` are both CONSULTED - a lesson in either can be
+recalled by a situation that matches its keywords, and recall moves `fired_count`
+on both. `working` is not consulted at all, which is what stops an unjudged note
+accumulating firings. A `raw` row has no score at all and is in no candidate list until it
 is tiered.
 
 **The score is DERIVED, never stored.** There is no score column and no band column.
