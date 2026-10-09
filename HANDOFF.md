@@ -2,83 +2,91 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
-## Current state (2026-10-07, pushed and green)
+## Current state (2026-10-09)
 
-HEAD `4f45674` on master, 3019 passed, 0 failed. Five commits today. Working
-tree clean. All five active projects deployed with mode-correct playbooks.
-
-**Two projects run `human_memory`: IND (40) and DWB (1).** Not just IND. On both,
-`memory/append`, `memory/condense`, `memory/compact` and `session-complete`
-return 409; lessons go to `POST /api/agents/{id}/memories`, episodes to
-`POST /api/journal`. A `/memories` row satisfies the write-on-close gate.
+HEAD `c298217` on master, five commits today, tree clean.
+Reinforcement works and runs in production on DWB. IND is switched off.
 
 ## What shipped
 
-**IND's memory serves again.** 298 rows had no clock origin because an adoption
-run executed entirely in the gap between two sessions. Backfilled: 293 at origin
-2651, 5 at 2657. `spawn-prepare` for Archie_IND went 583 chars to 20253. Zero
-NULL-origin rows on IND at any tier.
+**Reinforcement fired for the first time since it was built.** DWB-644: the
+match relation was inverted. The needle was the user's whole prompt and the
+haystack was the lesson body, so a scar could only fire when someone recited
+the lesson back - and could fire on an ordinary English phrase that happened
+to sit inside a lesson. `fired_count` was 0 on all 877 rows. Now the needle is
+the lesson's own keywords and the haystack is the situation; the body is never
+searched. Eight rows have fired in production, all correct recalls.
 
-The origin is a FLOOR, not a birth certificate. No row stamped 2651 was created
-during 2651; it is the last tick before the rows existed, which is correct for a
-consumer comparing strictly greater-than and false as provenance. Use `created_at`
-and `memory_transitions` for real provenance.
+**A keyword now has to be reachable from the moment it is written for.**
+DWB-667: 288 scars were keyworded as filing labels (`self-exempt`,
+`decompose-the-count`) rather than words anyone types. A write now carries an
+author-written `situation`, and keywords must match it under the matcher's own
+predicate, imported rather than copied. `POST /memories/{id}/rekey` replaces
+keywords on an existing row, owner-only.
 
-**A memory can no longer be written without a session.** One module, one rule,
-every writer. Caller-facing writes refuse with 400; the background consolidation
-pass defers. The ticket named two writers; there were three.
+**Ordinary-word keywords are refused.** DWB-669: widening made recall work and
+made junk worse. `before i` is two ordinary words, clears the two-token floor
+by itself, and fires on any first-person sentence. A keyword is refused when it
+clears the floor alone AND every token is a non-subject word. Both conditions
+are required - the first alone would delete `git checkout` and `shared tree`.
 
-**DWB was the thing teaching the sealed routes.** The rules block pasted into
-every spawn bundle, `identity.md`, and eleven sites across four playbooks all
-told agents to call routes that 409.
+## The numbers, with what they cover
 
-**The wrong memory mode's sections are now stripped at deploy**, by the mechanism
-that already strips jira blocks. Unmarked content is shared — a decision, because
-every existing line is unmarked.
+Frozen 30 situations, written by the one agent not re-keywording, before anyone
+started, seen by no author:
 
-## Open, needing Miles
+    recall any      4/30 -> 10 -> 19 -> 18 -> 17 -> 16
+    recall correct  4/30 ->  8 -> 14 -> 14 -> 14 -> 14
 
-- **DWB-644: reinforcement has never run in production.** `fired_count` 0 and
-  `last_reinforced_session_id` NULL on all 779 rows. The match relation is
-  backwards: a scar fires only when the user's whole prompt is a verbatim
-  substring of the lesson, i.e. when they are reciting it back. It also fires on
-  coincidence — `that is the` matches 8 scars — and three coincidental prompts
-  promote into CORE, which never decays. **Do not flip `topoff_enabled` as the
-  fix; the flag is the only thing keeping it latent.**
-- **DWB-643: `gate-status` reports `all_passing` while never evaluating three
-  gates sprint close enforces**, two of which are enabled here. The green light
-  on the project page is lying.
-- **DWB-640: stick redemption is unreachable** on human_memory. The redeem chain
-  only runs after a stock append.
-- **DWB-641: NOT NULL on `created_session_id`** is blocked on a design question —
-  `project.py`'s delete path nulls it deliberately so global agents do not lose
-  lessons when an unrelated project goes.
-- **DWB-642:** a raw row with no origin is indistinguishable from a normal fresh
-  one; `reason` reports `untiered` for both.
-- **DWB-646** (spec says "Not built" while eight files cite it) and **DWB-647**
-  (project_rules sends workers to `dwb2jira` on a project with no Jira). 647 is
-  the TL's — workers crash writing under `.claude/`.
-- **DWB-639** is a standing audit lane. `docs/doc_audit_backlog.md`, 11 items,
-  each verified against a running system.
+**The correct number has not moved since pass two, through five corpus changes.
+Every step down in the any-number was a junk or borderline route dying.**
 
-## The lesson worth carrying
+Junk: the subjectless channel measures zero on 20 project-vocabulary controls.
+Three fires remain, all carrying a subject word; one is a DB column matching a
+UI column, which is a domain collision no word list reaches.
 
-Four times today a number was true when read and false when sent, in a tree
-several people were writing at once — a line citation, a row count, a marker
-census, a suite result. No amount of re-checking fixes that; two careful reads
-give two correct-then-stale values. Cite symbols, not line numbers, and state
-the predicate beside every count.
+**What the number does not cover** (Pam): identical before/after proves the
+drops cost no recall ON THAT SET. A term doing real work for a situation nobody
+probed scores the same as a dead one, because both contribute zero to a set
+that never asks. Same shape as the Bucket C question, unanswered.
 
-And the sharper one, from the doc side: correctness of every sentence does not
-imply correctness of the document, because the defect can be which sentences are
-PRESENT. Three deployed files carried the wrong mode's content after every line
-had been checked against the code. Review the output of a pipeline, never its
-input.
+## Open, needing a decision
+
+- **DWB-668: CORE is never searched.** The tier that never decays can never be
+  recalled. 86 of Archie_DWB's 106 rows are CORE, so most of that corpus is
+  unconsultable, and promotion at three fires is a one-way exit from retrieval.
+  Two rows are currently at `fired_count` 2. Decide whether CORE is meant to be
+  consulted before any code.
+- **DWB-665: no demote path off CORE.** A mis-promoted row is permanent. 668
+  and 665 together mean a lesson that proves itself three times is frozen in
+  every direction.
+- **IND is unswept and its reinforcement is OFF.** 195 scars, 310 keyworded
+  rows, none touched by the rule. `before and after` is live there on
+  Sylvie_IND #939. Turned off rather than left armed on a corpus nobody cleaned.
+- **Bucket C, computed as a lower bound, not acted on.** Rows that kept the
+  floor but lost their only route to their own situation. Four found inside the
+  frozen 30, zero of them correct recalls; Stan's #517, #542 and #495 are real
+  cases outside the set that the instrument structurally cannot see.
+- **DWB-666, DWB-643, DWB-664** unchanged and still open. 664's fill route is
+  incomplete and committed as in-flight.
+
+## The lesson the whole team converged on
+
+**A rule in your own memory is not a second person.** Four people broke the same
+rule in the act of applying it - a plural changed to a singular, `trim` losing
+`trimming`, a synonym added for the term being removed, a junk keyword written
+in the session that named the class. None was careless. The first pass lost three
+working recalls to it; the second replaced care with an assertion (import the
+previous set, refuse any write that is not a strict superset) and lost nothing.
+
+And the one that governs every number here: **a gate you satisfy with your own
+sentence measures reachability, not recall, and the flattering number arrives
+first.** Stan self-reported 6/9, rewrote the probes from the other end and got
+4/18 on the same rows. Every self-measured rate in this work is flattered the
+same way. The frozen set is the only instrument nobody could tune against.
 
 ## Team
 
-Shut down at Miles's request. Roster is DB-authoritative:
-`GET /api/projects/1/team`. Archie_DWB (13), Pam_DWB (14), Barry_DWB (21),
-Dolores (28), Stan (38) all participated and all have memory writes on record.
-CC teams do not survive a session; respawn via the full flow in
-`docs/team_lead_playbook.md` § 4a.
+Archie_DWB (13), Pam_DWB (14), Freddie (19), Barry_DWB (21), Sylvie (27),
+Dolores (28), Stan (38), Devin_DWB (188, new). All participants wrote memory
+this session. Roster is DB-authoritative: `GET /api/projects/1/team`.
