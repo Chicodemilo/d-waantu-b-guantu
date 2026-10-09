@@ -413,6 +413,77 @@ def require_reachable_keywords(
 # against zero in a hundred pairs is not a reversal, and the cure refuses good
 # single words. What has changed is that it is no longer defended by "we saw
 # none". ABSENCE ON A CONTROL SET IS NOT ABSENCE, and the control set was mine.
+#
+# AND THE PAIR CHANNEL'S MEMBERSHIP IS CORPUS-DEPENDENT, WHICH A FIXED TOKEN
+# LIST STRUCTURALLY CANNOT EXPRESS. This is the sharpest thing anyone said about
+# this rule and it came from another agent. The list above is calibrated on
+# general English, and it deliberately keeps real subjects out - `memory`,
+# `column`, `field`, `path`, `project`, `ticket`. That is correct everywhere
+# except INSIDE this project, where those same words are in every third
+# sentence, so a pair of them carries no more signal than `before i` does. The
+# ubiquitous words of a corpus are its own nouns, and no list of ordinary
+# English words can contain them without becoming too wide for every other
+# corpus.
+#
+# NO ROW ID IS CITED HERE, DELIBERATELY, AND THAT IS THE SECOND LESSON. Two
+# instances were cited for this claim within one hour and BOTH EXPIRED. The first
+# was handed over by another agent (a CORE row firing on `ticket` + `done`); by
+# the time it was checked the row had been re-keyworded and matched nothing. The
+# second was one this module cited after re-deriving it independently (`a path` +
+# `no project` on "what does gate status return for a project with no repo path")
+# and it went stale before the write-up finished, re-keyworded in the same pass.
+#
+# On a corpus people are actively editing, a cited row id is a claim with an
+# expiry nobody can see. So the claim is recorded as a PREDICATE plus the command
+# that re-derives it:
+#
+#     a row whose matching keywords are ALL single-token after stopword removal,
+#     firing on a sentence from backend/scripts/dwb669_offenders.py's controls
+#
+# Run it and you get today's instances. Trust the id in a comment and you get an
+# answer about a row that has moved.
+#
+# STOPWORD EROSION, which fell out of one of those instances and survives it
+# because it is about the mechanism rather than about a row. `a path` and
+# `no project` LOOK like two-word keywords and are not: `a` and `no` are
+# stopwords, so each reduces to ONE token, and a pair of them clears the floor
+# between them rather than either standing on its own. An author counting words
+# cannot see it, and it is invisible at exactly the moment terms are being
+# chosen - which is an argument for putting it in the write gate's refusal text
+# rather than only here.
+#
+# THE STAKES ARE HIGHER ON CORE THAN ON A SCAR: a junk pair on a scar decays
+# toward its floor, and on CORE it never decays at all. That exposure is bounded
+# rather than permanent only because DWB-665 built a demotion path.
+#
+# CORE IS SEARCHED. THIS IS LIVE, NOT CONDITIONAL, AND THIS PARAGRAPH SAID THE
+# OPPOSITE FOR HALF AN HOUR. The false version read "CORE is NOT currently
+# searched - SCAR_FAMILY is still scar-only - so this matters WHEN DWB-668 lands,
+# not today". `SCAR_FAMILY` IS still scar-only; that is simply not what the search
+# reads. DWB-668's design point was that the consultation population must not be
+# that constant, so it introduced `memory_consult.CONSULTED_TIERS`, which is
+# `(core, scar)`, and `match_scars` queries that. SCAR_FAMILY being unchanged is
+# what the fix LOOKS like, which is exactly why reading it as evidence is
+# persuasive and wrong.
+#
+# Evidence it is live rather than pending a deploy: uvicorn runs --reload, and
+# CORE #390 carries fired_count 1 against session 3360 - a CORE row recalled in
+# production, the only CORE row in the store with a fire.
+#
+# HOW THE FALSE LINE GOT HERE, because it is the same defect twice in one
+# afternoon and the second time was mine about my own module. I read
+# `tier.in_(SCAR_FAMILY)` in `match_scars` earlier in the day, which was true when
+# I read it, then concluded hours later from the CONSTANT'S value what the QUERY
+# does, without reopening the query. A conclusion asserted from a name with no
+# artifact behind it. The detection move is the one already written three
+# paragraphs up and in my own memory: open it, or say you have not.
+#
+# A NOTE ON THE EVIDENCE, because it is the same trap twice in one day. The
+# instance originally reported for this was #390 firing on `ticket` + `done`.
+# By the time it was checked, #390 had been re-keyworded and no longer fires at
+# all. The structural claim reproduced on a DIFFERENT row; the specific instance
+# did not. On a live corpus a cited row id expires, so the claim is recorded with
+# its predicate and a fresh instance rather than with the id someone handed over.
 _NON_SUBJECT_TOKENS = frozenset(
     {
         # From the refusal set these were derived from: every token of every

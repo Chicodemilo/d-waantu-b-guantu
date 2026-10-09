@@ -54,22 +54,31 @@ from app.database import SessionLocal  # noqa: E402
 from app.models.agent import Agent  # noqa: E402
 from app.models.agent_memory import AgentMemory  # noqa: E402
 from app.services import memory_consult  # noqa: E402
-from app.services.memory_scan import SCAR_FAMILY  # noqa: E402
+from app.services.memory_consult import CONSULTED_TIERS  # noqa: E402
 
 
 def _scar_population(db, agent_id: int):
     """The rows `consult_scars` actually searches, and nothing wider.
 
-    `tier.in_(SCAR_FAMILY)` is a single-element tuple since DWB-611: CORE is
-    NOT searched. Any denominator that includes it is the wrong population, and
-    a count without its population stated beside it is not comparable to
-    anyone else's count.
+    IT IS `CONSULTED_TIERS`, NOT `SCAR_FAMILY`, AND THIS LINE USED TO BE WRONG.
+    It read `tier.in_(SCAR_FAMILY)` with a comment saying "CORE is NOT searched",
+    which was true until DWB-668 and silently false afterwards. 668 deliberately
+    did NOT widen SCAR_FAMILY - it introduced `memory_consult.CONSULTED_TIERS`,
+    `(core, scar)`, and pointed the query at that instead - so SCAR_FAMILY being
+    unchanged is what the fix looks like rather than evidence about the search.
+
+    The consequence while it was wrong is the kind this probe exists to prevent:
+    `match_scars` was already searching CORE, so the HIT RATES were right, while
+    the population printed beside them was understated by 126 rows and the
+    `unmatchable` count was computed over the wrong set. A count with a wrong
+    population beside it is worse than a count with none, because it reads as
+    checked. Import the consultation's own constant so this cannot drift again.
     """
     return list(
         db.execute(
             select(AgentMemory)
             .where(AgentMemory.agent_id == agent_id)
-            .where(AgentMemory.tier.in_(SCAR_FAMILY))
+            .where(AgentMemory.tier.in_(CONSULTED_TIERS))
             .order_by(AgentMemory.id.asc())
         )
         .scalars()
@@ -123,7 +132,8 @@ def main() -> int:
         fired_before = _fired_total(db, args.agent_id)
 
         print(f"agent         {agent.id} {agent.name}")
-        print(f"population    {len(scars)} scars (tier in SCAR_FAMILY; CORE not searched)")
+        print(f"population    {len(scars)} rows (tier in CONSULTED_TIERS = "
+              f"{', '.join(t.value for t in CONSULTED_TIERS)})")
         print(f"unmatchable   {len(unmatchable)} (fewer than "
               f"{memory_consult._MATCH_TOKENS_REQUIRED} keyword tokens, can never match)")
         print(f"fired total   {fired_before} (before)")

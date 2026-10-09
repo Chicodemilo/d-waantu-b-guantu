@@ -35,8 +35,16 @@ are required - the first alone would delete `git checkout` and `shared tree`.
 Frozen 30 situations, written by the one agent not re-keywording, before anyone
 started, seen by no author:
 
-    recall any      4/30 -> 10 -> 19 -> 18 -> 17 -> 16
+    recall any      4/30 -> 10 -> 19 -> 18 -> 17 -> 18
     recall correct  4/30 ->  8 -> 14 -> 14 -> 14 -> 14
+
+The final any-number was reported as 16 and is 18. The probe imported
+`SCAR_FAMILY` and printed "CORE not searched" on every run, so every denominator
+it printed excluded CORE while the query was already searching it. The hit rates
+were right and the populations beside them were understated by up to 126 rows.
+The tool now imports `CONSULTED_TIERS` from the consultation itself so it cannot
+drift from the query again. **A count with a wrong population beside it is worse
+than a count with none, because it reads as checked.**
 
 **The correct number has not moved since pass two, through five corpus changes.
 Every step down in the any-number was a junk or borderline route dying.**
