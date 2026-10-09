@@ -393,14 +393,81 @@ class TestNothingAutomaticDemotes:
 
     def test_the_demote_service_has_exactly_one_caller_and_it_is_the_route(self):
         """A sweep that called this would be indistinguishable from the bug it
-        repairs. Asserted against the source rather than trusted."""
+        repairs. Asserted against the source rather than trusted.
+
+        IT WALKS THE AST FOR CALL SITES, NOT THE TEXT FOR THE NAME, and the
+        first version of this guard did the latter. A module docstring in
+        `memory_promote.py` that mentions `memory_demote.demote_from_core` in
+        prose - explaining that a way back from CORE now exists - was counted
+        as a caller, and the guard went red on a file containing no call at
+        all.
+
+        That matters more than the false red. A guard that matches prose
+        punishes DOCUMENTING the function, and the cheapest way to make it
+        green is to delete the explanation. A check whose easiest fix is to
+        make the system less legible will eventually be paid that way by
+        someone in a hurry.
+
+        It is also the exact inverse of a sweep that ran well an hour earlier:
+        grepping for a CLAIM rather than a file found two more stale copies of
+        it, which was right, because a claim lives in prose. Grepping for a
+        NAME rather than a CALL found one that was not there, because a call is
+        structure. Same tool, opposite error, and the question that separates
+        them is whether the thing being hunted is prose or structure.
+        """
+        import ast
         import pathlib
 
         app_dir = pathlib.Path(__file__).resolve().parent.parent / "app"
-        callers = sorted(
-            str(p.relative_to(app_dir))
-            for p in app_dir.rglob("*.py")
-            if "demote_from_core" in p.read_text(encoding="utf-8")
-            and p.name != "memory_demote.py"
+        callers = []
+        for path in app_dir.rglob("*.py"):
+            if path.name == "memory_demote.py":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = (
+                    func.attr
+                    if isinstance(func, ast.Attribute)
+                    else func.id
+                    if isinstance(func, ast.Name)
+                    else None
+                )
+                if name == "demote_from_core":
+                    callers.append(str(path.relative_to(app_dir)))
+                    break
+
+        # The assertion is its own positive control: a non-empty expected list
+        # means an AST walk that silently matched nothing fails here rather
+        # than passing perfectly, which is what an `== []` guard would do.
+        assert sorted(callers) == ["routers/agents.py"], sorted(callers)
+
+    def test_the_caller_guard_can_see_a_call_that_is_really_there(self):
+        """The control for the control. The walk above is only evidence if it
+        can find a call site at all - a traversal that matched nothing would
+        satisfy an equality against any list it happened to be given, and this
+        codebase has shipped that exact false green before."""
+        import ast
+
+        source = (
+            "from app.services import memory_demote\n"
+            "def f(db):\n"
+            "    return memory_demote.demote_from_core(db)\n"
         )
-        assert callers == ["routers/agents.py"], callers
+        found = [
+            n
+            for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "demote_from_core"
+        ]
+        assert len(found) == 1
+
+        # ... and it must NOT see the shape that broke the first version: the
+        # name in prose, with no call anywhere in the module.
+        prose = '''"""`memory_demote.demote_from_core` is the way back."""'''
+        assert not [
+            n for n in ast.walk(ast.parse(prose)) if isinstance(n, ast.Call)
+        ]
