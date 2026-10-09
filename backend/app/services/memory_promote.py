@@ -58,9 +58,20 @@ number in common.
 anywhere in the app, used by both directions core is ever reached:
 
 - Retiering an EXISTING AgentMemory row in place (this ticket's scar path -
-  `memory=` given, id and fired_count history survive, only tier and
-  context_key change; context_key is cleared because CORE is context-free by
-  definition).
+  `memory=` given, ONLY `tier` changes; id, fired_count history, session
+  references and `context_key` all survive).
+
+  DWB-665/668 REVERSED THE CONTEXT_KEY HALF OF THIS BULLET, and it is stated
+  here rather than only at the function, because this is the half of the file
+  a reader reaches first. It used to say "context_key is cleared because CORE
+  is context-free by definition". That was defensible while promotion was a
+  ONE-WAY DOOR: nothing came back from CORE, so a cleared value could never be
+  needed again. `memory_demote.demote_from_core` is the way back, and
+  destroying data that cannot be restored stopped being defensible the moment
+  one existed - a demotion can return a row's tier and cannot return a context
+  nobody kept. Rows promoted before 2026-10-09 have already lost theirs and
+  are not repaired; there is no backup column. See the function docstring for
+  what a demoted row with a NULL key does.
 - Creating a NEW row from content that has no AgentMemory row of its own yet
   (DWB-608's journal path - a JournalEntry is a different table, so promoting
   one to CORE has nothing to retier and must construct a row).

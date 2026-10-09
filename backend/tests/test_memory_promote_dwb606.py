@@ -199,8 +199,14 @@ class TestWrongSignalsDoNotPromote:
 
 
 class TestRetieringInPlace:
-    """"Broaden to CORE, remove from scars" (Miles) - the SAME row, not a
-    copy, and CORE is context-free so context_key must not survive."""
+    """"Broaden to CORE, remove from scars" (Miles) - the SAME row, not a copy.
+
+    DWB-665 REVERSED THE SECOND HALF OF THIS HEADER. It read "and CORE is
+    context-free so context_key must not survive", which is now the opposite of
+    what the test below asserts. The header survived the test being rewritten,
+    which is the drift this lane keeps finding: a class docstring is what a
+    reviewer trusts and nothing makes it fail.
+    """
 
     def test_promoted_row_keeps_its_id_and_fired_count_history(
         self, db_session, agent

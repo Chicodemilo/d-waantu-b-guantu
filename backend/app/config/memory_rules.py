@@ -1,7 +1,7 @@
 # Path: app/config/memory_rules.py
 # File: memory_rules.py
 # Created: 2026-06-10
-# Purpose: Single source of truth for the inline memory-usage rules surfaced in identify + spawn-prepare responses (DWB-352); DWB-560 makes them lessons-only; DWB-638 adds the human_memory variant so a sealed project is never handed stock instructions; DWB-661 states the required condensed + keywords fields on the lesson write
+# Purpose: Single source of truth for the inline memory-usage rules surfaced in identify + spawn-prepare responses (DWB-352); DWB-560 makes them lessons-only; DWB-638 adds the human_memory variant so a sealed project is never handed stock instructions; DWB-661 states the required condensed + keywords fields; DWB-667 adds `situation` and the reachability rule; DWB-669 adds the subject rule. This block is a WRITE instruction: it deliberately does NOT state that core and scar are both consulted, or that a CORE row can be demoted, because those are retrieval and re-tiering facts and the block has three characters of headroom
 # Caller: app/services/memory_mode.py (memory_usage_rules_for), app/services/agent.py (identify_agent, spawn_prepare_payload), app/services/agent_memory.py (identity.md)
 # Callees: -
 # Data In: -
@@ -37,7 +37,8 @@ per-route replacement (`memory_mode._WRITE_REPLACEMENT`), so the specific
 mapping is served at the moment it is needed rather than memorised in advance.
 The playbooks under `docs/` name all four explicitly, where length is free.
 
-Hard contract: each constant is <= 700 chars (600 until DWB-661; see the
+Hard contract: each constant is <= 1600 chars (600 until DWB-661, then 1050 in
+DWB-667, then 1600 for DWB-669's subject rule; every move trimmed first; see the
 cap block at the bottom for why it moved and in what order). The module
 asserts this at import time so a future edit that overflows fails the test
 run instead of silently bloating the response.
@@ -62,7 +63,8 @@ MEMORY_USAGE_RULES: str = (
 # other, never both, because two sets of memory instructions that both look
 # authoritative is the exact failure DWB-589 exists to prevent.
 #
-# DWB-661 adds `condensed` and `keywords`, both REQUIRED on the lesson write
+# DWB-661 adds `condensed` and `keywords`; DWB-667 adds `situation`; all four
+# REQUIRED on the lesson write, and DWB-669's subject rule refuses separately
 # (DWB-657 refuses the write at 400 without them). They are named here and not
 # left to the refusal alone because this block is the only memory instruction
 # some agents ever read, and a required field an agent does not know about

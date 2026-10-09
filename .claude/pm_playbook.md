@@ -113,6 +113,12 @@ explains the worst baseline on the team - `ORM model edit`, `migration proof`,
 nothing. Carrying both inflections is not keyword stuffing on an unstemmed matcher, it
 is the correct index, and it cost zero false fires in a ten-situation negative sweep.
 
+AND COUNT TOKENS, NOT WORDS. `a path` and `no project` look like two-word keywords and
+are not: `a` and `no` are ignored, so each reduces to a SINGLE token, neither stands
+alone, and a pair of them clears the floor between them. An author counting words
+cannot see it, and it bites hardest in the very shape the rule above recommends, so
+check offline rather than counting.
+
 WIDENING HAS TWO MEASURED COSTS. A very wide set erodes what the gate PROVES: every
 keyword must appear in the situation line, so a 16-term set turns that line into prose
 plus an appended vocabulary clause, and for those terms the gate becomes
@@ -121,7 +127,11 @@ three shapes buy junk while looking safe: two ordinary PROJECT words together (`
 ticket` on "the wrong colour on the ticket card"); two ordinary ENGLISH words together,
 which is worse because the pair clears the floor by itself and fires on ordinary prose
 (`before i` on "the epic needs a description before I create it", same family as `show
-me` and `every agent`); and bare generic single words (`gate`, `test`, `check`,
+me` and `every agent`) - that third shape is no longer advice, it is REFUSED at write
+time as `keyword_fires_without_subject` (DWB-669), on the write, fill and rekey routes
+alike, and the check is independent of the situation line because a junk keyword is
+MORE likely to appear in its own author's sentence, not less; put the subject in and
+`before i edit` and `new column` both pass. And bare generic single words (`gate`, `test`, `check`,
 `report`) which cannot fire alone but pair up by accident across a corpus. Declining to
 ADD a junk route is not narrowing, so none of this conflicts with widen-never-narrow.
  Two mechanics decide reachability:

@@ -262,8 +262,12 @@ def scan_context(db: Session, memory: AgentMemory) -> ContextLiveness:
     # - 251 of 285 on DWB, 130 of 170 on IND. One project's team lead had 39
     # promoted in a two-second batch at its next spawn, including 13 standing
     # human rulings and a credential authorization, none of them human-ruled
-    # into CORE. The promotion also CLEARS `context_key`, which is why the
-    # rows afterwards look like they never had one.
+    # into CORE. Promotion ALSO CLEARED `context_key` at the time, which is why
+    # those rows afterwards look like they never had one - and it is why that
+    # NULL is not evidence this path did not run. DWB-665 stopped the clearing
+    # (see `memory_promote.promote_to_core`), so a row promoted AFTER
+    # 2026-10-09 keeps its key and the tell described here no longer appears.
+    # The 39 rows above were promoted before that and their keys are gone.
     #
     # THE FIX IS THE MODULE'S OWN RULE, APPLIED TO THE THIRD CASE. The
     # docstring already says it for an unresolvable project: "`cannot_die` is

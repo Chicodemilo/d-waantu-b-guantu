@@ -188,7 +188,7 @@ becomes `working`.
 
 **Tag what the moment actually knew, and nothing else.** Do not reach for `high` to
 keep a lesson alive. The `working` default is a structural safety property rather
-than a demotion: `working` sits outside the scar family, so it is never consulted,
+than a demotion: `working` is outside the consulted tiers, so it is never searched,
 so its fired count never rises, so an unjudged note can never be promoted to `core`,
 the tier that never decays. Inflating your tags does not protect a lesson, it
 disables the one mechanism that stops scratch notes becoming permanent.
@@ -329,6 +329,17 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
   3. **Bare generic single words** - `gate`, `test`, `check`, `report`, `file`, `key`.
      One alone cannot fire, which is what makes them feel free. Two of them in one
      situation fires the row, and a corpus full of them pairs up by accident.
+  4. **STOPWORD EROSION: count TOKENS, not words.** `a path` and `no project` look
+     like two-word keywords and are not - `a` and `no` carry no retrieval signal,
+     so each one reduces to a SINGLE token. Neither stands on its own, and a pair
+     of them clears the floor between them rather than either earning it. The full
+     ignored set is `a an and are as at be by for from in is it no not of on or
+     that the this to vs with`. **You cannot see this by looking at your keyword**,
+     which is why it is worth checking offline rather than counting words. Note
+     what it does NOT contradict: preferring several short keywords is still
+     right, and this is the one way that advice misfires - a short keyword built
+     out of filler is not a short keyword, it is half of one. Widen with the
+     nouns of the situation, not with the words between them.
 
   **Declining to ADD a junk route is not narrowing**, so this costs you nothing against
   the widen rule. Widen with the nouns of the situation; do not widen with filler.
@@ -613,7 +624,7 @@ curl -X POST http://localhost:8000/api/agents/{your_agent_id}/memories \
        "cost": "low", "caught_by": "me"}'
 ```
 
-`condensed`, `keywords` and `situation` are REQUIRED (DWB-657, DWB-667): omit or blank any of them and the write is refused with 400 and nothing lands, which at close means you still have no write on record. `condensed` is one line carrying THE LESSON and not the setup. `keywords` are the words that will be in the air when you are IN the situation, never a label for what the lesson is about: `git checkout` / `shared tree`, not `self-exempt` / `decompose-the-count`. `situation` is the one line they are matched against, with the same comparison retrieval uses, so a keyword your own sentence does not contain is refused. `cost` and `caught_by` are enums (`none|low|high`, `me|worker|human|ci`); prose in either one is a 422, and any `tier` at all is a 400. Those three are optional, and they are also what picks your tier, so tag what the moment knew rather than what you want the score to be (see Memory Writes above).
+`condensed`, `keywords` and `situation` are REQUIRED (DWB-657, DWB-667): omit or blank any of them and the write is refused with 400 and nothing lands, which at close means you still have no write on record. `condensed` is one line carrying THE LESSON and not the setup. `keywords` are the words that will be in the air when you are IN the situation, never a label for what the lesson is about: `git checkout` / `shared tree`, not `self-exempt` / `decompose-the-count`. `situation` is the one line they are matched against, with the same comparison retrieval uses, so a keyword your own sentence does not contain is refused. A SECOND refusal runs independently of your situation line (DWB-669): a keyword made entirely of ordinary words that name no subject, but carrying enough tokens to fire on its own, is rejected - `before i`, `show me`, `every agent`, `new file`. It fires on any sentence containing the phrase whatever that sentence is about, and your own situation line will not catch it, because an author who wrote `before i` has written "before I" in the sentence beside it. Put the subject in: `before i edit` is accepted, `new column` is accepted. Widening your keyword set is still right; this is the one widening that is not free. `cost` and `caught_by` are enums (`none|low|high`, `me|worker|human|ci`); prose in either one is a 422, and any `tier` at all is a 400. Those three are optional, and they are also what picks your tier, so tag what the moment knew rather than what you want the score to be (see Memory Writes above).
 
 A DWB session must be open or this write is refused with 400 and nothing lands. You cannot open one; tell the TL. Nothing is lost on the refusal: re-send the identical request once a session is open.
 <!-- human-memory-only:end -->
@@ -646,6 +657,12 @@ There is nothing to curate and no ceiling to curate against. Decay and consolida
 When done, message the TL: what you did, files changed, anything unexpected, whether changes are staged/committed or unstaged. Keep it concise, the TL reads the diff.
 
 **`in_review` is your terminal state.** Do not flip your ticket to `done` (TL-only after review) and do not mark your team-board task completed; the TL flips the board task when the review verdict lands. A board that says "completed" before review makes the TL's queue lie. Hand off, message, stand by.
+
+**Put a fingerprint beside every number.** When you report a count, a hit rate or a sweep result taken over the live store, record what state you measured next to the number itself: a population size, a max `updated_at`, a hash, whatever re-identifies the thing you read. A number without its state is a claim with an invisible expiry.
+
+This is not a precaution against carelessness. The corpus moved under a reading four times in one day, across three people, and **every one was caught by two readings disagreeing, never by anyone being careful**: a probe disagreeing with a simulation of it, a sweep finding 44 rows and then 0, a cited row re-keyworded after it was measured, and a row edited underneath the person writing it up. A live store with five agents on it is not a stable object, and the interval between your measurement and your sentence about it is long enough for the object to change.
+
+**On a live corpus, do not cite a row id as evidence.** Record the PREDICATE and the command that re-derives it - "the 12 rows where `keywords` contains a two-token term with no subject, as of 595 scars" beats "rows 627 and 762", because the predicate still finds the right rows after someone edits them and the ids do not. Two different rows were cited for the same claim in one hour and both were edited out from under the citation before it was finished. The same discipline applies to a file: cite the symbol, and treat the line number as a hint that expires.
 
 ## Scoring (DWB-424..427)
 

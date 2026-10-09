@@ -88,6 +88,12 @@ explains the worst baseline on the team - `ORM model edit`, `migration proof`,
 nothing. Carrying both inflections is not keyword stuffing on an unstemmed matcher, it
 is the correct index, and it cost zero false fires in a ten-situation negative sweep.
 
+AND COUNT TOKENS, NOT WORDS. `a path` and `no project` look like two-word keywords and
+are not: `a` and `no` are ignored, so each reduces to a SINGLE token, neither stands
+alone, and a pair of them clears the floor between them. An author counting words
+cannot see it, and it bites hardest in the very shape the rule above recommends, so
+check offline rather than counting.
+
 WIDENING HAS TWO MEASURED COSTS. A very wide set erodes what the gate PROVES: every
 keyword must appear in the situation line, so a 16-term set turns that line into prose
 plus an appended vocabulary clause, and for those terms the gate becomes
@@ -151,9 +157,10 @@ it when you brief people rather than when you close:
   row, becomes `working`.
 
 **Do not tell a worker to tag `high` so their lesson survives.** The `working` default
-is a structural guard: `working` sits outside the scar family, is never consulted,
+is a structural guard: `working` is outside the consulted tiers, is never searched,
 never raises a fired count, and so can never be promoted to `core`, the tier that never
-decays. Inflating tags disables the one mechanism stopping scratch notes from becoming
+decays. `core` and `scar` are both consulted (DWB-668), so a promoted lesson stays
+reachable instead of leaving retrieval, and `core` can be left by its owner. Inflating tags disables the one mechanism stopping scratch notes from becoming
 permanent. Brief it as "tag what the moment actually knew".
 
 **One operational consequence for you.** A `/memories` write REQUIRES an open DWB

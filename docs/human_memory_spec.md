@@ -262,8 +262,24 @@ reset and never nears its floor; one that never fires drifts down honestly.
 This is spaced repetition with per-type floors. The parameters are tunable against real data
 rather than argued about.
 
-⚠️ **Unsolved in the prototype:** there is no clock. Nothing records `created_at` or
-`last_reinforced` per memory, so every number above needs the row model, not the blob.
+**WHAT MAKES A MEMORY FIRE (DWB-644, 2026-10-09).** Firing is a match against the lesson's own
+author-written `keywords`, tested against a description of the situation the agent is in. The
+lesson BODY is never searched. The relation used to run the other way - a slice of the prompt
+was looked for inside the body as a substring - and anything describing it that way is
+describing code that no longer exists.
+
+The rule, in `memory_consult`: a keyword matches when EVERY token it carries is present in the
+situation, nothing is stemmed, and the lesson fires once the situation supplies **two distinct
+keyword tokens**. Two is the whole mechanism, because one shared ordinary word is coincidence.
+Both honest shapes clear it: one two-word keyword fully present, or two separate single-word
+keywords both present. A row whose keywords contribute fewer than two tokens in total is
+reported as `unmatchable` rather than counted as searched-and-not-found - it could not have
+matched whatever the situation said.
+
+The clock is no longer unsolved. `created_session_id`, `last_reinforced_session_id`,
+`fired_count` and `created_at` are all columns on `agent_memories`, and DWB-637 refuses a write
+with no session origin, because a row with no clock origin cannot be scored and would read as
+stored while behaving as lost.
 
 ## 4. Encode raw, consolidate at the boundary
 
@@ -272,6 +288,39 @@ rather than argued about.
 
 **Append RAW and unsorted during a session.** No tiering. Tiering in the moment rubber-stamps
 in-the-moment salience, which is the judgment consolidation exists to make.
+
+**THE WRITE CARRIES FOUR REQUIRED FIELDS, and the server refuses it without them.**
+`POST /api/agents/{id}/memories` takes `body`, `condensed`, `keywords` and `situation`, all
+required in effect (DWB-657, DWB-667). They are declared optional in the schema ON PURPOSE, so
+that an author who omits one gets a 400 explaining what to write rather than pydantic's generic
+"Field required" - these are the one part of a memory an extractor cannot produce.
+
+- `condensed` is ONE line that IS the lesson, not the setup. It is written by the author and is
+  never derived from the body; a second thought about a lesson is a new lesson with its own
+  `created_at`, which is why no route revises it.
+- `keywords` are the words that will be in the air when the agent is IN that moment, never a
+  label for what the lesson is about.
+- `situation` is one line naming that moment, in the author's own words, and the keywords are
+  matched against it **with the same comparison retrieval will later use**. So a keyword the
+  author's own sentence does not contain is refused at write time: passing the gate IS being
+  recalled once, by a sentence the author wrote.
+
+Two gates run on every write, and they answer different questions - neither covers the other:
+
+1. **Reachability** (DWB-667). Every keyword must match the author's own situation line, and
+   the set must contribute at least two matchable tokens in total. A keyword that no situation
+   could ever reach is the same outcome as no keyword at all, and only one of them used to be
+   refused.
+2. **The subject rule** (DWB-669). A keyword that clears the two-token floor BY ITSELF while
+   naming no subject is refused, independent of the situation line. `before i` fires on any
+   first-person sentence; `before i edit` is accepted, because `edit` names the thing. This
+   gate is deliberately independent, because a junk keyword is MORE likely to appear in its
+   own author's situation line, not less.
+
+The same two gates run on the fill route (DWB-664) and on re-keywording (DWB-667), so there is
+no path that can store a keyword set the write gate would have refused. One exception, stated
+rather than discovered later: filling `situation` ALONE runs reachability and not the subject
+rule, because no keywords are being supplied to judge.
 
 **Tag only what the moment knows** and cannot later be reconstructed:
 
@@ -417,8 +466,13 @@ authoritative and disagree.**
    every time, so anything landing there must be something every agent needs on every turn.
 4. **Anything leaving memory lands in the journal first.** Journal, then rewrite. Losing it in
    flight is the one unrecoverable mistake in the design.
-5. **CORE is never touched by automatic consolidation.** Only a human retires a ruled entry;
-   only logged cross-context evidence adds a graduated one.
+5. **CORE is never touched by automatic consolidation.** Only logged cross-context evidence
+   adds a graduated entry, and nothing automatic takes one off the tier. Leaving CORE is a
+   deliberate, attributed act: `memory_demote.demote_from_core` is owner-only, requires a
+   written reason, and is journaled. **Owner means the owning AGENT, not only the human** - an
+   agent may re-tier its own CORE row and no agent may re-tier another's, the same policy
+   withdrawal and re-keywording already use. There is deliberately no automatic demotion
+   nomination keyed on `fired_count`.
 6. **A tool invoked for one tier still owns the whole-file total.** Per-tier tools each
    reporting "my tier is fine" while the file blows its ceiling is the obvious failure, and the
    promotion path between tiers otherwise belongs to nobody.
@@ -477,8 +531,17 @@ does one ticket and dies.
 
 ## 10. Known weaknesses
 
-- **No clock and no reinforcement counter in the prototype.** Fade stays editorial until
-  memories are rows.
+- **The clock and the reinforcement counter SHIPPED, and the open question moved.** Memories
+  are rows: `created_session_id`, `last_reinforced_session_id` and `fired_count` all exist and
+  the score is derived from them. What is still unproven is whether the fade is EARNED - a
+  large shrink can happen with zero demotions on evidence, because removing material that
+  should never have been written is cleanup, not decay.
+- **A lesson can be stored correctly and still be unreachable.** Retrieval depends on the
+  author's keywords matching a future situation, so a keyword written as a filing label is a
+  lesson that never fires. The write gate now refuses the two shapes that are decidable
+  (DWB-667, DWB-669), but a lesson whose moment is normally named in ONE word cannot be reached
+  at all under a two-token floor, whatever its author does. That is the honest limit of the
+  approach rather than a defect in it.
 - **Consolidation is a judgment rewrite, not a transform.** A hook can prompt it; it cannot
   perform it. No version of this is fully automatic.
 - **Context-death detection is unsolved** (§2).
