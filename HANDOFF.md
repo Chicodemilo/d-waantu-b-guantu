@@ -50,6 +50,20 @@ drops cost no recall ON THAT SET. A term doing real work for a situation nobody
 probed scores the same as a dead one, because both contribute zero to a set
 that never asks. Same shape as the Bucket C question, unanswered.
 
+## One correction worth inheriting
+
+The subject rule was reported twice, in writing, as refusing `before and after`.
+It did not - `after` had never been added to the list, and the function was
+never called on the keyword. The store-wide sweep reported zero offenders while
+that keyword sat live on IND. Fixed, and the account is in the module beside the
+word. **A rule's test suite only contains the cases somebody thought to write
+down**, so the tests passed either way.
+
+`test_memory_recession_dwb623::test_several_agents_wrapping_up_concurrently_still_terminates`
+is load-sensitive, not broken: it compares timestamps across a 1.5s gap against
+MySQL second-rounding and fails when something else is hitting the same MySQL.
+Passes alone and on a clean full run.
+
 ## Open, needing a decision
 
 - **DWB-668: CORE is never searched.** The tier that never decays can never be
