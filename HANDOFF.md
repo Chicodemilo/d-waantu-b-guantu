@@ -73,16 +73,37 @@ is load-sensitive, not broken: it compares timestamps across a 1.5s gap against
 MySQL second-rounding and fails when something else is hitting the same MySQL.
 Passes alone and on a clean full run.
 
+## The second half, shipped the same day
+
+**CORE is consulted now.** It never was: promotion at three firings removed a
+lesson from the only path that could recall it, permanently, because there was
+no way back. A CORE row has since fired in production on DWB - #390, the lesson
+about thirteen tickets meeting their criteria while the feature did not exist.
+The two rows that were one fire from being silenced are now one fire from being
+promoted and staying searchable. The reward stopped being the punishment.
+
+`demote_from_core` exists, owner-only, reason required, journals the ruling
+before moving the tier. `promote_to_core` no longer clears `context_key`.
+
+**CORE was the untouched pre-667 corpus** - no re-keywording worksheet ever
+included it, 2 of 126 reachable against 56 of 604 scars. All 86 DWB rows (mine)
+are re-keyworded; the other 39 are IND's and 1 is an orphan probe, so DWB's CORE
+is complete.
+
+**A service edit on this box IS a deploy.** uvicorn runs `--reload`, so
+`CONSULTED_TIERS` went live the moment it was saved, with no gate between an
+edit and production. That is how #390 fired before anyone reported the change.
+
 ## Open, needing a decision
 
-- **DWB-668: CORE is never searched.** The tier that never decays can never be
-  recalled. 86 of Archie_DWB's 106 rows are CORE, so most of that corpus is
-  unconsultable, and promotion at three fires is a one-way exit from retrieval.
-  Two rows are currently at `fired_count` 2. Decide whether CORE is meant to be
-  consulted before any code.
-- **DWB-665: no demote path off CORE.** A mis-promoted row is permanent. 668
-  and 665 together mean a lesson that proves itself three times is frozen in
-  every direction.
+- **DWB-672: the subject rule is calibrated on general English** and this corpus
+  is made of project nouns. `ticket`, `done`, `sprint`, `review` carry a subject
+  everywhere except here. Junk climbed 0/20 to 1/20 on CORE through a bare-generic
+  PAIR, which DWB-669 criterion 4 recorded as not-enforced on the defence "we saw
+  none" - now falsified twice, in two corpora. The decision may still be right on
+  cost; the defence is gone.
+- **DWB-671: delete_agent 500s on journal entries**, and delete_project strands
+  tiered rows with no clock origin. Four exist, all probe rows with journal copies.
 - **IND is unswept and its reinforcement is OFF.** 195 scars, 310 keyworded
   rows, none touched by the rule. `before and after` is live there on
   Sylvie_IND #939. Turned off rather than left armed on a corpus nobody cleaned.
