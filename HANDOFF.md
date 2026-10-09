@@ -50,6 +50,15 @@ drops cost no recall ON THAT SET. A term doing real work for a situation nobody
 probed scores the same as a dead one, because both contribute zero to a set
 that never asks. Same shape as the Bucket C question, unanswered.
 
+## The evidence that is not self-measured
+
+After the freeze lifted, nine memory rows were written by five independent
+authors through both gates. ZERO carry a subjectless keyword, ZERO are below
+the match floor, and nobody had to work around a refusal. Store-wide sweep on a
+fresh connection afterwards: DWB 403 scars, zero offenders; IND one, the
+unswept project. That is the first evidence in either ticket that is not an
+instrument measuring itself.
+
 ## One correction worth inheriting
 
 The subject rule was reported twice, in writing, as refusing `before and after`.
