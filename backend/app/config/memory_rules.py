@@ -5,8 +5,8 @@
 # Caller: app/services/memory_mode.py (memory_usage_rules_for), app/services/agent.py (identify_agent, spawn_prepare_payload), app/services/agent_memory.py (identity.md)
 # Callees: -
 # Data In: -
-# Data Out: MEMORY_USAGE_RULES: str, HUMAN_MEMORY_USAGE_RULES: str (each <=700 chars, enforced at import time)
-# Last Modified: 2026-10-08 (DWB-661: condensed + keywords stated as required in HUMAN_MEMORY_USAGE_RULES; cap 600 -> 700; the stock constant is unchanged)
+# Data Out: MEMORY_USAGE_RULES: str, HUMAN_MEMORY_USAGE_RULES: str (each <=1600 chars, enforced at import time)
+# Last Modified: 2026-10-09 (DWB-667: `situation` stated as required, and the reachable/unreachable keyword contrast carried inline; cap 700 -> 1050; the stock constant is unchanged)
 
 """Inline memory-usage rules for agent spawn responses (DWB-352).
 
@@ -69,13 +69,29 @@ MEMORY_USAGE_RULES: str = (
 # costs it a round trip on its first write of the session.
 HUMAN_MEMORY_USAGE_RULES: str = (
     "HUMAN_MEMORY MODE: stock memory.md is SEALED. Every stock write route\n"
-    "409s and writes nothing; the 409 names the replacement.\n"
-    "DURABLE LESSONS ONLY: no ticket ids, dates, counts or status.\n"
-    "- Lesson: POST /api/agents/{id}/memories. {body, condensed, keywords}\n"
-    "  ALL REQUIRED else 400. condensed = ONE line that IS the lesson, not\n"
-    "  the setup. keywords = two or three. Optional cost:'none|low|high',\n"
-    "  caught_by:'me|worker|human|ci', surprised:bool; enums not prose (422),\n"
-    "  no tier (400).\n"
+    "409s and writes nothing; the body names the replacement.\n"
+    "DURABLE LESSONS ONLY: no ticket ids, dates, counts, status.\n"
+    "- Lesson: POST /api/agents/{id}/memories.\n"
+    "  {body, condensed, keywords, situation} ALL REQUIRED else 400.\n"
+    "  condensed = ONE line that IS the lesson, not the setup.\n"
+    "  keywords = the words in the air when you are IN that moment, NOT a\n"
+    "  label for what the lesson is about. Reachable 'git checkout',\n"
+    "  'shared tree'; unreachable 'self-exempt', 'decompose-the-count'.\n"
+    "  No stemming, every token must be present, two distinct needed\n"
+    "  across ANY keywords - so SEVERAL SHORT keywords beat one precise\n"
+    "  phrase, and carry both forms typed (doc/docs): a wrong-form\n"
+    "  keyword is as dead as a label and LOOKS right.\n"
+    "  But NEVER index a phrase not about your subject: two ordinary\n"
+    "  words clear the floor BY THEMSELVES and fire on any prose\n"
+    "  ('before i', 'show me'). Bare 'gate'/'test' cannot fire alone\n"
+    "  but pair up by accident. Not adding junk is not narrowing.\n"
+    "  situation = one line naming that moment. Keywords match it with\n"
+    "  retrieval's OWN comparison, so one your sentence lacks is refused.\n"
+    "  WRITE THE SITUATION FIRST, read keywords out of it.\n"
+    "  Check offline, writes nothing:\n"
+    "  keyword_reachability.require_reachable_keywords(keywords,situation)\n"
+    "  Optional cost:'none|low|high', caught_by:'me|worker|human|ci',\n"
+    "  surprised:bool; enums not prose (422), no tier (400).\n"
     "- Episode: POST /api/journal {agent_id, body, tags}\n"
     "- Read: GET /api/agents/{id}/memory/scored\n"
     "/memories satisfies write-on-close. No ceiling."
@@ -97,7 +113,97 @@ HUMAN_MEMORY_USAGE_RULES: str = (
 # on, so the number moved rather than the content. That is the order to repeat:
 # trim to the floor, then move the cap by exactly what the floor needs. A cap
 # that rises to meet whatever was written has stopped being a cap.
-MEMORY_USAGE_RULES_MAX_CHARS = 700
+#
+# DWB-667 MOVED IT 700 -> 1050, SAME ORDER, AND THIS IS THE BIG ONE SO THE
+# ARGUMENT HAD BETTER BE GOOD. What was added is `situation` and, crucially, a
+# WORKED CONTRAST between a reachable keyword and a filing label. The contrast
+# is the content: "keywords are the words that will be in the air" is a sentence
+# every author already believes it is following, and 288 live scars were written
+# by authors who believed exactly that. Only the pair - 'git checkout' beside
+# 'self-exempt' - changes what the next one writes. A rule stated without its
+# counter-example is the version that produced those rows.
+#
+# THE TRIM CAME FIRST AGAIN, and it was measured. The first draft stating all of
+# it ran 1112; cutting the redundant phrasing around the mechanics (not the
+# mechanics) brought it to 1041, and no further cut removed anything an agent
+# acts on. The cap is 1050 rather than 1041 so an unrelated word does not fail
+# the build, and rather than 1200 so that the next addition has to make this
+# argument again.
+#
+# IT MOVED AGAIN, 1050 -> 1350, IN THE SAME TICKET, AND THAT NEEDS SAYING OUT
+# LOUD RATHER THAN SLIPPING THROUGH AS A SECOND BUMP. The first move carried the
+# RULE. Four agents then re-keyworded 207 rows against that rule and sent back two
+# things the rule did not contain, both found by running rows rather than by
+# reading it:
+#
+#   INFLECTION, not labels, is the hard half. Getting from 'absence-defect' to
+#   situational words is easy. Knowing whether the typed form is 'doc' or 'docs',
+#   'trim' or 'trimming' is not, nothing is stemmed, and a situational keyword in
+#   the wrong form is exactly as dead as a filing label while LOOKING correct -
+#   which is worse, because re-reading it tells you nothing. Carrying both forms
+#   costs one array entry and is the whole fix.
+#
+#   WRITE THE SITUATION FIRST and read the keywords out of it. Two agents arrived
+#   at that independently from opposite directions, and it is what the gate
+#   structurally enforces anyway.
+#
+# Plus the offline check, which turns learning this contract from a sequence of
+# 400s into one local call; one agent checked all 44 of its rows that way and sent
+# zero failing requests.
+#
+# A cap that rises to meet whatever was written has stopped being a cap, so: the
+# addition is 302 chars against a 300-char move, the trim was done first again
+# (the duplicated "every token must be present" clause was absorbed rather than
+# appended), and the test pinning the literal must be edited in the same commit.
+#
+# THIRD MOVE, 1350 -> 1600, AND A THIRD MOVE IN ONE TICKET NEEDS MORE THAN THE
+# USUAL ARGUMENT. Here it is.
+#
+# WHAT FORCED IT. The second move added Barry's rule - several short keywords beat
+# one precise phrase - which is correct and is the single most useful mechanical
+# line in this block. Measuring the pass that followed it showed what it produces
+# when shipped WITHOUT its failure mode: keywords like 'before i' and 'show me',
+# which are two ordinary English words, so they clear the two-token floor BY
+# THEMSELVES and fire on any first-person prose. On twenty negative controls drawn
+# from this project's own vocabulary, 'before i' fired on "the epic needs a
+# description before I create it". Bare 'gate', 'test' and 'check' spread across
+# the corpus the same way; one cannot fire alone, which is exactly what makes them
+# feel free, and two in one situation fires the row.
+#
+# SO THE QUALIFIER IS NOT AN ADDITION TO THE ADVICE, IT IS PART OF IT. Shipping
+# "widen" in the block that some agents read INSTEAD of the playbook, while the
+# measured way widening goes wrong lives only in the playbook, is this file's own
+# counter-example rule broken by this file. That is the whole reason the contrast
+# pair is in here rather than only in docs/.
+#
+# WHAT I TRIED FIRST, because trim-before-bump has to be more than a sentence. The
+# qualifier is 249 chars as shipped and the slack was 2. My first draft of it ran
+# 297 and the import-time assert refused the file at 1645 against a cap I had just
+# set to 1600 - I had costed the move from a draft I then rewrote. The assert is
+# the only reason that number and this comment agree, which is the argument for
+# having it. Compressing the reachable/unreachable
+# contrast recovers about 25; the situation sentence about 3; the sealed-routes line
+# about 2. Dropping `- Read: GET /api/agents/{id}/memory/scored` would recover 43
+# and is the only sizeable cut left - it is NOT taken, because a route an agent
+# cannot find is the defect this block exists to prevent, and trading a route for
+# prose is the wrong direction. There is no cut of ~160 chars that does not delete
+# something an agent acts on, so the number moved rather than the content, for the
+# third time, by measurement rather than by drafting.
+#
+# ONE THING FOR WHOEVER READS THIS NEXT. This block is now 1597 chars against the
+# stock variant's 593. It has stopped being a quick card and is becoming a short
+# playbook. That is a shape question - whether the inline block should carry worked
+# examples at all, or state rules and point at docs/ - and it is deliberately NOT
+# answered here by a fourth trim or a fourth bump. It wants a decision, not another
+# edit to this constant.
+#
+# WHY THIS BLOCK AND NOT ONLY THE PLAYBOOK: this is the only memory instruction
+# some agents ever read. It reaches more of them than any markdown file does,
+# because identify and spawn-prepare paste it into all of them, and a behaviour
+# rule with a second home in a code generator goes stale silently. The playbooks
+# under docs/ carry the same contrast at length; if the two ever disagree, the
+# API is the tiebreak.
+MEMORY_USAGE_RULES_MAX_CHARS = 1600
 for _name, _rules in (
     ("MEMORY_USAGE_RULES", MEMORY_USAGE_RULES),
     ("HUMAN_MEMORY_USAGE_RULES", HUMAN_MEMORY_USAGE_RULES),

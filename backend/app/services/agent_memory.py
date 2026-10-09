@@ -16,7 +16,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-from app.models.project import Project
+from app.models.project import MemoryMode, Project
 from app.services import memory_mode
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,11 @@ class ScaffoldResult:
     refreshed: list[str] = field(default_factory=list) # system-generated files re-written
     skipped: bool = False
     skip_reason: str | None = None
+    # DWB-662: agent-owned files NOT created, and why. Reported rather than
+    # silently omitted - a caller comparing `created` across projects would
+    # otherwise see a shorter list with no explanation, which is the quiet
+    # version of the bug this field exists to document.
+    not_created: list[str] = field(default_factory=list)
 
 
 class ScaffoldError(Exception):
@@ -224,11 +229,42 @@ def scaffold_agent_dir(db: Session, agent_id: int) -> ScaffoldResult:
                 agent.id, exc_info=True,
             )
 
-    # Agent-owned files - touch only if missing
+    # Agent-owned files - touch only if missing.
+    #
+    # DWB-662: NOT CREATED AT ALL ON A `human_memory` PROJECT. The file is
+    # SEALED there (spec section 7 hard rule 1), so every stock memory route
+    # returns 409 at app/routers/agents.py:408 BEFORE it reaches the
+    # filesystem. A zero-byte memory.md on such a project is therefore a file
+    # that can never be read and can never be written - it exists only to be
+    # ignored.
+    #
+    # It was not harmless. `test_memory_format_dwb594.py::
+    # test_headings_survive_as_context_not_as_entries` reads every live
+    # memory.md as a corpus and requires each to carry a heading chain, so an
+    # empty one fails PERMANENTLY from the moment the agent spawns - a red that
+    # names a person and implicates nothing they did, and one more with every
+    # future spawn on DWB or IND.
+    #
+    # FIXED HERE AND NOT AT A CALLER: there are six call sites
+    # (agent.create_agent and two others, project_agent assign, the
+    # scaffold-agents and scaffold-memory endpoints, and playbook_deploy), so a
+    # fix at any one of them leaves five open.
+    #
+    # `adopting` IS DELIBERATELY NOT INCLUDED. Mid-adoption the stock file is
+    # the SOURCE being read - memory_adopt snapshots and splits it - so
+    # withholding it there would break the migration this mode exists to
+    # perform. Only a fully sealed project skips.
+    #
+    # EXISTING FILES ARE UNTOUCHED either way: the `exists()` branch below
+    # preserves them, so this changes what is created and never what is there.
+    seals_memory_md = project.memory_mode == MemoryMode.human_memory
     for fname in _AGENT_OWNED_FILES:
         path = memory_dir / fname
         if path.exists():
             result.preserved.append(str(path))
+            continue
+        if seals_memory_md:
+            result.not_created.append(str(path))
             continue
         try:
             path.touch()

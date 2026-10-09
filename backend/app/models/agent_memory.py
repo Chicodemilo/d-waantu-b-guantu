@@ -10,7 +10,9 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: AgentMemory, MemoryTier, MemoryCost, MemoryCaughtBy
-# Last Modified: 2026-09-30 (DWB-611: scar_context_bound collapsed into scar -
+# Last Modified: 2026-10-09 (DWB-667: `situation`, the author-written line the
+#                keywords are checked against; nothing matches on it)
+#                (DWB-611: scar_context_bound collapsed into scar -
 #                Miles's ruling was four buckets, all scars context-bound, not
 #                a fifth value distinguishing which ones are)
 
@@ -196,8 +198,21 @@ class AgentMemory(Base):
     # escaping rule the first time a keyword contains a comma, and nothing
     # would notice the day one did.
     keywords: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # DWB-667. One line, written by the author, naming the moment this lesson
+    # applies to. The write gate matches `keywords` against it with
+    # `memory_consult`'s own predicate, so a keyword that the author's own
+    # sentence would not have recalled cannot be stored. Kept rather than
+    # discarded after the check for two reasons: it is the PROVENANCE of that
+    # row's reachability claim, and it is the only accumulating corpus of real
+    # situation language this system has - DWB-644 recorded that there was none.
     #
-    # BOTH NULLABLE AT THE DATABASE LEVEL, AND THAT IS NOT THE END STATE. The
+    # NOTHING MATCHES AGAINST IT. It is not a second retrieval surface: a
+    # consultation comparing a situation to stored situations would recall every
+    # lesson by its own sentence, which is the vacuous match `match_scars`
+    # exists to refuse. Written once, read by people.
+    situation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #
+    # ALL THREE NULLABLE AT THE DATABASE LEVEL, AND THAT IS NOT THE END STATE. The
     # API enforces mandatory (DWB-657); the backfill of the 831 pre-existing
     # rows is DWB-655; the NOT NULL flip is DWB-656 and comes after it. A NOT
     # NULL column with a server default would have been the worse option here:

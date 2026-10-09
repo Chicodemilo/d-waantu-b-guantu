@@ -1,0 +1,50 @@
+# DWB-667 FIXED SITUATION SET. Written 2026-10-09 BEFORE any re-keywording.
+#
+# 30 situations, 6 per agent, across the five agents that hold the 288 live
+# scars (13 Archie_DWB team-lead, 14 Pam_DWB pm, 21 Barry_DWB backend,
+# 28 Dolores docs-writer, 38 Stan backend).
+#
+# HOW THEY WERE WRITTEN, because a situation set an author tunes is not a
+# measurement. Each line was written from the AGENT'S ROLE and from work this
+# project actually does - migrations, sprint close, gates, probes, reviews,
+# handoff - and NOT from any row's keywords. The author of this file had read
+# the live keywords of agents 13 and 21 before writing it and had not read
+# 14, 28 or 38; that asymmetry is stated rather than hidden, and the per-agent
+# numbers are reported separately so a reader can check whether 13 and 21
+# behave differently from the three the author had not seen.
+#
+# THE SET IS FROZEN. The before-number and the after-number are both taken
+# over exactly these 30 lines, with the matcher untouched between them. If a
+# line is ever changed, both numbers are void and must be retaken.
+#
+# Format: <agent_id>\t<situation>
+13	I am about to review a worker's diff before I commit it and I want to know what to check first
+13	The sprint close just failed with a 400 and I need to work out which gate refused it
+13	I am writing the handoff before I shut the team down for the day
+13	I am filing a ticket and writing its acceptance criteria
+13	A worker reported a count of remaining rows and I am deciding whether that work is finished
+13	Two agents on this team have similar names and I am not sure which one sent this message
+14	I am closing the sprint and the write-on-close memory gate is refusing it over a participant
+14	An alert fired because a ticket went back to in_progress and I have to fill in the failure record
+14	I am creating tickets from the team lead's spec and assigning them to the active sprint
+14	A worker says the ticket is done but there is no commit that references the ticket key
+14	I need to report sprint status to the human without burying the item that matters
+14	The ticket I just created landed on the wrong sprint and I am about to patch it
+21	I am about to run alembic revision autogenerate for a new column on the project table
+21	My test passes when I run it alone and fails in the full suite
+21	I edited an ORM model and uvicorn reloaded, and I want to know whether the live table changed under me
+21	I posted to the API and got a 200 back but I am not sure the row actually persisted
+21	I am adding a NOT NULL column to a table that already has rows in it
+21	My own check reported a FAIL I did not expect and I am about to blame the other worker's change
+28	I am rewriting a playbook section and I need to know whether the same rule lives somewhere else too
+28	I am about to delete a paragraph from the handoff because it looks out of date
+28	I am trimming a doc that is over its token ceiling for the consolidation gate
+28	I am about to sign off on a doc review without having opened every file it names
+28	I am writing a section that contradicts something another agent published an hour ago
+28	I need to make this message to the human scannable instead of three paragraphs
+38	I want to undo an edit I just made to a file on a tree nobody has committed today
+38	I am about to run a mutation battery against the working tree to check that a test catches the bug
+38	I am writing a probe that drives the system into a start state before it measures anything
+38	I ran diff on two files and it came back clean so I believe they are identical
+38	I am about to report that this feature works after running a syntax check on it
+38	A grep returned nothing so I am about to conclude that the code path does not exist

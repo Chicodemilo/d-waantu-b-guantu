@@ -1,0 +1,105 @@
+# DWB-667 COVERAGE BASELINE. Written 2026-10-09, FROZEN BEFORE THE AFTER-RUN.
+#
+# WHAT THIS IS FOR. The after-number on its own cannot distinguish two causes
+# with opposite meanings:
+#
+#   a situation that HAS a covering lesson and still recalls nothing
+#       -> a KEYWORD failure, which is what DWB-667 is about
+#   a situation that has NO covering lesson
+#       -> the corpus has nothing to say and reporting nothing is CORRECT
+#
+# So the result is reported as two numbers against two denominators rather than
+# one number against a guess. This file is the denominator, and it is written
+# and frozen BEFORE the after-run so it cannot be adjusted to fit the result.
+#
+# HOW EACH VERDICT WAS REACHED. For each of the 30 frozen situations in
+# dwb667_situations.tsv, every scar belonging to that agent was read and judged:
+# is any of them GENUINELY ABOUT this moment? Judged from `condensed` ONLY -
+# never from keywords, which are the thing under measurement and were being
+# rewritten while this was written. `condensed` is untouched by the rekey route
+# (verified: it is not a parameter, the schema forbids the key, and the AST
+# guard asserts rekey_memory never assigns it), so the judgement is stable
+# whenever it is taken.
+#
+# WHO WROTE IT, SO A READER CAN DISCOUNT IT. Devin_DWB (188) wrote the 30
+# situations AND judged this coverage. That is one person on both sides of the
+# measurement and it should be read that way. The mitigation is that it is
+# per-situation and cites the row ids, so any verdict can be checked against the
+# store by someone who disagrees. Devin is the only agent not re-keywording,
+# which is why the job fell here.
+#
+# THE THREE VERDICTS WERE DECLARED BEFORE ANY WERE ASSIGNED:
+#   covered     at least one scar is squarely about this moment. Row ids cited.
+#   borderline  a scar is adjacent but is about a different thing. NOT resolved
+#               either way on purpose - a third bucket declared in advance is
+#               honest, one invented after the number lands is not.
+#   none        nothing in this agent's corpus is about this moment.
+#
+# A FOURTH CLASS WAS CHECKED FOR AND IS EMPTY, MEASURED NOT ASSUMED. A situation
+# supplying fewer than _MATCH_TOKENS_REQUIRED usable tokens is unreachable by
+# construction, whatever any keyword says. Across these 30: ZERO. The minimum
+# usable-token count in the set is 8 and the maximum is 15.
+#
+# A NOTE ON THAT CLASS, because the report that prompted the check named it
+# differently and the difference changes which bucket a row lands in. The two
+# cited examples were measured: "the README is out of date, can you fix it"
+# supplies 6 usable tokens, and "I used diff to check the two files" supplies 6.
+# Neither is a situation that cannot be reached. What was short in both was the
+# OVERLAP between the sentence and the keyword set - ['readme','stale'] lands one
+# token where ['readme','out of date'] lands three, and ['cmp','diff'] lands one
+# where ['diff','files'] lands two. That is a KEYWORD failure, which is the
+# bucket this ticket is about, not a structural limit of the situation. The
+# remedy both authors found - widen the set - is right either way; only the
+# label moves, and it moves the row from "correct behaviour, nothing to do" into
+# "the thing we are fixing".
+#
+# Format: <agent_id>\t<verdict>\t<covering row ids or ->\t<situation>
+13	covered	1376,1190	I am writing the handoff before I shut the team down for the day
+13	covered	1188,824	I am filing a ticket and writing its acceptance criteria
+13	covered	1376	A worker reported a count of remaining rows and I am deciding whether that work is finished
+13	covered	1377	Two agents on this team have similar names and I am not sure which one sent this message
+13	borderline	830,1189	I am about to review a worker's diff before I commit it and I want to know what to check first
+13	borderline	806,852	The sprint close just failed with a 400 and I need to work out which gate refused it
+14	covered	707,625	I am closing the sprint and the write-on-close memory gate is refusing it over a participant
+14	covered	585,763,590,1182	I am creating tickets from the team lead's spec and assigning them to the active sprint
+14	covered	827,513	A worker says the ticket is done but there is no commit that references the ticket key
+14	covered	686,673,694,635	I need to report sprint status to the human without burying the item that matters
+14	covered	544,548,590	The ticket I just created landed on the wrong sprint and I am about to patch it
+14	borderline	625,635	An alert fired because a ticket went back to in_progress and I have to fill in the failure record
+21	covered	765	I am about to run alembic revision autogenerate for a new column on the project table
+21	covered	767	My test passes when I run it alone and fails in the full suite
+21	covered	764	I edited an ORM model and uvicorn reloaded, and I want to know whether the live table changed under me
+21	covered	770,1216	I posted to the API and got a 200 back but I am not sure the row actually persisted
+21	covered	1161,765	I am adding a NOT NULL column to a table that already has rows in it
+21	covered	775,1231	My own check reported a FAIL I did not expect and I am about to blame the other worker's change
+28	covered	639,1168,654,704	I am rewriting a playbook section and I need to know whether the same rule lives somewhere else too
+28	covered	648,656,688	I am about to delete a paragraph from the handoff because it looks out of date
+28	covered	665,677	I am trimming a doc that is over its token ceiling for the consolidation gate
+28	covered	627,1173,753	I am about to sign off on a doc review without having opened every file it names
+28	covered	631,639,1183	I am writing a section that contradicts something another agent published an hour ago
+28	covered	652,736,709	I need to make this message to the human scannable instead of three paragraphs
+38	covered	687,1390	I want to undo an edit I just made to a file on a tree nobody has committed today
+38	covered	598,562,621,1172	I am about to run a mutation battery against the working tree to check that a test catches the bug
+38	covered	573,845,1223,1187	I am writing a probe that drives the system into a start state before it measures anything
+38	covered	517,521	I ran diff on two files and it came back clean so I believe they are identical
+38	covered	479,511,622,669	I am about to report that this feature works after running a syntax check on it
+38	covered	845,1213,1364	A grep returned nothing so I am about to conclude that the code path does not exist
+#
+# TOTALS: 27 covered, 3 borderline, 0 none, 0 unreachable-by-construction.
+#
+# WHAT THAT MEANS FOR THE RESULT, stated now rather than after the number:
+#
+#   The probe set is NOT the problem. 27 of 30 situations have a lesson that is
+#   squarely about them and 3 more have something adjacent. The baseline recalled
+#   4. So at least 23 situations hold a covering lesson that the keywords failed
+#   to reach, and that is the quantity DWB-667 is trying to move.
+#
+#   The honest ceiling for the after-run is therefore 27/30, not 30/30, and a
+#   result between 27 and 30 would mean something had gone wrong rather than
+#   right: a borderline situation firing is as likely to be a coincidence match
+#   as a real recall, and should be inspected rather than counted.
+#
+#   The per-agent denominators are 13:4+2, 14:5+1, 21:6, 28:6, 38:6. Barry (21)
+#   is the sharpest single case in the set: 6 of 6 covered and 0 of 6 recalled
+#   at baseline, with the most concrete-looking keywords on the team. If the
+#   contract is right, his number should move the furthest.

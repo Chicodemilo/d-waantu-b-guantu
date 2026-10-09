@@ -9,7 +9,9 @@
 # Callees: POST /api/agents/{id}/memories, app.services.raw_memory
 # Data In: factory-created project/agent/session via conftest fixtures
 # Data Out: assertions on status codes, refusal text, and the persisted row
-# Last Modified: 2026-10-08 (DWB-657: created)
+# Last Modified: 2026-10-09 (DWB-667: payloads carry `situation`; the one-token
+#                keyword set is now refused and says why)
+#                (DWB-657: created)
 
 """DWB-657: the condensed + keywords write gate.
 
@@ -42,6 +44,14 @@ GOOD = {
     "body": "the full lesson in your own words",
     "condensed": "verify against a source you did not produce",
     "keywords": ["verification", "false-green"],
+    # DWB-667. The gate matches `keywords` against this line with
+    # `memory_consult`'s own predicate, so it has to CONTAIN every token of
+    # every keyword above - 'verification', 'false' and 'green'. If you change
+    # the keywords, change this line in the same edit.
+    "situation": (
+        "I am about to trust a verification whose check cannot tell a real "
+        "pass from a false green"
+    ),
     "cost": "low",
     "caught_by": "me",
 }
@@ -204,10 +214,60 @@ class TestCountIsGuidanceNotALimit:
     made a limit, these two tests are what must change, and they are named so
     the next reader finds them."""
 
-    @pytest.mark.parametrize("kws", [["one"], ["a", "b", "c", "d"]], ids=["one", "four"])
-    def test_accepted(self, client, writer, kws):
-        r = client.post(f"/api/agents/{writer['id']}/memories", json={**GOOD, "keywords": kws})
+    @pytest.mark.parametrize(
+        "kws,situation",
+        [
+            (
+                ["git checkout"],
+                "I want to undo an edit with git checkout on a tree nobody "
+                "has committed",
+            ),
+            (
+                ["a1", "b2", "c3", "d4"],
+                "the harness emits a1 b2 c3 d4 as its four column headers",
+            ),
+        ],
+        ids=["one", "four"],
+    )
+    def test_accepted(self, client, writer, kws, situation):
+        """COUNT is still guidance. DWB-667 did not add a range check.
+
+        The one-keyword case now uses a TWO-TOKEN keyword, and that is a real
+        contract change rather than a test being made to pass. DWB-667 refuses a
+        keyword set contributing fewer than `_MATCH_TOKENS_REQUIRED` distinct
+        tokens in total, because such a row cannot be recalled by any situation
+        whatsoever - `match_scars` already counted those rows as `unmatchable`
+        rather than as searched-and-not-found, and storing one stores a lesson
+        that will never be served. The floor is on TOKENS, which is the
+        matcher's own unit; the COUNT of keywords is still unbounded in both
+        directions, which is what this test says and still proves.
+        """
+        r = client.post(
+            f"/api/agents/{writer['id']}/memories",
+            json={**GOOD, "keywords": kws, "situation": situation},
+        )
         assert r.status_code == 201, r.text
+
+    def test_a_single_single_word_keyword_is_refused_as_unmatchable(
+        self, client, writer
+    ):
+        """The case this class used to accept, and the argument for the change.
+
+        `["one"]` contributes one matchable token. Recall requires two distinct
+        tokens, and that constant is not negotiable here - it is the only reason
+        zero junk fired across 30 live probes, and a false fire can reach CORE
+        at the promotion threshold, which DWB-665 proves is permanent. So a
+        one-token keyword set is not a near miss; it is a row that cannot be
+        recalled however the situation is phrased, and the write gate says so
+        instead of storing it.
+        """
+        r = client.post(
+            f"/api/agents/{writer['id']}/memories",
+            json={**GOOD, "keywords": ["one"], "situation": "there is only one of them"},
+        )
+        assert r.status_code == 400, r.text
+        detail = r.json()["detail"]
+        assert "could never be recalled by any situation" in detail, detail
 
     def test_the_guidance_is_still_in_the_message(self, client, writer):
         detail = client.post(

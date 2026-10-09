@@ -6,7 +6,9 @@
 # Callees: POST /api/agents/identify, POST /api/agents/spawn-prepare, app.config.memory_rules
 # Data In: tmp_path filesystem, factory project + agent
 # Data Out: Assertions on response field presence, length cap, content invariants, single source of truth
-# Last Modified: 2026-06-19
+# Last Modified: 2026-10-09 (DWB-667: the pinned cap literal moves 700 -> 1050,
+#                then 1050 -> 1350 for the two findings the authors sent back,
+#                then 1350 -> 1600 for the junk-keyword qualifier)
 
 """DWB-352 coverage.
 
@@ -113,12 +115,38 @@ class TestMemoryUsageRulesLengthCap:
         The literal is pinned on purpose: moving the cap should be a
         deliberate edit in two places, not a silent drift in one. DWB-661
         moved it 600 -> 700 after trimming the human_memory block to its
-        floor; see the cap block in app/config/memory_rules.py."""
+        floor; DWB-667 moved it 700 -> 1050 the same way, to carry
+        `situation` and the worked contrast between a reachable keyword and a
+        filing label. The contrast is the part that needed the room: "keywords
+        are the words that will be in the air" is a sentence the authors of all
+        288 unreachable rows believed they were following, and only the pair -
+        'git checkout' beside 'self-exempt' - changes what the next one writes.
+        It then moved 1050 -> 1350 inside the SAME ticket, which is the kind of
+        second bump this pinned literal exists to make visible. The first move
+        carried the rule; four agents then re-keyworded 207 rows against it and
+        sent back what the rule did not contain - that INFLECTION, not labels,
+        is the hard half, and that the procedure is to write the situation
+        first and read the keywords out of it. Both were found by running rows
+        rather than by reading the rule.
+
+        THEN 1350 -> 1600, a THIRD move in the same ticket, and the reason is
+        this literal doing its job: the second move shipped "several short
+        keywords beat one precise phrase" into the block some agents read
+        INSTEAD of the playbook, and measuring the pass that followed showed
+        what that advice produces unqualified - keywords like 'before i' and
+        'show me', two ordinary English words that clear the two-token floor by
+        themselves and fire on any first-person prose. The qualifier is part of
+        the advice rather than an addition to it, so it had to ship in the same
+        place. Three moves in one ticket is a lot; each was forced by a
+        measurement rather than by drafting, and the trim was done first every
+        time. See the cap block in app/config/memory_rules.py, which also
+        records that the block is now 1597 against the stock variant's 593 and
+        that its SHAPE, not its size, is the open question."""
         from app.config.memory_rules import (
             MEMORY_USAGE_RULES,
             MEMORY_USAGE_RULES_MAX_CHARS,
         )
-        assert MEMORY_USAGE_RULES_MAX_CHARS == 700
+        assert MEMORY_USAGE_RULES_MAX_CHARS == 1600
         assert len(MEMORY_USAGE_RULES) <= MEMORY_USAGE_RULES_MAX_CHARS
 
 

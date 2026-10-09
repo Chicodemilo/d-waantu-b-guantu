@@ -6,7 +6,10 @@
 # Callees: app/services/agent.py, app/services/agent_consolidation.py, app/services/raw_memory.py, app/services/memory_score.py
 # Data In: HTTP requests
 # Data Out: JSON responses (AgentRead, AgentIdentifyResponse, AgentConsolidationAckRead)
-# Last Modified: 2026-10-08 (DWB-649: POST /{id}/memories returns a real tier,
+# Last Modified: 2026-10-09 (DWB-667: POST /{id}/memories requires `situation`
+#                and refuses an unreachable keyword; new POST
+#                /{id}/memories/{mid}/rekey)
+#                (DWB-649: POST /{id}/memories returns a real tier,
 #                derived at insert; the request `tier` field is still refused)
 # DWB-652: the withdraw route now COMMITS - it is the owner the flush-only
 #          services below it delegate to, and it never performed the commit
@@ -42,6 +45,10 @@ from app.schemas.agent_consolidation_ack import (
     AgentConsolidationAckRead,
 )
 from app.schemas.agent_memory import (
+    MemoryFillRequest,
+    MemoryFillResponse,
+    MemoryRekeyRequest,
+    MemoryRekeyResponse,
     MemoryWithdrawRequest,
     MemoryWithdrawResponse,
     RawMemoryCreate,
@@ -54,6 +61,8 @@ from app.services import agent_consolidation as consolidation_svc
 from app.services import memory_mode as memory_mode_svc
 from app.services import memory_score as memory_score_svc
 from app.services import memory_origin
+from app.services import keyword_reachability
+from app.services import memory_fill as memory_fill_svc
 from app.services import raw_memory as raw_memory_svc
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -560,6 +569,10 @@ def scaffold_memory(agent_id: int, db: Session = Depends(get_db)):
         "agent_id": result.agent_id,
         "memory_dir": result.memory_dir,
         "created": result.created,
+        # DWB-662: withheld sealed files, so a shorter `created` list on a
+        # human_memory project has a stated reason rather than looking like a
+        # scaffold that did less.
+        "not_created": result.not_created,
         "preserved": result.preserved,
         "refreshed": result.refreshed,
         "skipped": result.skipped,
@@ -590,8 +603,17 @@ def append_raw_memory(
     between. What section 4 forbids is the WRITER rubber-stamping its own
     salience, and that is still forbidden; see below.
 
-    Body: { body, condensed, keywords, context_key?, cost?, caught_by?,
-            surprised?, tier? }
+    Body: { body, condensed, keywords, situation, context_key?, cost?,
+            caught_by?, surprised?, tier? }
+
+    `situation` is REQUIRED IN EFFECT too (DWB-667): one line, in the author's
+    words, naming the moment the lesson applies to. The keywords are matched
+    against it with `memory_consult`'s own predicate - the same comparison that
+    will later decide whether this lesson is recalled - and the write is refused
+    when the author's own sentence does not recall the author's own keywords.
+    288 live scars carry keywords written as filing labels (`self-exempt`,
+    `decompose-the-count`), which are correctly stored and unreachable; a
+    contract nobody enforced is what produced them.
 
     `condensed` and `keywords` are author-supplied and REQUIRED IN EFFECT
     (DWB-657). They are Optional on the schema so the refusal can be a 400 that
@@ -628,7 +650,9 @@ def append_raw_memory(
 
     Returns 201. Errors:
       - 400: empty body, any tier at all, unscoped agent, NO OPEN DWB SESSION,
-             missing/blank `condensed`, missing/blank/all-blank `keywords`.
+             missing/blank `condensed`, missing/blank/all-blank `keywords`,
+             missing/blank `situation`, a keyword that can never match anything,
+             a keyword set the author's own situation does not recall (DWB-667).
       - 404: agent or project not found.
     """
     try:
@@ -643,7 +667,16 @@ def append_raw_memory(
             tier=data.tier,
             condensed=data.condensed,
             keywords=data.keywords,
+            situation=data.situation,
         )
+    except keyword_reachability.KeywordUnreachable as e:
+        # DWB-667. 400 rather than 422: the request is well-formed, and what is
+        # wrong with it is a claim it makes about itself - that these keywords
+        # are the words that will be in the air. Pydantic cannot evaluate that
+        # and its generic message would teach nothing; the detail here names the
+        # keyword, names the tokens the author's own situation did not supply,
+        # and shows a reachable set beside an unreachable one.
+        raise HTTPException(400, e.detail)
     except memory_origin.MemoryOriginMissing as e:
         # DWB-637. 400 rather than 409: the request is well-formed and the
         # server state is not in conflict with it - the precondition for
@@ -656,6 +689,175 @@ def append_raw_memory(
         else:
             status = 400
         raise HTTPException(status, e.detail)
+
+
+@router.post(
+    "/{agent_id}/memories/{memory_id}/fill",
+    response_model=MemoryFillResponse,
+)
+def fill_agent_memory(
+    agent_id: int,
+    memory_id: int,
+    data: MemoryFillRequest,
+    db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None, alias="X-Agent-ID"),
+):
+    """DWB-664: give one of your OWN existing memories its condensed line and
+    keywords. FILL-ONLY: it completes a row, it does not edit one.
+
+    ~820 rows predate those two columns, and the lines are AUTHORED rather than
+    derived (an extractor surfaces what a text says most often, which is the
+    setup). The only alternative before this route was withdraw-and-repost,
+    which destroys the row's id, created_at, fired_count,
+    last_reinforced_session_id and every memory_transitions row pointing at it.
+    Changing one label must not cost a row its history.
+
+    Body: { condensed?, keywords? } - at least one. Any other key is a 422, and
+    that is the enforcement of "nothing else is mutable" rather than a
+    formality: a silently-dropped `tier` would look identical to an honoured
+    one at the call site, and `tier` is the field memory_decide deliberately
+    keeps behind a human.
+
+    "Not sent" and "sent as null" are different requests. `model_fields_set` is
+    what tells them apart - comparing to None would make an omitted field and
+    an explicit null the same thing, and an explicit null should be refused as
+    blank rather than silently skipped.
+
+    Returns 200 with the row AND the history fields it did not touch, so the
+    caller can see they survived rather than trust that they did. Errors:
+      - 400: neither field sent, blank value, no X-Agent-ID, wrong agent.
+      - 403: you are not the owning agent.
+      - 404: no such memory.
+      - 409: that field already carries a value - a revision is a new lesson.
+      - 422: an undeclared key, i.e. an attempt to change anything else.
+    """
+    sent = data.model_fields_set
+    try:
+        result = memory_fill_svc.fill_memory(
+            db,
+            agent_id=agent_id,
+            memory_id=memory_id,
+            acting_agent_id=x_agent_id,
+            condensed=(
+                data.condensed if "condensed" in sent else memory_fill_svc.UNSET
+            ),
+            keywords=(
+                data.keywords if "keywords" in sent else memory_fill_svc.UNSET
+            ),
+        )
+    except memory_fill_svc.MemoryFillError as e:
+        status = {
+            "memory_not_found": 404,
+            "not_owner": 403,
+            "already_set": 409,
+        }.get(e.code, 400)
+        raise HTTPException(status, e.detail)
+    except raw_memory_svc.RawMemoryWriteError as e:
+        # The shared validators. Same rule broken, same code, same sentence the
+        # write gate would have given - see memory_fill's module docstring.
+        raise HTTPException(400, e.detail)
+
+    # DWB-652's lesson, applied without being asked: the services below this are
+    # flush-only by contract, so the route is the named owner of the commit. A
+    # fill that answered 200 and persisted nothing would be that bug again, in a
+    # route built the same afternoon it was fixed.
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            500,
+            f"memory {memory_id} was NOT filled: the update could not be "
+            f"committed and has been rolled back ({type(e).__name__}: {e}). The "
+            "row is unchanged.",
+        )
+    return result
+
+
+@router.post(
+    "/{agent_id}/memories/{memory_id}/rekey",
+    response_model=MemoryRekeyResponse,
+)
+def rekey_agent_memory(
+    agent_id: int,
+    memory_id: int,
+    data: MemoryRekeyRequest,
+    db: Session = Depends(get_db),
+    x_agent_id: int | None = Header(default=None, alias="X-Agent-ID"),
+):
+    """DWB-667: REPLACE the keywords on one of your OWN existing memories.
+
+    Separate from `/fill`, which completes a row and refuses any field that
+    already carries a value. 285 of the 288 live scars already carry keywords,
+    so fill answers `already_set` on every one of them and there was no path to
+    re-keywording a single row before this route existed.
+
+    THE ASYMMETRY IS THE WHOLE JUSTIFICATION. `condensed` is THE LESSON and is
+    not a field here: the schema forbids the key, so a caller that sends one
+    gets a 422 naming it rather than a 200 that quietly revised a lesson.
+    `keywords` are an INDEX - the terms a later situation is matched against.
+    They make no claim about the past, so repairing one is not revising history,
+    it is repairing a pointer that never pointed anywhere.
+
+    Body: { keywords, situation } - BOTH required. The replacement goes through
+    the same reachability gate as a fresh write (`keyword_reachability`), which
+    is the point: there would be no sense repairing 288 dead pointers through a
+    route that could store a dead one.
+
+    STILL OWNER-ONLY, with no operator path and no impersonation header. The
+    agents holding those rows write their own words. It costs more to arrange
+    and it is the only version where the keywords are the author's, and it keeps
+    the DWB-667 measurement honest - the frozen situation set is published, and
+    an author re-keywording blind to it is the only arrangement in which the
+    after-number measures recall rather than measuring whoever wrote both sides.
+
+    Returns 200 with `previous_keywords` beside the new ones, so the caller can
+    see what was overwritten; this is the one operation in the lane that
+    destroys a value rather than completing one. Errors:
+      - 400: no X-Agent-ID, wrong agent, blank keywords, missing/blank
+             situation, unreachable keywords.
+      - 403: you are not the owning agent.
+      - 404: no such memory.
+      - 409: the row already carries exactly these keywords, so the call would
+             change nothing while answering 200.
+      - 422: an undeclared key, i.e. an attempt to change anything else.
+    """
+    try:
+        result = memory_fill_svc.rekey_memory(
+            db,
+            agent_id=agent_id,
+            memory_id=memory_id,
+            acting_agent_id=x_agent_id,
+            keywords=data.keywords,
+            situation=data.situation,
+        )
+    except memory_fill_svc.MemoryFillError as e:
+        status = {
+            "memory_not_found": 404,
+            "not_owner": 403,
+            "keywords_unchanged": 409,
+        }.get(e.code, 400)
+        raise HTTPException(status, e.detail)
+    except keyword_reachability.KeywordUnreachable as e:
+        raise HTTPException(400, e.detail)
+    except raw_memory_svc.RawMemoryWriteError as e:
+        # The shared validator. Same rule broken, same code, same sentence the
+        # write gate would have given.
+        raise HTTPException(400, e.detail)
+
+    # The service is flush-only by contract, so the route is the named owner of
+    # the commit - DWB-652's lesson, same as `/fill` one route up.
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            500,
+            f"memory {memory_id} was NOT re-keyworded: the update could not be "
+            f"committed and has been rolled back ({type(e).__name__}: {e}). The "
+            "row is unchanged.",
+        )
+    return result
 
 
 @router.post(
