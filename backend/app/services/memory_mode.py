@@ -15,7 +15,9 @@
 # Data In: db Session, agent_id or Project
 # Data Out: bool / the pointer string / assembled memory text / the mode's
 #           memory-usage rules / StockMemorySealed
-# Last Modified: 2026-10-07 (DWB-638: memory_usage_rules_for picks the mode's
+# Last Modified: 2026-10-09 (DWB-667: the fill and rekey routes are excused in
+#                OPEN_UNDER_HUMAN_MEMORY with their reasons)
+#                (DWB-638: memory_usage_rules_for picks the mode's
 #                inline rules block, so spawn stops teaching sealed routes)
 
 """Hard rule 1, put in the API instead of in prose.
@@ -132,6 +134,17 @@ OPEN_UNDER_HUMAN_MEMORY = {
     "memories/{memory_id}/withdraw": "retracts a row from the human_memory "
     "store itself, journaling it first; not a stock memory.md write, and it is "
     "the only correction path for a wrong memory",
+    # DWB-664 and DWB-667. Same category argument as withdraw, one step on: both
+    # operate on `agent_memories`, which IS the human_memory store, so neither is
+    # a stock memory.md write under any reading. Sealing them would leave the
+    # authoritative store as the one that cannot be completed or corrected, which
+    # is backwards from what the seal is for.
+    "memories/{memory_id}/fill": "completes `condensed` or `keywords` on a row "
+    "in the human_memory store that predates those columns; owner-only, and not "
+    "a stock memory.md write",
+    "memories/{memory_id}/rekey": "replaces a dead keyword set on a row in the "
+    "human_memory store so the lesson can be reached at all; owner-only, never "
+    "touches `condensed`, and not a stock memory.md write",
 }
 
 

@@ -42,18 +42,25 @@ from app.database import Base, get_db
 from app.main import app
 from app.schemas.ticket import ticket_number_from_key
 
-# DWB-657: the two fields every memory write must now carry. ONE DEFINITION,
+# DWB-657/667: the fields every memory write must now carry. ONE DEFINITION,
 # imported by the memory test modules, because the write contract changed twice
 # in one day (DWB-649 derived the tier, DWB-657 made these mandatory) and the
 # second change cost 35 individually-edited inline payloads. The next change
-# costs one line here.
+# costs one line here - and DWB-667 was the next change, and it cost one line.
 #
 # Spread as `**MEMORY_WRITE_EXTRAS` FIRST in a payload literal, so an explicit
 # key in the test still wins - a test that deliberately sends a blank
 # `condensed` must not have it silently replaced by this.
+#
+# DWB-667 ADDED `situation`, AND IT IS NOT ARBITRARY FILLER. The gate matches
+# `keywords` against it with `memory_consult`'s own predicate, so this sentence
+# has to CONTAIN both 'fixture' and 'contract' or every memory test in the suite
+# refuses with a 400. If you change the keywords above, change this line in the
+# same edit; they are a matched pair and nothing else in the suite will tell you.
 MEMORY_WRITE_EXTRAS = {
     "condensed": "state the rule, not the anecdote",
     "keywords": ["fixture", "contract"],
+    "situation": "I am editing a shared test fixture that encodes the write contract",
 }
 
 

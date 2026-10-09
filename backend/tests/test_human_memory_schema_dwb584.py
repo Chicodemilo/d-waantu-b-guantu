@@ -8,7 +8,8 @@
 # Callees: alembic CLI (subprocess), sqlalchemy.inspect, app.models
 # Data In: Base.metadata; a scratch MySQL database replayed from base
 # Data Out: Assertions on declared and migrated schema
-# Last Modified: 2026-09-30 (DWB-605: journal_entries gains created_at)
+# Last Modified: 2026-10-09 (DWB-667: agent_memories gains `situation`)
+#                (DWB-605: journal_entries gains created_at)
 
 """Schema guards for DWB-584, the human_memory substrate.
 
@@ -114,6 +115,27 @@ AGENT_MEMORIES_COLUMNS = {
     # the same one: who writes this value, and what does NULL mean?
     "condensed",
     "keywords",
+    # DWB-667, and it answers this set's own question: who writes it, and what
+    # does NULL mean?
+    #
+    # The AUTHOR writes it, at the moment of the write, and it is one line
+    # naming the situation the lesson applies to. The write gate matches
+    # `keywords` against it with `memory_consult`'s own predicate, so a keyword
+    # the author's own sentence would not have recalled cannot be stored. 288
+    # live scars were stored with keywords that no sentence recalls, which is
+    # the same outcome as not having written them.
+    #
+    # It is KEPT rather than discarded after the check for two reasons: it is
+    # the provenance of that row's reachability claim, and it is the only
+    # accumulating corpus of real situation language this system has - DWB-644
+    # recorded, correctly, that there was none. NOTHING MATCHES AGAINST IT; a
+    # consultation comparing a situation to stored situations would recall every
+    # lesson by its own sentence, which is the vacuous match `match_scars`
+    # exists to refuse.
+    #
+    # NULL means "written before this was asked for", same transitional state
+    # and same reasoning as the two above.
+    "situation",
     "created_at",
     "updated_at",
 }

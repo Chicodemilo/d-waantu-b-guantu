@@ -184,8 +184,14 @@ class Rig:
     agent_name: str = ""
     repo_path: str | None = None
     ticket_key: str = ""
+    dwb_session_id: int | None = None
     chain_session_ids: list[int] = field(default_factory=list)
     movements: list[Movement] = field(default_factory=list)
+    # WHICH PHASES ACTUALLY RAN (DWB-663). Not decoration: `print_table`
+    # refuses unless every expected phase is in here. See PHASES below for
+    # why a count of results cannot answer this question.
+    phases_run: set = field(default_factory=set)
+    band_assembly_ok: bool | None = None
 
 
 def _api(rig: Rig, method: str, path: str, **kw) -> requests.Response:
@@ -235,6 +241,29 @@ def create_throwaway(rig: Rig) -> None:
     data = _require(_api(rig, "POST", "/agents", json=agent_body), "create throwaway agent")
     rig.agent_id = data["id"]
     print(f"[setup] throwaway agent {rig.agent_name} (id={rig.agent_id})")
+
+    # A DWB SESSION MUST BE OPEN BEFORE THE ADOPTION (DWB-663). Without one
+    # the PATCH below is refused outright:
+    #   400 "Adoption refused: <PREFIX> has no open DWB session."
+    # That guard (DWB-637) is correct and is not the thing to work around.
+    # Every memory an adoption writes stamps its clock origin from the session
+    # open at the time; with none open they all store NULL, and a memory with
+    # no origin cannot be scored, so it is excluded from retrieval and never
+    # reaches an agent. The store fills up and reads as empty.
+    #
+    # This rig predates that guard and was never updated, so it died here, at
+    # setup, long before any of the checks it exists to run. It had been doing
+    # that quietly for an unknown length of time.
+    data = _require(
+        _api(rig, "POST", "/sessions/open", json={
+            "project_id": rig.project_id,
+            "open_method": "slash",
+            "open_phrase": f"exerciser run {RUN_TAG}",
+        }),
+        "open DWB session on the throwaway",
+    )
+    rig.dwb_session_id = data["id"]
+    print(f"[setup] DWB session {rig.dwb_session_id} opened on the throwaway")
 
     # stock -> adopting, confirmed. A brand-new project with no memory.md
     # content on disk enumerates ZERO candidates, and app/services/project.py
@@ -295,6 +324,7 @@ def create_throwaway(rig: Rig) -> None:
         "close throwaway ticket",
     )
     print(f"[setup] context-finished proxy ticket {rig.ticket_key} closed")
+    rig.phases_run.add("setup")
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +375,7 @@ def build_session_chain(rig: Rig) -> None:
         rig.chain_session_ids.append(dwb.id)
     db.commit()
     print(f"[setup] manufactured {CHAIN_LEN + 1} closed sessions for the clock")
+    rig.phases_run.add("session_chain")
 
 
 def origin_for_gap(rig: Rig, gap: int) -> int:
@@ -521,6 +552,7 @@ def seed_buckets(rig: Rig) -> dict:
     seed_journal_entries(rig, seeded)
 
     print(f"[setup] seeded {len(seeded)} rows across CORE/SCAR/WORKING/JOURNAL")
+    rig.phases_run.add("seed")
     return seeded
 
 
@@ -584,7 +616,9 @@ def fire_consolidation_trigger(rig: Rig) -> dict:
             "agent_name": rig.agent_name,
         },
     )
-    return _require(resp, "fire SessionStart consolidation trigger")
+    out = _require(resp, "fire SessionStart consolidation trigger")
+    rig.phases_run.add("consolidation_trigger")
+    return out
 
 
 def fetch_scored(rig: Rig) -> list[dict]:
@@ -623,6 +657,7 @@ def fetch_scored(rig: Rig) -> list[dict]:
         _api(rig, "GET", f"/agents/{rig.agent_id}/memory/scored"),
         "GET scored memory",
     )
+    rig.phases_run.add("scored_fetch")
     return data.get("entries", []) if data.get("computed") else []
 
 
@@ -725,6 +760,7 @@ def check_movements(rig: Rig, seeded: dict, entries: list[dict]) -> None:
     ))
 
     rig.movements = m
+    rig.phases_run.add("movements")
 
 
 # ---------------------------------------------------------------------------
@@ -767,6 +803,7 @@ def print_received_context(rig: Rig) -> tuple[str, str]:
     print(additional_context if additional_context else "(EMPTY - nothing injected)")
     print("--- end additionalContext ---\n")
 
+    rig.phases_run.add("received_context")
     return memory_full, additional_context
 
 
@@ -813,6 +850,14 @@ def _expected_compressed_line(entry: dict, cap: int = 400) -> str:
     return ""
 
 
+def _band_expectation_label(expect_full_text: bool, expect_keywords_only: bool) -> str:
+    if expect_full_text:
+        return "expected verbatim"
+    if expect_keywords_only:
+        return "expected id + keywords, no content"
+    return "expected the author's one line"
+
+
 def check_band_assembly(rig: Rig, memory_full: str, entries: list[dict]) -> None:
     """Section 3's band table (docs/human_memory_spec.md): 8-10 carried in
     full, 5-7 compressed to one line, below that not carried at all. DWB-610
@@ -842,8 +887,10 @@ def check_band_assembly(rig: Rig, memory_full: str, entries: list[dict]) -> None
     print("=" * 78)
     print("STEP 6: bands 8-10 as full text, lower bands compressed")
     print("=" * 78)
+    rig.phases_run.add("band_assembly")
     if not entries:
         print("FAIL: scored memory reports computed=False, or nothing scored")
+        rig.band_assembly_ok = False
         return
 
     rows = []
@@ -854,9 +901,33 @@ def check_band_assembly(rig: Rig, memory_full: str, entries: list[dict]) -> None
         full = e["body"]  # DWB-610: ScoredMemoryEntry carries body directly
         full_present = bool(full) and full in memory_full
         expect_full_text = band == "full_text"
+        # DWB-659 SPLIT THE NON-FULL-TEXT CASE IN TWO AND THIS CHECK HAD TO
+        # SPLIT WITH IT. Everything that was not `full_text` used to be
+        # "expected one-line compression", which was true when the 2-4 and 1
+        # bands were a bare aggregate count and no row appeared individually.
+        # They now render per-row as `#<id>  kw, kw` and carry NO condensed
+        # line, so the old expectation looked for a line that is correctly
+        # absent and reported NOT_ASSEMBLED - the instrument calling a working
+        # feature broken, which is exactly what DWB-663 was filed about,
+        # reappearing one band along. Caught by running the rig; the first fix
+        # to this file was made without being able to.
+        expect_keywords_only = band in ("demotion_candidate", "last_consolidation")
 
         if expect_full_text:
             outcome = "PASS" if full_present else "NOT_ASSEMBLED"
+        elif expect_keywords_only:
+            # These bands are abbreviated BECAUSE they are low value. The
+            # check is therefore the mirror of the one above: the row must be
+            # REFERENCED and its content must NOT be carried.
+            id_present = f"#{e['id']}" in memory_full
+            condensed = (e.get("condensed") or "").strip()
+            leaked = full_present or (bool(condensed) and condensed in memory_full)
+            if leaked:
+                outcome = "FAIL"  # content carried in a band that must not
+            elif id_present:
+                outcome = "PASS"
+            else:
+                outcome = "NOT_ASSEMBLED"
         else:
             expected_line = _expected_compressed_line(e)
             # Decisive when the expected rendering is a DIFFERENT string
@@ -885,7 +956,7 @@ def check_band_assembly(rig: Rig, memory_full: str, entries: list[dict]) -> None
         print(
             f"  {outcome:<20}  memory_id={e['id']:>6}  tier={e['tier']:<20}  "
             f"score={e['score']:>2}  band={band:<18}  "
-            f"{'expected verbatim' if expect_full_text else 'expected one-line compression'}"
+            f"{_band_expectation_label(expect_full_text, expect_keywords_only)}"
         )
     if not rows:
         print("  (no scored entries - nothing to check)")
@@ -895,11 +966,19 @@ def check_band_assembly(rig: Rig, memory_full: str, entries: list[dict]) -> None
     n_ambiguous = sum(1 for *_, o in rows if o == "SHORT_BODY_AMBIGUOUS")
     print(
         f"\nBand assembly: {n_pass} PASS, {n_fail} FAIL, "
-        f"{n_not_assembled} NOT_ASSEMBLED (expected until DWB-610 lands), "
+        f"{n_not_assembled} NOT_ASSEMBLED (DWB-610 has landed - any of these is a real gap), "
         f"{n_ambiguous} SHORT_BODY_AMBIGUOUS (compression is a no-op on these "
         f"bodies either way, so they cannot confirm or deny it) "
         f"of {len(rows)} scored rows"
     )
+    # FEED THE VERDICT (DWB-663). This function used to print its results and
+    # return None, touching nothing `print_table` reads, so every compressed
+    # row could report FAIL while OVERALL said PASS and the script exited 0.
+    # NOT_ASSEMBLED counts as failure: it means the row never reached the
+    # injected context at all, which is the thing this step exists to catch.
+    # SHORT_BODY_AMBIGUOUS does NOT - it is the honest third state for inputs
+    # that cannot discriminate, and counting it either way would be a guess.
+    rig.band_assembly_ok = (n_fail == 0 and n_not_assembled == 0)
 
 
 # ---------------------------------------------------------------------------
@@ -987,6 +1066,34 @@ def cleanup(rig: Rig) -> None:
         rig.session.close()
 
 
+# EVERY PHASE THAT MUST HAVE RUN BEFORE A VERDICT MEANS ANYTHING (DWB-663).
+#
+# WHY A SET OF NAMES AND NOT A COUNT OF RESULTS. Before this, `print_table`
+# iterated `rig.movements` and set `all_pass = True` before the loop. With an
+# empty list the loop never executed, so it printed
+#   OVERALL: PASS (0/0 movements)
+# and `main` returned 0. A rig that checked NOTHING reported success - the
+# dangerous case and the safe case producing the identical answer, which is
+# the exact guard shape this project keeps shipping wrong. Tightening the
+# count cannot separate them, because "ran and all passed" and "never ran"
+# are both consistent with zero failures. The signal has to DIFFER, so it is
+# a record that each phase executed, written by the phase itself.
+#
+# Add a phase here when you add one. A name that is never recorded fails the
+# run loudly, which is the intended direction: a check that silently stops
+# running is what DWB-663 was filed about.
+PHASES = {
+    "setup",
+    "session_chain",
+    "seed",
+    "consolidation_trigger",
+    "scored_fetch",
+    "movements",
+    "received_context",
+    "band_assembly",
+}
+
+
 def print_table(rig: Rig) -> bool:
     print("\n" + "=" * 78)
     print("PER-MOVEMENT RESULT (DWB-614 acceptance)")
@@ -999,8 +1106,33 @@ def print_table(rig: Rig) -> bool:
         print(f"  [{status}] ({mv.key}) {mv.description}")
         print(f"          {mv.detail}")
     print("=" * 78)
+
+    # A verdict is only meaningful if everything that was supposed to run did.
+    missing = PHASES - rig.phases_run
+    if missing:
+        all_pass = False
+        print("INCOMPLETE RUN - these phases never executed:")
+        for name in sorted(missing):
+            print(f"  - {name}")
+        print("A verdict over a partial run is not a verdict. Treat this as")
+        print("FAIL regardless of what the movements above say.")
+
+    if not rig.movements:
+        all_pass = False
+        print("NO MOVEMENTS WERE CHECKED. This used to print PASS (0/0).")
+
+    # STEP 6 feeds the verdict. It did not before: `check_band_assembly`
+    # never touched `rig.movements`, so every compressed row could report
+    # FAIL while OVERALL said PASS and the script exited 0. That is the same
+    # defect as the empty-movements one, one layer along, and it sat in the
+    # step that proves band assembly works.
+    if rig.band_assembly_ok is False:
+        all_pass = False
+        print("BAND ASSEMBLY FAILED - see STEP 6 above.")
+
     print(f"OVERALL: {'PASS' if all_pass else 'FAIL'} "
-          f"({sum(1 for m in rig.movements if m.passed)}/{len(rig.movements)} movements)")
+          f"({sum(1 for m in rig.movements if m.passed)}/{len(rig.movements)} movements, "
+          f"{len(rig.phases_run)}/{len(PHASES)} phases)")
     return all_pass
 
 

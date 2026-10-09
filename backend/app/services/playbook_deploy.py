@@ -300,6 +300,10 @@ class DeployedMemoryDir(BaseModel):
     agent_name: str
     memory_dir: str
     created: list[str] = []
+    # DWB-662: empty on every stock project. Non-empty means the scaffold
+    # deliberately withheld a sealed file (human_memory); reported rather
+    # than omitted so a shorter `created` list has a stated reason.
+    not_created: list[str] = []
     refreshed: list[str] = []
     preserved: list[str] = []
     skipped: bool = False
@@ -866,6 +870,7 @@ def deploy_bundle(db: Session, project) -> DeployResult:
                     agent_name=agent.name,
                     memory_dir=res.memory_dir,
                     created=res.created,
+                    not_created=res.not_created,
                     refreshed=res.refreshed,
                     preserved=res.preserved,
                     skipped=res.skipped,

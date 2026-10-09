@@ -10,7 +10,8 @@
 #          scripts/hooks/block_harness_memory_writes.py (as a subprocess)
 # Data In: lat_test rows, tmp_path memory files, a crafted hook payload
 # Data Out: assertions
-# Last Modified: 2026-09-29 (DWB-589)
+# Last Modified: 2026-10-09 (DWB-667: write payloads carry `situation`, and the
+#                setup write that was discarded is now asserted)
 
 """DWB-589, the enforcement ticket.
 
@@ -189,6 +190,13 @@ class TestReadEndpointsStayOpen:
                 # shape, so the payload is made valid and nothing else moves.
                 "condensed": "the new store is the one that accepts writes",
                 "keywords": ["human-memory", "store"],
+                # DWB-667: the gate matches the keywords above against
+                # this line, so it has to contain every one of their
+                # tokens. Change one, change both.
+                "situation": (
+                    "I am writing a lesson into the human memory store "
+                    "on a project where stock memory is sealed"
+                ),
             }
         )
         assert r.status_code == 201, r.text
@@ -305,6 +313,10 @@ class TestWriteOnCloseGateOnASwitchedProject:
                 # DWB-657: mandatory fields; this test is about the gate stamp.
                 "condensed": "a lesson worth one line",
                 "keywords": ["gate", "participation"],
+                "situation": (
+                    "the sprint close gate is checking participation and "
+                    "I have no write on record"
+                ),
             }
         )
         assert r.status_code == 201, r.text
@@ -348,15 +360,27 @@ class TestWriteOnCloseGateOnASwitchedProject:
         """The window is still a window. A row from before `since` is not
         participation in THIS sprint."""
         agent_row = make_agent(project_id=human_memory_project["id"], name="Earlier")
-        client.post(
+        wrote = client.post(
             f"/api/agents/{agent_row['id']}/memories",
             json={
                 "body": "old",
                 # DWB-657: mandatory fields; this test is about the sprint window.
                 "condensed": "a lesson written before the window opened",
                 "keywords": ["window", "participation"],
+                # DWB-667: matched against the keywords above by the write gate.
+                "situation": (
+                    "the sprint window closed before my participation was "
+                    "recorded"
+                ),
             },
         )
+        # ASSERTED rather than assumed. This call's response was discarded until
+        # DWB-667, and the write contract changed under it: the next line went
+        # looking for exactly one row and found none, which reads as a defect in
+        # the WINDOW logic this test is about. A setup step that fails silently
+        # turns every later result into a confident measurement of the wrong
+        # thing.
+        assert wrote.status_code == 201, wrote.text
         row = (
             db_session.query(AgentMemory)
             .filter(AgentMemory.agent_id == agent_row["id"])
@@ -436,6 +460,10 @@ class TestSprintCloseOnASwitchedProject:
                 # DWB-657: mandatory fields; this test is about sprint close.
                 "condensed": "participation is what the close gate checks",
                 "keywords": ["sprint-close", "participation"],
+                "situation": (
+                    "I am at sprint close and the gate wants "
+                    "participation from every agent"
+                ),
             }
         )
         assert r.status_code == 201, r.text

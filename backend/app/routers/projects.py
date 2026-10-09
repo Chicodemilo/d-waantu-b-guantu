@@ -520,6 +520,8 @@ def scaffold_project_agents(project_id: int, db: Session = Depends(get_db)):
                 "agent_name": a.name,
                 "memory_dir": res.memory_dir,
                 "created": res.created,
+                # DWB-662: see agents.py scaffold-memory.
+                "not_created": res.not_created,
                 "preserved": res.preserved,
                 "refreshed": res.refreshed,
                 "skipped": res.skipped,

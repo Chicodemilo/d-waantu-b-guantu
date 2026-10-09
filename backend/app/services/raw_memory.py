@@ -13,7 +13,10 @@
 # Data In: agent_id, body, optional context_key, the section 4 moment-tags,
 #          optional tier (refused)
 # Data Out: dict describing the written row, including session_state
-# Last Modified: 2026-10-08 (DWB-649: the tier is derived AT INSERT by
+# Last Modified: 2026-10-09 (DWB-667: the write carries an author-written
+#                `situation` and the keywords must MATCH it under
+#                memory_consult's own predicate; previous entry:
+#                DWB-649: the tier is derived AT INSERT by
 #                memory_consolidate.tier_for_raw; this module no longer writes
 #                `raw`, and a caller still cannot name a tier)
 
@@ -117,7 +120,7 @@ from app.models.agent_memory import (
     MemoryTier,
 )
 from app.models.project import Project
-from app.services import memory_consolidate, memory_origin
+from app.services import keyword_reachability, memory_consolidate, memory_origin
 from app.services.agent import _record_memory_write
 
 # What the session lookup found. ONE value, because after DWB-637 there is one
@@ -239,6 +242,7 @@ def append_raw_memory(
     tier: str | None = None,
     condensed: str | None = None,
     keywords: list[str] | None = None,
+    situation: str | None = None,
 ) -> dict:
     """Append one memory row for `agent_id`, tiered from its own moment-tags.
 
@@ -279,6 +283,12 @@ def append_raw_memory(
       - tier_not_settable  (any other tier)
       - condensed_required (DWB-657: missing, or whitespace-only)
       - keywords_required  (DWB-657: missing, empty list, or any blank entry)
+
+    Also raises `keyword_reachability.KeywordUnreachable` (DWB-667) when
+    `situation` is missing, when a keyword can never match anything, or when the
+    author's own situation line does not recall its own keywords. A separate
+    exception type for the same reason `MemoryOriginMissing` is one: the rule
+    belongs to every writer of `agent_memories.keywords`, not to this one.
 
     Also raises `memory_origin.MemoryOriginMissing` (code `no_session_origin`)
     when no DWB session is open for the agent's project. A separate exception
@@ -357,6 +367,26 @@ def append_raw_memory(
     _require_condensed(condensed)
     _require_keywords(keywords)
 
+    # DWB-667, and the ORDER HERE IS THE SAME RULING ONE STEP FURTHER ON.
+    # DWB-657's two refusals ask whether the fields were SUPPLIED; these ask
+    # whether what was supplied can ever be reached. Supplied-but-dead is the
+    # same outcome as blank - a lesson correctly stored and never served - and
+    # only the blank case was refused, which is how 288 unreachable rows came to
+    # exist. They sit after 657's gate because "you sent no keywords" and "your
+    # keywords cannot be recalled" are different answers and the first one is
+    # the one to give when both are true.
+    #
+    # Still before the first database read, so an unstorable request costs no
+    # query and answers identically whether or not the agent exists.
+    keyword_reachability.require_situation(situation)
+    # DWB-669 BEFORE DWB-667's situation check, and the order is the point. A
+    # keyword made of ordinary words is MORE likely to appear in its own author's
+    # situation line, not less - someone who wrote `before i` wrote "before I" in
+    # the sentence beside it - so the reachability check would pass it and the
+    # author would never learn it fires on everything.
+    keyword_reachability.require_subject_bearing_keywords(keywords)
+    keyword_reachability.require_reachable_keywords(keywords, situation)
+
     agent = db.get(Agent, agent_id)
     if agent is None:
         raise RawMemoryWriteError("agent_not_found", f"agent id {agent_id} not found")
@@ -393,6 +423,11 @@ def append_raw_memory(
         # at every later read.
         condensed=condensed,
         keywords=keywords,
+        # DWB-667: the sentence the keywords above were checked against. Stored
+        # as given, for the same reason they are - it is the provenance of this
+        # row's reachability claim, and a server-written one would be
+        # indistinguishable from an authored one at every later read.
+        situation=situation,
         # Never conditional. `origin` is a session or this line was not reached.
         created_session_id=origin.id,
     )
@@ -433,6 +468,7 @@ def append_raw_memory(
         "surprised": row.surprised,
         "condensed": row.condensed,
         "keywords": row.keywords,
+        "situation": row.situation,
         "created_session_id": row.created_session_id,
         "session_state": SESSION_OPEN,
         "fired_count": row.fired_count,
