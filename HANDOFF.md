@@ -102,6 +102,19 @@ is complete.
 `CONSULTED_TIERS` went live the moment it was saved, with no gate between an
 edit and production. That is how #390 fired before anyone reported the change.
 
+## The doc layer is current as of this session
+
+Every claim in `docs/`, the playbooks, `README.md` and `project_rules_team_lead.md`
+was checked against the code, not against a summary. The spec had never stated
+what makes a lesson fire; the playbooks reasoned about consultation from
+`SCAR_FAMILY` when the search population is `CONSULTED_TIERS`; `project_rules`
+taught a write shape with no `situation`. All corrected and deployed.
+
+`config/memory_rules.py` keeps its payload at 1597 of a hard 1600: core being
+consulted and the demote path are retrieval facts and that block is a write
+instruction. The header records why they are absent, so the next reader inherits
+a decision rather than a question.
+
 ## Open, needing a decision
 
 - **DWB-672: the subject rule is calibrated on general English** and this corpus
