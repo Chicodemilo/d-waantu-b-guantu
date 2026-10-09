@@ -66,6 +66,15 @@ APP_DIR = pathlib.Path(__file__).resolve().parent.parent / "app"
 
 TERM = "zzdwb621onlyinthisrow"
 BODY = f"a lesson about {TERM} that cost us a morning"
+# DWB-644 inverted the match relation: a scar is recalled by ITS OWN keywords
+# landing in the situation, not by the situation being a verbatim substring of
+# the body. The keywords below are nonsense tokens for the same reason TERM was
+# - nothing else in the store can collide with them - and the SITUATION shares
+# no wording with BODY, so these tests distinguish the new relation from the old
+# instead of passing under both.
+KEYWORDS = ["zzdwb621alpha", "zzdwb621beta"]
+SITUATION = "I am about to zzdwb621alpha the zzdwb621beta again"
+NO_MATCH_SITUATION = "nothing in this situation names that lesson"
 
 # 91+ elapsed sessions puts a scar in the open-ended last bucket, where the
 # curve reads 6. That is the resting floor the ticket says it never leaves.
@@ -147,6 +156,7 @@ def floored(db_session, make_project, make_agent, tmp_path):
         agent_id=agent["id"],
         tier=MemoryTier.scar,
         body=BODY,
+        keywords=list(KEYWORDS),
         created_session_id=origin.id,
         last_reinforced_session_id=None,
         fired_count=0,
@@ -195,7 +205,7 @@ class TestAConsultationReinforces:
         memory_id, project_id, agent_id = floored
         active = _open_session(db_session, project_id)
 
-        svc.consult_scars(db_session, agent_id=agent_id, term=TERM)
+        svc.consult_scars(db_session, agent_id=agent_id, situation=SITUATION)
 
         assert _reread(db_session, memory_id).last_reinforced_session_id == active.id
 
@@ -203,7 +213,7 @@ class TestAConsultationReinforces:
         memory_id, project_id, agent_id = floored
         active = _open_session(db_session, project_id)
 
-        svc.consult_scars(db_session, agent_id=agent_id, term=TERM)
+        svc.consult_scars(db_session, agent_id=agent_id, situation=SITUATION)
 
         value, row = _score_of(db_session, memory_id)
         assert row.last_reinforced_session_id == active.id
@@ -220,7 +230,9 @@ class TestAConsultationReinforces:
         memory_id, project_id, agent_id = floored
         _open_session(db_session, project_id)
 
-        svc.consult_scars(db_session, agent_id=agent_id, term="nothing matches this")
+        svc.consult_scars(
+            db_session, agent_id=agent_id, situation=NO_MATCH_SITUATION
+        )
 
         value, row = _score_of(db_session, memory_id)
         assert row.last_reinforced_session_id is None
@@ -234,6 +246,7 @@ class TestAConsultationReinforces:
             agent_id=agent_id,
             tier=MemoryTier.scar,
             body="an unrelated lesson",
+            keywords=["zzdwb621gamma", "zzdwb621delta"],
             created_session_id=_reread(db_session, memory_id).created_session_id,
             fired_count=0,
         )
@@ -241,7 +254,7 @@ class TestAConsultationReinforces:
         db_session.flush()
         _open_session(db_session, project_id)
 
-        svc.consult_scars(db_session, agent_id=agent_id, term=TERM)
+        svc.consult_scars(db_session, agent_id=agent_id, situation=SITUATION)
 
         assert _reread(db_session, memory_id).last_reinforced_session_id is not None
         assert _reread(db_session, sibling.id).last_reinforced_session_id is None
@@ -262,7 +275,7 @@ class TestNoActiveSession:
     ):
         memory_id, project_id, agent_id = floored
         active = _open_session(db_session, project_id)
-        svc.consult_scars(db_session, agent_id=agent_id, term=TERM)
+        svc.consult_scars(db_session, agent_id=agent_id, situation=SITUATION)
         assert _reread(db_session, memory_id).last_reinforced_session_id == active.id
 
         # Close it, so there is no active session for the second consultation.
@@ -270,7 +283,7 @@ class TestNoActiveSession:
         active.close_method = DwbCloseMethod.regex
         db_session.flush()
 
-        svc.consult_scars(db_session, agent_id=agent_id, term=TERM)
+        svc.consult_scars(db_session, agent_id=agent_id, situation=SITUATION)
 
         row = _reread(db_session, memory_id)
         assert row.last_reinforced_session_id == active.id, (

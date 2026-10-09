@@ -98,8 +98,13 @@ def _fire(db, project, *, text, session_id="dwb612-sess"):
     return _prompt(db, project, text=text, session_id=session_id)
 
 
-def _scar(db, *, agent_id, body):
-    row = AgentMemory(agent_id=agent_id, tier=MemoryTier.scar, body=body)
+def _scar(db, *, agent_id, body, keywords=None):
+    """DWB-644: a scar is recalled by its own KEYWORDS landing in the prompt,
+    so a scar written without them is unmatchable by construction. `keywords`
+    is a required part of the fixture now, not decoration."""
+    row = AgentMemory(
+        agent_id=agent_id, tier=MemoryTier.scar, body=body, keywords=keywords
+    )
     db.add(row)
     db.flush()
     return row
@@ -224,9 +229,16 @@ class TestMatchIncrementsRetrievalCountExactlyOnce:
 
 
 class TestScarMatchIncrementsFiredCountExactlyOnce:
-    """The scar half, mirroring the journal class above. Same direction note
-    applies: consult_scars matches `AgentMemory.body LIKE '%term%'`, term is
-    the (capped) prompt, so the prompt must be a substring OF the scar body."""
+    """The scar half, mirroring the journal class above.
+
+    DWB-644 REVERSED THE DIRECTION NOTE THIS CLASS USED TO CARRY. It said the
+    prompt must be a substring OF the scar body, which is what the code did and
+    is the defect: a scar could only fire when the user recited the lesson back.
+    The prompt is now the haystack and each lesson's author-supplied keywords
+    are the needle. The fixtures below therefore share NO WORDING between the
+    prompt and the body, so they fail against the old relation instead of
+    passing under both.
+    """
 
     def test_a_matching_scar_is_found_and_fired_once(
         self, db_session, make_agent, topoff_project
@@ -238,17 +250,25 @@ class TestScarMatchIncrementsFiredCountExactlyOnce:
             agent_id=agent["id"],
             body="LESSON: never grep a transcript, parse it - a grep finds the "
             "conversation about a string, only parsing finds the string.",
+            keywords=["transcript grep", "string search"],
         )
         db_session.commit()
         assert scar.fired_count == 0
 
-        prompt_text = "never grep a transcript, parse it"
+        # Describes the SITUATION. It is not a substring of the body, and the
+        # body is not a substring of it, so only the inverted relation can
+        # find this scar.
+        prompt_text = "I want to grep the transcript for that phrase"
         result = _fire(db_session, topoff_project, text=prompt_text)
 
         check = result["topoff"]["scar_check"]
         assert check["searched"] is True
         assert check["matched"] == 1
         assert check["memory_ids"] == [scar.id]
+        # The measurement surface DWB-644 criterion 3 asks for, and it names
+        # WHICH author-written keyword did the work rather than echoing the
+        # user's prompt back.
+        assert check["matched_keywords"] == {scar.id: ["transcript grep"]}
 
         db_session.refresh(scar)
         assert scar.fired_count == 1, "must increment exactly once per search"
@@ -262,10 +282,11 @@ class TestScarMatchIncrementsFiredCountExactlyOnce:
             db_session,
             agent_id=agent["id"],
             body="a very specific past mistake recurs constantly in this codebase",
+            keywords=["fcntl lock", "pytest run"],
         )
         db_session.commit()
 
-        _fire(db_session, topoff_project, text="a very specific past mistake recurs")
+        _fire(db_session, topoff_project, text="the fcntl lock is held, can I kill it")
         db_session.refresh(scar)
         assert scar.fired_count == 1
 
@@ -297,11 +318,23 @@ class TestScarMatchIncrementsFiredCountExactlyOnce:
                     )
 
 
-class TestSameTermDrivesBothChecks:
-    """Miles's ruling was explicit: 'same pass, same term.' This is the test
-    that would fail if journal and scar matching ever computed the term
-    independently and drifted - a single scar+journal pair, each matching
-    only a prefix of the firing prompt, must BOTH be found by one firing."""
+class TestOnePassDrivesBothChecks:
+    """Miles's ruling was 'same pass, same term', and DWB-644 kept the half of
+    it that was load-bearing.
+
+    WHAT THE RULING WAS FOR: the two checks must not drift onto different
+    slices of the prompt. DWB-644 removed the scar half's slice entirely rather
+    than changing it - that side now tests each lesson's own keywords against
+    the whole prompt - so there is no slice left for it to drift on, and
+    truncating the prompt for it would destroy matches rather than bound a
+    scan. The journal half still searches the capped literal term.
+
+    So this class no longer asserts one shared string. It asserts the property
+    that string existed to protect: ONE firing prompt, ONE pass, and BOTH
+    consultations land on it. The old name (`TestSameTermDrivesBothChecks`)
+    described the mechanism; this one describes the requirement, because the
+    mechanism changed under it and the requirement did not.
+    """
 
     def test_one_firing_prompt_matches_both_a_journal_entry_and_a_scar(
         self, db_session, make_agent, topoff_project
@@ -311,16 +344,26 @@ class TestSameTermDrivesBothChecks:
         journal_entry = journal_svc.create_entry(
             db_session,
             agent_id=agent["id"],
-            body="journal side: the fcntl lock blocks a second pytest run",
+            # The journal relation is UNCHANGED by DWB-644, so this body must
+            # still CONTAIN the prompt verbatim for the journal half to find
+            # it. That asymmetry is the point of this test now.
+            body="note to self: the fcntl lock blocks a second pytest run, so "
+            "wait rather than killing it",
         )
         scar = _scar(
             db_session,
             agent_id=agent["id"],
-            body="scar side: the fcntl lock blocks a second pytest run",
+            body="scar side: killing the holder leaves the test database "
+            "wherever the transaction reached",
+            keywords=["fcntl lock", "pytest run"],
         )
         db_session.commit()
 
-        result = _fire(db_session, topoff_project, text="the fcntl lock blocks a second pytest run")
+        result = _fire(
+            db_session,
+            topoff_project,
+            text="the fcntl lock blocks a second pytest run",
+        )
 
         assert result["topoff"]["journal_check"]["matched"] == 1
         assert result["topoff"]["journal_check"]["entry_ids"] == [journal_entry.id]

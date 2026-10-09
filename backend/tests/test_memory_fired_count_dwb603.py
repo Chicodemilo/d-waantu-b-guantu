@@ -53,11 +53,45 @@ from app.services import memory_score
 APP_DIR = pathlib.Path(__file__).resolve().parent.parent / "app"
 
 
-def _memory(db, *, agent_id, tier=MemoryTier.scar, body="a lesson about X", **kw):
-    row = AgentMemory(agent_id=agent_id, tier=tier, body=body, **kw)
+# DWB-644: THE SCAR IS FOUND BY ITS OWN KEYWORDS, NOT BY QUOTING ITS BODY.
+# Before this ticket every test here fired a scar with term="migration",
+# matched as a literal substring of the body. That relation was backwards: it
+# could only fire when the prompt was a verbatim slice of the lesson, and it
+# fired on ordinary English that happened to sit inside one. These fixtures
+# describe a SITUATION, and the lesson's author-supplied keywords are tested
+# against it.
+#
+# THE KEYWORDS AND THE BODY DELIBERATELY SHARE NO WORDING. If the situation
+# below were also a substring of the body, every test in this file would pass
+# under BOTH relations and none of them would distinguish the fix from the bug.
+SCAR_KEYWORDS = ["alembic migration", "head revision"]
+SITUATION = "editing an alembic migration that is already applied"
+NO_MATCH = "pick a colour for the sprint badge"
+
+
+def _memory(
+    db,
+    *,
+    agent_id,
+    tier=MemoryTier.scar,
+    body="a lesson about X",
+    keywords=None,
+    **kw,
+):
+    row = AgentMemory(
+        agent_id=agent_id, tier=tier, body=body, keywords=keywords, **kw
+    )
     db.add(row)
     db.flush()
     return row
+
+
+def _scar(db, *, agent_id, body="hit a race in the migration", **kw):
+    """A scar that CAN be recalled - it has keywords. A scar without them is
+    unmatchable by construction under the DWB-644 relation, which is its own
+    reported state rather than a miss."""
+    kw.setdefault("keywords", list(SCAR_KEYWORDS))
+    return _memory(db, agent_id=agent_id, body=body, **kw)
 
 
 def _fired_count_of(db, memory_id):
@@ -92,63 +126,145 @@ class TestConsultScars:
     consultation, proven against the stored value."""
 
     def test_a_match_fires_the_scar(self, db_session, agent):
-        scar = _memory(db_session, agent_id=agent["id"], body="hit a race in the migration")
+        scar = _scar(db_session, agent_id=agent["id"])
         assert scar.fired_count == 0
 
-        result = svc.consult_scars(db_session, agent_id=agent["id"], term="migration")
+        result = svc.consult_scars(
+            db_session, agent_id=agent["id"], situation=SITUATION
+        )
 
         assert result["count"] == 1
         assert [m.id for m in result["entries"]] == [scar.id]
         assert _fired_count_of(db_session, scar.id) == 1
 
     def test_repeated_matching_consultations_accumulate(self, db_session, agent):
-        scar = _memory(db_session, agent_id=agent["id"], body="hit a race in the migration")
+        scar = _scar(db_session, agent_id=agent["id"])
         for expected in (1, 2, 3):
-            svc.consult_scars(db_session, agent_id=agent["id"], term="migration")
+            svc.consult_scars(db_session, agent_id=agent["id"], situation=SITUATION)
             assert _fired_count_of(db_session, scar.id) == expected
 
     def test_a_search_that_finds_nothing_fires_nothing(self, db_session, agent):
-        scar = _memory(db_session, agent_id=agent["id"], body="hit a race in the migration")
+        scar = _scar(db_session, agent_id=agent["id"])
 
-        result = svc.consult_scars(db_session, agent_id=agent["id"], term="completely unrelated")
+        result = svc.consult_scars(
+            db_session, agent_id=agent["id"], situation=NO_MATCH
+        )
 
         assert result["count"] == 0
         assert result["entries"] == []
         assert _fired_count_of(db_session, scar.id) == 0
 
     def test_only_the_matching_scar_fires_not_every_scar(self, db_session, agent):
-        matching = _memory(db_session, agent_id=agent["id"], body="hit a race in the migration")
-        other = _memory(db_session, agent_id=agent["id"], body="an unrelated lesson")
+        matching = _scar(db_session, agent_id=agent["id"])
+        other = _scar(
+            db_session,
+            agent_id=agent["id"],
+            body="an unrelated lesson",
+            keywords=["sprint badge colour", "css token"],
+        )
 
-        svc.consult_scars(db_session, agent_id=agent["id"], term="migration")
+        svc.consult_scars(db_session, agent_id=agent["id"], situation=SITUATION)
 
         assert _fired_count_of(db_session, matching.id) == 1
         assert _fired_count_of(db_session, other.id) == 0
 
     def test_scoped_to_the_given_agent(self, db_session, agent, make_agent):
         other_agent = make_agent(project_id=agent["project_id"])
-        _memory(db_session, agent_id=other_agent["id"], body="hit a race in the migration")
+        _scar(db_session, agent_id=other_agent["id"])
 
-        result = svc.consult_scars(db_session, agent_id=agent["id"], term="migration")
+        result = svc.consult_scars(
+            db_session, agent_id=agent["id"], situation=SITUATION
+        )
 
         assert result["entries"] == []
 
-    @pytest.mark.parametrize("term", ["", "   ", None])
-    def test_a_blank_or_missing_term_is_refused(self, db_session, agent, term):
-        _memory(db_session, agent_id=agent["id"])
+    @pytest.mark.parametrize("situation", ["", "   ", None])
+    def test_a_blank_or_missing_situation_is_refused(
+        self, db_session, agent, situation
+    ):
+        """The refusal survived DWB-644's inversion unchanged - only the name
+        of what is required moved. A consultation with nothing in it is a list
+        wearing a consultation's clothes, whichever direction the match runs."""
+        _scar(db_session, agent_id=agent["id"])
         with pytest.raises(svc.ConsultError) as exc_info:
-            svc.consult_scars(db_session, agent_id=agent["id"], term=term)
-        assert exc_info.value.code == "term_required"
+            svc.consult_scars(db_session, agent_id=agent["id"], situation=situation)
+        assert exc_info.value.code == "situation_required"
+
+    def test_the_old_keyword_argument_is_a_typeerror_not_a_silent_match(
+        self, db_session, agent
+    ):
+        """DWB-644 renamed `term` to `situation` deliberately. The dangerous
+        outcome of an inversion is a call site that still means the old thing
+        and still runs, so the old name must fail loudly rather than be
+        reinterpreted."""
+        _scar(db_session, agent_id=agent["id"])
+        with pytest.raises(TypeError):
+            svc.consult_scars(db_session, agent_id=agent["id"], term="migration")
+
+    def test_a_scar_with_no_keywords_cannot_fire_and_is_reported_as_such(
+        self, db_session, agent
+    ):
+        """The known hole, asserted rather than left to be discovered: 15 live
+        scars predate DWB-657 and carry no keywords, so this relation can never
+        recall them. `unmatchable` is why that reads differently from
+        searched-and-not-found."""
+        scar = _memory(
+            db_session,
+            agent_id=agent["id"],
+            body="hit a race in the alembic migration head revision",
+            keywords=None,
+        )
+
+        result = svc.consult_scars(
+            db_session, agent_id=agent["id"], situation=SITUATION
+        )
+
+        assert result["count"] == 0
+        assert result["unmatchable"] == 1
+        assert result["considered"] == 1
+        assert _fired_count_of(db_session, scar.id) == 0
+
+    def test_a_common_word_shared_with_one_keyword_does_not_fire(
+        self, db_session, agent
+    ):
+        """THE OTHER HALF OF THE BUG. The old relation fired on an ordinary
+        English phrase that happened to sit inside a lesson body; this one must
+        not fire on a single ordinary word that happens to be a keyword. One
+        shared word is coincidence - the conjunction is the mechanism."""
+        scar = _scar(db_session, agent_id=agent["id"], keywords=["migration", "alembic"])
+
+        result = svc.consult_scars(
+            db_session,
+            agent_id=agent["id"],
+            situation="should I write a migration for this?",
+        )
+
+        assert result["count"] == 0
+        assert _fired_count_of(db_session, scar.id) == 0
+
+        # ... and the same scar DOES fire once both of its words are present,
+        # so the assertion above is about the rule and not about an
+        # unreachable row. An absence assertion paired with the state where it
+        # must come back non-zero proves itself on every run.
+        result = svc.consult_scars(
+            db_session,
+            agent_id=agent["id"],
+            situation="should I write an alembic migration for this?",
+        )
+        assert result["count"] == 1
+        assert _fired_count_of(db_session, scar.id) == 1
 
     def test_returned_rows_carry_the_post_increment_value(self, db_session, agent):
         """The caller gets the AFTER value, not the before - same discipline
         journal.py's search uses for its own counter, and for the same
         reason: a caller reading a pre-increment value would see a number the
         database has already moved past."""
-        scar = _memory(db_session, agent_id=agent["id"], body="hit a race in the migration")
-        svc.consult_scars(db_session, agent_id=agent["id"], term="migration")
+        scar = _scar(db_session, agent_id=agent["id"])
+        svc.consult_scars(db_session, agent_id=agent["id"], situation=SITUATION)
 
-        result = svc.consult_scars(db_session, agent_id=agent["id"], term="migration")
+        result = svc.consult_scars(
+            db_session, agent_id=agent["id"], situation=SITUATION
+        )
 
         assert result["entries"][0].fired_count == 2
         assert result["entries"][0].fired_count == _fired_count_of(db_session, scar.id)
@@ -158,12 +274,18 @@ class TestConsultScars:
         `[e.id for e in result["entries"]]` off journal.search_entries today;
         this proves consult_scars offers the same two handles rather than a
         shape Freddie has to special-case."""
-        scar = _memory(db_session, agent_id=agent["id"], body="hit a race in the migration")
-        result = svc.consult_scars(db_session, agent_id=agent["id"], term="migration")
+        scar = _scar(db_session, agent_id=agent["id"])
+        result = svc.consult_scars(
+            db_session, agent_id=agent["id"], situation=SITUATION
+        )
         assert result["count"] == len(result["entries"]) == 1
         assert [e.id for e in result["entries"]] == [scar.id]
         assert result["agent_id"] == agent["id"]
-        assert result["term"] == "migration"
+        # DWB-644: the response no longer echoes the prompt back as `term`. It
+        # carries the KEYWORDS that matched, which the agent wrote - so the
+        # measurement surface contains no user text by construction.
+        assert result["matched_keywords"] == {scar.id: ["alembic migration"]}
+        assert "term" not in result
 
 
 class TestScoredMemoryNeverFires:

@@ -6,7 +6,12 @@
 # Callees: app/models/hook_session.py, app/models/tool_action.py, app/services/tracking.py, app/services/dwb_session.py, app/services/activity_log.py, app/models/alert.py, app/config/session_phrases.py, app/services/journal.py (DWB-612 top-off journal search), app/services/memory_consult.py (DWB-612 top-off scar consult), app/services/memory_consolidate.py (DWB-609 session-start consolidation)
 # Data In: db: Session, hook event JSON from Claude Code hooks
 # Data Out: HookSession records, ToolAction records (DWB-417..421), activity-feed verbs, tracking_log events via tracking.py, opened/closed/reopened DwbSession rows, memory movements via memory_consolidate (DWB-609)
-# Last Modified: 2026-10-06 (top-off is suppressed while a memory transition is
+# Last Modified: 2026-10-08 (DWB-644: the scar half of top-off is handed the
+#                WHOLE PROMPT as a situation instead of a truncated slice of it
+#                as a literal search term. The relation it feeds was backwards
+#                and had never fired once in production; see memory_consult.py.
+#                The journal half is unchanged and keeps the slice; previous
+#                entry: top-off is suppressed while a memory transition is
 #                in flight: the firing pass promotes a scar to CORE at a
 #                threshold, and during adopting/reverting the store is partial,
 #                so it would reach the one tier `decide` refuses an agent on
@@ -2171,17 +2176,27 @@ TRANSITION_MODES = (MemoryMode.adopting, MemoryMode.reverting)
 
 
 def _topoff_search_term(prompt: str | None) -> str | None:
-    """The ONE term both top-off consultations search with.
+    """The term the JOURNAL half of top-off searches with. DWB-644: it is no
+    longer the scar half's term too.
 
-    Factored out so journal and scar matching cannot drift into searching two
-    different slices of the same prompt. Miles's ruling on the scar extension
-    was explicitly "same pass, same term" - a single term computed once and
-    handed to both is what makes that literal, rather than two call sites that
-    happen to agree today and quietly diverge later.
+    It was factored out so journal and scar matching could not drift into
+    searching two different slices of the same prompt, under Miles's "same
+    pass, same term" ruling. DWB-644 removed the scar half's slice entirely
+    rather than changing it: that side now matches each lesson's own keywords
+    against the whole prompt, so it has no slice to drift on and takes the
+    prompt directly. The two checks still run in the same pass off the same
+    prompt; what ended is the shared literal, because only one of them still
+    uses the prompt as a literal.
 
-    Returns None when there is not enough prompt to be a term (see the
-    constant above for why that floor exists); both callers treat None the
-    same way, as "do not search".
+    THE TRUNCATION IS STILL RIGHT FOR THE JOURNAL AND WOULD BE WRONG FOR SCARS.
+    For a literal-substring search a longer needle only makes a match less
+    likely, which is what the cap is for. For the inverted relation the prompt
+    is the HAYSTACK, so cutting it can only destroy matches.
+
+    Returns None when there is not enough prompt to be a term (see the constant
+    above for why that floor exists). The scar half applies the same floor to
+    the prompt itself - see `_topoff_scar_check` on why the same number is
+    still the right gate there for a different reason.
     """
     if not prompt:
         return None
@@ -2253,7 +2268,9 @@ def _topoff_journal_check(
     }
 
 
-def _topoff_scar_check(db: Session, *, agent_id: int | None, term: str | None) -> dict:
+def _topoff_scar_check(
+    db: Session, *, agent_id: int | None, situation: str | None
+) -> dict:
     """DWB-612 extension: the scar half of top-off, ruled 2026-09-30.
 
     This is the resolution to the DWB-603/610/612 collision: a scar's
@@ -2271,22 +2288,36 @@ def _topoff_scar_check(db: Session, *, agent_id: int | None, term: str | None) -
     unfiltered read `scored_memory()` still serves to injection and the
     dashboard. Nothing here touches `fired_count` directly.
 
-    SAME TERM, SAME HONESTY ABOUT IT. `term` comes from `_topoff_search_term`,
-    shared with `_topoff_journal_check` by Miles's own "same pass, same term"
-    ruling. The literal-substring limitation noted on the journal side applies
-    here identically, and now matters on two counters instead of one: a false
-    match is a false "I have been here before" that can eventually promote a
-    row to CORE, which never decays.
+    DWB-644: IT TAKES THE WHOLE PROMPT NOW, NOT A SLICE OF IT. The literal-
+    substring limitation this docstring used to note on the journal side no
+    longer applies here, because the comparison runs the other way round: each
+    lesson's author-supplied keywords are tested against the situation, instead
+    of the situation being required to appear verbatim inside a lesson body.
+    That is what makes this a consultation rather than a recitation check. The
+    measured consequence of the old relation was total: `fired_count` was 0 on
+    all 877 rows across both human_memory projects, and the same comparison
+    could still fire on an ordinary English phrase that happened to sit inside
+    a lesson.
+
+    THE LENGTH FLOOR IS REUSED, AND IT MEANS SOMETHING DIFFERENT NOW. Under the
+    old relation a short term was dangerous because a short string is a
+    substring of almost anything. Under this one a short prompt is simply too
+    small to carry the evidence the matcher requires, so the same number is
+    still the right gate for "there is not enough prompt here to be a
+    situation" - it is not lowered or raised, and lowering it would no longer
+    buy anything in either direction.
 
     Never raises: same fire-and-forget contract as its journal sibling.
     """
     if not agent_id:
         return {"searched": False, "reason": "no_agent"}
-    if not term:
+    if not situation or len(situation.strip()) < _TOPOFF_SEARCH_TERM_MIN_CHARS:
         return {"searched": False, "reason": "prompt_too_short"}
 
     try:
-        result = memory_consult.consult_scars(db, agent_id=agent_id, term=term)
+        result = memory_consult.consult_scars(
+            db, agent_id=agent_id, situation=situation
+        )
         db.commit()
     except memory_consult.ConsultError as e:
         db.rollback()
@@ -2296,10 +2327,33 @@ def _topoff_scar_check(db: Session, *, agent_id: int | None, term: str | None) -
         logger.exception("_topoff_scar_check failed for agent_id=%s", agent_id)
         return {"searched": False, "reason": "error"}
 
+    # DWB-644 CRITERION 3, THE FORWARD INSTRUMENT, AND IT CARRIES NO USER TEXT.
+    # The ticket asked for the term and the match count logged when top-off
+    # fires. Under the inverted relation the "term" that did the work is the
+    # set of KEYWORDS the lesson's own author wrote, not the user's prompt, so
+    # the measurement surface is agent-authored by construction and the
+    # no-user-text rule is satisfied without a redaction step. `considered`,
+    # `unmatchable` and `situation_tokens` are here because a match count with
+    # no population beside it is not comparable to anyone else's.
+    logger.info(
+        "topoff scar consult agent_id=%s considered=%s unmatchable=%s "
+        "situation_tokens=%s matched=%s keywords=%s",
+        agent_id,
+        result["considered"],
+        result["unmatchable"],
+        result["situation_tokens"],
+        result["count"],
+        sorted({k for kws in result["matched_keywords"].values() for k in kws}),
+    )
+
     return {
         "searched": True,
         "matched": result["count"],
         "memory_ids": [e.id for e in result["entries"]],
+        "matched_keywords": result["matched_keywords"],
+        "considered": result["considered"],
+        "unmatchable": result["unmatchable"],
+        "situation_tokens": result["situation_tokens"],
     }
 
 
@@ -2415,13 +2469,26 @@ def _topoff_for_prompt(
     # whatever the prompt of the moment happened to contain); this runs at
     # exactly the moment the agent is told to self-check.
     #
-    # ONE TERM, COMPUTED ONCE, HANDED TO BOTH. Miles's ruling on the scar
-    # extension was explicitly "same pass, same term" - computing it twice
-    # (once per check) would let the two searches drift onto different
-    # slices of the prompt the moment either call site changed independently.
+    # SAME PASS, AND NO LONGER THE SAME TERM - DWB-644 ENDED THAT, WITH THE
+    # REASON THE ORIGINAL RULING WAS GIVEN FOR STILL INTACT. Miles's ruling was
+    # "same pass, same term", and its purpose was that the two checks must not
+    # drift onto different slices of the prompt. The scar half no longer takes
+    # a SLICE of the prompt at all: DWB-644 inverted its relation, so the whole
+    # prompt is now the HAYSTACK that each lesson's own keywords are tested
+    # against, rather than a needle to find inside a lesson body. There is no
+    # slice left for it to drift on, and truncating the prompt for it would now
+    # DESTROY matches rather than bound a scan - the exact opposite of what the
+    # cap was for.
+    #
+    # The journal half is untouched and still searches `term`. Its relation has
+    # the same defect (the prompt is matched as a literal substring of an entry
+    # body) and fixing it is NOT DWB-644 - that ticket is scoped to the scar
+    # reinforcement path. Stated here rather than left implicit, because two
+    # checks in one pass that no longer share a term will otherwise read as
+    # drift to the next person.
     term = _topoff_search_term(prompt)
     journal_check = _topoff_journal_check(db, agent_id=hook_session.agent_id, term=term)
-    scar_check = _topoff_scar_check(db, agent_id=hook_session.agent_id, term=term)
+    scar_check = _topoff_scar_check(db, agent_id=hook_session.agent_id, situation=prompt)
 
     return {
         "topoff": {

@@ -4,9 +4,9 @@
 # Purpose: The consultation Miles ruled into existence - "have I made this
 #          scar producing error before? Outside of normal startup." The ONLY
 #          write site for AgentMemory.fired_count AND for
-#          AgentMemory.last_reinforced_session_id. Requires a real term, same
-#          discipline journal.search_entries already enforces, and fires only
-#          the rows that MATCH.
+#          AgentMemory.last_reinforced_session_id. Requires a real
+#          SITUATION, same discipline journal.search_entries already
+#          enforces, and fires only the rows that MATCH it.
 # Caller: whatever ends up calling a deliberate consultation (settled with
 #         Barry/Freddie: not spawn/SessionStart injection, not DWB-613's
 #         dashboard - both call memory_score.scored_memory(), which is pure).
@@ -14,12 +14,18 @@
 # Callees: app/models/agent, app/models/agent_memory,
 #          app/services/dwb_session (get_active_session),
 #          app/services/memory_scan (SCAR_FAMILY)
-# Data In: db Session, agent_id, a search term
-# Data Out: dict {agent_id, term, count, entries: list[AgentMemory]} - matches
-#           already carry the post-increment fired_count and the new origin
-# Last Modified: 2026-10-01 (DWB-621: a recalled scar returns to full strength -
-#                this module now also moves last_reinforced_session_id, which
-#                had no writer anywhere in app/ before today)
+# Data In: db Session, agent_id, a situation (what the agent is doing)
+# Data Out: dict {agent_id, count, entries: list[AgentMemory],
+#           matched_keywords, considered, unmatchable, situation_tokens} -
+#           matches already carry the post-increment fired_count and the new
+#           origin
+# Last Modified: 2026-10-08 (DWB-644: the match relation was backwards and
+#                this feature had never fired once in production. The needle
+#                is now the LESSON'S OWN KEYWORDS and the haystack is the
+#                SITUATION, instead of the prompt being required to be a
+#                verbatim substring of the lesson body. `match_scars` is the
+#                pure half, split out so a measurement cannot fire anything;
+#                previous entry: DWB-621 the recall bump)
 
 """Firing, moved to where Miles's ruling says it belongs.
 
@@ -49,11 +55,18 @@ does not exist cannot be gotten wrong at all. `scored_memory()` now contains
 no code path that can ever touch `fired_count`, by construction, not by
 convention.
 
-TERM REQUIRED, NO BLANKET MATCH. Same reasoning as `journal.search_entries`'s
-filter requirement, applied to the actual defect this module exists to avoid
-repeating: a consultation with no term in it is a list wearing a consultation's
-clothes, and would reopen exactly the hole this ticket closed. Refused the
-same way journal refuses an unfiltered read.
+A SITUATION IS REQUIRED, NO BLANKET MATCH. Same reasoning as
+`journal.search_entries`' filter requirement, applied to the actual defect this
+module exists to avoid repeating: a consultation with no situation in it is a
+list wearing a consultation's clothes, and would reopen exactly the hole this
+ticket closed. Refused the same way journal refuses an unfiltered read.
+
+DWB-644 CHANGED WHAT IS COMPARED, NOT WHETHER A QUESTION IS REQUIRED. The
+refusal above survived the inversion unchanged; what moved is which side is the
+needle. See the long note above `_SITUATION_STOPWORDS` for the measurement that
+forced it - this consultation had fired exactly zero times in production across
+877 rows, and the same comparison could also fire on an ordinary English
+phrase.
 
 ONLY A MATCH FIRES. Section 5's principle, carried over: a match is literal
 evidence the agent has been here before (Archie's framing of Miles's own
@@ -65,6 +78,8 @@ tier list of its own: there is exactly one definition in this codebase of
 "what is a scar" and this module imports it rather than keeping a second one
 that could drift from the first.
 """
+
+import re
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -150,49 +165,229 @@ def _fire(
     )
 
 
-def consult_scars(db: Session, *, agent_id: int, term: str) -> dict:
-    """The deliberate consultation: "have I made this scar producing error
-    before?" Searches this agent's scars for `term`; every MATCH has its
-    `fired_count` incremented, nothing else is touched.
+# DWB-644: THE RELATION, AND WHY IT IS THIS WAY ROUND.
+#
+# Until this ticket the needle was the USER'S PROMPT and the haystack was the
+# LESSON: `AgentMemory.body LIKE '%' || prompt || '%'`. That is backwards, and
+# it was wrong in both directions at once rather than merely too strict.
+#
+#   - It could not fire when it should. A scar matched only when the whole
+#     prompt was a verbatim substring of the lesson body, which happens only
+#     when the user is RECITING THE LESSON BACK - exactly the moment a
+#     consultation is unnecessary. `fired_count` was 0 on all 877 rows across
+#     both human_memory projects, with 0 non-null `last_reinforced_session_id`.
+#   - It could fire when nothing happened. A short common English phrase
+#     ('one at a time', 'the same thing') is a substring of real lesson bodies,
+#     so typing one as a whole prompt fired scars nobody recalled. At
+#     SCAR_FIRED_THRESHOLD that promotes a row to CORE, which never decays and
+#     has no demotion path (DWB-665).
+#
+# NO CONSTANT MOVES THAT. Both directions are the same comparison, so lowering
+# the prompt-length floor widens coincidence without helping recall, and
+# raising it narrows both identically. The relation itself had to be inverted.
+#
+# SO: THE NEEDLE IS THE LESSON'S OWN KEYWORDS AND THE HAYSTACK IS THE PROMPT.
+# `keywords` is author-supplied by DWB-654/657 and is defined as "the words
+# someone hunting this lesson would type" - which is a description of the
+# retrieval term for exactly this search. The lesson now says what it is about
+# and the situation is tested against that, rather than the situation being
+# required to quote the lesson.
+#
+# Consequences worth naming because they are not obvious:
+#   - The body is no longer searched at all. Nothing here reads the lesson
+#     text, which also means nothing here can be fired by prose the author did
+#     not choose as a retrieval term.
+#   - Matching moved from SQL to Python. The `utf8mb4_0900_ai_ci` collation
+#     made the old LIKE case-insensitive for free; `_tokenize` now casefolds
+#     EXPLICITLY, because an implicit property of a column is not available
+#     when the needle lives in a JSON list rather than in a column predicate.
+#     The set is bounded by construction - one agent's scars, indexed on
+#     (agent_id, tier) - so this is a few dozen rows, not a scan.
+#   - Nothing user-authored is stored or returned. The old code echoed the
+#     prompt back as `term`; this returns matched KEYWORDS, which the agent
+#     wrote, and a token COUNT. That is the whole measurement surface
+#     (DWB-644 criterion 3) and it needs no user text to work.
 
-    Refuses a blank or missing term the same way `journal.search_entries`
-    refuses a filterless request - see the module docstring on why that
-    refusal is the actual mechanism, not a formality borrowed from journal.py.
+# Tokens that carry no retrieval signal. Deliberately a SHORT NAMED SET rather
+# than a stopword corpus or a length rule: 'ci', 'db' and 'rc' are two letters
+# and are exactly the sort of term an author picks on purpose, so a length cut
+# would delete the signal it was meant to protect. Every member here is a word
+# that (a) appears in ordinary prose often enough that its presence in a prompt
+# is no evidence of anything, and (b) actually occurs inside author-written
+# keyword phrases in the live store ('naming vs counting', 'code-not-docs',
+# 'is not the same'), where leaving it in would require the user to type a
+# joining word to get a match.
+_SITUATION_STOPWORDS = frozenset(
+    {
+        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in",
+        "is", "it", "no", "not", "of", "on", "or", "that", "the", "this",
+        "to", "vs", "with",
+    }
+)
 
-    Returns a dict rather than a bare list - `{agent_id, term, count,
-    entries}` - mirroring `journal.search_entries`'s shape (DWB-612 pulls
-    `result["count"]` and `[e.id for e in result["entries"]]` off that
-    response today; this gives it the same two handles for scars without
-    inventing a second response convention). No `status`/`truncated` field:
-    unlike the journal, which can genuinely sprawl, there is no limit applied
-    here to be truncated against, so every call is complete by construction;
-    adding that field before anything needs it would be answering a question
-    nobody is asking yet.
+# How many distinct keyword TOKENS a situation must hit before the lesson is
+# treated as recalled. Tokens, not keywords, and that distinction was settled by
+# measurement against the live store rather than by taste.
+#
+# TWO, AND THE CONJUNCTION IS THE ENTIRE MECHANISM. One shared ordinary word is
+# coincidence. Measured over one agent's 109 live scars, a prompt of 'run the
+# tests' hits the bare keyword 'tests' on 7 unrelated lessons, 'verification'
+# hits 9, and 'check the state of the ticket' hits 'ticket' on 4. Those are the
+# false-fire channel this ticket exists to close, wearing better words. Two
+# distinct words co-occurring is evidence about the situation.
+#
+# COUNTED ACROSS KEYWORDS, NOT WITHIN ONE, so both honest shapes qualify: one
+# two-word keyword fully present ('working tree', 'git checkout', 'code
+# review'), or two separate single-word keywords both present. In the same
+# measurement every multi-token hit was the right lesson and almost every
+# single-token hit was not.
+#
+# WHAT IT COSTS, STATED RATHER THAN DISCOVERED LATER: a lesson keyworded only
+# with bare single words is recalled only when two of them appear together, and
+# a lesson whose keyword tokens number fewer than two in total can never be
+# recalled at all. The second case is reported as `unmatchable` rather than
+# counted as a miss. One genuine recall was lost to this rule in measurement
+# ('cmp', a rare one-word keyword naming exactly one lesson). Firing on a single
+# token when that token is unique in the agent's corpus would recover it and is
+# deliberately NOT built here: it is one observed instance, it needs a second
+# guard for a small corpus where every token is unique, and DWB-644 is about
+# making the relation correct rather than tuning its recall. Raised as a
+# follow-up with that measurement attached rather than built on one case.
+_MATCH_TOKENS_REQUIRED = 2
 
-    `entries` carries the matched rows post-increment, same ordering
-    `_fire`'s `synchronize_session="fetch"` already guarantees elsewhere in
-    this lane: a caller reading `entries[i].fired_count` sees the value AFTER
-    this call, not the one that was true when the search started.
+# Split on anything that is not a letter or digit, so 'code-not-docs' and
+# 'code not docs' tokenize identically and an author's hyphen style cannot
+# decide whether their lesson is reachable.
+_TOKEN_SPLIT = re.compile(r"[^0-9a-z]+")
 
-    Does not commit; the caller owns the transaction, same convention as
-    every other service function in this lane.
+
+def _tokenize(text: str) -> frozenset[str]:
+    """Casefold, split on non-alphanumerics, drop empties.
+
+    EXPLICIT casefold, see the module note above: this comparison used to
+    inherit case-insensitivity from the column's collation, and a Python
+    reimplementation that forgets it understates matches in one direction only
+    (always fewer), which no consistency check between two such
+    reimplementations can catch - they agree.
     """
-    if not term or not term.strip():
+    if not text:
+        return frozenset()
+    return frozenset(t for t in _TOKEN_SPLIT.split(text.casefold()) if t)
+
+
+def _keyword_tokens(keyword: object) -> frozenset[str]:
+    """The tokens a single keyword requires, stopwords removed.
+
+    Returns an empty set for a non-string, a blank, or a keyword made entirely
+    of stopwords. `matching_keywords` treats empty as NO MATCH rather than as a
+    trivially-satisfied one: a requirement with nothing in it is satisfied by
+    every situation, which would fire the row on an empty prompt. That is the
+    vacuous-assertion shape, and it is the one place this design could have
+    reintroduced a blanket match.
+    """
+    if not isinstance(keyword, str):
+        return frozenset()
+    return frozenset(t for t in _tokenize(keyword) if t not in _SITUATION_STOPWORDS)
+
+
+def keyword_token_set(memory: AgentMemory) -> frozenset[str]:
+    """Every token any of this memory's keywords could be matched on.
+
+    The reachability question: a memory whose whole keyword set contributes
+    fewer than `_MATCH_TOKENS_REQUIRED` tokens cannot satisfy the rule whatever
+    the situation says, so `match_scars` counts it as `unmatchable` rather than
+    silently reporting it as searched-and-not-found. Those are different facts
+    and only one of them is about the situation.
+    """
+    tokens: set[str] = set()
+    for k in memory.keywords or []:
+        tokens |= _keyword_tokens(k)
+    return frozenset(tokens)
+
+
+def usable_keywords(memory: AgentMemory) -> list[str]:
+    """This memory's keywords that can ever match anything.
+
+    Named and returned rather than filtered silently, because the rows this
+    excludes are a REAL HOLE and a silent one would be invisible: 15 live scars
+    predate DWB-657 and carry no keywords at all, so under this relation they
+    can never fire. They are reported as `unmatchable` by `match_scars` instead
+    of quietly counting as "searched and not found". The hole closes on its own
+    as those rows decay, because DWB-657 makes keywords required on every new
+    write; what must not happen is a body-derived backfill, which DWB-654 rules
+    out in plain words - nothing in this lane may populate `keywords` from the
+    body.
+    """
+    return [k for k in (memory.keywords or []) if _keyword_tokens(k)]
+
+
+def matched_tokens(
+    memory: AgentMemory, situation_tokens: frozenset[str]
+) -> frozenset[str]:
+    """The distinct tokens this situation hit, across every matching keyword.
+
+    This is the quantity `_MATCH_TOKENS_REQUIRED` is counted against. DISTINCT,
+    so a lesson repeating a word across two keywords ('stale comment', 'stale
+    doc') cannot reach the floor on one word typed once.
+    """
+    hit = matching_keywords(memory, situation_tokens)
+    if not hit:
+        return frozenset()
+    tokens: set[str] = set()
+    for k in hit:
+        tokens |= _keyword_tokens(k)
+    return frozenset(tokens)
+
+
+def matching_keywords(memory: AgentMemory, situation_tokens: frozenset[str]) -> list[str]:
+    """Which of this memory's keywords the situation contains, in order.
+
+    A keyword matches when EVERY token it needs is present. Partial credit
+    inside a keyword was considered and rejected: 'stale inbox file' matching on
+    'file' alone is the single-common-word rule again, one level down.
+    """
+    if not situation_tokens:
+        return []
+    return [
+        k
+        for k in (memory.keywords or [])
+        if (tokens := _keyword_tokens(k)) and tokens <= situation_tokens
+    ]
+
+
+def match_scars(db: Session, *, agent_id: int, situation: str) -> dict:
+    """WHICH SCARS THIS SITUATION RECALLS. PURE - WRITES NOTHING.
+
+    Split out from `consult_scars` deliberately, and it is the same ruling that
+    moved firing out of `scored_memory()` in the first place: a flag is a thing
+    a future caller gets wrong by omission, where a function with no write in it
+    is structurally incapable of firing no matter who calls it. The measurement
+    harness for DWB-644 criterion 3 calls THIS, so an instrument pointed at the
+    live store cannot promote anything to CORE by running.
+
+    Returns the three numbers a measurement needs next to the matches
+    themselves: how many scars were `considered`, how many were `unmatchable`
+    (fewer than `_MATCH_TOKENS_REQUIRED` keyword tokens in total, so they could
+    not have matched whatever the situation said), and how many tokens the
+    situation contributed. A count with no population beside it is not comparable to
+    anyone else's count.
+    """
+    if not situation or not situation.strip():
         raise ConsultError(
-            "term_required",
-            "a consultation requires a real term - 'have I made this error "
-            "before' is a question, and a blank term asks nothing. Supply "
-            "what you suspect you have seen before.",
+            "situation_required",
+            "a consultation requires a real situation - 'have I made this "
+            "error before' is a question, and a blank situation asks nothing. "
+            "Describe what you are doing; the lesson's own keywords are "
+            "matched against it.",
         )
 
-    cleaned = term.strip()
-    matches = list(
+    tokens = _tokenize(situation)
+    candidates = list(
         db.execute(
             select(AgentMemory)
             .where(
                 AgentMemory.agent_id == agent_id,
                 AgentMemory.tier.in_(SCAR_FAMILY),
-                AgentMemory.body.like(f"%{cleaned}%"),
             )
             .order_by(AgentMemory.id.asc())
         )
@@ -200,16 +395,63 @@ def consult_scars(db: Session, *, agent_id: int, term: str) -> dict:
         .all()
     )
 
+    matches: list[AgentMemory] = []
+    hits: dict[int, list[str]] = {}
+    unmatchable = 0
+    for memory in candidates:
+        if len(keyword_token_set(memory)) < _MATCH_TOKENS_REQUIRED:
+            unmatchable += 1
+            continue
+        if len(matched_tokens(memory, tokens)) >= _MATCH_TOKENS_REQUIRED:
+            matches.append(memory)
+            hits[memory.id] = matching_keywords(memory, tokens)
+
+    return {
+        "agent_id": agent_id,
+        "count": len(matches),
+        "entries": matches,
+        "matched_keywords": hits,
+        "considered": len(candidates),
+        "unmatchable": unmatchable,
+        "situation_tokens": len(tokens),
+    }
+
+
+def consult_scars(db: Session, *, agent_id: int, situation: str) -> dict:
+    """The deliberate consultation: "have I made this scar producing error
+    before?" Every scar this SITUATION recalls has its `fired_count`
+    incremented and its decay clock reset; nothing else is touched.
+
+    DWB-644 RENAMED THE PARAMETER FROM `term` TO `situation`, ON PURPOSE. The
+    argument used to be a slice of the user's prompt used as a literal
+    substring to find inside a lesson; it is now a description of what is
+    happening, which the lesson's own keywords are tested against. Those are
+    different questions, and a caller that keeps passing `term=` gets a
+    TypeError rather than a silently reinterpreted argument. Same reason the
+    old name could not simply be kept: the dangerous failure here is a call
+    site that still means the old thing and still runs.
+
+    Refuses a blank or missing situation the same way `journal.search_entries`
+    refuses a filterless request - see the module docstring on why that
+    refusal is the actual mechanism, not a formality borrowed from journal.py.
+
+    Returns `match_scars`' dict unchanged, with `entries` carrying the matched
+    rows POST-increment: `_fire`'s `synchronize_session="fetch"` expires them,
+    so a caller reading `entries[i].fired_count` sees the value AFTER this
+    call. `count` and `entries` are the two handles DWB-612's wiring already
+    pulls off journal.search_entries' response; they survived the inversion so
+    that wiring did not have to change shape.
+
+    Does not commit; the caller owns the transaction, same convention as
+    every other service function in this lane.
+    """
+    result = match_scars(db, agent_id=agent_id, situation=situation)
+
     _fire(
         db,
-        [m.id for m in matches],
+        [m.id for m in result["entries"]],
         reinforce_session_id=_active_session_id(db, agent_id),
     )
     db.flush()
 
-    return {
-        "agent_id": agent_id,
-        "term": cleaned,
-        "count": len(matches),
-        "entries": matches,
-    }
+    return result
