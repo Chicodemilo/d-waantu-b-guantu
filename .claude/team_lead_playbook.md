@@ -37,11 +37,75 @@ work while the mode is on. The stock branch was stripped out of your copy at dep
 so you are not choosing between two sets of instructions.
 
 Your own lessons and every worker's go to **`POST /api/agents/{agent_id}/memories`**
-`{body, cost, caught_by, surprised}` (`cost` and `caught_by` are enums,
-`none|low|high` and `me|worker|human|ci`; prose in either is a 422, and any `tier` at
-all is a 400). Episodes go to **`POST /api/journal`** `{agent_id, body, tags}`. Reads
-come from **`GET /api/agents/{id}/memory/scored`**. There is no 12000-token ceiling on
+`{body, condensed, keywords, situation, cost, caught_by, surprised}`. `body`,
+`condensed`, `keywords` and `situation` are REQUIRED; omit or blank any of them and the
+write is refused with 400 (DWB-657, DWB-667). `condensed` is ONE LINE carrying THE
+LESSON and not the setup, and it is what the 5-7 band carries instead of a truncation of
+the body's first line (DWB-658). `keywords` are what makes the 2-4 and 1 bands
+inspectable instead of a bare count (DWB-659). All are author-supplied, never
+server-derived: an extractor pulls what a text says most often, which names the subject
+and loses the point.
+
+`keywords` ARE THE WORDS THAT WILL BE IN THE AIR WHEN THE AGENT IS IN THAT SITUATION,
+never a label for what the lesson is ABOUT. Reachable: `git checkout` / `shared tree`,
+`working tree` / `mutation test`, `sprint close` / `backlog ticket`. Unreachable:
+`self-exempt`, `decompose-the-count`, `absence-defect`, `passes-today`,
+`stale-numbers` - nobody types those, because you only know the moral after you have
+already remembered the lesson. 288 live scars carry the second kind and recalled four
+lessons across 30 realistic situations. `situation` is what enforces it: the keywords
+are matched against that one line with THE SAME comparison retrieval uses, so a
+keyword the author's own sentence does not contain is refused at 400 (DWB-667), naming
+the keyword and the exact tokens that were missing.
+Write the SITUATION first, as a natural prompt, then read the keywords OUT of it - two
+agents re-keywording 76 rows converged on that independently. INFLECTION is the hard
+half and is worse than a filing label: `doc` vs `docs`, `trim` vs `trimming`, nothing
+is stemmed, and a situational keyword in the wrong form is exactly as dead while
+LOOKING correct. Carry both forms as separate keywords where both get typed. When only
+one keyword lands in the moment, WIDEN THE SET rather than asking for the floor to be
+lowered - measured, `['cmp','diff']` gives one token on "I used diff to check the two
+files" and `['diff','files']` gives two; the sentence carried six usable tokens either
+way, so what was short was the overlap, not the situation. The gate is a pure function
+and can be checked offline with no server and no write:
+`keyword_reachability.require_reachable_keywords(keywords, situation)`.
+ PREFER SEVERAL SHORT SINGLE-WORD KEYWORDS OVER ONE PRECISE PHRASE: the floor is two
+distinct tokens across ANY matching keywords, so four single words fire on any two of
+them while one three-word phrase fires only when all three appear in exactly that
+form. Precision narrows the firing surface rather than sharpening it, and that alone
+explains the worst baseline on the team - `ORM model edit`, `migration proof`,
+`alembic downgrade`, the most concrete-looking keywords anyone wrote, recalling
+nothing. Carrying both inflections is not keyword stuffing on an unstemmed matcher, it
+is the correct index, and it cost zero false fires in a ten-situation negative sweep.
+
+WIDENING HAS TWO MEASURED COSTS. A very wide set erodes what the gate PROVES: every
+keyword must appear in the situation line, so a 16-term set turns that line into prose
+plus an appended vocabulary clause, and for those terms the gate becomes
+self-attestation rather than a demonstration the author would have said them. And
+three shapes buy junk while looking safe: two ordinary PROJECT words together (`wrong
+ticket` on "the wrong colour on the ticket card"); two ordinary ENGLISH words together,
+which is worse because the pair clears the floor by itself and fires on ordinary prose
+(`before i` on "the epic needs a description before I create it", same family as `show
+me` and `every agent`); and bare generic single words (`gate`, `test`, `check`,
+`report`) which cannot fire alone but pair up by accident across a corpus. Declining to
+ADD a junk route is not narrowing, so none of this conflicts with widen-never-narrow.
+ Two mechanics decide reachability:
+EVERY token of a keyword must be present and nothing is stemmed (`ORM model edit` does
+not match "I edited an ORM model"), and recall needs TWO distinct tokens across the
+whole set, so a single one-word keyword can never be recalled and is refused.
+
+NO FIELD HERE HAS A SIZE RULE: there is no character cap on `condensed` or `situation`,
+and the keyword COUNT is guidance, not a limit, so do not brief any of them as one. What
+is enforced is emptiness and reachability, never length. A misspelled key is a pydantic **422**
+`extra_forbidden` rather than the teaching 400, which is worth knowing before you
+debug a worker's refusal. `cost` and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`;
+prose in either is a 422, and any `tier` at all is a 400. Episodes go to
+**`POST /api/journal`** `{agent_id, body, tags}`. Reads come from
+**`GET /api/agents/{id}/memory/scored`**. There is no 12000-token ceiling on
 this path, so there is nothing to chase anyone to trim.
+
+**Brief the two required fields when you spawn.** An agent arriving with an older
+playbook in context knows the four-field body and will burn its first write on a 400.
+The refusal names the field and shows a correct body, so nothing is lost, but it costs
+a round trip you can spend by stating the shape once in the brief.
 
 **A `/memories` row satisfies the DWB-519 write-on-close gate with no extra step.** It
 stamps `agents.last_memory_write_at` exactly like a stock write. Nobody calls
@@ -488,7 +552,7 @@ Subagent edits to ANY path under `.claude/` trigger a permission dialog that cra
 
 - **Workers cannot safely write anything under `.claude/`** - that includes `.claude/settings.json`, the playbooks, and the project_rules files. (DWB-401 moved agent memory OUT to `.dwb/memory/<prefix>/<name>/`, which is writable, so the memory dir is no longer in this danger zone, though writes still go through the API for the ISO heading + ceiling enforcement.)
 - **TL is the only agent that can directly Edit/Write `.claude/` files.** You run in the main CC window with a user attached for the permission dialog, so the prompt resolves instead of killing you. This is the hard exception to the TL-never-codes rule for harness-config edits.
-- **For worker memory writes**, route them through the API, never a file edit. The FastAPI process has no permission dialog, so server-side writes are safe. On a **stock** project that is `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`; on **human_memory** both are sealed at 409 and the route is `POST /api/agents/{agent_id}/memories` (§ Memory mode above). Brief the one your project actually runs: a worker handed the wrong pair burns its first write on a 409. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
+- **For worker memory writes**, route them through the API, never a file edit. The FastAPI process has no permission dialog, so server-side writes are safe. On a **stock** project that is `POST /api/agents/{agent_id}/memory/append` (DWB-358) and `POST /api/agents/{agent_id}/session-complete`; on **human_memory** both are sealed at 409 and the route is `POST /api/agents/{agent_id}/memories` (§ Memory mode above), which REQUIRES `condensed`, `keywords` and `situation` alongside `body` (DWB-657, DWB-667). Brief the route AND those three fields, and brief what a keyword IS: the words that will be in the air in that situation (`git checkout`, `shared tree`), never a label for what the lesson is about (`self-exempt`, `decompose-the-count`). A worker handed the wrong pair burns its first write on a 409; a worker handed the right route with the old body burns it on a 400; a worker who has not been told what a keyword is for writes one that stores cleanly and can never be recalled, which costs nothing today and loses the lesson permanently. Workers know to use these from the worker playbook; you may need to remind a worker who hits a memory bug that the direct Edit path is dead.
 - Do NOT ticket a `.claude/settings.json` edit to a worker. Make the change yourself. The worker playbook carries the matching prohibition.
 
 ### SendMessage routes by EXACT name

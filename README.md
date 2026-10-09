@@ -211,7 +211,7 @@ API: trigger `POST /api/system/run-tests`, coverage `GET /api/status/test-covera
 
 ## API Reference
 
-149 endpoints across 25 routers. **The full reference is the interactive docs at http://localhost:8000/docs** (every route, schema, and example); `CLAUDE.md` carries the day-to-day quick table. Standard CRUD exists for all resources.
+176 endpoints across 30 routers (counted as HTTP methods across paths in the live OpenAPI schema, 2026-10-09). **The full reference is the interactive docs at http://localhost:8000/docs** (every route, schema, and example); `CLAUDE.md` carries the day-to-day quick table. Standard CRUD exists for all resources.
 
 **Slim responses:** List endpoints strip heavy fields by default (test-results omit `details`, agents omit `api_key`); tickets/alerts/sprints support `?fields=slim`.
 

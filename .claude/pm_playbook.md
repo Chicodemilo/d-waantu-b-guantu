@@ -57,7 +57,7 @@ If a TL asks you to close a Jira sprint, REFUSE and escalate to the human. This 
 
 ## On Startup
 
-**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker. As of DWB-517 you do NOT read your memory files: your full `memory.md` is injected into your spawn prompt via the TL's `spawn-prepare` handshake (`memory_full` field), so your prior notes are already in context. The dir + files are still auto-scaffolded on spawn (DWB-341) and you only ever WRITE them through the API. The identify response also carries `memory_usage_rules` (DWB-352): a condensed inline summary of the memory rules.
+**First, complete the identity flow** in `.claude/worker_playbook.md` § On Spawn: Identity. Same flow for every agent: identify, cache `agent_id`, confirm the TL wrote your session marker. As of DWB-517 you do NOT read your memory files: your full `memory.md` is injected into your spawn prompt via the TL's `spawn-prepare` handshake (`memory_full` field), so your prior notes are already in context. The dir + files are still auto-scaffolded on spawn (DWB-341) and you only ever WRITE them through the API. The identify response also carries `memory_usage_rules` (DWB-352, mode-aware since DWB-638): a short inline summary of the memory rules for your project's mode. On `human_memory` that includes the four fields the lesson write requires, `body`, `condensed`, `keywords` and `situation`.
 
 Then read: this playbook, `.claude/project_rules_pm.md`, `HANDOFF.md`. Fetch live roster from `GET /api/projects/{project_id}/team` (DB-authoritative).
 
@@ -76,10 +76,70 @@ lands: `memory/append`, `session-complete`, `memory/compact`, `memory/condense`.
 The stock branch was stripped out of your copy at deploy.
 
 Lessons go to **`POST /api/agents/{agent_id}/memories`**
-`{body, cost, caught_by, surprised}` (`cost` and `caught_by` are enums,
-`none|low|high` and `me|worker|human|ci`; prose in either is a 422, and any `tier` at
-all is a 400). Episodes go to **`POST /api/journal`**. Reads come from
-**`GET /api/agents/{id}/memory/scored`**.
+`{body, condensed, keywords, situation, cost, caught_by, surprised}`. `body`,
+`condensed`, `keywords` and `situation` are REQUIRED; omit or blank any of them and the
+write is refused with 400 (DWB-657, DWB-667). `condensed` is ONE LINE carrying THE
+LESSON and not the setup. All are author-supplied rather than server-derived, because an
+extractor pulls what a text says most often and that names the subject while losing the
+point.
+
+`keywords` ARE THE WORDS THAT WILL BE IN THE AIR WHEN THE AGENT IS IN THAT SITUATION,
+never a label for what the lesson is ABOUT. Reachable: `git checkout` / `shared tree`,
+`working tree` / `mutation test`, `sprint close` / `backlog ticket`. Unreachable:
+`self-exempt`, `decompose-the-count`, `absence-defect`, `passes-today`,
+`stale-numbers` - nobody types those, because you only know the moral after you have
+already remembered the lesson. 288 live scars carry the second kind and recalled four
+lessons across 30 realistic situations. `situation` is what enforces it: the keywords
+are matched against that one line with THE SAME comparison retrieval uses, so a
+keyword the author's own sentence does not contain is refused at 400 (DWB-667), naming
+the keyword and the exact tokens that were missing.
+Write the SITUATION first, as a natural prompt, then read the keywords OUT of it - two
+agents re-keywording 76 rows converged on that independently. INFLECTION is the hard
+half and is worse than a filing label: `doc` vs `docs`, `trim` vs `trimming`, nothing
+is stemmed, and a situational keyword in the wrong form is exactly as dead while
+LOOKING correct. Carry both forms as separate keywords where both get typed. When only
+one keyword lands in the moment, WIDEN THE SET rather than asking for the floor to be
+lowered - measured, `['cmp','diff']` gives one token on "I used diff to check the two
+files" and `['diff','files']` gives two; the sentence carried six usable tokens either
+way, so what was short was the overlap, not the situation. The gate is a pure function
+and can be checked offline with no server and no write:
+`keyword_reachability.require_reachable_keywords(keywords, situation)`.
+ PREFER SEVERAL SHORT SINGLE-WORD KEYWORDS OVER ONE PRECISE PHRASE: the floor is two
+distinct tokens across ANY matching keywords, so four single words fire on any two of
+them while one three-word phrase fires only when all three appear in exactly that
+form. Precision narrows the firing surface rather than sharpening it, and that alone
+explains the worst baseline on the team - `ORM model edit`, `migration proof`,
+`alembic downgrade`, the most concrete-looking keywords anyone wrote, recalling
+nothing. Carrying both inflections is not keyword stuffing on an unstemmed matcher, it
+is the correct index, and it cost zero false fires in a ten-situation negative sweep.
+
+WIDENING HAS TWO MEASURED COSTS. A very wide set erodes what the gate PROVES: every
+keyword must appear in the situation line, so a 16-term set turns that line into prose
+plus an appended vocabulary clause, and for those terms the gate becomes
+self-attestation rather than a demonstration the author would have said them. And
+three shapes buy junk while looking safe: two ordinary PROJECT words together (`wrong
+ticket` on "the wrong colour on the ticket card"); two ordinary ENGLISH words together,
+which is worse because the pair clears the floor by itself and fires on ordinary prose
+(`before i` on "the epic needs a description before I create it", same family as `show
+me` and `every agent`); and bare generic single words (`gate`, `test`, `check`,
+`report`) which cannot fire alone but pair up by accident across a corpus. Declining to
+ADD a junk route is not narrowing, so none of this conflicts with widen-never-narrow.
+ Two mechanics decide reachability:
+EVERY token of a keyword must be present and nothing is stemmed (`ORM model edit` does
+not match "I edited an ORM model"), and recall needs TWO distinct tokens across the
+whole set, so a single one-word keyword can never be recalled and is refused.
+
+No field has a size rule: no character cap on `condensed` or `situation`, and the
+keyword count is guidance rather than a limit. The gate refuses what is empty or
+unreachable, never what is long, so a refusal you are chasing is a missing field or a
+keyword nobody would type, not a long one. `cost` and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`;
+prose in either is a 422, and any `tier` at all is a 400. Episodes go to
+**`POST /api/journal`**. Reads come from **`GET /api/agents/{id}/memory/scored`**.
+
+**This is the one that bites at close.** When you chase a non-writer, name the two
+required fields along with the route. A participant who writes from an older
+four-field example gets a 400, not a row, and the write-on-close gate still has
+nothing on record for them.
 
 #### What blocks a close here, and what does not
 

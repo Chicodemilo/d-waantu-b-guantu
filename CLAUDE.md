@@ -171,4 +171,4 @@ Failure types: A–G (manual taxonomy), rework (auto-detected), test_failure (au
 | Record standards audit | POST /api/standards-audits |
 | Apply audit scorecard | POST /api/standards-audits/:id/apply-scorecard |
 
-See README.md for the full 149-endpoint reference.
+See README.md for the full endpoint reference.

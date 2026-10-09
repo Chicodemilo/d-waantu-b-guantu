@@ -29,7 +29,7 @@ Full workflow under § Ticket Workflow below.
 
 Before doing ANY work, establish who you are on this project:
 
-1. **Identify yourself.** `POST /api/agents/identify` with `{role, name, project_prefix}` (use the name from your spawn brief; for fixed-role agents this may be a `_<PROJECT_PREFIX>` suffixed form like `Archie_DWB`, but the endpoint accepts the short name too). Response includes `agent_id`, `memory_dir`, `scratchpad_excerpt`, `instructions[]`, `jira_enabled` (DWB-332), and `memory_usage_rules` (DWB-352): a condensed inline summary of the memory dir layout + append-only rule + ISO 8601 timestamp format. Treat that string as the authoritative quick-reference; the longer Memory Writes section below expands on it. Canonical shape lives in `app/schemas/agent.py::AgentIdentifyResponse`.
+1. **Identify yourself.** `POST /api/agents/identify` with `{role, name, project_prefix}` (use the name from your spawn brief; for fixed-role agents this may be a `_<PROJECT_PREFIX>` suffixed form like `Archie_DWB`, but the endpoint accepts the short name too). Response includes `agent_id`, `memory_dir`, `scratchpad_excerpt`, `instructions[]`, `jira_enabled` (DWB-332), and `memory_usage_rules` (DWB-352, mode-aware since DWB-638): a short inline summary of the memory rules your project actually runs. On `human_memory` it names the lesson route and the four fields it requires, `body`, `condensed`, `keywords` and `situation`; on stock it names the memory dir layout, the append-only rule and the ISO 8601 timestamp format. Treat that string as the authoritative quick-reference; the longer Memory Writes section below expands on it. Canonical shape lives in `app/schemas/agent.py::AgentIdentifyResponse`.
    - On `409 ambiguous` or `404 not found`: **HALT** and tell the TL. Never invent an agent_id.
 2. **Cache your `agent_id`.** Include `X-Agent-ID: {agent_id}` on **every** `POST`/`PATCH`/`PUT`/`DELETE` to `/api/`. Without it, your actions log as "system" and your tokens don't attribute.
 3. **Session marker: TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file**: subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop, matching on your agent_id when the hook payload carries one (DWB-390) so concurrent spawns can't cross-attribute. If you think your marker is missing, tell the TL, they write it.
@@ -182,6 +182,9 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
 ```json
 {
   "body": "The lesson, in your own words. Required, non-empty.",
+  "condensed": "One line. THE LESSON, not the setup. Required.",
+  "keywords": ["git checkout", "shared tree"],
+  "situation": "One line: the moment this applies. Required. Your keywords must match it.",
   "context_key": "optional: what this is bound to, when you already know",
   "cost": "none | low | high",
   "caught_by": "me | worker | human | ci",
@@ -189,9 +192,164 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
 }
 ```
 
+- **`condensed`, `keywords` and `situation` are REQUIRED (DWB-657, DWB-667).** A write
+  that omits or blanks any of them is refused with **400** and nothing lands. They are author-supplied rather
+  than server-derived on purpose: an extractor pulls what the text says most often,
+  which names the subject and loses the point. "A difference between two measurements
+  is not a cause" extracts as measurement / runs / truncate. You know what the lesson
+  is FOR; the extractor does not.
+- **`condensed` is ONE LINE carrying THE LESSON, not the setup.** It is what the 5-7
+  band carries in place of a truncation of your body's first line (DWB-658). A lesson
+  that opens with three sentences of context and lands the point at the end compresses,
+  under a truncation, into exactly the context and none of the point, and the result
+  still looks like a summary. Write the sentence you would want to keep if the body
+  were gone: an instruction to someone who was not there, what to do differently
+  rather than what happened to you.
+  **"One line" is register, not syntax, and NOTHING enforces length.** There is no
+  character cap, and a wrapped write is not a violation. A 400-character `condensed`
+  is accepted (measured). A count would refuse a good 200-character lesson and pass a
+  useless 60-character one, so the write gate refuses what is EMPTY and the renderer
+  bounds what is LONG. Nothing will stop you pasting your whole body in here; it just
+  stops being worth its column, because then the 5-7 band carries a summary again.
+- **`keywords` ARE THE WORDS THAT WILL BE IN THE AIR WHEN YOU ARE IN THIS SITUATION.
+  They are NOT a label for what the lesson is about.** This is the one rule on this
+  page that was measured and found broken. Read the contrast before you write yours:
+
+  | reachable | unreachable |
+  |---|---|
+  | `git checkout`, `shared tree` | `self-exempt` |
+  | `working tree`, `mutation test` | `decompose-the-count` |
+  | `sprint close`, `backlog ticket` | `absence-defect` |
+  | `alembic`, `autogenerate` | `passes-today`, `stale-numbers` |
+
+  The left column is what somebody types when they are standing in the moment. The
+  right column names the MORAL of the lesson, which is a thing nobody types, because
+  you only know the moral after you have already remembered the lesson. 288 live
+  scars carry the right-hand kind. Across 30 realistic situations they recalled four
+  lessons between them. The only two rows that have ever fired in production carried
+  left-hand keywords.
+
+  **The two mechanics that decide whether a keyword can be reached, and they bite the
+  people who are already writing concrete terms:**
+
+  1. **EVERY token of a keyword must be present, and nothing is stemmed.** `ORM model
+     edit` does not match "I edited an ORM model". `alembic downgrade` does not match
+     "run alembic autogenerate". Each extra word in a keyword is another word the
+     situation has to contain in exactly that form.
+
+     **So PREFER SEVERAL SHORT SINGLE-WORD KEYWORDS OVER ONE PRECISE PHRASE, and the
+     arithmetic is the argument.** The floor is two distinct tokens across ANY of your
+     matching keywords. Four single words fire on any TWO of them appearing. One
+     three-word phrase fires only when all three appear, in that order of nothing and
+     in exactly that form. Precision NARROWS the firing surface; it does not sharpen
+     it. That one fact explains the worst baseline on the team: an agent whose scars
+     carried `ORM model edit`, `migration proof` and `alembic downgrade` - the most
+     concrete-looking keywords anyone had written - recalled nothing across six
+     realistic situations.
+  2. **Recall needs TWO distinct tokens across your whole keyword set.** One shared
+     ordinary word is coincidence, not evidence. So one two-word keyword works
+     (`git checkout`), and two separate one-word keywords work (`alembic`,
+     `autogenerate`), and a single one-word keyword can never be recalled by anything
+     and is refused at write time.
+
+  **THE PROCEDURE, which is the part to actually do. Write the SITUATION first, as a
+  natural prompt, in the words you would really type. Then read the keywords OUT of
+  it.** Two agents re-keywording 76 rows between them arrived at this independently,
+  from opposite directions, and it is what the gate structurally enforces anyway.
+  Writing keywords first and then a sentence to justify them is the same motion that
+  produced the filing labels.
+
+  **INFLECTION IS THE HARD HALF, AND IT IS WORSE THAN A FILING LABEL.** Getting from
+  `absence-defect` to situational words is the easy part. The hard part is WHICH FORM
+  gets typed: `doc` or `docs`, `trim` or `trimming`, `line number` or `line numbers`.
+  A perfectly situational keyword in the wrong inflection is exactly as dead as a
+  label, and it LOOKS CORRECT, so nothing about re-reading it tells you it is dead.
+  **Carry both forms as separate keywords wherever both are plausible.** It costs one
+  array entry, nothing caps the count, and on an unstemmed matcher this is not keyword
+  stuffing - **it is the correct index.** Measured by the agent who proposed it: zero
+  false fires across a ten-situation negative sweep.
+
+  **WHEN ONLY ONE OF YOUR KEYWORDS IS IN THE MOMENT, WIDEN THE SET - do not ask for
+  the floor to be lowered.** Measured: `["cmp", "diff"]` against "I used diff to check
+  the two files" supplies one token and does not fire; `["diff", "files"]` supplies two
+  and does. `["readme", "stale"]` against "the README is out of date, can you fix it"
+  supplies one; `["readme", "out of date"]` supplies three. In both cases the SITUATION
+  carried six usable tokens - what was short was the overlap with the keyword set, not
+  the sentence. That is the two-token rule working, not a bug in it: one shared
+  ordinary word is coincidence, and the floor is the only reason the measured baseline
+  had no junk fires. Some moments are normally named in one word and simply need a
+  deliberately broadened keyword set.
+
+  **WIDENING HAS TWO COSTS. BOTH ARE MEASURED AND BOTH ARE YOURS TO WEIGH.**
+
+  **Cost one: a very wide set erodes what the gate proves.** Every keyword has to
+  appear in your situation line, so a sixteen-term set forces that line to stop being
+  "the moment in your words" and become prose plus an appended vocabulary clause. For
+  those appended terms the gate is no longer a demonstration that you would have said
+  them: it is self-attestation. It still refuses a term nobody could ever type; it no
+  longer shows that YOU would have typed it. **That clause is where the contract's
+  teeth go.** Keep the situation a sentence you would really write, and let the set be
+  as wide as that sentence honestly supports.
+
+  **Cost two: three keyword shapes buy junk, and they look safe.** Measured on live
+  corpora against negative controls drawn from this project's own vocabulary:
+
+  1. **Two ordinary PROJECT words together.** `wrong ticket` fired on "the wrong
+     colour on the ticket card"; bare `epic` plus bare `sprint` fired on "create the
+     epic and the first sprint". Each word alone looks specific enough to be safe.
+  2. **Two ordinary ENGLISH words together, which is worse, because the pair clears
+     the two-token floor BY ITSELF and fires on ordinary prose.** `before i` fired on
+     "the epic needs a description before I create it". Same family: `show me`,
+     `every agent`. **Never index a phrase that is not about your subject.**
+  3. **Bare generic single words** - `gate`, `test`, `check`, `report`, `file`, `key`.
+     One alone cannot fire, which is what makes them feel free. Two of them in one
+     situation fires the row, and a corpus full of them pairs up by accident.
+
+  **Declining to ADD a junk route is not narrowing**, so this costs you nothing against
+  the widen rule. Widen with the nouns of the situation; do not widen with filler.
+
+  **CHECK IT OFFLINE BEFORE YOU SEND ANYTHING.** The gate is a pure function and runs
+  with no server and no write:
+
+  ```python
+  from app.services.keyword_reachability import require_reachable_keywords
+  require_reachable_keywords(["diff", "files"], "I used diff to check the two files")
+  ```
+
+  It raises `KeywordUnreachable` with the same sentence the 400 would carry, and
+  returns None when the set is good. An agent re-keywording 44 rows checked every one
+  this way and sent zero failing requests. That is cheaper than learning the contract
+  one refusal at a time.
+
+- **`situation` is one line naming the moment, and it is what makes the gate honest
+  (DWB-667).** Your keywords are matched against it with THE SAME comparison that will
+  later decide whether this lesson is recalled. So a keyword set that your own sentence
+  does not contain would never have been recalled by anyone's, and the write is refused
+  with **400** naming the keyword and the exact tokens your situation was missing.
+  Write the situation the way you would actually say it: "I want to undo an edit on a
+  tree nobody has committed today", not "revert semantics on uncommitted state". Then
+  the keywords almost write themselves out of it.
+- Keywords are also what makes the 2-4 and 1 bands inspectable (DWB-659); those bands
+  are otherwise a bare count, so an agent cannot tell what it is about to lose. Send a
+  JSON ARRAY of short strings, not a comma-joined string: the column is JSON, like
+  journal tags, and a string body is a **422**. The COUNT is guidance and is not
+  enforced: one term and four terms are both accepted, as long as the set clears the
+  two-token floor above. What IS enforced is that the array exists and that no entry is
+  blank: `[]`, `[""]` and `["  "]` all refuse, and a blank among real terms refuses
+  too, naming the index, rather than quietly dropping it and storing a shorter list
+  than you wrote.
 - `cost`, `caught_by`, `surprised` are the moment-tags: **enums, not prose**. A sentence
   in `cost` is a **422**. All three are optional, and tagging only what the moment
-  actually knows is the normal case, so an untagged memory is fine.
+  actually knows is the normal case, so an untagged memory is fine. `condensed`,
+  `keywords` and `situation` are NOT optional, and that is the one difference to carry
+  over from any older playbook you have in context.
+- **A MISSPELLED key is a 422, not the teaching 400.** The two refusals are different
+  layers and they mean different things. The 400 comes from the service and teaches:
+  it names the field, says what it is for, and shows a correct body. The 422 comes
+  from pydantic before any of that runs, because the schema forbids unknown keys, so
+  `condense`, `keyword` or `key_words` returns `extra_forbidden` naming the key you
+  actually sent, and `"keywords": "a, b"` returns a `list_type` error. If you get a
+  422 instead of the helpful message, you did not omit a field, you malformed one.
 - **Never send `tier`.** Any value at all is refused at 400, deliberately: tiering is
   consolidation's judgment, not yours, and the field exists only so the attempt gets an
   answer instead of silently landing as raw.
@@ -211,8 +369,11 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
   The refusal you will actually see begins `Memory write refused: <PREFIX> has no open
   DWB session.` and ends `Nothing was written and nothing was lost.` Opening a session
   is TL-only, so tell the TL rather than reaching for `/api/sessions/open` yourself.
-- Returns 201. Errors: 400 (empty body, any tier, unscoped agent, **no open DWB
-  session**), 404 (agent or project missing).
+- Returns 201. Errors: 400 (empty body, **missing or blank `condensed`**, **missing
+  or blank `keywords`**, **missing or blank `situation`**, **a keyword your situation
+  does not contain**, **a keyword set under the two-token floor**, any tier, unscoped
+  agent, **no open DWB session**), 404
+  (agent or project missing).
 
 An **episode** (what happened, in the voice of someone who was there) goes to
 **`POST /api/journal`** with `{agent_id, body, tags?}`. A sanitized entry is a useless
@@ -305,10 +466,14 @@ If you get blocked on the work, message the TL, don't sit on it.
 curl -X POST http://localhost:8000/api/agents/{your_agent_id}/memories \
   -H "X-Agent-ID: {your_agent_id}" \
   -H "Content-Type: application/json" \
-  -d '{"body": "the lesson in your own words", "cost": "low", "caught_by": "me"}'
+  -d '{"body": "the lesson in your own words",
+       "condensed": "the one line that IS the lesson",
+       "keywords": ["git checkout", "shared tree"],
+       "situation": "I want to undo an edit on a tree nobody has committed today",
+       "cost": "low", "caught_by": "me"}'
 ```
 
-`cost` and `caught_by` are enums (`none|low|high`, `me|worker|human|ci`); prose in either one is a 422, and any `tier` at all is a 400. They are also what picks your tier, so tag what the moment knew rather than what you want the score to be (see Memory Writes above).
+`condensed`, `keywords` and `situation` are REQUIRED (DWB-657, DWB-667): omit or blank any of them and the write is refused with 400 and nothing lands, which at close means you still have no write on record. `condensed` is one line carrying THE LESSON and not the setup. `keywords` are the words that will be in the air when you are IN the situation, never a label for what the lesson is about: `git checkout` / `shared tree`, not `self-exempt` / `decompose-the-count`. `situation` is the one line they are matched against, with the same comparison retrieval uses, so a keyword your own sentence does not contain is refused. `cost` and `caught_by` are enums (`none|low|high`, `me|worker|human|ci`); prose in either one is a 422, and any `tier` at all is a 400. Those three are optional, and they are also what picks your tier, so tag what the moment knew rather than what you want the score to be (see Memory Writes above).
 
 A DWB session must be open or this write is refused with 400 and nothing lands. You cannot open one; tell the TL. Nothing is lost on the refusal: re-send the identical request once a session is open.
 <!-- human-memory-only:end -->
@@ -799,7 +964,7 @@ When you see it, answer these four, honestly, before your next action:
 
 If any answer is uncomfortable, say so in your next message rather than quietly correcting course. The check is worth nothing if it only ever passes.
 
-It fires on an interval the project sets, it is independent of `memory_mode`, and no agent has to switch it on. You cannot turn it off and you are not expected to acknowledge it.
+It fires on an interval the project sets and no agent can switch it on or off: `topoff_enabled` is a per-project flag an operator sets, and it is OFF by default (`default=False`, `server_default="0"` in `models/project.py`). On a project where it is off you will never see the marker, and the four questions above are not firing for you. It is independent of `memory_mode` except during an `adopting` or `reverting` transition, when it is suppressed on purpose. You are not expected to acknowledge it when it does fire.
 
 **Why the questions are here and not in the line itself.** The marker is the trigger; this section is the content. That makes the check a rule behind a reference, which is weaker than a rule in front of you, and the trade was made deliberately: one short constant line costs almost nothing per fire, where the four questions injected verbatim every interval is the flood that gets ignored. The consequence is that this section is load-bearing. If you do not know what the marker means, the feature does nothing.
 
