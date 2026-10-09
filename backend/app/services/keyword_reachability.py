@@ -377,9 +377,42 @@ def require_reachable_keywords(
 # and DWB-669 does not reopen it. This rule removes a route; it does not retune a
 # measurement.
 #
+# THIS RULE IS NOT ENFORCEABLE BY DWB-667'S GATE AND HAD TO BE ITS OWN CHECK.
+# 667 asks only whether a keyword appears in the author's situation line, and a
+# subject-free pair appears there BY CONSTRUCTION - the author who writes
+# `another agent` writes "another agent" in the sentence beside it, honestly,
+# because the lesson genuinely is about another agent. 667 cannot separate "this
+# phrase names my subject" from "this phrase is two ordinary words"; that
+# distinction is the whole of this rule, which is why it is a separate predicate
+# running BEFORE 667's rather than a tightening of it.
+#
+# AND THE DEFECT PREDATES THE WIDENING THAT MADE IT COMMON. Four of the first
+# sweep's terms - `found nothing`, `never ran`, `read the code`, `line range` -
+# were written before any widening instruction existed, and `never ran` cleared
+# 667's gate on the day it was written. The hole was in the gate from the start;
+# widening raised its frequency. The story is not "the remedy opened a channel".
+#
 # THE BARE GENERIC SINGLE WORD IS NOT ENFORCED HERE, and that is an answer rather
-# than an omission - see `single_token_generic_report` at the bottom of this module
-# for the measurement behind it.
+# than an omission. The measurement behind it: 64 single-token keywords whose one
+# token is in the list below, across 292 rows, and only 7 rows of 595 can fire on
+# bare generics ALONE. Banning them costs one situation on the frozen 30, and it
+# would refuse `collation`, `grep` and `alembic`, which are single words that are
+# exactly right.
+#
+# THE SECOND HALF OF THAT MEASUREMENT HAS SINCE BEEN FALSIFIED AND IS CORRECTED
+# HERE RATHER THAN QUIETLY LEFT. It used to read "real in principle, fired nothing
+# in practice", on zero bare-generic pair fires across 100 agent-by-control pairs.
+# An agent then produced one: a draft row carrying `check` beside `population`,
+# fired by "check the population of the staging database". Two ordinary words, no
+# subject in either, pairing exactly as the channel predicts. Neither gate refuses
+# it - `check` is a single token so it never clears the floor alone, which is the
+# condition this rule turns on, and 667 agrees because the author's own situation
+# contains both words.
+#
+# The DECISION stands on the cost, not on the absence: one observed instance
+# against zero in a hundred pairs is not a reversal, and the cure refuses good
+# single words. What has changed is that it is no longer defended by "we saw
+# none". ABSENCE ON A CONTROL SET IS NOT ABSENCE, and the control set was mine.
 _NON_SUBJECT_TOKENS = frozenset(
     {
         # From the refusal set these were derived from: every token of every
@@ -423,6 +456,28 @@ _NON_SUBJECT_TOKENS = frozenset(
         # those would be the too-wide failure this list is watched for. Only
         # words with an observed fire went in.
         "does", "mean", "means", "looks", "fine",
+        # `after`, and the way it got here is worth the three lines.
+        #
+        # The author of this rule wrote `before and after` as a keyword on his own
+        # memory row, in the session he named this class, then told the lead TWICE
+        # that "the rule refuses it" - having never run it. It does not: `before`
+        # was in the list and `after` was not. The row was cleaned because the lead
+        # ruled it should be, not because the rule caught it, and the sweep was
+        # reporting zero offenders store-wide while the keyword sat live on another
+        # project.
+        #
+        # That is a conclusion asserted from a NAME with no artifact behind it,
+        # inside the ticket written to stop exactly that, by the person who wrote
+        # the refusal message about it. The fix is one word; the reason it is
+        # recorded here is that nothing else would have caught it - the tests pass
+        # either way, because a rule's test suite only contains the cases someone
+        # thought to write down.
+        #
+        # Blast radius checked first, over every live keyword containing `after` or
+        # `before`: exactly ONE refusal store-wide, `before and after` on IND #939.
+        # `after their`, `after my change`, `re-profile after fix`, `before i edit`,
+        # `before filing`, `before deleting` all survive on their subject word.
+        "after",
         # Inflections of words ALREADY above. The matcher does not stem, so an
         # author writing the other form would otherwise walk straight through a
         # rule the singular already covers. Nothing is added here whose base form
