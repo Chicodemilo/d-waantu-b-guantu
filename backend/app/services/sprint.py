@@ -243,13 +243,10 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
         return
 
     if project.force_test_run:
-        # Require at least one test run for this project during the sprint
-        stmt = select(func.count()).select_from(TestResult).where(
-            TestResult.project_id == project.id
-        )
-        if sprint.start_date:
-            stmt = stmt.where(TestResult.run_at >= sprint.start_date)
-        count = db.scalar(stmt) or 0
+        # Require at least one test run for this project during the sprint.
+        # DWB-678: the count comes from the shared predicate so gate-status
+        # reports the same window this refuses on.
+        count = test_run_count_for_sprint(db, project, sprint)
         if count == 0:
             raise HTTPException(
                 400,
@@ -327,19 +324,9 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
     if project.force_consolidation:
         from app.services import agent_consolidation as consolidation_svc
         unacked = consolidation_svc.unacked_agents_for_sprint(db, sprint)
-        # Denominator = active participants (the set we actually require acks
-        # from), not all active agents on the project. Pre-DWB-326 this was
-        # all active agents, which made the M/N display misleading when the
-        # active roster was larger than the sprint team.
-        participant_ids = consolidation_svc.participants_for_sprint(db, sprint)
-        total_required = db.scalar(
-            select(func.count()).select_from(Agent)
-            .where(
-                Agent.project_id == project.id,
-                Agent.is_active.is_(True),
-                Agent.id.in_(participant_ids) if participant_ids else Agent.id.is_(None),
-            )
-        ) or 0
+        # DWB-678: denominator via the shared predicate, so gate-status shows
+        # the same M of N this refusal quotes.
+        total_required = required_ack_agent_count(db, project, sprint)
         if unacked:
             raise HTTPException(
                 400,
@@ -536,6 +523,144 @@ def router_test_coverage(routers_dir: Path, tests_dir: Path) -> list[dict]:
             "covered": covered,
         })
     return coverage
+
+
+# ---------------------------------------------------------------------------
+# DWB-678: the three gates that sprint close enforces and gate-status used to
+# omit entirely. A TL read six passing gates, closed, and was refused by a gate
+# that was never in the answer.
+#
+# SHARED PREDICATES, NOT A SECOND IMPLEMENTATION. Each status builder below is
+# the READ side of a gate whose REFUSE side is in _check_completion_gates a few
+# hundred lines up, and the two must never disagree - an endpoint that reports
+# a gate passing while the close refuses on it is the same trap again, one
+# layer in. So the shared part is factored into a predicate that both call,
+# rather than restated here and kept in step by care.
+# ---------------------------------------------------------------------------
+
+
+def test_run_count_for_sprint(db: Session, project: Project, sprint: Sprint) -> int:
+    """Test runs recorded for `project` inside `sprint`'s window.
+
+    The window is "since sprint start" and is unbounded when the sprint has no
+    start_date, which is the behaviour the close has always had.
+    """
+    stmt = select(func.count()).select_from(TestResult).where(
+        TestResult.project_id == project.id
+    )
+    if sprint.start_date:
+        stmt = stmt.where(TestResult.run_at >= sprint.start_date)
+    return db.scalar(stmt) or 0
+
+
+def required_ack_agent_count(db: Session, project: Project, sprint: Sprint) -> int:
+    """How many agents the consolidation gate requires an ack from.
+
+    Denominator = active participants (the set acks are actually required
+    from), not all active agents on the project. Pre-DWB-326 this was all
+    active agents, which made the M/N display misleading when the active
+    roster was larger than the sprint team.
+    """
+    from app.services import agent_consolidation as consolidation_svc
+
+    participant_ids = consolidation_svc.participants_for_sprint(db, sprint)
+    return db.scalar(
+        select(func.count()).select_from(Agent)
+        .where(
+            Agent.project_id == project.id,
+            Agent.is_active.is_(True),
+            Agent.id.in_(participant_ids) if participant_ids else Agent.id.is_(None),
+        )
+    ) or 0
+
+
+def test_run_gate_status(db: Session, project: Project, sprint: Sprint) -> dict:
+    """Read side of force_test_run. Mirrors the refusal, counts nothing extra."""
+    enabled = bool(project.force_test_run)
+    count = test_run_count_for_sprint(db, project, sprint) if enabled else 0
+    return {
+        "kind": "test_run",
+        "toggle": "force_test_run",
+        "enabled": enabled,
+        "test_runs_in_window": count,
+        "window_start": sprint.start_date.isoformat() if sprint.start_date else None,
+        "passing": not enabled or count > 0,
+    }
+
+
+def test_coverage_gate_status(project: Project) -> dict:
+    """Read side of force_test_coverage.
+
+    RAISES NOTHING. _get_uncovered_routers refuses with a 400 when the project
+    has no repo_path or is not shaped like a FastAPI backend, which is correct
+    for a close and wrong for a read: a GET that 400s because a toggle is on
+    would make gate-status unusable on exactly the projects whose closes are
+    already going to fail. The refusal is caught and surfaced as
+    `evaluable: False` with its reason, so the caller learns the same thing
+    without the endpoint falling over.
+    """
+    enabled = bool(project.force_test_coverage)
+    if not enabled:
+        return {
+            "kind": "test_coverage",
+            "toggle": "force_test_coverage",
+            "enabled": False,
+            "evaluable": True,
+            "uncovered_routers": [],
+            "passing": True,
+        }
+
+    try:
+        uncovered = _get_uncovered_routers(project)
+    except HTTPException as exc:
+        return {
+            "kind": "test_coverage",
+            "toggle": "force_test_coverage",
+            "enabled": True,
+            "evaluable": False,
+            "reason": str(exc.detail),
+            "uncovered_routers": None,
+            # NOT passing: the close will refuse for this same reason, so
+            # reporting True here would be the trap this ticket closes.
+            "passing": False,
+        }
+
+    return {
+        "kind": "test_coverage",
+        "toggle": "force_test_coverage",
+        "enabled": True,
+        "evaluable": True,
+        "uncovered_routers": uncovered,
+        "passing": not uncovered,
+    }
+
+
+def consolidation_gate_status(db: Session, project: Project, sprint: Sprint) -> dict:
+    """Read side of force_consolidation.
+
+    /api/projects/{id}/consolidation-status still exists and is the per-agent
+    detail view; this is the one-line verdict that belongs beside the other
+    gates. Including it here does not make that endpoint redundant.
+    """
+    from app.services import agent_consolidation as consolidation_svc
+
+    enabled = bool(project.force_consolidation)
+    unacked_names: list[str] = []
+    required = 0
+    if enabled:
+        unacked_names = [
+            a.name for a in consolidation_svc.unacked_agents_for_sprint(db, sprint)
+        ]
+        required = required_ack_agent_count(db, project, sprint)
+
+    return {
+        "kind": "consolidation",
+        "toggle": "force_consolidation",
+        "enabled": enabled,
+        "unacked_agents": unacked_names,
+        "required_agents": required,
+        "passing": not enabled or not unacked_names,
+    }
 
 
 def _get_uncovered_routers(project: Project) -> list[str]:

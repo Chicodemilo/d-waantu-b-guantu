@@ -6,8 +6,8 @@
 # Callees: app/services (project, project_agent, standards_audit, test_result, seed_demo, playbook_deploy, activity_log), models (ActivityLog, Agent, Alert, InterAgentMessage, ProjectAgent, Ticket)
 # Data In: HTTP requests
 # Data Out: JSON responses (ProjectRead, gate status, token budget, team listing)
-# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
-#                ceiling_for_category instead of inlining 800/1000)
+# Last Modified: 2026-10-12 (DWB-678: gate-status says what it did NOT evaluate;
+#                all_passing is three-valued, null when gates are unexamined)
 
 import json
 import logging
@@ -775,22 +775,184 @@ def _check_header_gate(db: Session, project) -> dict:
     }
 
 
+# Where a caller can read a gate this endpoint does NOT evaluate.
+#
+# CURRENTLY UNREACHABLE, AND SAID SO RATHER THAN LEFT TO LOOK LIVE. Every
+# force_* column now has a gate builder, so the only toggles that reach
+# `unevaluated` are the two sprint-scoped ones on a project with no active
+# sprint - and those carry a REASON, which _coverage_note prefers over a route
+# - or a column added later, which by definition has no entry here and gets
+# "no read route known". So no entry below is read today. It is left in place
+# as the fallback for a gate that becomes unevaluable for some reason other
+# than a missing sprint; delete it if that never happens.
+_GATE_READ_ROUTES = {
+    "force_consolidation": (
+        "GET /api/projects/{project_id}/consolidation-status"
+        "?sprint_id=N  (sprint_id is required; without it the route 422s)"
+    ),
+    "force_test_run": "GET /api/projects/{project_id}/tests",
+    "force_test_coverage": "GET /api/status/test-coverage",
+}
+
+
+def _summarise_all_passing(
+    covered_passing: bool, unevaluated: list[str]
+) -> bool | None:
+    """Three-valued, and only the LYING value is withheld (DWB-678).
+
+    False stays False and is always truthful: one covered gate failing means
+    the close is refused no matter what the unevaluated gates would say, so
+    nothing is lost by answering it.
+
+    True was the lie. `all_passing` computed over a SUBSET reads as a verdict
+    on the whole, and a caller could not tell a true meaning "every gate" from
+    a true meaning "the ones I happened to look at". While anything is
+    unevaluated the honest answer is None: not "something is failing", but
+    "this endpoint cannot answer that question".
+
+    None is falsy in both Python and JSON/JS, so a caller doing the naive
+    `if all_passing:` is pushed toward the SAFE reading - do not assume the
+    close will succeed - rather than the dangerous one.
+
+    WHEN None ACTUALLY APPEARS. Not from any fixed set of gates. It appears
+    whenever `unevaluated` is non-empty, which the handler derives as every
+    force_* column on the Project model minus the toggles the returned gates
+    carry. Two things produce it. A gate scoped to a sprint window
+    (force_test_run, force_consolidation) on a project with no active sprint,
+    because there is no window to judge against and guessing would be the
+    defect this function exists to remove. And a force_* column that no gate
+    builder evaluates, which is how a gate added to the model later announces
+    itself instead of going missing.
+
+    So None is a live value on a normally-configured project, and a project
+    with an active sprint and every gate evaluated gets a real True or False.
+
+    Pure and separate from the handler so each branch is testable
+    independently of whatever the live data happens to be able to produce.
+    """
+    if not covered_passing:
+        return False
+    if unevaluated:
+        return None
+    return True
+
+
+def _all_gate_toggles() -> list[str]:
+    """Every force_* toggle the Project model carries.
+
+    DERIVED FROM THE TABLE, NEVER LISTED HERE. A hardcoded list is how three
+    gates went missing from this endpoint's accounting in the first place: it
+    would be correct the day it was written and silently short the day a tenth
+    column lands. Reading the columns means a new gate shows up as UNEVALUATED
+    the moment it exists, so the endpoint reports its own incompleteness
+    instead of someone discovering it at a sprint close (DWB-678).
+    """
+    from app.models.project import Project
+
+    return sorted(
+        c.name for c in Project.__table__.columns if c.name.startswith("force_")
+    )
+
+
 @router.get("/{project_id}/gate-status")
 def get_gate_status(project_id: int, db: Session = Depends(get_db)):
     project = svc.get_project(db, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
 
+    from app.models.sprint import Sprint, SprintStatus
+    from app.services import sprint as sprint_svc
+
     gates = _check_doc_gates(db, project)
     gates.append(_check_header_gate(db, project))
     # DWB-017: audit-gate DB access + logic live in the service (thin router).
     gates.append(standards_audit_svc.audit_gate_status(db, project))
 
+    # DWB-678: the three gates sprint close enforces that this endpoint used to
+    # omit. Logic lives in services/sprint.py beside the refusal it mirrors.
+    gates.append(sprint_svc.test_coverage_gate_status(project))
+
+    active_sprint = db.scalars(
+        select(Sprint)
+        .where(Sprint.project_id == project.id)
+        .where(Sprint.status == SprintStatus.active)
+        .order_by(Sprint.id.desc())
+        .limit(1)
+    ).first()
+
+    # SPRINT-SCOPED GATES ARE OMITTED RATHER THAN GUESSED WHEN THERE IS NO
+    # ACTIVE SPRINT. Both are defined over a sprint window, so with no sprint
+    # there is no honest verdict. Omitting them drops them into
+    # `unevaluated_gates` by construction, which is exactly the machinery this
+    # ticket built - the alternative, a passing:None, would be read as falsy by
+    # `all()` and report a failure where the truth is "not applicable yet".
+    unevaluated_reasons: dict[str, str] = {}
+    if active_sprint is not None:
+        gates.append(sprint_svc.test_run_gate_status(db, project, active_sprint))
+        gates.append(
+            sprint_svc.consolidation_gate_status(db, project, active_sprint)
+        )
+    else:
+        no_sprint = (
+            "no active sprint on this project; this gate is defined over a "
+            "sprint window and cannot be evaluated without one"
+        )
+        unevaluated_reasons["force_test_run"] = no_sprint
+        unevaluated_reasons["force_consolidation"] = no_sprint
+
+    evaluated = sorted({g["toggle"] for g in gates if g.get("toggle")})
+    unevaluated = [t for t in _all_gate_toggles() if t not in evaluated]
+    covered_passing = all(g["passing"] for g in gates)
+
+    all_passing = _summarise_all_passing(covered_passing, unevaluated)
+
     return {
         "project_id": project_id,
-        "all_passing": all(g["passing"] for g in gates),
+        "all_passing": all_passing,
+        # The old `all_passing` value, under a name that says what it covers.
+        # A caller that genuinely wants "is everything I can see here ok"
+        # should read this and not infer it from the three-valued field.
+        "covered_passing": covered_passing,
+        "evaluated_gates": evaluated,
+        "unevaluated_gates": unevaluated,
+        "coverage_note": _coverage_note(unevaluated, unevaluated_reasons),
         "gates": gates,
     }
+
+
+def _coverage_note(
+    unevaluated: list[str], reasons: dict[str, str] | None = None
+) -> str | None:
+    """Plain-language statement of what this endpoint did not look at.
+
+    None when it looked at everything, so the field's presence is itself the
+    signal. Names a READ ROUTE per missing gate rather than only declaring the
+    gap: a response that says "I am incomplete" and stops leaves the caller to
+    guess where the rest lives.
+    """
+    if not unevaluated:
+        return None
+
+    lines = [
+        "This endpoint did not evaluate: " + ", ".join(unevaluated) + ".",
+        "Sprint close enforces EVERY force_* toggle "
+        "(services/sprint.py::_check_completion_gates), so a close can still "
+        "be refused by a gate that is absent from `gates` below. `all_passing` "
+        "is null for that reason; read `covered_passing` for a verdict over "
+        "what was actually checked.",
+        "Read the missing ones at:",
+    ]
+    reasons = reasons or {}
+    for toggle in unevaluated:
+        # A REASON BEATS A ROUTE. When we know WHY a gate could not be
+        # evaluated, saying so is more use than pointing at somewhere to look;
+        # the route is the fallback, and "no read route known" is the honest
+        # answer for a gate nobody has wired yet.
+        detail = reasons.get(toggle) or _GATE_READ_ROUTES.get(
+            toggle, "no read route known"
+        )
+        lines.append(f"  {toggle}: {detail}")
+    return "\n".join(lines)
 
 
 @router.get("/{project_id}/tests", response_model=list[TestResultRead])

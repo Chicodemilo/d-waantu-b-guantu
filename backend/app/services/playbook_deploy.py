@@ -6,7 +6,10 @@
 # Callees: app/services/agent_memory.py, app/models/agent.py, pathlib, shutil, re, json
 # Data In: db: Session, project: Project
 # Data Out: DeployResult
-# Last Modified: 2026-10-07 (DWB-645: the variant scrub is table-driven and
+# Last Modified: 2026-10-12 (DWB-673: deploy ships scripts/hooks/ into the
+#                target repo, so the PreToolUse guard the hooks block names
+#                actually exists there. Previous: DWB-645: the variant scrub
+#                is table-driven and
 #                takes a second key, project.memory_mode, alongside jira.
 #                _scrub_for_jira_target became _scrub_variant_blocks - see the
 #                rename note there. Previous: DWB-526 deploy re-grounds doc
@@ -55,6 +58,16 @@ DWB_COMMANDS_DIR = DWB_REPO_ROOT / ".claude" / "commands"
 SPRINT_POST_COMMAND_NAME = "sprint-post.md"
 SPRINT_POST_COMMAND_SRC = DOCS_DIR / "commands" / SPRINT_POST_COMMAND_NAME
 DWB_SPRINT_POST_COMMAND = DWB_COMMANDS_DIR / SPRINT_POST_COMMAND_NAME
+
+# DWB-673: the hook SCRIPTS the hooks block points at. These live at the REPO
+# ROOT (`<repo>/scripts/hooks/`), not under `.claude/`, because that is where
+# `$CLAUDE_PROJECT_DIR/scripts/hooks/...` in _HOOKS_SETTINGS_BLOCK resolves to.
+# Before this, deploy wrote the PreToolUse config into every target and shipped
+# nothing to satisfy it: python3 exits 2 on a missing path, exit 2 on PreToolUse
+# is a DENY, so Write/Edit/MultiEdit/NotebookEdit were dead on every repo that
+# had been deployed to. Config without its payload is worse than neither.
+DWB_HOOK_SCRIPTS_DIR = DWB_REPO_ROOT / "scripts" / "hooks"
+HOOK_SCRIPTS_REL = Path("scripts") / "hooks"
 
 PLAYBOOK_FILES = {
     "team_lead": "team_lead_playbook.md",
@@ -317,6 +330,10 @@ class DeployResult(BaseModel):
     memory_dirs: list[DeployedMemoryDir] = []
     root_docs: list[str] = []  # DWB-366: skeletons created at repo root
     hooks_settings: str | None = None  # DWB-390: 'created'|'merged'|'unchanged'|None
+    # DWB-673: hook scripts copied to <repo>/scripts/hooks/, repo-root-relative.
+    # A separate field rather than an entry in `deployed`: every entry in
+    # `deployed` is relative to `.claude/` and callers resolve it that way.
+    hook_scripts: list[str] = []
 
 
 # DWB-390: hooks block written into each project's `.claude/settings.json`
@@ -468,7 +485,7 @@ _HOOKS_SETTINGS_BLOCK: dict = {
     # own settings.json, which `test_block_matches_shipped_settings_json`
     # enforces in both directions.
     "PreToolUse": [{
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [{
             "type": "command",
             "command": (
@@ -914,6 +931,62 @@ def deploy_bundle(db: Session, project) -> DeployResult:
     if target_dir.resolve() != (DWB_REPO_ROOT / ".claude").resolve():
         hooks_settings = _deploy_hooks_settings(target_dir)
 
+    # DWB-673: ship the hook SCRIPTS alongside the hook config written just
+    # above. Destination is <repo>/scripts/hooks/, NOT <repo>/.claude/, because
+    # that is what `$CLAUDE_PROJECT_DIR/scripts/hooks/...` resolves to in the
+    # deployed command string. Kept adjacent to the settings write on purpose:
+    # the config and the file it names must not drift apart again.
+    #
+    # EXISTING TARGET FILES ARE OVERWRITTEN, deliberately. These are DWB-owned
+    # shipped artifacts, the same class as the playbooks and the agent defs, so
+    # the newest DWB copy wins and a target repo cannot pin a stale guard. The
+    # never-overwrite rule applies only to files a TL or human authors in the
+    # target (project_rules_*, root-doc stubs). Nothing here is hand-authored
+    # downstream; a target that edits one is editing a file deploy owns.
+    #
+    # shutil.copy2 (not copy) because it runs copystat, which carries the
+    # executable bit across. A non-executable hook script is a hook that CC
+    # cannot run, which is the same outcome as the absent file this fixes.
+    #
+    # THE UNIT OF SHIPPING IS THE DIRECTORY, NOT A NAMED FILE, deliberately.
+    # Naming one file is how DWB-673 happened: a hook was wired and its script
+    # was not in anybody's copy list. Globbing the directory means a hook added
+    # to scripts/hooks/ later ships without anyone remembering to add it here,
+    # which is the whole property being bought.
+    #
+    # The cost of that choice, stated rather than discovered: scripts/hooks/
+    # also holds `post-commit`, so every consumer repo now receives it. That is
+    # a git hook that POSTs commit message, repo path and SHA to DWB_API_URL to
+    # auto-close tickets, and it is INERT until symlinked into .git/hooks.
+    # scripts/install-git-hooks.sh does NOT ship, so no consumer repo installs
+    # it by accident - it arrives as a dormant file and stays one. Shipping it
+    # was not separately decided and is accepted as the price of the directory
+    # rule. If someone later wants post-commit to actually run downstream, that
+    # is a deliberate ticket (ship the installer, document it), not a thing to
+    # infer from the file being present.
+    hook_scripts: list[str] = []
+    hook_scripts_target = repo / HOOK_SCRIPTS_REL
+    if (
+        DWB_HOOK_SCRIPTS_DIR.is_dir()
+        and hook_scripts_target.resolve() != DWB_HOOK_SCRIPTS_DIR.resolve()
+    ):
+        hook_scripts_target.mkdir(parents=True, exist_ok=True)
+        for src in sorted(DWB_HOOK_SCRIPTS_DIR.iterdir()):
+            if not src.is_file() or src.name.startswith("."):
+                continue
+            dst = hook_scripts_target / src.name
+            try:
+                shutil.copy2(src, dst)
+            except shutil.SameFileError:  # pragma: no cover - resolve() guard
+                continue
+            except OSError:
+                logger.warning(
+                    "deploy-playbooks: could not copy hook script %s to %s",
+                    src, dst, exc_info=True,
+                )
+                continue
+            hook_scripts.append(str(HOOK_SCRIPTS_REL / src.name))
+
     project.playbooks_deployed_at = datetime.now(timezone.utc)
     db.commit()
 
@@ -933,4 +1006,5 @@ def deploy_bundle(db: Session, project) -> DeployResult:
         memory_dirs=memory_dirs,
         root_docs=root_docs,
         hooks_settings=hooks_settings,
+        hook_scripts=hook_scripts,
     )

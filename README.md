@@ -104,7 +104,7 @@ A DWB session is a user-bounded span of work: it opens when you signal start, cl
 
 ## Sprint Gates
 
-Boolean toggles gating sprint completion. All default OFF (opt-in per project):
+Boolean toggles gating sprint completion. All default OFF except `force_handoff_md`, which defaults **ON**: every project must have `HANDOFF.md` at its repo root to close a sprint, opted in or not.
 
 | Toggle | Check |
 |--------|-------|
@@ -119,7 +119,7 @@ Boolean toggles gating sprint completion. All default OFF (opt-in per project):
 | `force_headers` | Sprint-touched `.py` files carry the code-header block; missing ones block close |
 | Failure records | Unreviewed stubs always block close |
 
-Check gates: `GET /api/projects/{id}/gate-status`
+Check gates: `GET /api/projects/{id}/gate-status`. It evaluates every `force_*` column, so new gates appear automatically. `all_passing` is three-valued: `false` a checked gate is failing, `true` all passed, `null` it could not answer, which is not the same as something failing. Null shows up when a gate needs a sprint window and there is none; `unevaluated_gates` and `coverage_note` say which and why, and `covered_passing` scores what was actually checked. Sprint close enforces every toggle regardless (`_check_completion_gates`).
 
 On sprint completion: a test ticket is minted onto the closing sprint as backlog, unassigned (DWB-566), and pulled forward by hand when the next sprint opens. No alerts fire: the per-role tests-needed alerts were removed in DWB-463.
 
@@ -129,7 +129,7 @@ On sprint completion: a test ticket is minted onto the closing sprint as backlog
 
 **Auto-detected:** ticket back to `in_progress` after `done` → rework record + PM alert; failed test → one record per failed test.
 
-**Manual taxonomy:** types A–G, categorized by the PM. Unreviewed stubs block sprint close. Summary: `GET /api/failure-records/summary`.
+**Manual taxonomy:** seven values the PM picks from, stored verbatim in `failure_record.failure_type`: `context_degradation`, `spec_drift`, `sycophantic_confirmation`, `tool_selection_error`, `cascading_failure`, `silent_failure`, `integration_failure`. "A-G" is shorthand for that set, not a value to store. Unreviewed stubs block sprint close. Summary: `GET /api/failure-records/summary`.
 
 ---
 

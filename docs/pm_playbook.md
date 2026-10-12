@@ -14,7 +14,7 @@
 - **Ticket creation (no Jira)**: on projects without Jira (`project.jira_base_url` is null) there is no `dwb2jira` and no dual-write gate. The PM files tickets directly via `POST /api/tickets` with `X-Agent-ID: {pm_id}`, from a TL-drafted, human-approved spec. Filing tickets is still the PM's job, not the TL's; the TL drafts, you file. The approval order is unchanged: human sees the spec before anything is created. Tickets auto-assign to the active sprint and inherit its epic.
 <!-- non-jira-only:end -->
 
-**Tickets must not contradict `.claude/rules/global/coding-standards.md`.** The auditor scores your ticketing both ways: a ticket that steers work against the standards is your stick; clean, well-organized ticketing that devs then ignore is your carrot and their stick. Write specs the sheet backs, not ones it overrules.
+**Tickets must not contradict `.claude/rules/global/coding-standards.md`** (in the DWB repo itself, `docs/rules/global/coding-standards.md`). The auditor scores your ticketing both ways: a ticket that steers work against the standards is your stick; clean, well-organized ticketing that devs then ignore is your carrot and their stick. Write specs the sheet backs, not ones it overrules.
 
 **DWB is internal: never reference DWB or DWB ticket IDs in Jira, PRs, commits, or any external content.** Full context: `.claude/worker_playbook.md § DWB Is an Internal Tool`.
 
@@ -65,7 +65,7 @@ Load instructions: `GET /api/instructions?scope=global`, `scope=project&project_
 
 ## DWB Session Lifecycle (PM Awareness)
 
-The TL alone evaluates user intent and opens/closes DWB sessions; **the PM never opens or closes a DWB session.** Don't post to `/api/sessions/open` or `/api/sessions/{id}/close`, even if you think you spot an open/close phrase the TL missed. Surface it to the TL instead. PM tokens roll up under the open session automatically via hooks; you don't need to signal anything. Full user-facing reference: `.claude/session_lifecycle.md`.
+The TL alone evaluates user intent and opens/closes DWB sessions; **the PM never opens or closes a DWB session.** Don't post to `/api/sessions/open` or `/api/sessions/{id}/close`, even if you think you spot an open/close phrase the TL missed. Surface it to the TL instead. PM tokens roll up under the open session automatically via hooks; you don't need to signal anything. Full user-facing reference: `.claude/session_lifecycle.md` (in the DWB repo itself, `docs/session_lifecycle.md`).
 
 <!-- stock-memory-only:start -->
 ### Memory mode: this project runs `stock`
@@ -110,8 +110,11 @@ one keyword lands in the moment, WIDEN THE SET rather than asking for the floor 
 lowered - measured, `['cmp','diff']` gives one token on "I used diff to check the two
 files" and `['diff','files']` gives two; the sentence carried six usable tokens either
 way, so what was short was the overlap, not the situation. The gate is a pure function
-and can be checked offline with no server and no write:
-`keyword_reachability.require_reachable_keywords(keywords, situation)`.
+and can be checked offline with no server and no write, by calling
+`keyword_reachability.require_reachable_keywords(keywords, situation)` from
+`backend/app/services/`. That import resolves ONLY on the DWB repo itself; on every
+other project the same gate runs server-side at write time and refuses a bad set with
+a 400, so brief the refusal rather than the offline call.
  PREFER SEVERAL SHORT SINGLE-WORD KEYWORDS OVER ONE PRECISE PHRASE: the floor is two
 distinct tokens across ANY matching keywords, so four single words fire on any two of
 them while one three-word phrase fires only when all three appear in exactly that
@@ -247,7 +250,7 @@ store, with no file and no token ceiling; size is bounded by decay rather than a
 Write-on-close is still REQUIRED (DWB-519) and a `/memories` row satisfies it.
 <!-- human-memory-only:end -->
 
-**Budgeted vs exempt:** the consolidation gate counts only docs the TL owns (root docs + `project_rules_*`). DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Your `memory.md` is not counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time: an append / session-complete / compact / condense that would exceed it is refused (HTTP 400, nothing dropped), and you condense to get back under. On a `human_memory` project all four of those routes are sealed at 409 and there is no ceiling to enforce (§ Memory mode). `GET /api/agents/{id}/memory` (DWB-532) returns your current `est_tokens`, `ceiling` and `headroom`, and the file content itself, which is also how you recover something to rewrite from after a context compaction. Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. No agent can Edit a `.claude/` path directly (it crashes the session); memory goes through the API, and only the TL (with a human attached) edits the other `.claude/` files.
+**Budgeted vs exempt:** the consolidation gate counts only docs the TL owns (root docs + `project_rules_*`). DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Your `memory.md` is not counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time: an append / session-complete / compact / condense that would exceed it is refused (HTTP 400, nothing dropped), and you condense to get back under. On a `human_memory` project all four of those routes are sealed at 409 and there is no ceiling to enforce (§ Memory mode). `GET /api/agents/{id}/memory` (DWB-532) returns your current `est_tokens`, `ceiling` and `headroom`, and the file content itself, which is also how you recover something to rewrite from after a context compaction. Separately, DWB-519 requires every active participant to write to `memory.md` at least once per sprint or the sprint cannot close. No worker and no PM can Edit a `.claude/` path directly (the permission dialog crashes them); memory goes through the API, and only the TL (with a human attached) edits the other `.claude/` files.
 
 ---
 

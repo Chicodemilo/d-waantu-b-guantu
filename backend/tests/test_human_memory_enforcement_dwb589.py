@@ -515,7 +515,21 @@ class TestSprintCloseOnASwitchedProject:
 
 
 def _run_hook(payload: dict, env_extra: dict | None = None):
+    """Run the guard with DWB armed.
+
+    DWB-674 made the guard conditional: it is armed only when DWB's hooks are
+    wired in `<repo>/.claude/settings.json`. These tests are about WHAT the
+    guard refuses, not about WHEN it is armed, so they pin the repo to this
+    one, which is armed by construction - test_playbooks.py asserts the
+    shipped settings.json names this very script. The arming condition itself
+    is covered in tests/test_harness_write_guard_dwb674.py, both directions.
+
+    Without this the subprocess would fall back to os.getcwd(), which under
+    pytest is `backend/`, which has no .claude/ - unarmed, and every assertion
+    below would be testing the arming check instead of the rule it names.
+    """
     env = dict(os.environ)
+    env["CLAUDE_PROJECT_DIR"] = str(REPO_ROOT)
     env.update(env_extra or {})
     proc = subprocess.run(
         [sys.executable, str(HOOK_SCRIPT)],
@@ -586,7 +600,9 @@ class TestHarnessMemoryHook:
         """CLAUDE_CONFIG_DIR is optional; HOME is the documented fallback."""
         fake_home = tmp_path / "home"
         target = fake_home / ".claude" / "projects" / "s" / "memory" / "m.md"
-        env = {"HOME": str(fake_home)}
+        # CLAUDE_PROJECT_DIR pins the arming check to this repo (DWB-674); see
+        # _run_hook. Only CLAUDE_CONFIG_DIR is under test here.
+        env = {"HOME": str(fake_home), "CLAUDE_PROJECT_DIR": str(REPO_ROOT)}
         # Explicitly clear it rather than trusting the ambient environment.
         proc = subprocess.run(
             [sys.executable, str(HOOK_SCRIPT)],

@@ -59,7 +59,7 @@ Before doing ANY work, establish who you are on this project:
 
 After identity, read: (1) `.claude/project_rules_worker.md`, (2) `HANDOFF.md`, (3) `ARCHITECTURE.md`, (4) `README.md`. If any are missing, proceed with what you have and flag it.
 
-For context on the DWB session model (open/close phrases, single-active rule, what gets tracked), see `.claude/session_lifecycle.md`. You are NOT responsible for opening or closing sessions: that is TL-only. The reference is there so you understand where your tokens land. The `open_method` / `close_method` enum on a DwbSession row spans: `regex` (Layer 1 catalogue hit on UserPromptSubmit or SessionEnd retry), `slash` (Layer 3 deterministic `/dwb-open` and `/dwb-close` escape hatches in `<repo>/.claude/commands/`, DWB-381), `ai_confident` / `ai_asked` (TL layer), and `idle_timeout` (close-only safety sweeper). The `ai_classifier` value (Layer 2 system-driven Haiku classification, DWB-382) was retired in DWB-402 and remains only as a legacy value on historical rows. Workers do not call any of these; the field exists so you know which layer attributed the surrounding work.
+For context on the DWB session model (open/close phrases, single-active rule, what gets tracked), see `.claude/session_lifecycle.md` (in the DWB repo itself, `docs/session_lifecycle.md`). You are NOT responsible for opening or closing sessions: that is TL-only. The reference is there so you understand where your tokens land. The `open_method` / `close_method` enum on a DwbSession row spans: `regex` (Layer 1 catalogue hit on UserPromptSubmit or SessionEnd retry), `slash` (Layer 3 deterministic `/dwb-open` and `/dwb-close` escape hatches in `<repo>/.claude/commands/`, DWB-381), `ai_confident` / `ai_asked` (TL layer), and `idle_timeout` (close-only safety sweeper). The `ai_classifier` value (Layer 2 system-driven Haiku classification, DWB-382) was retired in DWB-402 and remains only as a legacy value on historical rows. Workers do not call any of these; the field exists so you know which layer attributed the surrounding work.
 
 ## The Doc Model (what loads, who owns it, what's budgeted)
 
@@ -109,7 +109,7 @@ cap. Write-on-close is still REQUIRED (DWB-519) and a `/memories` row satisfies 
 The Claude Code permission dialog for editing files under `.claude/` crashes subagents in the ink renderer. Four sibling agents died across S66 from this exact pattern, including some that followed prior playbook guidance to "append yourself" inside the memory dir. The current ground truth is stricter:
 
 - **NEVER** use `Edit`, `Write`, or `NotebookEdit` on ANY path under `.claude/`. This includes `.claude/settings.json`, `.claude/settings.local.json`, every playbook, and every project_rules file. The dialog fires the same way; subagents die the same way. (Your memory dir moved out to `.dwb/` in DWB-401, so it is no longer in this danger zone, but still write it through the API for the ISO heading + ceiling enforcement.)
-- Anywhere outside `.claude/` is safe to write directly (project code, `docs/`, `README.md`, `HANDOFF.md`, etc.).
+- Anywhere outside `.claude/` is free of the dialog, so a write there will not kill you. That is a statement about the renderer, NOT about permission. Project code and `docs/` are yours to write. The root docs (`README.md`, `HANDOFF.md`, `ARCHITECTURE.md`, `INITIAL.md`, `CLAUDE.md`) are TL-owned, as the tree above says: draft the change and hand it to the TL rather than writing the file.
 - Memory updates go through the API only: see Memory Writes below.
 - If your work requires a `.claude/settings.json` (or other harness-config) change, flag it to the TL; they'll handle the edit directly from the main CC window where a user is attached for the permission dialog.
 
@@ -344,13 +344,21 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
   **Declining to ADD a junk route is not narrowing**, so this costs you nothing against
   the widen rule. Widen with the nouns of the situation; do not widen with filler.
 
-  **CHECK IT OFFLINE BEFORE YOU SEND ANYTHING.** The gate is a pure function and runs
-  with no server and no write:
+  **CHECK IT BEFORE YOU SEND ANYTHING.** The gate is a pure function: no server, no
+  write, no side effects. How you reach it depends on which repo you are in.
+
+  ON THE DWB REPO ONLY, where the backend source is checked out, call it directly:
 
   ```python
   from app.services.keyword_reachability import require_reachable_keywords
   require_reachable_keywords(["diff", "files"], "I used diff to check the two files")
   ```
+
+  ON EVERY OTHER REPO that import does not resolve, because `backend/` is DWB's own
+  tree and is not deployed to your project. You are not unprotected: the identical
+  gate runs server-side on the write itself, so a bad set is refused with a 400 and
+  nothing lands. The cost of leaning on the write-time refusal rather than the offline
+  call is one round trip, not a lost check. Read the 400, fix the set, re-send.
 
   It raises `KeywordUnreachable` with the same sentence the 400 would carry, and
   returns None when the set is good. An agent re-keywording 44 rows checked every one
@@ -499,11 +507,11 @@ When you receive a ticket assignment, the TL or PM gives you both forms: `DWB-28
 
 ## Coding Standards: Read Before You Write
 
-Read `.claude/rules/global/coding-standards.md` before writing any code — it is the cross-project law (services, scripts, components, styling, headers, commits, tests). The Standards Auditor checks every PR against it and **rejects** violators. Rejections dock your reputation on the scorecard, so conform the first time.
+Read `.claude/rules/global/coding-standards.md` before writing any code. It is the cross-project law covering services, scripts, components, styling, headers, commits and tests. In the DWB repo itself, `docs/rules/global/coding-standards.md`: that is the source copy, and deploy does not mirror the aux docs into DWB's own `.claude/`. The Standards Auditor checks every PR against it and **rejects** violators. Rejections dock your reputation on the scorecard, so conform the first time.
 
 ## Code Headers: Mandatory
 
-Every new file MUST have a code header. See `.claude/rules/global/code-header-format.md` for the format. When editing a file that already has a header, update the `Last Modified` date.
+Every new file MUST have a code header. See `.claude/rules/global/code-header-format.md` for the format (in the DWB repo itself, `docs/rules/global/code-header-format.md`). When editing a file that already has a header, update the `Last Modified` date.
 
 ## Git Commit Rules
 

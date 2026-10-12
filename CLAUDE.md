@@ -96,7 +96,9 @@ Projects can optionally link to a Jira project. When enabled:
 
 ## Sprint Gates
 
-Live list: `GET /api/projects/{id}/gate-status`. Nine boolean gates (test run + coverage, four `*_md` doc-exists checks, `force_standards_audit`, `force_headers`, `force_consolidation`), all default OFF. Enable via PATCH /api/projects/:id or the toggles. Full table with each check: README § Sprint Gates.
+Nine boolean gates, all enforced at sprint close by `_check_completion_gates` (`backend/app/services/sprint.py`): `force_test_run`, `force_test_coverage`, four `*_md` doc-exists checks (`force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_coding_standards_md`), `force_standards_audit`, `force_headers`, `force_consolidation`. Eight default OFF. `force_handoff_md` defaults **ON**, so every project needs `HANDOFF.md` at its repo root to close a sprint whether or not anyone enabled it. Enable the rest via PATCH /api/projects/:id or the toggles. Full table with each check: README § Sprint Gates.
+
+`GET /api/projects/{id}/gate-status` evaluates every `force_*` column on the Project model, derived from the table rather than a hardcoded list, so a new gate shows up there as soon as the column exists (DWB-678). `all_passing` is three-valued: `false` means a gate it checked is failing, `true` means everything passed, and `null` means it COULD NOT ANSWER, not that something failed. Null appears when a gate cannot be evaluated, for example `force_test_run` and `force_consolidation` on a project with no sprint window. `unevaluated_gates` and `coverage_note` name which gates and why, and `covered_passing` is the verdict over what was actually checked. Null is falsy, so a naive `if all_passing` lands on the safe reading. Sprint close enforces every toggle regardless of what this endpoint could see (`_check_completion_gates` in `backend/app/services/sprint.py`).
 
 ## Sprint Workflow
 
@@ -123,7 +125,7 @@ When a ticket moves back to in_progress after being done (rework), the system:
 2. Alerts the PM to fill in the failure type
 3. Blocks sprint close until the PM reviews it
 
-Failure types: A–G (manual taxonomy), rework (auto-detected), test_failure (auto-detected)
+Failure types: seven manual values the PM picks from, plus two auto-detected. Manual: `context_degradation`, `spec_drift`, `sycophantic_confirmation`, `tool_selection_error`, `cascading_failure`, `silent_failure`, `integration_failure`. Auto-detected: `rework`, `test_failure`. These are the strings stored in `failure_record.failure_type`; "A-G" elsewhere is shorthand for the seven manual ones and is not a value. The column is a free string and will accept anything, so a wrong value stores silently and matches nothing.
 
 ## Key Rules
 

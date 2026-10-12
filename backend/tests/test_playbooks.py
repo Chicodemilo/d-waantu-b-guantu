@@ -6,10 +6,12 @@
 # Callees:       GET/POST /api/playbooks, POST /api/projects/:id/deploy-playbooks
 # Data In:       Factory-created projects via conftest fixtures; temp playbook files
 # Data Out:      Assertions on HTTP status codes and deployed playbook content
-# Last Modified: 2026-09-14 (DWB-511: /sprint-post skill deploy + drift-guard tests)
+# Last Modified: 2026-10-12 (DWB-673: deployed-lane hook-script tests - the
+#                deployed command is executed from the target, not asserted)
 
 """Tests for /api/playbooks and /api/projects/:id/deploy-playbooks."""
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -765,3 +767,334 @@ class TestDeployHooksSettings:
         assert data["hooks_settings"] is None
         # File contents untouched.
         assert broken.read_text(encoding="utf-8") == "{ not valid json"
+
+
+class TestDeployShipsHookScripts:
+    """DWB-673: the deploy writes a PreToolUse hook into every target's
+    settings.json naming `$CLAUDE_PROJECT_DIR/scripts/hooks/...`, and until this
+    ticket nothing copied the script. python3 exits 2 on a missing path and exit
+    2 on PreToolUse is a DENY, so four live repos had every Write/Edit/MultiEdit/
+    NotebookEdit refused by a guard that was supposed to refuse memory writes.
+
+    WHY THESE TESTS LOOK LIKE THIS. DWB-589 proved the hook by feeding a crafted
+    payload to the script inside DWB's own checkout, where it exists, and
+    test_playbooks asserted the deployed command STRING. Every check was correct;
+    none asked whether the thing the string points at arrives. So the test below
+    resolves $CLAUDE_PROJECT_DIR against the deploy target and EXECUTES the
+    literal deployed command there. A test that asserts the file exists, or
+    asserts the command string, is the test that let this through.
+    """
+
+    # Matches `$CLAUDE_PROJECT_DIR/rel/path` and `${CLAUDE_PROJECT_DIR}/rel/path`.
+    # Stops at a quote or whitespace, which is where the path ends in a command.
+    _PROJECT_DIR_PATH_RE = re.compile(r"\$\{?CLAUDE_PROJECT_DIR\}?/([^\"'\s]+)")
+
+    def _deploy_or_skip(self, client, project_id):
+        import pytest
+        r = client.post(f"/api/projects/{project_id}/deploy-playbooks")
+        if r.status_code == 500:
+            pytest.skip("docs/ has no playbook files in this env")
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def _deployed_settings(self, repo: Path) -> dict:
+        import json
+        settings_path = repo / ".claude" / "settings.json"
+        assert settings_path.is_file(), settings_path
+        return json.loads(settings_path.read_text(encoding="utf-8"))
+
+    def _hook_commands(self, settings: dict):
+        """Every (event, command) pair in the deployed hooks block."""
+        out = []
+        for event, entries in settings.get("hooks", {}).items():
+            for entry in entries:
+                for hook in entry.get("hooks", []):
+                    cmd = hook.get("command")
+                    if isinstance(cmd, str):
+                        out.append((event, cmd))
+        return out
+
+    def test_the_deployed_command_runs_from_the_target_and_denies(
+        self, client, make_project, tmp_path
+    ):
+        """ACCEPTANCE 1. Resolve $CLAUDE_PROJECT_DIR against the deploy target,
+        run the literal deployed command string as CC would, assert a deny.
+
+        This is the only check in this file that would have failed before the
+        fix. A missing script surfaces here as returncode 2 with empty stdout,
+        which is precisely the DENY-everything behaviour that shipped."""
+        import json
+        import os
+        import subprocess
+
+        repo = tmp_path / "target-repo"
+        repo.mkdir()
+        project = make_project(repo_path=str(repo))
+        self._deploy_or_skip(client, project["id"])
+
+        settings = self._deployed_settings(repo)
+        pre_tool_use = [
+            cmd for event, cmd in self._hook_commands(settings)
+            if event == "PreToolUse"
+        ]
+        assert pre_tool_use, "deployed settings.json has no PreToolUse command"
+
+        # A path inside a throwaway harness config dir: what the hook seals.
+        config_dir = tmp_path / "claude-config"
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(config_dir / "projects" / "s" / "memory" / "M.md")
+            },
+        }
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": str(tmp_path / "home"),
+            "CLAUDE_PROJECT_DIR": str(repo),
+            "CLAUDE_CONFIG_DIR": str(config_dir),
+        }
+
+        for cmd in pre_tool_use:
+            proc = subprocess.run(
+                cmd, shell=True, input=json.dumps(payload),
+                capture_output=True, text=True, env=env, cwd=str(repo),
+            )
+            assert proc.returncode == 0, (
+                f"deployed hook command exited {proc.returncode}: {cmd}\n"
+                f"stderr: {proc.stderr}\n"
+                "A non-zero exit on PreToolUse is a DENY of the tool call."
+            )
+            out = json.loads(proc.stdout)
+            decision = out["hookSpecificOutput"]
+            assert decision["permissionDecision"] == "deny", out
+            assert "/api/agents/" in decision["permissionDecisionReason"]
+
+    def test_the_deploy_is_what_arms_the_guard_in_a_target_repo(
+        self, client, make_project, tmp_path
+    ):
+        """DWB-674 made the guard conditional: it arms only when it finds DWB's
+        hook wiring in <repo_root>/.claude/settings.json. So the settings write
+        in this same deploy is the ARMING EVENT, and shipping the script without
+        it would ship a permanently silent guard - a failure that looks exactly
+        like a working allow.
+
+        The deny test above passes today only because the deploy happens to have
+        written that settings.json. This pins the dependency instead of leaving
+        it incidental: same payload, same command, settings.json present then
+        absent. Either half alone passes against a guard broken the other way.
+        """
+        import json
+        import os
+        import subprocess
+
+        repo = tmp_path / "target-repo"
+        repo.mkdir()
+        project = make_project(repo_path=str(repo))
+        data = self._deploy_or_skip(client, project["id"])
+        # The arming event, named rather than assumed.
+        assert data["hooks_settings"] in ("created", "merged"), data
+
+        settings_path = repo / ".claude" / "settings.json"
+        commands = [
+            cmd for event, cmd in
+            self._hook_commands(self._deployed_settings(repo))
+            if event == "PreToolUse"
+        ]
+        assert commands, "deployed settings.json has no PreToolUse command"
+
+        config_dir = tmp_path / "claude-config"
+        payload = json.dumps({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(config_dir / "projects" / "s" / "memory" / "M.md")
+            },
+        })
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": str(tmp_path / "home"),
+            "CLAUDE_PROJECT_DIR": str(repo),
+            "CLAUDE_CONFIG_DIR": str(config_dir),
+        }
+
+        def run(cmd):
+            return subprocess.run(
+                cmd, shell=True, input=payload, capture_output=True,
+                text=True, env=env, cwd=str(repo),
+            )
+
+        for cmd in commands:
+            armed = run(cmd)
+            assert armed.returncode == 0, armed.stderr
+            assert json.loads(armed.stdout)["hookSpecificOutput"][
+                "permissionDecision"
+            ] == "deny", armed.stdout
+
+        # Remove ONLY the arming signal. The script stays exactly where the
+        # deploy put it, so a non-zero exit here would mean the script went
+        # missing, not that the guard disarmed.
+        settings_path.unlink()
+        for cmd in commands:
+            unarmed = run(cmd)
+            assert unarmed.returncode == 0, (
+                f"deployed hook command exited {unarmed.returncode} with no "
+                f"settings.json: {unarmed.stderr}"
+            )
+            assert unarmed.stdout.strip() == "", (
+                "the guard still spoke with its arming signal removed; "
+                f"got {unarmed.stdout!r}"
+            )
+
+    def test_the_deployed_command_allows_an_unrelated_write(
+        self, client, make_project, tmp_path
+    ):
+        """Negative control for the test above: the deployed lane must not deny
+        everything. Without this, 'exit 2 on a missing script' and 'a working
+        guard' both read as a pass."""
+        import json
+        import os
+        import subprocess
+
+        repo = tmp_path / "target-repo"
+        repo.mkdir()
+        project = make_project(repo_path=str(repo))
+        self._deploy_or_skip(client, project["id"])
+
+        settings = self._deployed_settings(repo)
+        config_dir = tmp_path / "claude-config"
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(repo / "src" / "thing.py")},
+        }
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": str(tmp_path / "home"),
+            "CLAUDE_PROJECT_DIR": str(repo),
+            "CLAUDE_CONFIG_DIR": str(config_dir),
+        }
+
+        for event, cmd in self._hook_commands(settings):
+            if event != "PreToolUse":
+                continue
+            proc = subprocess.run(
+                cmd, shell=True, input=json.dumps(payload),
+                capture_output=True, text=True, env=env, cwd=str(repo),
+            )
+            assert proc.returncode == 0, proc.stderr
+            assert "deny" not in proc.stdout, proc.stdout
+
+    def test_no_hook_command_names_a_file_absent_from_the_deployed_tree(
+        self, client, make_project, tmp_path
+    ):
+        """ACCEPTANCE 2. General assertion over the whole deployed hooks block,
+        not a hardcoded filename: every $CLAUDE_PROJECT_DIR-relative path any
+        hook names must exist in the target. A hook added to the block later
+        without its payload fails here."""
+        repo = tmp_path / "target-repo"
+        repo.mkdir()
+        project = make_project(repo_path=str(repo))
+        self._deploy_or_skip(client, project["id"])
+
+        settings = self._deployed_settings(repo)
+        named = [
+            (event, m)
+            for event, cmd in self._hook_commands(settings)
+            for m in self._PROJECT_DIR_PATH_RE.findall(cmd)
+        ]
+        # Anti-vacuous: if the regex matches nothing the assertion below is
+        # free, and a silently-empty scan is how this defect reads as green.
+        assert named, (
+            "no $CLAUDE_PROJECT_DIR path found in any deployed hook command - "
+            "either the block stopped using one or this scan has rotted"
+        )
+        missing = [
+            (event, rel) for event, rel in named if not (repo / rel).is_file()
+        ]
+        assert not missing, (
+            "deployed hooks name files that were not deployed: "
+            f"{missing}. A hook command pointing at a missing path exits "
+            "non-zero, and a non-zero PreToolUse exit denies the tool call."
+        )
+
+    def test_the_executable_bit_survives_the_copy(
+        self, client, make_project, tmp_path
+    ):
+        """A hook script that lands non-executable is as dead as one that does
+        not land, for any wiring that execs it directly rather than via
+        python3."""
+        import os
+
+        from app.services.playbook_deploy import DWB_HOOK_SCRIPTS_DIR
+
+        repo = tmp_path / "target-repo"
+        repo.mkdir()
+        project = make_project(repo_path=str(repo))
+        self._deploy_or_skip(client, project["id"])
+
+        checked = 0
+        for src in sorted(DWB_HOOK_SCRIPTS_DIR.iterdir()):
+            if not src.is_file() or src.name.startswith("."):
+                continue
+            if not os.access(src, os.X_OK):
+                continue
+            dst = repo / "scripts" / "hooks" / src.name
+            assert dst.is_file(), dst
+            assert os.access(dst, os.X_OK), f"{dst} lost the executable bit"
+            checked += 1
+        assert checked, "no executable hook script in the source tree to check"
+
+    def test_response_reports_the_hook_scripts(
+        self, client, make_project, tmp_path
+    ):
+        """hook_scripts is repo-root-relative, not .claude/-relative, and every
+        entry resolves under the target repo."""
+        repo = tmp_path / "target-repo"
+        repo.mkdir()
+        project = make_project(repo_path=str(repo))
+        data = self._deploy_or_skip(client, project["id"])
+
+        assert data["hook_scripts"], data
+        for rel in data["hook_scripts"]:
+            assert rel.startswith("scripts/hooks/"), rel
+            assert (repo / rel).is_file(), rel
+
+    def test_a_stale_target_copy_is_overwritten(
+        self, client, make_project, tmp_path
+    ):
+        """The stated decision: these are DWB-owned shipped artifacts, same
+        class as the playbooks and agent defs, so the newest DWB copy wins and
+        a target cannot pin a stale guard."""
+        from app.services.playbook_deploy import DWB_HOOK_SCRIPTS_DIR
+
+        repo = tmp_path / "target-repo"
+        hooks_dir = repo / "scripts" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        stale = hooks_dir / "block_harness_memory_writes.py"
+        stale.write_text("# stale copy from an older deploy\n", encoding="utf-8")
+
+        project = make_project(repo_path=str(repo))
+        self._deploy_or_skip(client, project["id"])
+
+        src = DWB_HOOK_SCRIPTS_DIR / "block_harness_memory_writes.py"
+        assert stale.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+
+    def test_redeploy_is_idempotent(self, client, make_project, tmp_path):
+        repo = tmp_path / "target-repo"
+        repo.mkdir()
+        project = make_project(repo_path=str(repo))
+        first = self._deploy_or_skip(client, project["id"])
+        second = self._deploy_or_skip(client, project["id"])
+        assert first["hook_scripts"] == second["hook_scripts"]
+
+    def test_no_hardcoded_home_directory_or_username(self):
+        """DWB-574: this repo is cloned onto other machines, so the deploy
+        module may not carry an absolute home path. Every path it writes is
+        derived from the project's repo_path or from DWB_REPO_ROOT."""
+        from app.services import playbook_deploy
+
+        path = Path(playbook_deploy.__file__)
+        text = path.read_text(encoding="utf-8")
+        for needle in ("/Users/", "/home/", "C:" + chr(92) + "Users"):
+            assert needle not in text, f"{needle!r} hardcoded in {path.name}"
