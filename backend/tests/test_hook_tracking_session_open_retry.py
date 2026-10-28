@@ -169,6 +169,15 @@ class TestSessionEndOpensViaRegexRetry:
         open_session returns ``(None, existing)`` when a session is active,
         so the retry must be a silent no-op (no duplicate row, single-active
         invariant holds).
+
+        THIS IS NOT COVERAGE OF THE DWB-682 REOPEN LOOP, and it is the test
+        most likely to be mistaken for it. It pins the already-open guard,
+        which is precisely the guard that does NOT help there: the dangerous
+        moment is immediately AFTER a close, when the window is genuinely
+        empty and the scan is entitled to open from a phrase it already spent.
+        That case lives in
+        ``test_dwb_session_reopen_loop_dwb682.py``, which counts ROWS across a
+        close sequence rather than asserting on the open set.
         """
         pid = hook_project["id"]
         repo = hook_project["repo_path"]

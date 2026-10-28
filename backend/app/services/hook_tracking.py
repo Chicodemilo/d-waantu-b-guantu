@@ -1879,8 +1879,47 @@ def _is_synthetic_user_text(text: str) -> bool:
     return bool(_WRAPPER_TAG_RE.match(text))
 
 
+def _transcript_entry_key(entry: dict, path: str, line_index: int) -> str:
+    """DWB-682: a stable identity for one transcript entry, used to record
+    which entry opened a session so it can never open a second one.
+
+    Claude Code stamps every entry with a ``uuid``. Measured across 40 real
+    transcripts on this machine: 1555 of 1555 human-authored turns carried one,
+    and no file repeated a value. A uuid is globally unique by construction, so
+    it needs no further qualification.
+
+    The fallback is for entries that carry none - older fixtures and the
+    flattened shapes ``_extract_user_message_entries`` deliberately still
+    accepts. A bare line index is NOT unique across transcripts, so the
+    fallback is path-qualified. It is a fallback and not the primary key
+    because a line index is only stable while the file is append-only.
+    """
+    uuid = entry.get("uuid")
+    if isinstance(uuid, str) and uuid:
+        return uuid
+    return f"{path}#idx:{line_index}"
+
+
 def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
     """Return user-side message texts from a Claude Code JSONL transcript.
+
+    Thin wrapper over ``_extract_user_message_entries``; see that function for
+    the full contract. Kept as the close path's entry point, which matches on
+    text alone and has no use for an entry key.
+    """
+    return [text for _key, text in _extract_user_message_entries(path, head=head)]
+
+
+def _extract_user_message_entries(path: str, *, head: bool) -> list[tuple[str, str]]:
+    """Return ``(entry_key, text)`` for user-side messages in a Claude Code
+    JSONL transcript.
+
+    DWB-682: this is the single scan implementation. It was
+    ``_extract_user_message_texts`` and now yields the entry key alongside the
+    text so the OPEN path can record which transcript entry opened a session
+    and refuse to open a second one from the same entry. The close path keeps
+    the text-only wrapper above, so its behaviour is unchanged and there is
+    still exactly one place that decides what counts as a human turn.
 
     Claude Code stores each turn as a JSON line. User turns look like:
 
@@ -1918,11 +1957,15 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
     except OSError:
         return []
 
-    iter_lines = lines if head else list(reversed(lines))
+    # DWB-682: the ORIGINAL line index travels with each line, so the
+    # fallback entry key means the same thing whichever direction we scan.
+    # Reversing the pairs rather than the lines is what keeps that true.
+    indexed = list(enumerate(lines))
+    iter_lines = indexed if head else list(reversed(indexed))
 
-    out: list[str] = []
+    out: list[tuple[str, str]] = []
     user_turns = 0
-    for raw in iter_lines:
+    for line_index, raw in iter_lines:
         raw = raw.strip()
         if not raw:
             continue
@@ -1976,7 +2019,7 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
                 text = "\n".join(parts)
 
         if text:
-            out.append(text)
+            out.append((_transcript_entry_key(entry, path, line_index), text))
         if len(out) >= _PHRASE_SCAN_LIMIT:
             break
 
@@ -2001,6 +2044,28 @@ def _extract_user_message_texts(path: str, *, head: bool) -> list[str]:
     return out
 
 
+def _open_key_consumed(db: Session, project_id: int, entry_key: str) -> bool:
+    """DWB-682: True when this project has already opened a session from this
+    transcript entry.
+
+    Scoped by project because two projects can resolve from one cwd prefix
+    (``_resolve_project`` matches on a repo_path prefix), and an entry that
+    opened a session for one of them has not been spent for the other.
+
+    Asks the question in SQL rather than loading rows: the answer is a
+    membership test and the (project_id, open_transcript_key) index serves it
+    directly.
+    """
+    return db.scalar(
+        select(DwbSession.id)
+        .where(
+            DwbSession.project_id == project_id,
+            DwbSession.open_transcript_key == entry_key,
+        )
+        .limit(1)
+    ) is not None
+
+
 def try_open_dwb_session_from_transcript(
     db: Session, project: Project, transcript_path: str | None
 ) -> None:
@@ -2011,6 +2076,33 @@ def try_open_dwb_session_from_transcript(
       - transcript_path is missing or unreadable
       - no user message matches an OPEN_PATTERNS regex
       - the project already has an open DWB session
+      - every matching entry has ALREADY opened a session (DWB-682)
+
+    DWB-682: A PHRASE OCCURRENCE OPENS EXACTLY ONE SESSION, EVER.
+
+    This function scans the HEAD of the transcript, and it is called on
+    SessionStart AND on every SessionEnd / Stop / SubagentStop (the DWB-343
+    retry). Those two call sites are why the guard lives HERE and not at
+    either of them: a fix applied to the retry path alone would have looked
+    correct and left the loop running through SessionStart.
+
+    Without the guard the morning's open phrase sits at line one of the
+    transcript all day and matches on every single scan. The already-open
+    no-op does not help, because the dangerous moment is immediately AFTER a
+    close, when the window is genuinely empty and the scan is entitled to
+    open. `handle_session_end` makes that explicit: it runs the close scan and
+    then this one, back to back, so a single hook event closed a session and
+    opened the next.
+
+    The anchor is the transcript POSITION, not a clock. A timestamp floor
+    would compare a transcript entry's wall clock against a DB-stamped
+    `opened_at` - the cross-clock comparison DWB-633 exists to repair. See the
+    dwb682a1b2c3 revision docstring.
+
+    A consumed entry is SKIPPED, not fatal: the scan keeps looking at later
+    entries, so a user who types the open phrase a second time still opens a
+    second session. That case is the reason this is a per-entry guard and not
+    a per-transcript one.
 
     All exceptions are swallowed + logged as failed_hook rows. Hook flows
     must never raise out of this function — they're called in fire-and-
@@ -2019,12 +2111,16 @@ def try_open_dwb_session_from_transcript(
     if not transcript_path:
         return
     try:
-        texts = _extract_user_message_texts(transcript_path, head=True)
-        for text in texts:
+        entries = _extract_user_message_entries(transcript_path, head=True)
+        for entry_key, text in entries:
             phrase = match_open(text)
             if not phrase:
                 continue
-            # Found a match — try to open. The service returns (None,
+            if _open_key_consumed(db, project.id, entry_key):
+                # This entry already opened a session. Keep scanning: a LATER
+                # entry may be an unspent phrase the user typed again.
+                continue
+            # Found an unspent match — try to open. The service returns (None,
             # existing) when a session is already open; that's a silent
             # no-op for the hook path (Layer 2 / explicit endpoint will
             # surface conflicts to the user).
@@ -2034,6 +2130,7 @@ def try_open_dwb_session_from_transcript(
                 opened_at=datetime.now(UTC),
                 open_method=DwbOpenMethod.regex,
                 open_phrase=phrase,
+                open_transcript_key=entry_key,
             )
             if new_session is not None:
                 db.commit()

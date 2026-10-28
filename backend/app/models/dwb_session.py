@@ -1,12 +1,12 @@
 # Path: app/models/dwb_session.py
 # File: dwb_session.py
 # Created: 2026-06-09
-# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone], DWB-481 structured summary JSON column, DWB-505 total_tokens widened to BIGINT)
+# Purpose: DwbSession ORM model - passive user-bounded session for time + token rollup (DWB-335, DWB-346 headline, DWB-381 slash escape hatch, DWB-382 ai_classifier fallback [retired DWB-402, enum kept as tombstone], DWB-481 structured summary JSON column, DWB-505 total_tokens widened to BIGINT, DWB-682 open_transcript_key consumed-position guard)
 # Caller: app/services/dwb_session.py (DWB-337), app/routers/dwb_sessions.py (DWB-338)
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: DwbSession, DwbOpenMethod, DwbCloseMethod, DwbCloseReason
-# Last Modified: 2026-07-28
+# Last Modified: 2026-10-28
 
 import enum
 from datetime import datetime
@@ -100,6 +100,17 @@ class DwbSession(Base):
 
     open_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
     close_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # DWB-682: the transcript entry this session was opened FROM, so that entry
+    # can never open a second one. The Layer-1 open scan re-reads the HEAD of
+    # the transcript on every hook event, so without this the morning's open
+    # phrase reopens a session after every close, forever. See the revision
+    # dwb682a1b2c3 docstring for why this is a position and not a timestamp.
+    # Written only by the transcript scan; NULL on every other open method and
+    # on every row that predates the column.
+    open_transcript_key: Mapped[str | None] = mapped_column(
+        String(512), nullable=True
+    )
 
     open_method: Mapped[DwbOpenMethod] = mapped_column(
         Enum(DwbOpenMethod), nullable=False

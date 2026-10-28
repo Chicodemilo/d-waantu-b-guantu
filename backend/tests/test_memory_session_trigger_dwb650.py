@@ -709,14 +709,161 @@ class TestNothingHasToRememberToRunIt:
             if isinstance(n, ast.FunctionDef) and n.name == "open_session"
         )
         params = [a.arg for a in fn.args.args + fn.args.kwonlyargs]
+        # An ALLOWLIST OF NAMED MEMBERS, each admitted for a stated reason,
+        # rather than a loosened rule. A new parameter has to be argued onto
+        # this list by whoever adds it, which is the whole mechanism: the
+        # question "does this one gate the pass?" gets asked exactly once per
+        # parameter, by the person in a position to answer it.
+        #
+        #   db, project_id, opened_at, open_method, open_phrase
+        #       the original five (DWB-650).
+        #   open_transcript_key (DWB-682)
+        #       the transcript entry the open came from, recorded so that
+        #       entry can never open a second session. PURE DATA: it is
+        #       assigned onto the row and read by nothing in this file. It
+        #       cannot gate the consolidation pass, which runs unconditionally
+        #       after the row is flushed, and leaving it off changes only
+        #       whether the reopen guard has a key to match on later.
         assert params == [
             "db",
             "project_id",
             "opened_at",
             "open_method",
             "open_phrase",
+            "open_transcript_key",
         ], (
             f"open_session grew a parameter: {params}. If one of these gates the "
             "consolidation pass, the trigger is now something a caller has to "
-            "remember to ask for, which is what DWB-650 removed."
+            "remember to ask for, which is what DWB-650 removed. Add it to the "
+            "list above WITH A REASON, or make it not gate anything."
+        )
+
+
+class TestOpenTranscriptKeyCannotReachThePass:
+    """DWB-682 earned `open_transcript_key` a place on the tripwire's
+    allowlist above. THIS is the property that earned it, pinned so the
+    widening cannot outlive the reason for it.
+
+    THE TRIPWIRE ASKS A QUESTION IT CANNOT ANSWER ITSELF. It compares a
+    parameter list, so it detects that `open_session` grew a parameter and
+    then relies on a human to decide whether that parameter can switch the
+    pass off. Widening it records the verdict; these two tests record the
+    EVIDENCE, and they keep checking it on every run rather than once in a
+    report.
+
+    TWO INSTRUMENTS, AND THEY FAIL DIFFERENTLY ON PURPOSE. The first reads
+    the source and proves the parameter is never consulted in a branch, so it
+    is structurally incapable of choosing a return path. The second runs the
+    function across a spread of values and proves the pass fired for every
+    one. A structural proof cannot see a trigger that is reached but declines
+    internally; a behavioural one cannot see a value nobody thought to try.
+    Neither alone would do.
+    """
+
+    def _open_session_ast(self):
+        tree = ast.parse((SERVICES_DIR / "dwb_session.py").read_text())
+        return next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "open_session"
+        )
+
+    def test_the_parameter_is_never_read_in_a_branch(self):
+        """It flows into the row constructor and nowhere else.
+
+        `open_method` IS read in branches (the timestamp authority and the
+        DWB-351 privacy null-out), which is exactly why this test is scoped
+        to the ONE parameter whose claim is write-only rather than asserted
+        over all of them. A blanket 'no parameter is ever read' would be
+        false and would have to be weakened until it proved nothing.
+        """
+        fn = self._open_session_ast()
+
+        # Every place the name is LOADED (read), anywhere in the body.
+        loads = [
+            n for n in ast.walk(fn)
+            if isinstance(n, ast.Name)
+            and n.id == "open_transcript_key"
+            and isinstance(n.ctx, ast.Load)
+        ]
+        # POSITIVE CONTROL. A walk that matches nothing proves nothing, and
+        # "zero reads" is also what a renamed or deleted parameter looks like.
+        assert len(loads) == 1, (
+            f"expected exactly one read of open_transcript_key, found "
+            f"{len(loads)}. More than one means it is consulted somewhere "
+            f"beyond the row constructor; zero means it is gone and this "
+            f"test is no longer measuring anything."
+        )
+
+        # That single read must be the keyword VALUE in the DwbSession(...)
+        # construction - not a condition, not a return expression.
+        constructor_values = [
+            kw.value
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "DwbSession"
+            for kw in n.keywords
+        ]
+        assert loads[0] in constructor_values, (
+            "open_transcript_key is read somewhere other than the DwbSession "
+            "constructor. If it now influences control flow it can gate the "
+            "consolidation pass, and its place on the DWB-650 allowlist is "
+            "no longer earned."
+        )
+
+        # And belt-and-braces on the thing we actually care about: it appears
+        # in no test position of any branch, and in no return.
+        tests_and_returns = []
+        for n in ast.walk(fn):
+            if isinstance(n, (ast.If, ast.While, ast.IfExp)):
+                tests_and_returns.append(n.test)
+            elif isinstance(n, ast.Return) and n.value is not None:
+                tests_and_returns.append(n.value)
+        guarded = {
+            name.id
+            for branch in tests_and_returns
+            for name in ast.walk(branch)
+            if isinstance(name, ast.Name)
+        }
+        assert "open_transcript_key" not in guarded, (
+            "open_transcript_key appears in a branch test or a return value"
+        )
+
+    @pytest.mark.parametrize("key", [
+        None,                      # every non-transcript caller
+        "u-some-entry-uuid",       # the normal case
+        "",                        # empty string: falsy, the classic gate
+        "/a/path.jsonl#idx:0",     # the fallback form
+        "x" * 512,                 # the column's full width
+    ])
+    def test_the_pass_fires_whatever_the_key_is(
+        self, db_session, human_project, make_agent, key
+    ):
+        """Behavioural half. The values are chosen to include the ones a
+        gate would most plausibly key on - None and the empty string - rather
+        than five spellings of the happy path.
+        """
+        agent_id = _roster_agent(db_session, make_agent, human_project)
+        row = _raw_memory(db_session, agent_id, f"raw row for key={key!r}")
+        db_session.flush()
+
+        from app.models.dwb_session import DwbOpenMethod
+
+        new_session, existing = dwb_svc.open_session(
+            db_session,
+            project_id=human_project,
+            open_method=DwbOpenMethod.regex,
+            open_transcript_key=key,
+        )
+        assert existing is None and new_session is not None
+        assert new_session.open_transcript_key == key, (
+            "the value did not reach the row, so this run says nothing about "
+            "whether that value gates the pass"
+        )
+
+        db_session.refresh(row)
+        assert row.tier == MemoryTier.working, (
+            f"the consolidation pass did not run with "
+            f"open_transcript_key={key!r}; the parameter gates the trigger "
+            f"and does not belong on the DWB-650 allowlist"
         )

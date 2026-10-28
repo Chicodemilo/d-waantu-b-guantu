@@ -136,6 +136,7 @@ def open_session(
     opened_at: datetime | None = None,
     open_method: DwbOpenMethod,
     open_phrase: str | None = None,
+    open_transcript_key: str | None = None,
 ) -> tuple[DwbSession | None, DwbSession | None]:
     """Open a new DWB session for a project.
 
@@ -172,6 +173,14 @@ def open_session(
     recommends omitting the field for AI opens, but a stale caller that
     still sends it gets quiet
     null-out instead of a hard failure).
+
+    DWB-682 ``open_transcript_key``: the identity of the transcript entry this
+    open came from, passed only by the Layer-1 transcript scan so that entry
+    can never open a second session. Every other caller leaves it None. It is
+    a uuid or a file path, never user text, so the privacy null-out above has
+    nothing to do here. The guard that READS it lives in
+    ``hook_tracking.try_open_dwb_session_from_transcript``, next to the scan
+    that produces the key; this function only persists what it is handed.
     """
     existing = get_active_session(db, project_id)
     if existing is not None:
@@ -205,6 +214,7 @@ def open_session(
         opened_at=_strip_tz(opened_at),
         open_method=open_method,
         open_phrase=open_phrase,
+        open_transcript_key=open_transcript_key,
     )
     db.add(row)
     db.flush()
