@@ -302,6 +302,34 @@ someone who has not just written about it. I called it independent arrival and
 he corrected me. It needs a colder test: an agent who has read the playbook
 once, in the ordinary way, hitting the gate for the first time.
 
+## A wrong doc is worse than no doc, for the same reason a bad instrument is
+
+`session_lifecycle.md` said the idle sweeper closes a forgotten session after
+60 minutes. `IDLE_TIMEOUT_MINUTES` is 600. A reader waits the hour they were
+told, sees the session still open, and goes to debug the SWEEPER - a working
+component. **The wrong answer arrives with a reason to trust it**, and the file
+read as most authoritative exactly where it was wrong. Same shape as every
+instrument problem this session, wearing a document.
+
+It had already deployed to two other projects, because the bundle carries
+`session_lifecycle.md` and nobody had audited it. **Audit what you deploy, not
+just what you wrote.**
+
+## Ask WHY an instruction holds before you write it down
+
+"Count rows, do not infer the open set" was handed over as an instruction. The
+worker who went looking for WHY counting beats inferring found a second
+mechanism the instruction's author did not know about:
+
+- DWB-682: a close could MINT a new session. A check for a new row catches it.
+- DWB-395 `reopen_session`: NULLs `closed_at` on the row you just closed and
+  creates NOTHING, and `is_open` is generated from that column. **A check
+  looking for a new session sees nothing wrong.**
+
+Two opposite mechanisms, one check that survives both, and only the second one
+explains why counting is the only thing that works. Starting from the
+instruction would have produced a thinner section that happened to be right.
+
 ## Operational facts that cost someone an hour
 
 - **`information_schema.innodb_trx` is unavailable** - the app credentials lack
