@@ -259,9 +259,21 @@ Three, all measured, none authorised, nobody working them:
 2. **The nodeify sweep.** DWB-692's provider is registered and inert. The sweep
    irreversibly deletes 3,479 file pointers and writes ~13,200 row pointers in
    one committing call. Operator action, deliberately not taken.
-3. **DWB-706.** Held. Its premise was corrected - the conclude lane is ten
-   sessions young, not permanently blocked - so it needs re-briefing before
-   Stan starts it.
+3. **DWB-706.** Unblocked and in progress (Stan). Phase 0 CONFIRMED on all four
+   legs, re-run independently. I had called the lane "ten sessions young" and
+   that was wrong twice over: it is 8, AND IT IS NOT A COUNTDOWN. `score==6`
+   first occurs at gap 31, the largest gap in the store is 23, and
+   `sessions_since_reinforced` counts from `COALESCE(last_reinforced, created)`
+   - so ANY recall resets the clock to zero and a scar that fires on its way up
+   never arrives at 6 at all. **A context question gated on decay is gated on
+   DISUSE, and disuse is not what "this work finished" means.** That is the
+   argument for the fix; the arithmetic under it expires and that sentence does
+   not. Ruling given: no clock, because the protection against concluding too
+   early already shipped at the WRITE end (DWB-704's `context_already_closed`
+   refusal and `context_free`), and a second condition at the conclude end would
+   rebuild what is being removed under a new name. Dry-run counter ships and is
+   observed BEFORE the gate comes out - a counter that first runs in the same
+   commit that changes the behaviour cannot say what the behaviour used to be.
 
 Also still open from the first slate: **scar consolidation** (DWB-684 context).
 Lowering the floor or adding a candidate list changes what every agent sees at
