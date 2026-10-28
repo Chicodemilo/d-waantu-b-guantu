@@ -8,7 +8,7 @@
 # Callees: alembic CLI (subprocess), sqlalchemy.inspect, app.models
 # Data In: Base.metadata; a scratch MySQL database replayed from base
 # Data Out: Assertions on declared and migrated schema
-# Last Modified: 2026-10-28 (DWB-704: agent_memories gains `context_free`)
+# Last Modified: 2026-10-28 (DWB-710: agent_memories gains `adopted_from_heading`)
 #                (DWB-667: agent_memories gains `situation`)
 #                (DWB-605: journal_entries gains created_at)
 
@@ -163,6 +163,39 @@ AGENT_MEMORIES_COLUMNS = {
     # to promotion: declaring that no ticket owns a lesson is not a claim that
     # the lesson is permanent.
     "context_free",
+    # DWB-710, answering this set's own two questions.
+    #
+    # WHO WRITES IT: nothing, any more. A one-shot migration moved 380 values
+    # into it from `context_key`, and no code path writes it. That is a
+    # deliberate property rather than an omission - `memory_decide.decide` was
+    # the only producer and it has not run since 6 October, so the population
+    # is closed and the column records history rather than accumulating it.
+    #
+    # WHAT NULL MEANS: this lesson did not come through adoption. Not a gap -
+    # it is the correct and permanent answer for every row anyone wrote by
+    # hand, which is most of them.
+    #
+    # WHY IT IS NOT `context_key`. `decide` set that column to the markdown
+    # heading path of the `memory.md` section it was adopting, so a DOCUMENT
+    # LOCATION sat in the column `scan_context` resolves as a SCOPE. Zero of
+    # the 424 resolved against 29 epics with the production resolvers. The
+    # value is false as a scope and true as provenance, and `decide` will never
+    # run again, so it was moved rather than dropped - DWB-705 refused the
+    # plain null on the arithmetic that `unresolvable` and NULL both take no
+    # action, leaving the deletion with no upside and a total cost.
+    #
+    # THE NAME CARRIES A RESTRICTION AND IT IS LOAD-BEARING. 45 scars and 23
+    # WORKING rows carry heading-shaped keys an AUTHOR typed through
+    # `raw_memory.append_raw_memory`. They are indistinguishable from the
+    # adopted rows by the string and did not come from any `memory.md`, so they
+    # were left in `context_key` - writing them here would state something
+    # false about their origin, which is the error this column exists to end.
+    # Membership was the `memory_transitions` link, not the shape of the value.
+    #
+    # NOT READ BY `scan_context`, and a test asserts the module never mentions
+    # it. Provenance becoming a scan input would rebuild the original defect
+    # under a better name.
+    "adopted_from_heading",
     "created_at",
     "updated_at",
 }

@@ -7,7 +7,10 @@
 # Callees: pydantic
 # Data In: dicts from app/services/memory_score
 # Data Out: ScoredMemoryEntry, ScoredMemoryResponse
-# Last Modified: 2026-10-08 (DWB-658/659: ScoredMemoryEntry declares `condensed`
+# Last Modified: 2026-10-28 (DWB-710: ScoredMemoryEntry declares
+#                `adopted_from_heading`, so the provenance the migration moved
+#                out of `context_key` still reaches a reader)
+#                Previous entry: DWB-658/659: ScoredMemoryEntry declares `condensed`
 #                and `keywords`. Undeclared keys are stripped from a response
 #                model by pydantic's default `extra=ignore`, so without this the
 #                service carries both fields and the endpoint serves neither.
@@ -51,6 +54,13 @@ class ScoredMemoryEntry(BaseModel):
     condensed: str | None
     keywords: list | None
     context_key: str | None
+    # DWB-710: where an adopted lesson came from - the heading path of the
+    # `memory.md` section `memory_decide.decide` turned into this row. NULL for
+    # every row that did not come through adoption, which is not a gap: it is
+    # the correct answer for a lesson nobody adopted. Declared here because the
+    # note above applies to it exactly - `_entry` puts it on the dict and this
+    # model is what decides whether it reaches a caller.
+    adopted_from_heading: str | None
     fired_count: int
     scored: bool
     reason: str | None

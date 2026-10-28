@@ -10,7 +10,10 @@
 #          app/models/memory_transition
 # Data In: db Session, an AgentMemory, journal tags, an optional reason
 # Data Out: the JournalEntry written before the row went
-# Last Modified: 2026-10-01 (DWB-626)
+# Last Modified: 2026-10-28 (DWB-710: the journal entry carries
+#                `adopted_from_heading` - this function destroys the only
+#                other witness of it)
+#                (DWB-626)
 
 """Removing a memory has two halves and until now no path had both.
 
@@ -90,6 +93,29 @@ def journal_and_remove(
     2's guarantee hold under a crash rather than only under a clean return.
     """
     body = memory.body
+    # DWB-710. THE JOURNAL IS THE ONLY SURVIVOR OF THIS FUNCTION, so provenance
+    # has to travel in it or it is destroyed here.
+    #
+    # Step 3 below NULLs every `memory_transitions.target_memory_id` pointing at
+    # this row, and step 4 deletes the row. That link is the ONLY witness that a
+    # lesson came through adoption - it is what the DWB-710 migration used to
+    # decide membership, because the heading string itself cannot distinguish an
+    # adopted row from one an author typed. So after this function returns,
+    # nothing anywhere can establish where an adopted lesson came from, and the
+    # loss is silent and total.
+    #
+    # Hard rule 4 makes the journal the place things GO on their way out of
+    # memory, which is what makes an eviction recoverable. A journal entry
+    # carrying the lesson but not its origin is recoverable in content and not
+    # in provenance, which is the same half-measure DWB-705 refused when it
+    # declined to null these values outright.
+    #
+    # In the BODY rather than `tags`, for the reason the reason-line below
+    # already gives: tags are a controlled vocabulary the search filters on, and
+    # a heading path in there would make every adopted lesson its own
+    # unsearchable tag. In the body it is greppable by `term`.
+    if memory.adopted_from_heading:
+        body = f"{body}\n\nAdopted from memory.md heading: {memory.adopted_from_heading}"
     if reason:
         # Appended rather than put in `tags`: tags are a controlled vocabulary
         # the journal search filters on, and a free-text reason in there would

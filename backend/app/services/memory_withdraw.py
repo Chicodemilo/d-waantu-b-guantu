@@ -8,7 +8,10 @@
 # Callees: app/services/memory_removal, app/models/agent_memory, app/models/agent
 # Data In: db Session, owning agent id, memory id, acting agent id, reason
 # Data Out: a dict describing what was withdrawn and where it went
-# Last Modified: 2026-10-28 (DWB-684: recorded, with the measurement behind it,
+# Last Modified: 2026-10-28 (DWB-710: the response carries
+#                `adopted_from_heading`; the row and its adoption link are
+#                both gone after this call)
+#                (DWB-684: recorded, with the measurement behind it,
 #                that this is the only reachable exit from the scar tier)
 
 """The first way anything has ever left agent_memories by choice.
@@ -153,6 +156,13 @@ def withdraw_memory(
         "tier": memory.tier.value,
         "body": memory.body,
         "context_key": memory.context_key,
+        # DWB-710. Read here with everything else BEFORE the row is gone, and
+        # returned for the same reason `journal_entry_id` is: this response is
+        # the caller's only account of what was removed. For one of the 380
+        # adopted rows `context_key` above is now NULL, so without this the
+        # response would say the lesson had no origin at the one moment the
+        # question is unanswerable afterwards.
+        "adopted_from_heading": memory.adopted_from_heading,
     }
 
     entry = memory_removal.journal_and_remove(

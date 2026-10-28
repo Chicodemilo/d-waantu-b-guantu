@@ -10,7 +10,9 @@
 #          tier, a required reason
 # Data Out: a dict describing the movement, including the journal entry id that
 #           records it
-# Last Modified: 2026-10-28 (DWB-684: the not_core refusal no longer claims
+# Last Modified: 2026-10-28 (DWB-710: the response carries
+#                `adopted_from_heading` beside `context_key`)
+#                (DWB-684: the not_core refusal no longer claims
 #                every other tier moves under consolidation - the scar tier
 #                does not and cannot, so it names withdraw instead)
 
@@ -279,6 +281,12 @@ def demote_from_core(
         "last_reinforced_session_id": memory.last_reinforced_session_id,
         "fired_count": memory.fired_count,
         "context_key": memory.context_key,
+        # DWB-710. Beside `context_key` for the same reason the two lines above
+        # are here: these are the values, not a claim that they were left
+        # alone. A demotion keeps the row, so provenance is not at risk the way
+        # it is in a withdrawal - but a response that reports a NULL scope and
+        # stays silent about the origin reads as a row that never had one.
+        "adopted_from_heading": memory.adopted_from_heading,
         "journal_entry_id": entry.id,
         "journal_tags": list(DEMOTION_TAGS),
     }

@@ -10,8 +10,8 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: AgentMemory, MemoryTier, MemoryCost, MemoryCaughtBy
-# Last Modified: 2026-10-28 (DWB-704: `context_free`, the author's declaration
-#                that no single piece of work owns a lesson)
+# Last Modified: 2026-10-28 (DWB-710: `adopted_from_heading` - where an
+#                adopted lesson came from, moved out of the scope column)
 #                (DWB-667: `situation`, the author-written line the
 #                keywords are checked against; nothing matches on it)
 #                (DWB-611: scar_context_bound collapsed into scar -
@@ -147,6 +147,25 @@ class AgentMemory(Base):
     # a context-bound scar whose context has not been named yet. The SCAN reads
     # this to ask whether the context is still alive.
     context_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # DWB-710: WHERE THIS LESSON CAME FROM, for the rows the adoption pipeline
+    # wrote. `memory_decide.decide` set `context_key` to the markdown heading
+    # path of the `memory.md` section it was adopting - a DOCUMENT LOCATION in
+    # the column the SCAN reads as a SCOPE. False as a scope, true as
+    # provenance, and irreplaceable: `decide` will never run again. So the
+    # value moved here, where it is true, and the scope column was nulled.
+    #
+    # POPULATED FOR 380 ROWS AND NO OTHERS, and the name carries that
+    # restriction on purpose. A `context_key` was also supplied BY AUTHORS
+    # through `raw_memory.append_raw_memory` - 45 scars and 23 working rows,
+    # heading-shaped and indistinguishable in the column. Those did not come
+    # from a `memory.md`, so writing them here would state something false
+    # about where they came from, which is the same category error this
+    # migration exists to end. Membership was decided by the
+    # `memory_transitions` link (`decide` always sets `target_memory_id`),
+    # which is a verifiable witness rather than a judgement about the string.
+    adopted_from_heading: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
     # DWB-704: the author's DECLARATION that this lesson is bound to no single
     # piece of work. NOT the same fact as `context_key IS NULL`, and the whole
     # reason this column exists rather than being inferred from that: a null key

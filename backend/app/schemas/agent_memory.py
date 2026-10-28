@@ -6,7 +6,9 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: RawMemoryCreate, RawMemoryResponse
-# Last Modified: 2026-10-28 (DWB-667: `situation` on the write request and
+# Last Modified: 2026-10-28 (DWB-710: the demote and withdraw responses
+#                declare `adopted_from_heading`)
+#                (DWB-667: `situation` on the write request and
 #                response; MemoryRekeyRequest/Response for the keywords-only
 #                replace)
 #                (DWB-649: response tier is derived at insert and is
@@ -301,6 +303,10 @@ class MemoryDemoteResponse(BaseModel):
     last_reinforced_session_id: int | None
     fired_count: int
     context_key: str | None
+    # DWB-710: declared, or the service sets it and the caller never sees it -
+    # pydantic's default `extra` is `ignore`, so an undeclared key is stripped
+    # silently with no error at any layer.
+    adopted_from_heading: str | None
     journal_entry_id: int
     journal_tags: list[str]
 
@@ -318,6 +324,12 @@ class MemoryWithdrawResponse(BaseModel):
     tier: str
     body: str
     context_key: str | None
+    # DWB-710: where an adopted lesson came from, reported here because this
+    # response and the journal entry are the only two places it survives. The
+    # removal NULLs the `memory_transitions` link that proved the row was
+    # adopted and then deletes the row, so after this call nothing else can
+    # answer the question. Declared, or `extra=ignore` strips it in silence.
+    adopted_from_heading: str | None
     withdrawn: bool
     journal_entry_id: int
     journal_tags: list[str]

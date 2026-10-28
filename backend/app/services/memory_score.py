@@ -11,7 +11,9 @@
 #          app/models/dwb_session, app/services/journal.promotion_candidates
 # Data In: agent_id, a DB session
 # Data Out: score(), band(), sessions_since_reinforced(), scored_memory()
-# Last Modified: 2026-10-08 (DWB-658/659: _entry carries `condensed` and
+# Last Modified: 2026-10-28 (DWB-710: _entry carries `adopted_from_heading`
+#                beside `context_key`; both files changed together)
+#                Previous entry: DWB-658/659: _entry carries `condensed` and
 #                `keywords`; see its docstring for the two consumers this one
 #                projection feeds and why both files move together.
 #                Previous entry: 2026-10-07 (DWB-637 follow-up: UNSCORED_NO_SESSION_ORIGIN's
@@ -259,6 +261,16 @@ def _entry(db: Session, memory: AgentMemory) -> dict:
         "condensed": memory.condensed,
         "keywords": memory.keywords,
         "context_key": memory.context_key,
+        # DWB-710. Served beside `context_key`, not instead of it, because they
+        # answer different questions: `context_key` is the scope the SCAN tests
+        # for liveness, and this is where the lesson came from. For the 380
+        # adopted rows the heading path used to sit in the first and now sits
+        # in the second, so a reader asking "where did this come from" has to
+        # be able to see it here or the move lost the thing it was protecting.
+        #
+        # Declared in `ScoredMemoryEntry` in the same change, per the warning
+        # above: a key added only here is stripped from the response silently.
+        "adopted_from_heading": memory.adopted_from_heading,
         "fired_count": memory.fired_count,
     }
 
