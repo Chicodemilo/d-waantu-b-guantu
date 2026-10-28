@@ -2,12 +2,14 @@
 # File: journal.py
 # Created: 2026-09-29 (DWB-587)
 # Purpose: Journal HTTP endpoints - POST /api/journal appends, GET /api/journal
-#          searches by tags, date range and term. There is no full-dump route.
+#          searches by tags, date range and term, GET /api/journal/{id} reads
+#          one entry by id. There is no full-dump route.
 # Caller: app/main.py
 # Callees: app/services/journal.py
 # Data In: HTTP requests
 # Data Out: JSON responses (JournalEntryRead, JournalSearchResponse)
-# Last Modified: 2026-09-29 (DWB-587)
+# Last Modified: 2026-10-28 (DWB-687: GET /{entry_id}, 404 naming the entity,
+#                no retrieval_count increment)
 
 from datetime import datetime
 
@@ -108,3 +110,35 @@ def search_journal(
         raise HTTPException(422 if e.code == "filter_required" else 400, e.detail)
     db.commit()
     return result
+
+
+@router.get("/{entry_id}", response_model=JournalEntryRead)
+def get_journal_entry(entry_id: int, db: Session = Depends(get_db)):
+    """ONE journal entry by id (DWB-687). A missing id 404s NAMING THE ENTITY.
+
+    WHY THIS EXISTS, and it is not convenience. Before this route a bare id
+    404'd with FastAPI's default `{"detail": "Not Found"}`, which is
+    indistinguishable from "that entry does not exist". A team lead checking
+    whether a teammate's journal entry had been written read the route's
+    absence as the entry's absence and reported it missing to the human when it
+    was there. An API shape made an agent report false information about a
+    teammate, so the wording below is the fix as much as the route is - the
+    same reason `tl_channel.get_message` names its entity.
+
+    NO FILTER IS REQUIRED HERE AND THAT DOES NOT WEAKEN THE SEARCH RULE. `GET
+    ""` refuses an unfiltered read because an unfiltered read is a DUMP, and
+    section 5's cost model collapses when the journal's sprawl can be pulled
+    into context wholesale. An id is the narrowest possible question: it
+    returns exactly one entry and cannot be widened into a listing. The rule is
+    "never read whole", not "never read".
+
+    THIS GET HAS NO SIDE EFFECT. `retrieval_count` is NOT incremented - see
+    `svc.get_entry` for the ruling and for why the module docstring's
+    "unconditional" wording does not conflict with it.
+
+    Errors: 404 no entry with that id.
+    """
+    entry = svc.get_entry(db, entry_id)
+    if entry is None:
+        raise HTTPException(404, f"journal entry {entry_id} not found")
+    return entry

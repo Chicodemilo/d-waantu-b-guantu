@@ -1,14 +1,16 @@
 # Path: app/services/journal.py
 # File: journal.py
 # Created: 2026-09-29 (DWB-587)
-# Purpose: The human_memory journal - append an entry, and search it by tags,
-#          date range and term. Every successful retrieval increments
-#          retrieval_count here, which is the ONLY place that column is written.
+# Purpose: The human_memory journal - append an entry, search it by tags, date
+#          range and term, and fetch one by id. Every SEARCH retrieval
+#          increments retrieval_count here, which is the ONLY place that column
+#          is written; the by-id fetch deliberately does not (DWB-687).
 # Caller: app/routers/journal.py
 # Callees: app/models/journal_entry, app/services/dwb_session.get_active_session
-# Data In: agent_id, body, tags; search filters (tags, date range, term)
+# Data In: agent_id, body, tags; search filters (tags, date range, term); an
+#          entry id
 # Data Out: JournalEntry rows plus a named retrieval status
-# Last Modified: 2026-09-29 (DWB-587)
+# Last Modified: 2026-10-28 (DWB-687: get_entry, which does not count)
 
 """The journal (spec section 5).
 
@@ -269,6 +271,35 @@ def search_entries(
         "filters_applied": [name for name, used in supplied.items() if used],
         "entries": rows,
     }
+
+
+def get_entry(db: Session, entry_id: int) -> JournalEntry | None:
+    """ONE entry by id, or None. DWB-687.
+
+    THIS DOES NOT INCREMENT `retrieval_count`, AND THAT IS A RULING RATHER THAN
+    AN OVERSIGHT (Archie, DWB-687). A search increments because the row coming
+    back IS evidence: it matched a question somebody actually asked. An
+    addressed fetch carries no such evidence - the caller already held the id,
+    so the fetch says nothing about whether the entry was useful in a
+    situation. The count drives journal-to-CORE promotion at
+    PROMOTION_THRESHOLD, so counting addressed fetches would let three of them
+    promote an entry into the tier that never decays, and any UI that renders
+    an entry would inflate it on every page load.
+
+    ON THE MODULE DOCSTRING ABOVE, which says the increment is unconditional
+    and that no parameter suppresses it: that rule is about SEARCH and it is
+    correct - a caller must not be able to opt out of counting their own
+    search. A separate route is not a parameter, so there is no conflict with
+    it. The next reader will reach that paragraph and think there is one, which
+    is why this says so here.
+
+    `search_entries` therefore remains the single write site for the column,
+    and the guard test asserting that stays true.
+
+    Returns None rather than raising: the router owns the 404 and its wording,
+    the same split `tl_channel.get_message` uses.
+    """
+    return db.get(JournalEntry, entry_id)
 
 
 def promotion_candidates(

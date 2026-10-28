@@ -8,7 +8,8 @@
 # Callees: POST/GET /api/journal, app.services.journal, ast over app/
 # Data In: test DB rows via the factory fixtures; the app source tree
 # Data Out: Assertions on responses, on persisted counts, and on write sites
-# Last Modified: 2026-09-29 (DWB-587)
+# Last Modified: 2026-10-28 (DWB-687: the route-list tripwire admits GET
+#                /{entry_id}, with the section 5 check that earned it)
 
 """DWB-587 acceptance, spec section 5.
 
@@ -91,6 +92,17 @@ class TestNoFullDump:
         A second journal route added later - a convenience listing, a debug
         dump, an export - would leave every test above passing while defeating
         the rule they exist to enforce.
+
+        DWB-687 WIDENED THIS, AND THE CHECK IT DEMANDS WAS MADE. `GET
+        /api/journal/{entry_id}` was ruled (Archie) not to violate section 5:
+        the rule is "never read WHOLE", and an id is the narrowest question
+        there is - it returns exactly one entry and there is no parameter that
+        widens it into a listing. The route it replaces was no route at all,
+        which 404'd with a bare "Not Found" and got a teammate's journal entry
+        reported to the human as missing when it was there.
+
+        The tripwire keeps its teeth for everything else, and the test below
+        this one holds the new member to the property that earned it a place.
         """
         from app.main import app
 
@@ -104,10 +116,38 @@ class TestNoFullDump:
         assert journal_routes == {
             ("/api/journal", "POST"),
             ("/api/journal", "GET"),
+            ("/api/journal/{entry_id}", "GET"),
         }, (
             "the journal surface changed. A new route must be checked against "
             "spec section 5 (retrieval is never a full read) before this "
             "expectation is widened."
+        )
+
+    def test_the_by_id_route_can_only_ever_return_one_entry(self):
+        """What earned `GET /{entry_id}` its place in the set above.
+
+        Asserted on the response model rather than on a sample response: a
+        route that returns one entry TODAY and a list after some later change
+        would pass a behavioural check written against today's data, and would
+        be the convenience listing the tripwire exists to catch - arriving
+        through a door this file had already opened.
+        """
+        import typing
+
+        from app.routers import journal as journal_router
+        from app.schemas.journal import JournalEntryRead
+
+        # The router applies its own prefix as routes are registered, so the
+        # path here is the full one, matching the set asserted above.
+        route = next(
+            r
+            for r in journal_router.router.routes
+            if getattr(r, "path", "") == "/api/journal/{entry_id}"
+        )
+        assert route.response_model is JournalEntryRead
+        assert typing.get_origin(route.response_model) is None, (
+            "the by-id route's response model has become a container; it can "
+            "no longer claim to be the narrowest possible read"
         )
 
 
