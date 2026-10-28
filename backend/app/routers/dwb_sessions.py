@@ -3,10 +3,13 @@
 # Created: 2026-06-09
 # Purpose: REST endpoints for DWB session open/close/reopen + read rollups (DWB-336, DWB-338, DWB-346 list aggregates + headline, DWB-353 ad_hoc bucket, DWB-395 reopen, DWB-493 summary+keywords on list/detail, DWB-530 wrong-shape 400s)
 # Caller: app/main.py
-# Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/services/query_shape.py, app/schemas/dwb_session.py, app/models/entity_keyword.py
+# Callees: app/services/dwb_session.py, app/services/dwb_session_rollup.py, app/services/query_shape.py, app/schemas/dwb_session.py, app/models/entity_keyword.py, app/services/memory_mode.py (DWB-688 refusal text)
 # Data In: HTTP POST JSON bodies, GET query/path params
 # Data Out: DwbSessionRead, DwbSessionListItem[], DwbSessionDetail (or 404/409)
-# Last Modified: 2026-09-15 (DWB-530: 400 naming valid params on wrong query shape)
+# Last Modified: 2026-10-28 (DWB-688: the write-on-close and compaction
+#                refusals name routes the project's memory_mode accepts; text
+#                only, no predicate change)
+#                (DWB-530: 400 naming valid params on wrong query shape)
 
 """HTTP layer for DWB session lifecycle.
 
@@ -50,6 +53,7 @@ from app.schemas.dwb_session import (
 )
 from app.services import dwb_session as svc
 from app.services import dwb_session_rollup as rollup
+from app.services import memory_mode as memory_mode_svc
 from app.services import query_shape
 
 router = APIRouter(prefix="/api/sessions", tags=["dwb_sessions"])
@@ -222,13 +226,20 @@ def close_dwb_session(
         ).first()
         if tl is not None and not memory_trace.agent_wrote_since(db, tl, row.opened_at):
             start = row.opened_at.strftime("%Y-%m-%d %H:%M UTC")
+            # DWB-688: the route named here must be one this project's mode
+            # actually accepts. On human_memory, memory/append and
+            # session-complete both 409, so the gate was pointing at a sealed
+            # door. The CHECK above (agent_wrote_since) has been mode-aware
+            # since DWB-589 and is correct - only this sentence was wrong.
+            target = memory_mode_svc.write_on_close_instruction(
+                memory_mode_svc.project_for_agent(db, tl.id), tl.id
+            )
             raise HTTPException(
                 422,
                 (
                     f"Write-on-close: you ({tl.name}) have no memory write in this "
                     f"session (since {start}). Append what this session was about to "
-                    f"your memory.md via POST /api/agents/{tl.id}/memory/append (or "
-                    f"/session-complete), then retry the close. This is the "
+                    f"{target}, then retry the close. This is the "
                     f"write-on-close rule, not a wait: write, then close."
                 ),
             )
@@ -259,16 +270,19 @@ def close_dwb_session(
                 f"{owner} -> {', '.join(items)}"
                 for owner, items in sorted(by_owner.items())
             )
+            # DWB-688: memory/compact is sealed under human_memory, so this
+            # refusal was naming a route that 409s. Sealed-route half only -
+            # see compaction_agent_clause for the separate, deliberately
+            # unfixed staleness in the same sentence.
+            agent_clause = memory_mode_svc.compaction_agent_clause(project)
             raise HTTPException(
                 422,
                 (
                     "Compaction gate: this session cannot close until the "
                     "over-ceiling docs below are compacted. Have every owner "
                     "compact their files IN PARALLEL, now, without waiting to be "
-                    "asked — each agent rewrites its own memory files leaner and "
-                    "submits via POST /api/agents/{agent_id}/memory/compact "
-                    "{file, content}; the team-lead compacts the shared root "
-                    "docs (HANDOFF / ARCHITECTURE / README). Then retry the "
+                    f"asked — {agent_clause}; the team-lead compacts the shared "
+                    "root docs (HANDOFF / ARCHITECTURE / README). Then retry the "
                     f"close. Over ceiling: {offenders}"
                 ),
             )

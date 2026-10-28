@@ -3,10 +3,13 @@
 # Created: 2026-03-29
 # Purpose: Sprint CRUD, completion gates (incl. doc + consolidation), post-close automation, semantic activity events (DWB-410), gate_miss auto-scoring on blocked close (DWB-425)
 # Caller: app/routers/sprints.py
-# Callees: models (sprint, ticket, agent, failure_record, test_result, standards_audit, project), agent_consolidation svc, git, services/activity_log
+# Callees: models (sprint, ticket, agent, failure_record, test_result, standards_audit, project), agent_consolidation svc, git, services/activity_log, services/memory_mode (DWB-688 refusal text)
 # Data In: db: Session, SprintCreate/Update, acting_agent_id
 # Data Out: list[Sprint], Sprint
-# Last Modified: 2026-09-16 (DWB-572: force_test_coverage evaluates project.repo_path, not DWB's own BACKEND_DIR; router_test_coverage() shared with app/routers/status.py::get_test_coverage)
+# Last Modified: 2026-10-28 (DWB-688: the write-on-close refusal names a route
+#                the project's memory_mode accepts; text only, the
+#                agent_wrote_since predicate is unchanged)
+#                (DWB-572: force_test_coverage evaluates project.repo_path, not DWB's own BACKEND_DIR; router_test_coverage() shared with app/routers/status.py::get_test_coverage)
 
 import logging
 import re
@@ -370,6 +373,17 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                 if not memory_trace.agent_wrote_since(db, a, window_start)
             )
             if non_writers:
+                # DWB-688: the route named here must be one this project's mode
+                # accepts. On human_memory, memory/append and session-complete
+                # both 409, so the gate named a sealed door. The CHECK above
+                # (agent_wrote_since) has been mode-aware since DWB-589 and is
+                # correct - only this sentence was wrong. The id is a `<agent_id>`
+                # placeholder rather than the bare `{id}` this string used to
+                # emit unsubstituted: the gate names several agents at once and
+                # has no single id to interpolate.
+                from app.services import memory_mode as memory_mode_svc
+
+                target = memory_mode_svc.write_on_close_instruction(project)
                 raise HTTPException(
                     400,
                     "write-on-close gate failed: these sprint participants have "
@@ -379,9 +393,8 @@ def _check_completion_gates(db: Session, sprint: Sprint) -> None:
                         if sprint.start_date
                         else "on record"
                     )
-                    + f": {', '.join(non_writers)}. Each must write to their "
-                    "memory.md (POST /api/agents/{id}/memory/append or "
-                    "/session-complete) before the sprint can close.",
+                    + f": {', '.join(non_writers)}. Each must write to "
+                    + f"{target} before the sprint can close.",
                 )
 
     # Unreviewed failure records gate — block if stubs exist for sprint tickets.

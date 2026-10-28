@@ -5,7 +5,10 @@
 #          human_memory, stock DWB memory is not written and not read. Holds
 #          the per-route write seal and the pointer the sealed read paths
 #          return in place of stock memory.md content.
-# Caller: app/routers/agents.py (write seal), app/services/agent.py
+# Caller: app/routers/agents.py (write seal), app/routers/dwb_sessions.py
+#         (DWB-688 session write-on-close + compaction gate refusals),
+#         app/services/sprint.py (DWB-688 sprint write-on-close refusal),
+#         app/services/agent.py
 #         (tl_memory_for_project, spawn-prepare memory_full, memory_usage_rules),
 #         app/services/agent_memory.py (identity.md memory rules)
 # Callees: app/config/memory_rules (both usage-rule variants), app/models/agent,
@@ -15,7 +18,10 @@
 # Data In: db Session, agent_id or Project
 # Data Out: bool / the pointer string / assembled memory text / the mode's
 #           memory-usage rules / StockMemorySealed
-# Last Modified: 2026-10-09 (DWB-667: the fill and rekey routes are excused in
+# Last Modified: 2026-10-28 (DWB-688: write_on_close_instruction +
+#                compaction_agent_clause - the close gates named sealed routes
+#                in their own refusals; text only, no predicate change)
+#                (DWB-667: the fill and rekey routes are excused in
 #                OPEN_UNDER_HUMAN_MEMORY with their reasons)
 #                (DWB-638: memory_usage_rules_for picks the mode's
 #                inline rules block, so spawn stops teaching sealed routes)
@@ -105,6 +111,102 @@ _WRITE_REPLACEMENT = {
     "memory/compact": "POST /api/agents/{agent_id}/memories",
     "session-complete": "POST /api/agents/{agent_id}/memories",
 }
+
+# The four fields a human_memory write must carry. Named in the gate refusals
+# below because `body` alone is a 201 nowhere: `condensed`, `keywords` and
+# `situation` are MANDATORY IN EFFECT at the service layer (DWB-657, DWB-667)
+# while declared Optional on the request model, so an agent reading only the
+# schema sees three optional fields and gets a 400 it did not expect. A refusal
+# that sends someone to `/memories` without naming these has moved the wall
+# rather than removed it.
+HUMAN_MEMORY_REQUIRED_FIELDS = ("body", "condensed", "keywords", "situation")
+
+
+def write_on_close_instruction(project: Project | None, agent_id: int | None = None) -> str:
+    """What a close/compaction gate's refusal should tell this agent to call.
+
+    DWB-688. The gates that enforce "you write for your shit on close" were
+    telling a human_memory agent to fix the refusal by calling `memory/append`
+    or `session-complete`, both of which `assert_stock_write_allowed` above
+    refuses with 409. The gate was therefore unpassable by following its own
+    instructions: a wall whose sign points at another wall.
+
+    ONE DEFINITION, THREE CONSUMERS, and that is the whole point of putting it
+    here rather than branching at each gate. The three call sites
+    (`routers/dwb_sessions.py` session write-on-close and compaction gate,
+    `services/sprint.py` sprint write-on-close) read correctly in isolation
+    whichever way they are written, so three local branches would drift
+    invisibly - the next person fixes the gate they were sent to and leaves the
+    other two naming a sealed route.
+
+    THE PREDICATE IS NOT THE PROBLEM AND MUST NOT BE TOUCHED. Both gates decide
+    whether an agent wrote via `memory_trace.agent_wrote_since`, which has been
+    mode-aware since DWB-589 and correctly reads the human_memory store - a
+    single `POST /api/agents/{id}/memories` row satisfies them today. Only the
+    TEXT was wrong. Anyone "fixing" the check in response to this has
+    misdiagnosed it.
+
+    `agent_id` is optional because the sprint gate names several agents at once
+    and has no single id to substitute; it yields `<agent_id>` as an explicit
+    placeholder for the reader to fill rather than a bare `{id}`, which reads
+    as an f-string someone forgot to interpolate.
+
+    Returns the whole "where to write" phrase, NOUN INCLUDED, not just the
+    route. The noun is mode-dependent too - on human_memory there is no
+    `memory.md` to append to - and a helper returning only the URL would have
+    left each call site to supply "your memory.md" for itself, which is the
+    same drift this function exists to prevent, one word further along. The
+    STOCK phrase is byte-for-byte what the gates said before DWB-688; the
+    unchanged stock refusal is the control proving this touched only the text.
+    """
+    who = str(agent_id) if agent_id is not None else "<agent_id>"
+    if is_human_memory(project):
+        fields = ", ".join(HUMAN_MEMORY_REQUIRED_FIELDS)
+        return (
+            f"your memory store via POST /api/agents/{who}/memories "
+            f"(all four of {fields} are REQUIRED; "
+            f"stock memory.md is sealed on this project)"
+        )
+    return (
+        f"your memory.md via POST /api/agents/{who}/memory/append "
+        f"(or /session-complete)"
+    )
+
+
+def compaction_agent_clause(project: Project | None) -> str:
+    """The per-agent half of the compaction gate's instruction (DWB-688).
+
+    A SIBLING OF `write_on_close_instruction` RATHER THAN THE SAME STRING, and
+    the distinction is the point: `memory/compact` is sealed under
+    human_memory, but its replacement is NOT `/memories`. You do not compact a
+    file by writing a new memory row - the two routes do different things, and
+    substituting the write instruction here would swap a refusal that names an
+    impossible route for one that names an irrelevant one. Under human_memory
+    there IS no compaction route, because there is no stock memory.md to
+    compact, so the honest text says so and stops.
+
+    Kept beside the write instruction so both mode-dependent gate texts are one
+    file and one decision. The call sites hold no branch.
+
+    KNOWN STALE, DELIBERATELY NOT FIXED HERE: the stock clause asks agents to
+    compact their own memory files, but `agent_consolidation._gate_counts`
+    excludes every entry carrying `agent_name` (DWB-401), so per-agent memory
+    cannot trigger this gate on ANY project, stock included. That is a second
+    defect in the same sentence with its own cause and its own fix; DWB-688 is
+    scoped to the sealed route only. Filed separately - do not silently roll it
+    in, and do not read this clause as evidence the instruction is otherwise
+    correct.
+    """
+    if is_human_memory(project):
+        return (
+            "per-agent memory is sealed on this project (human_memory), so "
+            "there is nothing for agents to compact and no compaction route to "
+            "call"
+        )
+    return (
+        "each agent rewrites its own memory files leaner and submits via "
+        "POST /api/agents/<agent_id>/memory/compact {file, content}"
+    )
 
 # Routes under the memory surface that stay OPEN under human_memory, each with
 # the reason written down rather than remembered.
