@@ -242,6 +242,33 @@ across the whole pass mean the entire API degrades for minutes. **Nobody should
 run a sweep to find this out.** DWB-555 covers the CALLER's experience; this is
 a different cost with a different victim.
 
+## A MEASUREMENT EARNS YOU THE FINDING, NEVER THE CAUSE
+
+Barry's, and it is the frame for everything below. When a sentence moves from
+what you OBSERVED to WHY it happened, the second half is a new claim with its
+own test - and it is most likely to escape scrutiny **precisely because the
+first half was right**. The two arrive in the same breath and the change of
+claim-type is invisible from inside.
+
+Five instances today, two of them in the same shape an hour apart:
+
+- I attached my own mechanism to Benny's correct measurement of the sweep
+  transaction and handed it to Pam as established. The transaction was
+  measured; "therefore your PATCH stalled" was me, and it was wrong - the
+  transaction locks tables that PATCH never touches.
+- Barry measured a recall miss correctly, repaired it correctly, then
+  explained it as the write gate and the matcher using different comparisons.
+  They use the same one. One call, four seconds, would have shown it.
+
+The second was the more dangerous: a team told the two sides diverge would
+index inflections against a mechanism that does not exist AND stop reading a
+gate pass as what it is. **A wrong cause attached to a right finding is worse
+than no explanation**, because it inherits the finding's credibility.
+
+The usable check is Devin's from the other direction: NAME THE PREMISE BOTH
+HALVES REST ON AND MEASURE THAT ONE. Consistency between a finding and its
+explanation is free.
+
 ## A predicate that can only return presences cannot find an absence
 
 Ten never-indexed projects were missed because the query was
