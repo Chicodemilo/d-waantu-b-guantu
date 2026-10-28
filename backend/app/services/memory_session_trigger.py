@@ -14,6 +14,8 @@
 # Last Modified: 2026-10-28 (DWB-707: the memory_consolidation_pass payload
 #                carries concluded_nominated / concluded_unfinished)
 #                (DWB-650)
+#                (DWB-706: payload carries conclude_candidates /
+#                conclude_would_move)
 
 """The session-open consolidation trigger (DWB-650).
 
@@ -213,6 +215,20 @@ def _record_pass(
         ),
         "concluded_unfinished": sum(
             o.result.concluded_unfinished for o in result.outcomes if o.result
+        ),
+        # DWB-706: the before-reading for the resting-score gate's removal,
+        # on the same payload and for the same reason as the two above - it is
+        # already served by GET /api/projects/{id}/activity-feed, where a human
+        # looks. `conclude_candidates` is what a pass WOULD examine without the
+        # gate and `conclude_would_move` is what would actually be journaled.
+        # Their DIFFERENCE is the instrument: today 866 and 0, and a single
+        # number cannot tell a gate holding back a flood from one holding back
+        # nothing.
+        "conclude_candidates": sum(
+            o.result.conclude_candidates for o in result.outcomes if o.result
+        ),
+        "conclude_would_move": sum(
+            o.result.conclude_would_move for o in result.outcomes if o.result
         ),
         "promoted_journal": sum(
             len(o.result.promoted_journal) for o in result.outcomes if o.result

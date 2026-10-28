@@ -19,6 +19,8 @@
 #                than a bare list, so "nominated zero" and "nominated N, none
 #                finished" stop rendering identically)
 #                (DWB-609: created)
+#                (DWB-706: conclude_dry_run sizes the lane read-only, taken
+#                with the resting-score gate still in place)
 
 """The fifth movement, finally with a consumer.
 
@@ -141,6 +143,120 @@ def _scars_at_rest(db: Session, *, agent_id: int | None) -> list[AgentMemory]:
         if memory_score.score(MemoryTier.scar, gap) == _RESTING_SCORE:
             at_rest.append(memory)
     return at_rest
+
+
+@dataclass
+class ConcludeDryRun:
+    """What a conclude pass WOULD do if the resting-score gate were removed.
+
+    DWB-706 step 1. Read-only: nothing here moves, journals or deletes a row.
+
+    IT IS TAKEN WITH THE GATE STILL IN PLACE, ON PURPOSE. A counter that first
+    runs in the same change that alters the behaviour cannot say what the
+    behaviour used to be, so the before-reading has to exist before the
+    change does. `at_rest_now` is that before-reading: what the gate nominates
+    today, which is the number the gate's removal is measured against.
+
+    THE TWO NUMBERS THAT MATTER ARE `candidates_if_gate_removed` AND
+    `would_move`, AND THEIR BEING DIFFERENT IS THE WHOLE INSTRUMENT. Measured
+    2026-10-28: 866 and 0. One number alone cannot distinguish "the gate is
+    holding back a flood" from "the gate is holding back nothing", and those
+    call for opposite decisions.
+
+    `candidates_including_unscored` exists because removing the score gate
+    raises a question the gate currently hides: `_scars_at_rest` ALSO drops
+    rows whose `sessions_since_reinforced` is None, and that exclusion is
+    there because a row with no origin has no score to compare. Once the
+    comparison goes, the exclusion's reason goes with it - so the dry run
+    reports both populations rather than resolving that silently. Today the
+    difference is 4 rows.
+    """
+
+    scar_family: int = 0
+    """Every scar-family row in scope. The denominator."""
+
+    unscored_no_origin: int = 0
+    """Rows with no session origin, so no derivable score."""
+
+    at_rest_now: int = 0
+    """THE BEFORE-READING: what the live gate nominates today."""
+
+    candidates_if_gate_removed: int = 0
+    """Rows that would be examined with the score comparison gone, keeping the
+    unscored exclusion."""
+
+    candidates_including_unscored: int = 0
+    """As above, if the unscored exclusion went too. Reported, not chosen."""
+
+    would_move: int = 0
+    """Candidates whose context is `finished` - the rows that would actually
+    be journaled and deleted. This is the number a human should read."""
+
+    would_move_including_unscored: int = 0
+
+    verdicts: dict = field(default_factory=dict)
+    """scan_context outcome counts over the candidate set, by value."""
+
+    scan_errors: int = 0
+    """Rows whose scan raised. A NAMED THIRD STATE: not finished, not
+    unfinished. Folding these into either would let a broken scan read as a
+    clean verdict."""
+
+
+def conclude_dry_run(
+    db: Session, *, agent_id: int | None = None
+) -> ConcludeDryRun:
+    """Size the conclude lane without moving anything.
+
+    Answers the question the ticket's acceptance asks for: what WOULD move if
+    the resting-score precondition were removed. Pure read - no flush, no
+    delete, no journal entry.
+
+    Deliberately does NOT call `_scars_at_rest` for the counterfactual, because
+    that function IS the gate. It re-derives the same population and applies
+    only the exclusion that would survive, so the two numbers come from one
+    traversal and cannot drift from each other the way two queries would.
+    """
+    conditions = [AgentMemory.tier.in_(memory_scan.SCAR_FAMILY)]
+    if agent_id is not None:
+        conditions.append(AgentMemory.agent_id == agent_id)
+
+    memories = list(
+        db.execute(select(AgentMemory).where(*conditions).order_by(AgentMemory.id.asc()))
+        .scalars()
+        .all()
+    )
+
+    out = ConcludeDryRun(scar_family=len(memories))
+    verdicts: dict[str, int] = {}
+
+    for memory in memories:
+        gap = memory_score.sessions_since_reinforced(db, memory)
+        scored = gap is not None
+        if not scored:
+            out.unscored_no_origin += 1
+        elif memory_score.score(MemoryTier.scar, gap) == _RESTING_SCORE:
+            out.at_rest_now += 1
+
+        if scored:
+            out.candidates_if_gate_removed += 1
+        out.candidates_including_unscored += 1
+
+        try:
+            verdict = memory_scan.scan_context(db, memory)
+        except Exception:
+            # Never let one row's scan failure become a verdict about the lane.
+            out.scan_errors += 1
+            continue
+        key = getattr(verdict, "value", str(verdict))
+        verdicts[key] = verdicts.get(key, 0) + 1
+        if verdict == memory_scan.ContextLiveness.finished:
+            out.would_move_including_unscored += 1
+            if scored:
+                out.would_move += 1
+
+    out.verdicts = verdicts
+    return out
 
 
 @dataclass

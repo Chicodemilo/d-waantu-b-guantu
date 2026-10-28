@@ -22,6 +22,8 @@
 #                (DWB-649: tier_for_raw gained a second caller -
 #                raw_memory.append_raw_memory runs it at INSERT, so
 #                tier_raw_memories is now a backlog drain, not the main path)
+#                (DWB-706: ConsolidationResult carries conclude_candidates /
+#                conclude_would_move, the pre-removal before-reading)
 # DWB-650: consolidate_project_roster fans consolidate_agent out over every
 #          agent in project_agents, called from dwb_session.open_session
 
@@ -123,6 +125,13 @@ class ConsolidationResult:
     """DWB-707. Nominated scars skipped because their context was not
     finished. `concluded_nominated - concluded_unfinished ==
     len(concluded_scars)` always holds."""
+
+    # DWB-706: what a pass WOULD nominate and WOULD move if the resting-score
+    # gate were gone. Separate from `concluded_nominated`, which is what the
+    # gate actually let through (0 on every pass so far). The pair is the
+    # before-reading the gate's removal gets measured against.
+    conclude_candidates: int = 0
+    conclude_would_move: int = 0
 
     evicted_working: list[JournalEntry] = field(default_factory=list)
     """Journal entries created by evicting a WORKING memory at the floor."""
@@ -355,6 +364,18 @@ def consolidate_agent(db: Session, *, agent_id: int) -> ConsolidationResult:
     # `moved_anything`'s truthiness test keeps meaning what it meant. A
     # dataclass is always truthy, so assigning the outcome here would have
     # reported every pass as having moved something.
+    # DWB-706 step 1: the BEFORE-READING, taken while the resting-score gate
+    # is still in place. A counter that first runs in the same change that
+    # removes the gate cannot say what the behaviour used to be, so this ships
+    # and is observed first. Read-only - it moves nothing.
+    #
+    # `candidates` and `would_move` being DIFFERENT is the instrument: one
+    # number alone cannot tell "the gate holds back a flood" from "the gate
+    # holds back nothing", and those call for opposite decisions.
+    conclude_preview = memory_scar_conclude.conclude_dry_run(db, agent_id=agent_id)
+    result.conclude_candidates = conclude_preview.candidates_if_gate_removed
+    result.conclude_would_move = conclude_preview.would_move
+
     conclude_outcome = memory_scar_conclude.evict_concluded_scars(
         db, agent_id=agent_id
     )
