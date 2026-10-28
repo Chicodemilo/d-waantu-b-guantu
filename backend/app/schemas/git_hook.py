@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: HTTP request body / service result dict
 # Data Out: PostCommitRequest, PostCommitResponse
-# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
+# Last Modified: 2026-10-28 (DWB-695: optional branch, the one field git cannot recover later)
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,6 +17,18 @@ class PostCommitRequest(BaseModel):
     repo_path: str = Field(..., description="Absolute path of the repository the commit landed in")
     commit_message: str = Field(..., description="Full commit message body")
     commit_sha: str = Field(..., description="Commit SHA (full or short)")
+    # DWB-695. OPTIONAL, and it is the only new field, because everything else
+    # the commit row stores is read back out of the repository by the server -
+    # which is why the shipped hook did not have to change and an older hook
+    # still works against this endpoint unmodified.
+    #
+    # Branch is the exception: a branch pointer moves, so asking git later
+    # which branches contain a commit answers a different question than which
+    # branch was checked out when it landed. It is knowable only at commit
+    # time, so it can only arrive from the hook. Absent means NOT REPORTED.
+    branch: str | None = Field(
+        None, description="Branch checked out when the commit landed, if the hook reports it"
+    )
 
 
 class ClosedEntry(BaseModel):

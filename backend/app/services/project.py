@@ -28,6 +28,7 @@ from app.models.agent_consolidation_ack import AgentConsolidationAck
 from app.models.agent_score import AgentScore
 from app.models.alert import Alert
 from app.models.comment import Comment
+from app.models.commit import Commit
 from app.models.dwb_session import DwbSession
 from app.models.epic import Epic
 from app.models.failure_record import FailureRecord
@@ -596,6 +597,12 @@ def delete_project(db: Session, project: Project) -> None:
     # table left out here does not fail loudly at the model - it 500s the
     # delete endpoint with an integrity error. Found by deleting a throwaway
     # project and getting a 500 rather than a 204.
+    # DWB-695: commit rows. Same NO ACTION FK as everything else here, so
+    # leaving it out turns a project delete into a 500 the moment any commit
+    # has been recorded. Caught by the DWB-624 enumeration guard, which reads
+    # the mapper registry rather than a hardcoded list and therefore saw the
+    # new table the hour it was added.
+    db.execute(delete(Commit).where(Commit.project_id == pid))
     db.execute(delete(MemoryTransition).where(MemoryTransition.project_id == pid))
     db.execute(
         delete(MemoryTransitionRun).where(MemoryTransitionRun.project_id == pid)

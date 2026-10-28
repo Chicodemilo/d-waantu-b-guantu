@@ -6,7 +6,7 @@
 # Callees: app/services/hook_tracking.py, app/services/agent.py, app/services/failed_hook.py, app/services/git_hook.py, app/models/hook_session.py, app/schemas/tool_action.py
 # Data In: HTTP POST from curl hook commands
 # Data Out: JSON responses (HookSession data + DWB-517 SessionStart additionalContext, tool-action + lifecycle capture result, post-commit close result)
-# Last Modified: 2026-09-14 (DWB-525: post-commit re-grounds code pointers via code_pointers.ground_commit)
+# Last Modified: 2026-10-28 (DWB-695: post-commit persists a commit row via commit_record.record_commit)
 
 """Hook endpoints for passive tracking.
 
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.hook_session import HookSessionStatus
+from app.models.project import Project
 from app.schemas.git_hook import PostCommitRequest, PostCommitResponse
 from app.schemas.hook_session import (
     HookEventInput,
@@ -34,6 +35,7 @@ from app.schemas.tool_action import (
 )
 from app.services import agent as agent_svc
 from app.services import code_pointers as code_pointers_svc
+from app.services import commit_record as commit_record_svc
 from app.services import git_hook as git_hook_svc
 from app.services import hook_tracking as svc
 from app.services.failed_hook import log_failed_hook
@@ -341,10 +343,36 @@ def hook_post_commit(data: PostCommitRequest, db: Session = Depends(get_db)):
             commit_message=data.commit_message,
             commit_sha=data.commit_sha,
         )
+        # DWB-695: persist the commit row. MUST run off `project_id` and not
+        # off the auto-close outcome: `process_post_commit` returns early with
+        # reason=no_ticket_keys_in_message, and a commit carrying no key is
+        # precisely the commit this table exists to record - 54.6% of this
+        # repo's 284 commits carry none. Hanging it off `closed` would capture
+        # only the commits nobody needs to ask about.
+        #
+        # Best-effort in its own commit, same contract as the grounding below:
+        # the hook must always return 200 and must never block a commit.
+        pid = result.get("project_id") if isinstance(result, dict) else None
+        if pid:
+            try:
+                project = db.get(Project, pid)
+                if project is not None:
+                    commit_record_svc.record_commit(
+                        db,
+                        project=project,
+                        repo_path=data.repo_path,
+                        commit_sha=data.commit_sha,
+                        commit_message=data.commit_message,
+                        branch=data.branch,
+                    )
+                    db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("post-commit commit-row persistence failed")
+
         # DWB-525: re-ground code pointers for this commit's touched files.
         # Best-effort in its own commit so a grounding failure never disturbs
         # the auto-close result or the hook's fire-and-forget 200 contract.
-        pid = result.get("project_id") if isinstance(result, dict) else None
         if pid:
             try:
                 code_pointers_svc.ground_commit(

@@ -43,6 +43,7 @@ from app.models.entity_keyword import EntityKeyword
 from app.models.node import Node, NodePointer, NodePointerKind
 from app.models.node_exclusion import NodeExclusion
 from app.models.standards_audit import AuditVerdict, StandardsAudit
+from app.models.commit import Commit  # DWB-695
 from app.models.journal_entry import JournalEntry
 from app.models.memory_transition import (
     MemoryTransition,
@@ -86,6 +87,7 @@ __all__ = [
     "EntityKeyword",
     "Node", "NodePointer", "NodePointerKind", "NodeExclusion",
     "StandardsAudit", "AuditVerdict",
+    "Commit",
     "JournalEntry",
     "AgentMemory", "MemoryTier", "MemoryCost", "MemoryCaughtBy",
     "MemoryTransition", "TransitionDirection", "TransitionState",

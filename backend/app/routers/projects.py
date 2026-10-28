@@ -39,6 +39,7 @@ from app.schemas.project import (
 )
 from app.schemas.project_agent import ProjectTeamRead
 from app.schemas.test_result import TestResultRead
+from app.services import git_hook_health
 from app.services import memory_transition as transition_svc
 from app.services import project as svc
 from app.services import project_agent as pa_svc
@@ -852,6 +853,30 @@ def _all_gate_toggles() -> list[str]:
     return sorted(
         c.name for c in Project.__table__.columns if c.name.startswith("force_")
     )
+
+
+@router.get("/{project_id}/hook-status")
+def get_hook_status(project_id: int, db: Session = Depends(get_db)):
+    """DWB-695: is this project's post-commit hook actually installed?
+
+    Exists because "nobody committed" and "nothing was ever installed" are the
+    same observation from inside DWB, and that indistinguishability is the real
+    defect - not the fact that arming a clone takes one local action, which is
+    a property of git rather than of DWB.
+
+    `armed` is THREE-VALUED, the same convention `gate-status` uses for
+    `all_passing`: True, False, or null meaning COULD NOT ANSWER (no repo_path,
+    or a path this machine cannot read). Null is falsy, so `if armed` lands on
+    the safe reading; a caller acting on "unarmed" must test `is False`.
+
+    Read `silence_means` before concluding anything from `commit_rows`: zero
+    rows means four different things depending on the state beside it, and only
+    one of them is about the work.
+    """
+    project = svc.get_project(db, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return git_hook_health.hook_status(db, project)
 
 
 @router.get("/{project_id}/gate-status")

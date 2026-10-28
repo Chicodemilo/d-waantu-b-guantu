@@ -13,10 +13,11 @@
 # Callees: git via subprocess, app/services/node_registry.SourceUnit
 # Data In: repo_path, project prefix, commit sha
 # Data Out: (list[SourceUnit], prune_scope set) + plain git-walk dicts
-# Last Modified: 2026-09-15 (DWB-549: node-scan exclusions at enumeration)
+# Last Modified: 2026-10-28 (DWB-695: commit_paths + commit_metadata for the commit row)
 
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -96,6 +97,105 @@ def commit_files(repo_path: str, sha: str) -> list[str]:
     if out is None:
         return []
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
+def effective_hooks_dir(repo_path: str) -> str | None:
+    """The directory git will ACTUALLY look in for hooks, absolute, or None.
+
+    DWB-695. Asks git rather than assuming `.git/hooks`, because
+    `core.hooksPath` REPLACES that directory rather than adding to it - setting
+    it also switches the default off, which is how a repository can end up
+    pointing at an empty directory with eleven untouched samples sitting beside
+    it and no hook running. `rev-parse --git-path hooks` honours the override,
+    so it is the only answer that cannot disagree with git's own behaviour.
+
+    Returns an absolute path; git reports it relative to the repo root.
+    """
+    out = _git(repo_path, ["rev-parse", "--git-path", "hooks"])
+    if out is None:
+        return None
+    rel = out.strip()
+    if not rel:
+        return None
+    path = Path(rel)
+    return str(path if path.is_absolute() else Path(repo_path) / path)
+
+
+def git_config_value(repo_path: str, key: str) -> str | None:
+    """One git config value, or None when unset.
+
+    `_git` returns None on a non-zero exit, and `config --get` exits 1 for an
+    unset key, so "unset" and "git failed" arrive here identically. That is
+    acceptable for the single caller, which has already established the repo is
+    readable before asking.
+    """
+    out = _git(repo_path, ["config", "--get", key])
+    if out is None:
+        return None
+    return out.strip() or None
+
+
+def commit_paths(repo_path: str, sha: str) -> list[str]:
+    """Every repo-relative path a commit touched, INCLUDING deletions.
+
+    DWB-695. Deliberately NOT `commit_files`, and the difference is the whole
+    reason this exists: `commit_files` passes `--diff-filter=d` because a
+    vanished file cannot host a code pointer, which is correct for the pointer
+    lane and wrong here. The consumer of this list is a future file-overlap
+    discriminator asking "did the work on this ticket touch these files", and a
+    file the work DELETED is evidence of exactly that. Reusing `commit_files`
+    would have silently understated overlap for every commit that removed
+    anything.
+
+    Shares `_git` with the rest of this module so the failure semantics are
+    identical: [] on any git failure, never an exception into a hook lane.
+    """
+    out = _git(
+        repo_path,
+        ["diff-tree", "--no-commit-id", "--name-only", "-r", "-M", "--root", sha],
+    )
+    if out is None:
+        return []
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
+def commit_metadata(repo_path: str, sha: str) -> dict | None:
+    """Author/committer metadata for one commit, or None on any git failure.
+
+    Returns `full_sha`, `authored_at`, `committed_at` (both tz-aware, parsed
+    from strict ISO 8601 via %aI/%cI), `author_name`, `author_email`.
+
+    BOTH TIMESTAMPS, because a rebase or amend moves one and not the other and
+    the caller stores them in separate columns rather than choosing now.
+
+    The unit separator is the field delimiter: a commit message is not read
+    here, but an author name legitimately contains spaces and commas, and \x1f
+    cannot appear in any of these fields.
+    """
+    out = _git(
+        repo_path,
+        ["show", "-s", "--format=%H%x1f%aI%x1f%cI%x1f%an%x1f%ae", sha],
+    )
+    if out is None:
+        return None
+    parts = out.strip().split("\x1f")
+    if len(parts) != 5:
+        return None
+    full_sha, authored, committed, name, email = parts
+
+    def _parse(value: str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    return {
+        "full_sha": full_sha or None,
+        "authored_at": _parse(authored),
+        "committed_at": _parse(committed),
+        "author_name": name or None,
+        "author_email": email or None,
+    }
 
 
 def diff_line_ranges(repo_path: str, sha: str) -> dict[str, list[tuple[int, int]]]:
