@@ -92,6 +92,32 @@ design where model judgment is the mechanism rather than a fallback.
 - **Context gone** → drop it, and journal it on the way out.
 - **Context alive** → it stays at 6. No further action, no ceremony.
 
+> **WITHDRAWN IN PART, 2026-10-28 (DWB-706).** The wording above is KEPT because
+> `backend/app/services/memory_scar_conclude.py` still quotes it, and a reader who
+> finds the quote needs to be able to find out what happened to it.
+>
+> What is withdrawn is the clause **"Entries sitting at 6"** as a SCOPE on the scan.
+> It was implemented as a precondition: only scars whose score had decayed to the
+> resting value were re-examined. The scan now runs against **every scar-family row,
+> with no clock condition of any kind**, and the only thing that concludes a scar is
+> its context actually being finished.
+>
+> **The sentence that killed it was in this same section all along:** *a context's
+> liveness does not depend on how recently the scar fired.* That is true, and a
+> score precondition contradicts it. `sessions_since_reinforced` counts from
+> `COALESCE(last_reinforced, created)`, so ANY recall resets the gap to zero and a
+> scar that keeps proving useful never arrives at 6 at all. The gate was therefore
+> not a delay before the scan, it was a condition on DISUSE, and disuse is not what
+> "this work finished" means.
+>
+> Measured before removal (Stan, DWB-706): **0 of 870** scar-family rows were at the
+> resting score, the largest gap in the store was 23, and score 6 first occurs at a
+> gap of 31. The context check had therefore never run on anything.
+>
+> **The rest of this section stands.** Scars still rest at 6, the scan is still the
+> judgment step, and §3's table is unchanged. Only the scoping of WHICH rows the scan
+> considers was withdrawn.
+
 ### RECURRENCE IS DIAGNOSTIC — the most important mechanism here
 
 > **RULED.** *"If you do the same thing it means 1 of two things: 1, that the context is still
@@ -187,6 +213,34 @@ Candidate detectors for LATER, none validated: the lane closes; the paths it nam
 existing; or N sessions with no reinforcement and no recurrence. The third needs no
 hand-labelling and is therefore the likeliest v2, but it is absence-of-evidence and should not
 ship unattended.
+
+> **UNRESOLVED, 2026-10-28. The statement above is OVERTAKEN BY EVENTS and is left standing
+> deliberately. This note is not a correction and not a withdrawal.**
+>
+> An automatic detector exists and runs. The chain, with the tickets, is fully automatic and
+> has no human in it:
+>
+> - `memory_scan.scan_context` resolves a `context_key` to a ticket or epic and reports
+>   `finished` when that work is closed (DWB-609).
+> - `memory_scar_conclude.evict_concluded_scars` acts on `finished` without being asked,
+>   as step 2 of `memory_consolidate.consolidate_agent`.
+> - `memory_session_trigger.on_session_opened` fires `consolidate_project_roster`, which runs
+>   `consolidate_agent` for EVERY agent on the roster. It is called from
+>   `dwb_session.open_session` (DWB-650), so **opening a session is the trigger.**
+> - DWB-706 removed the resting-score condition that had been the last thing making this
+>   rare; see the withdrawal note in §2. DWB-707 made what the pass considers visible in the
+>   activity log, which is how it became legible at all.
+>
+> **This is the FIRST CANDIDATE DETECTOR ON THIS SECTION'S OWN LATER LIST, "the lane closes",
+> now built and running in production.**
+>
+> **NO RULING REVOKED THE v1 BOUNDARY, AND THIS NOTE IS NOT ONE.** Each ticket in the chain
+> was approved on its own terms; none of them mentions this section. Escalated to Miles
+> 2026-10-28 and recorded here as undecided until the owner of the intent decides it.
+>
+> **What a reader needs to carry away:** conclusion journals the scar and then DELETES the
+> `agent_memories` row, and the journal is never auto-loaded. So an automatic detector that
+> nobody authorised is removing rows from recall on session open.
 
 This is safe to leave manual precisely because **recurrence makes a wrong drop survivable** —
 an aggressive manual scan plus a journal beats an unvalidated automatic detector.
@@ -322,6 +376,36 @@ no path that can store a keyword set the write gate would have refused. One exce
 rather than discovered later: filling `situation` ALONE runs reachability and not the subject
 rule, because no keywords are being supplied to judge.
 
+**A THIRD GATE, ON SCOPE (DWB-704, 2026-10-28).** `context_key` stays OPTIONAL, but a key that
+IS sent is now resolved at write time and refused if it names nothing. Four codes, and the
+string in the refusal body is the one a reader will search for:
+
+| code | meaning |
+|---|---|
+| `context_unresolvable` | the key names no ticket and no epic on this project |
+| `context_already_closed` | it names something already done |
+| `context_contradiction` | the write sent `context_key` AND `context_free` together |
+| `context_unscoped_agent` | the agent row has no project, so nothing can resolve |
+
+All four are **400**, matching the two gates above and for the same reason: the request is
+well formed, and what is wrong is a claim it makes about itself.
+
+**`context_free: bool` is new on the write and on the response, and it is a DECLARATION rather
+than a default.** It records that the author judged no single piece of work owns this lesson.
+**It is NOT the same as omitting `context_key`:** omitting the key records that no scope was
+given, which is a data gap, while the flag records that someone decided there is no scope,
+which is a judgement. The two were collapsed once before and 381 of 455 rows were promoted into
+CORE on the strength of it. Sending both is `context_contradiction`; the server will not choose
+between two opposite claims.
+
+**Why this gate is worth having is §2's Context death, read forward.** A concluded scar is
+journaled and then REMOVED from `agent_memories`, and the journal is never auto-loaded, so a
+`context_key` is not a label for what a lesson is about. It is **the thing whose closing ends
+the lesson's life.** Since DWB-706 removed the clock condition, that closing can happen at any
+time rather than only after decay, so the repair an author reaches for first when refused,
+binding the lesson to a nearby ticket so the write passes, is the one that silently schedules
+its deletion. The sanctioned repair is `context_free: true`.
+
 **Tag only what the moment knows** and cannot later be reconstructed:
 
 - `cost:` none / low / high, and what happened — not how bad it felt
@@ -363,6 +447,28 @@ Separate store, append-only, never auto-loaded, queried by tag and date range.
 **Retrieval is the reinforcement signal.** Reaching for an entry is logged, dated and
 countable — which is the mechanism the first draft admitted it lacked. It is also the testing
 effect: recall consolidates harder than re-reading.
+
+**WHICH READS COUNT, AND ONE DELIBERATELY DOES NOT (DWB-687, 2026-10-28).** The rule was never
+"never read the journal". It is **never read it WHOLE**, and the two sanctioned reads are
+treated differently on purpose:
+
+- `GET /api/journal?tags=...&term=...&date_from=...` is the search above. **Every entry it
+  returns has `retrieval_count` incremented, server-side, and no request parameter suppresses
+  it.** This is the reaching-for that the 3-retrieval promotion rule counts.
+- `GET /api/journal/{entry_id}` reads one entry by id and **does NOT increment
+  `retrieval_count`.** A missing id returns a 404 naming the entity rather than a bare Not
+  Found.
+
+> **RULED (Archie, DWB-687).** The asymmetry is a ruling rather than an oversight. A search
+> increments because the row coming back IS evidence: it matched a question somebody actually
+> asked. An addressed fetch carries no such evidence, because the caller already held the id,
+> so it says nothing about whether the entry was useful in a situation. Since the count drives
+> journal-to-CORE promotion at the 3-retrieval threshold above, counting addressed fetches
+> would let three of them promote an entry into the tier that never decays, and any UI that
+> renders an entry would inflate it on every page load.
+
+`search_entries` therefore remains the single write site for `retrieval_count` in the
+application.
 
 **Memory must shrink; the journal may sprawl.** Opposite pressures — which is precisely why
 they are two stores and not one.
