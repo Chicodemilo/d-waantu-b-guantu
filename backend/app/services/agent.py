@@ -6,9 +6,9 @@
 # Callees: app/models/agent.py, app/models/project.py, app/models/instruction.py, app/models/project_agent.py
 # Data In: db: Session, AgentCreate/Update, identify params
 # Data Out: list[Agent], Agent, identify payload
-# Last Modified: 2026-10-07 (DWB-638: memory_usage_rules is mode-aware on both
-#                identify and spawn-prepare, via memory_mode.memory_usage_rules_for;
-#                it was the third ungated field in the same bundle as DWB-630's)
+# Last Modified: 2026-10-28 (DWB-686: identify reports topoff_enabled +
+#                topoff_interval, so an agent can tell top-off-is-off from
+#                top-off-was-never-built; the hook layer cannot say which)
 
 import json
 import logging
@@ -176,6 +176,23 @@ def identify_agent(
         # DWB-332: explicit jira_enabled flag so agents don't have to peek
         # at project.jira_base_url themselves.
         "jira_enabled": bool(project.jira_base_url),
+        # DWB-686: the state of top-off, for the same reason jira_enabled is
+        # here. Top-off is a periodic self-check injected by the hook layer,
+        # and when it is off the hook response is BYTE-IDENTICAL to what it
+        # was before the feature existed (`return {}` in hook_tracking) - so
+        # an agent cannot tell a project with top-off off from one where the
+        # feature was never built. An absent corrective is invisible by
+        # construction, which is how it stayed off on a project for two days
+        # without the team lead knowing.
+        #
+        # THE DASHBOARD ALREADY SHOWS THIS, at /projects/{id}/topoff, and that
+        # is the channel for a HUMAN. This one is for an agent, which does not
+        # browse the dashboard and otherwise has to read the project row to
+        # find out. Default is False (a decision, stated in DWB-584 and
+        # DWB-590), so most projects report off and that is the point: the
+        # value is only informative because it is reported either way.
+        "topoff_enabled": project.topoff_enabled,
+        "topoff_interval": project.topoff_interval,
         "memory_dir": memory_dir,
         "scratchpad_excerpt": scratchpad_excerpt,
         "instructions": instructions,

@@ -6,7 +6,7 @@
 # Callees: POST /api/agents/identify
 # Data In: Factory projects/agents, optional scratchpad/instruction fixtures
 # Data Out: Assertions on response shape and status codes
-# Last Modified: 2026-06-04
+# Last Modified: 2026-10-28 (DWB-686: identify reports top-off state)
 
 
 class TestIdentifyHappyPath:
@@ -441,3 +441,84 @@ class TestIdentifyDWB315SuffixedName:
             "project_prefix": "S315E",
         })
         assert r.status_code == 404
+
+
+class TestIdentifyReportsTopOffState:
+    """DWB-686: top-off was off on a project and the team lead could not tell.
+
+    WHY THIS FIELD EXISTS AT ALL. Top-off is a periodic self-check the hook
+    layer injects on every Nth prompt. When `topoff_enabled` is false the
+    hook returns `{}` - byte-identical to the output before the feature was
+    built - so from inside a session there is no observable difference
+    between "this project has top-off off" and "this build has no top-off".
+    An absent corrective is invisible by construction.
+
+    The dashboard already shows the flag at /projects/{id}/topoff, and that is
+    the channel for a human. An agent does not browse the dashboard; without
+    this field its only route is reading the project row.
+
+    The default is false, and that is a DECISION, stated in DWB-584, DWB-590
+    and the worker playbook - not an oversight. Nothing here turns it on.
+    """
+
+    def _project(self, client, tmp_path, prefix, **overrides):
+        body = {"prefix": prefix, "name": f"TopOff {prefix}",
+                "repo_path": str(tmp_path)}
+        body.update(overrides)
+        r = client.post("/api/projects", json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    def _identify(self, client, project, name="Archie"):
+        client.post("/api/agents", json={
+            "project_id": project["id"], "name": f"{name}_{project['prefix']}",
+            "role": "team-lead", "api_key": f"k-{project['prefix']}",
+        })
+        r = client.post("/api/agents/identify", json={
+            "role": "team-lead", "name": name,
+            "project_prefix": project["prefix"],
+        })
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_reports_the_OFF_case_explicitly(self, client, tmp_path):
+        """The off case is the whole point: it is the one nothing else can
+        report. A test that only covered the on case would pass against an
+        implementation that omitted the key whenever top-off was disabled,
+        which is exactly the silence the ticket is about."""
+        project = self._project(client, tmp_path, "TOF1")
+        assert project["topoff_enabled"] is False, "fixture assumption changed"
+
+        payload = self._identify(client, project)
+
+        assert "topoff_enabled" in payload, (
+            "identify omitted the key entirely when top-off is off, which is "
+            "indistinguishable from a build without the feature"
+        )
+        assert payload["topoff_enabled"] is False
+        assert payload["topoff_interval"] == 10
+
+    def test_reports_the_ON_case_and_the_interval(self, client, tmp_path):
+        """Paired with the off case so the field is shown to DISCRIMINATE.
+        A hardcoded `False` would satisfy the test above on its own."""
+        project = self._project(
+            client, tmp_path, "TOF2", topoff_enabled=True, topoff_interval=25,
+        )
+        payload = self._identify(client, project)
+
+        assert payload["topoff_enabled"] is True
+        assert payload["topoff_interval"] == 25
+
+    def test_the_interval_is_carried_not_defaulted(self, client, tmp_path):
+        """`topoff_interval` must come from the project row rather than the
+        schema default. A non-default value is used deliberately: 10 is the
+        default, so asserting on 10 cannot tell a real read from a constant."""
+        project = self._project(client, tmp_path, "TOF3", topoff_interval=3)
+        payload = self._identify(client, project)
+
+        assert payload["topoff_interval"] == 3, (
+            "the interval was not read from the project row"
+        )
+        assert payload["topoff_enabled"] is False, (
+            "setting only the interval must not imply the feature is on"
+        )

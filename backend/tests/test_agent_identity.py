@@ -76,6 +76,7 @@ class TestIdentifyHappyPath:
         assert set(data.keys()) == {
             "agent_id", "name", "role", "project_id", "project_prefix",
             "jira_enabled",  # DWB-332
+            "topoff_enabled", "topoff_interval",  # DWB-686
             "memory_dir", "scratchpad_excerpt", "instructions",
             "memory_usage_rules",  # DWB-352
         }

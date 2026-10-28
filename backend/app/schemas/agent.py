@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: AgentCreate, AgentUpdate, AgentRead
-# Last Modified: 2026-10-08 (DWB-651: request schemas refuse undeclared keys)
+# Last Modified: 2026-10-28 (DWB-686: identify reports topoff_enabled + topoff_interval)
 
 from datetime import datetime
 
@@ -95,6 +95,16 @@ class AgentIdentifyResponse(BaseModel):
     # to Jira. True when project.jira_base_url is set. Agents key Jira-side
     # decisions (dwb2jira invocations, jira_issue_key reads) on this.
     jira_enabled: bool
+    # DWB-686: whether this project's periodic self-check is on, and how often
+    # it fires. Reported ALWAYS, including the off case, because the off case
+    # is the one nothing else can tell you: when top-off is disabled the hook
+    # layer returns byte-identical output to a build without the feature, so
+    # silence here would be indistinguishable from the feature working.
+    # `topoff_interval` rides along because "on" without the number is not
+    # actionable - the interval is a per-project guess that is meant to be
+    # tuned (DWB-590).
+    topoff_enabled: bool
+    topoff_interval: int
     memory_dir: str
     scratchpad_excerpt: str
     instructions: list[InstructionPayload]
