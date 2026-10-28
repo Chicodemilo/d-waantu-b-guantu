@@ -287,6 +287,21 @@ strictly more available than catching the error, because it needs no insight -
 anyone can say "this line is mine and nobody has checked it", about anything, at
 any time.
 
+## `context_free` has one real use and it does not prove discoverability
+
+Row 1765 (Devin, scar, `context_free` true, `context_key` NULL) is the only row
+in the store with the flag set, written hours after the feature shipped. The
+accept path works; Barry had already proved the four refusals against the live
+route.
+
+**Do not read that as evidence an agent will find it.** Devin reached for the
+flag because he had written the warning into the team-lead playbook an hour
+earlier. That is the doc working on its own author, which is a good sign the
+sentence is in the right place and NOT a sign the feature is discoverable to
+someone who has not just written about it. I called it independent arrival and
+he corrected me. It needs a colder test: an agent who has read the playbook
+once, in the ordinary way, hitting the gate for the first time.
+
 ## Operational facts that cost someone an hour
 
 - **`information_schema.innodb_trx` is unavailable** - the app credentials lack
