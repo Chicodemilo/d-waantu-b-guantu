@@ -39,7 +39,7 @@ rework nobody looked at still blocks today's close.
 
 ## Alert Patterns
 
-- **0-token done tickets** — no alert fires; this has never raised one. Closing with zero attributed tokens applies a score penalty only (`scoring_triggers.py`). Usually means hooks aren't attributing. Investigate via the token audit if persistent.
+- **0-token done tickets** — no alert fires; this has never raised one. Closing with zero attributed tokens applies a score penalty only (`scoring_triggers.py`). **It does NOT usually mean hooks are failing** - that was the old guidance here and it sent people hunting the wrong thing. A session's tokens land on ONE ticket, so every other ticket the same worker closes in that session reads zero while carrying real tracked time. Measured 2026-10-28: 442 docks since June across 26 agents, 354 of them on tickets WITH tracked time. DWB-708. Miles has ruled the existing docks STAND and the work is prevention - do not re-escalate them.
 - **Sprint close** — mints a test ticket onto the closing sprint as backlog, unassigned (DWB-566). No alerts fire; the per-role "tests needed" alerts were removed in DWB-463.
 - **Doc gate failures** — critical alert for TL. Check that INITIAL.md, ARCHITECTURE.md, HANDOFF.md all exist. (TEAM.md is deprecated — roster lives in DB.)
 - **Rework detected** — info alert for PM when ticket goes back to in_progress after done. Auto-creates failure record stub.
@@ -63,4 +63,4 @@ When a blocker finishes, immediately move the dependent ticket to `in_progress` 
 6. Report to TL with scorecard
 
 ### Token attribution
-Hook-driven (DWB-304/307). If a done ticket shows 0 tokens, check the agent's session marker resolved correctly (`GET /api/hooks/sessions?status=orphan`).
+Hook-driven (DWB-304/307). **If a done ticket shows 0 tokens, do NOT start with `GET /api/hooks/sessions?status=orphan`.** Hook attribution was checked on 2026-10-28 and is not broken: 6035 hook sessions with no unclaimed markers. Check first whether the same worker closed another ticket in the same session - that is where the tokens went. An orphan hunt on these finds nothing, on all 442 of them.

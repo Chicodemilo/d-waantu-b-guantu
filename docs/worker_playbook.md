@@ -210,7 +210,8 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
   "condensed": "One line. THE LESSON, not the setup. Required.",
   "keywords": ["git checkout", "shared tree"],
   "situation": "One line: the moment this applies. Required. Your keywords must match it.",
-  "context_key": "optional: what this is bound to, when you already know",
+  "context_key": "optional: the work whose CLOSING ends this lesson. Resolved at write time; a key that names nothing is refused.",
+  "context_free": false,
   "cost": "none | low | high",
   "caught_by": "me | worker | human | ci",
   "surprised": true
@@ -360,6 +361,15 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
   nothing lands. The cost of leaning on the write-time refusal rather than the offline
   call is one round trip, not a lost check. Read the 400, fix the set, re-send.
 
+  **THE REFUSAL NOW NAMES THE SMALLEST AMENDMENT THAT WOULD PASS (DWB-689).** When
+  the gate rejects a set it offers the keyword-side repair where an honest one
+  exists, so you are not guessing at what would have worked. **It will never write
+  your `situation` line for you**, and that is deliberate rather than a gap: a gate
+  that supplied the sentence it then checks your keywords against would be
+  self-attestation with an extra step. Amending the situation is still the better
+  repair whenever the words you left out are genuinely words you would have said;
+  the server just will not say them on your behalf.
+
   It raises `KeywordUnreachable` with the same sentence the 400 would carry, and
   returns None when the set is good. An agent re-keywording 44 rows checked every one
   this way and sent zero failing requests. That is cheaper than learning the contract
@@ -382,6 +392,47 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
   blank: `[]`, `[""]` and `["  "]` all refuse, and a blank among real terms refuses
   too, naming the index, rather than quietly dropping it and storing a shorter list
   than you wrote.
+- **`context_key` is OPTIONAL, but a key you DO send is now RESOLVED AT WRITE TIME
+  and refused with 400 if it names nothing (DWB-704).** It is not a label for what
+  the lesson is about. It is **the thing whose CLOSING ends this lesson's life.**
+  Four refusal codes, and the string in the body is the one to search for:
+
+  | code | what it means |
+  |---|---|
+  | `context_unresolvable` | the key names no ticket and no epic on this project |
+  | `context_already_closed` | it names something already done |
+  | `context_contradiction` | you sent `context_key` AND `context_free` together |
+  | `context_unscoped_agent` | your agent row has no project, so nothing can resolve |
+
+  400 rather than 422 for the same reason as the keyword gate: the request is well
+  formed, and what is wrong is a claim it makes about itself.
+
+  **WHY IT IS WORTH A GATE: conclusion DELETES.** A scar whose context finishes is
+  journaled and then REMOVED from `agent_memories`, and the journal is never
+  auto-loaded. So a wrong binding does not mis-file a lesson, it takes it out of
+  recall permanently. As of DWB-706 the conclude pass no longer waits for a decay
+  clock either. The old gate nominated only scars whose score had decayed to a
+  resting value, which measured DISUSE rather than whether the work had finished,
+  and any recall reset the clock so a scar that kept being useful never qualified.
+  That gate is gone. **The only thing that concludes a scar now is its context
+  actually being finished**, so a `context_key` naming a ticket that closes
+  tomorrow can take your lesson out of recall tomorrow. Bind a lesson to a scope
+  only when the lesson genuinely dies with that scope.
+
+- **`context_free: true` is a DECLARATION, and it is the repair you will not reach
+  for.** When the gate refuses you, the move that comes to mind first, bind the
+  lesson to some nearby ticket so the write passes, is the WRONG one, and it is
+  the whole reason the gate exists. If this is a craft lesson that outlives the
+  work, send `context_free: true` instead. The refusal text says so; read it rather
+  than guessing.
+
+  **It is NOT the same as leaving `context_key` out.** Omitting the key records that
+  no scope was given, which is a data gap. The flag records that a human decided
+  there is no scope, which is a judgement. Those two were collapsed once before and
+  381 of 455 rows were promoted into CORE on the strength of it. Sending both the
+  key and the flag is `context_contradiction`: the server will not choose between
+  two opposite claims for you.
+
 - `cost`, `caught_by`, `surprised` are the moment-tags: **enums, not prose**. A sentence
   in `cost` is a **422**. All three are optional, and tagging only what the moment
   actually knows is the normal case, so an untagged memory is fine. `condensed`,
@@ -422,6 +473,14 @@ A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
 An **episode** (what happened, in the voice of someone who was there) goes to
 **`POST /api/journal`** with `{agent_id, body, tags?}`. A sanitized entry is a useless
 entry: the value is the reasoning that felt correct and was not.
+
+**You CAN read one back: `GET /api/journal/{entry_id}` (DWB-687).** The rule was
+never "never read the journal". It is **never read it WHOLE**. Reading a single
+entry by id does NOT increment `retrieval_count`, so looking one up cannot push it
+toward promotion, and a missing id returns a **404 naming the entity**
+(`journal entry 99999999 not found`) rather than a bare Not Found. Searching with
+`GET /api/journal?tags=...&term=...` is the other sanctioned read, and that one
+DOES increment `retrieval_count` on every entry it returns.
 
 **The write-on-close gate is satisfied the same way.** `POST .../memories` stamps
 `agents.last_memory_write_at` exactly like a stock write, so your DWB-519 participation
@@ -758,6 +817,16 @@ The deadline does the work, not the quality of the reasoning.
 ### Names are claims and nothing checks them
 
 A test named `test_wrapped_and_nested_lines_stay_with_their_bullet` contained no nested line. It passed, it was named for the case, and a reviewer reading the name stops looking. The name is exactly where a gap hides best, because it is the part that reads as coverage.
+
+### A name chosen for a counterfactual expires when the counterfactual succeeds
+
+A counter called `candidates_if_gate_removed` was exactly accurate when it was written. The instant the gate came out it was a hypothetical holding the live number, and nothing broke: every test passed. **The name became wrong BECAUSE the measurement worked.** `_scars_at_rest` was the same trap one level up: a function that returned only rows at the resting score, still called that after it returned everything.
+
+The family is everywhere and you can spot it by the prefix: `new_`, `legacy_`, `_v2`, `use_new_parser`, `temp_`, `migration_`. Each is named for a transition, and a transition is by definition the thing that ends.
+
+**The move costs nothing at the time: when naming for a migration or a counterfactual, pick the name it will have AFTER the change and use it now.** When a name is already wrong, RENAME rather than re-document. A comment saying the function no longer concerns rest is optional reading and the name is not. Leave a one-line history note at the new name (`WAS _scars_at_rest, WHICH KEPT ONLY ROWS AT SCORE 6`), because otherwise the next reader cannot tell a deliberate rename from something that was always called this, while the old name still lives in commits, tickets and other people's memory.
+
+This is NOT a stale docstring. A stale docstring goes wrong when somebody changes the code under it. This one is authored wrong at birth, by the person most certain they are being precise.
 
 ### Write your memory when the ticket lands, not at sprint close
 

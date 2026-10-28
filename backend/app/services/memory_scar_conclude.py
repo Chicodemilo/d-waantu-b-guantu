@@ -45,16 +45,27 @@ its own file means DWB-607's file still says exactly what DWB-607 built, and
 this one says exactly what DWB-609 added - the same reasoning that kept this
 whole lane's modules one-movement-per-file rather than one-grab-bag-file.
 
-"AT REST (SCORE 6)", NOT EVERY SCAR-FAMILY ROW, MATCHING THE SPEC'S OWN WORDS.
-Spec section 2: "Entries sitting at 6 get periodically re-examined against the
-current context." A context's liveness does not depend on how recently the
-scar fired - a context can conclude on day one as easily as after ninety
-sessions - but the spec scopes WHEN the re-examination runs to resting
-entries, not every entry on every pass. Scoping candidates to `score() == 6`
-(the resting value for FIRING_TIERS, memory_score._CURVE) matches that
-wording exactly rather than scanning everything on every consolidation pass.
-A scar still climbing toward 6 is presumably still being actively reinforced
-and is not what section 2 means by "sitting at 6".
+WITHDRAWN 2026-10-28 BY DWB-706, KEPT IN PLACE BECAUSE THE ARGUMENT STILL
+READS AS SOUND. This module used to open by defending a score==6 precondition:
+spec section 2 says "entries sitting at 6 get periodically re-examined against
+the current context", so candidates were scoped to the resting value rather
+than scanned every pass, on the reasoning that a scar still climbing toward 6
+is being actively reinforced.
+
+WHAT KILLED IT IS IN THE SAME PARAGRAPH, AND IT WAS THERE ALL ALONG: "a
+context's liveness does not depend on how recently the scar fired". That is
+true, and the gate contradicted it. `sessions_since_reinforced` counts from
+COALESCE(last_reinforced, created), so ANY recall resets the clock and a scar
+that keeps being useful never arrives at 6 at all - measured 2026-10-28, zero
+of 870 rows were at the resting score and the lane had never concluded
+anything in its existence. The gate measured DISUSE, not whether the work
+finished.
+
+There is no clock condition now. `_conclude_candidates` returns every
+scar-family row in scope and `scan_context` returning `finished` is the only
+thing that concludes one. `_RESTING_SCORE` survives at line 115 for
+`ConcludeDryRun.at_rest_now`, which gates nothing and is kept as a
+measurement.
 
 A MISSING OR BLANK context_key IS HANDLED BY scan_context ITSELF, NOT HERE.
 Per the DWB-604/611 sequencing ruling (Archie + Stan + Barry, 2026-09-30), a
@@ -319,7 +330,7 @@ class ConcludeOutcome:
 def evict_concluded_scars(
     db: Session, *, agent_id: int | None = None
 ) -> ConcludeOutcome:
-    """Move every resting scar whose context has concluded into the journal,
+    """Move every scar whose context has concluded into the journal,
     then delete the agent_memories row.
 
     DWB-707: returns a `ConcludeOutcome`, not a bare list. Callers that want
