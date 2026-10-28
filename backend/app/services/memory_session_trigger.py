@@ -11,7 +11,9 @@
 #          app/services/activity_log.log_activity, app/models/error_log
 # Data In: db Session, project_id, the id of the session that just opened
 # Data Out: RosterConsolidationResult, for tests and for the caller to read
-# Last Modified: 2026-10-08 (DWB-650)
+# Last Modified: 2026-10-28 (DWB-707: the memory_consolidation_pass payload
+#                carries concluded_nominated / concluded_unfinished)
+#                (DWB-650)
 
 """The session-open consolidation trigger (DWB-650).
 
@@ -195,6 +197,22 @@ def _record_pass(
         ),
         "concluded_scars": sum(
             len(o.result.concluded_scars) for o in result.outcomes if o.result
+        ),
+        # DWB-707. `concluded_scars: 0` alone cannot say WHY it is zero, and
+        # the two reasons call for opposite responses: nominated 0 means the
+        # resting-score gate let nothing through and the lane is idle;
+        # nominated N with 0 concluded means the lane ran and every context
+        # was still live. Fourteen consecutive passes logged the first while
+        # being indistinguishable from the second. Both counts ride the
+        # existing `memory_consolidation_pass` payload rather than a new
+        # surface, because that payload is already served by
+        # GET /api/projects/{id}/activity-feed, which is somewhere a human
+        # already looks.
+        "concluded_nominated": sum(
+            o.result.concluded_nominated for o in result.outcomes if o.result
+        ),
+        "concluded_unfinished": sum(
+            o.result.concluded_unfinished for o in result.outcomes if o.result
         ),
         "promoted_journal": sum(
             len(o.result.promoted_journal) for o in result.outcomes if o.result

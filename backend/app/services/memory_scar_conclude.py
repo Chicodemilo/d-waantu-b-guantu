@@ -12,8 +12,13 @@
 #          scored_memory() itself), app/services/memory_scan (scan_context,
 #          SCAR_FAMILY), app/services/journal
 # Data In: db Session, an optional agent_id scope
-# Data Out: list[JournalEntry] created by this eviction pass
-# Last Modified: 2026-09-30 (DWB-609)
+# Data Out: ConcludeOutcome - the JournalEntry list this pass created, plus
+#           the nominated / unfinished counts that tell an idle pass from a
+#           blocked one (DWB-707)
+# Last Modified: 2026-10-28 (DWB-707: the pass returns ConcludeOutcome rather
+#                than a bare list, so "nominated zero" and "nominated N, none
+#                finished" stop rendering identically)
+#                (DWB-609: created)
 
 """The fifth movement, finally with a consumer.
 
@@ -82,6 +87,8 @@ its own server_default (now()) because concluding IS when this entry
 genuinely arrives in the journal, only the memory's own age must survive.
 """
 
+from dataclasses import dataclass, field
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -136,11 +143,55 @@ def _scars_at_rest(db: Session, *, agent_id: int | None) -> list[AgentMemory]:
     return at_rest
 
 
+@dataclass
+class ConcludeOutcome:
+    """What one conclude pass DID and what it had to work with (DWB-707).
+
+    THE EMPTY LIST WAS LOAD-BEARING AND AMBIGUOUS. Before this, the pass
+    returned `list[JournalEntry]` and nothing else, so "no scar was nominated"
+    and "scars were nominated and none had finished contexts" both arrived as
+    `[]` and were logged identically as `concluded_scars: 0`. Fourteen
+    consecutive passes reported that, every one of them with zero candidates,
+    and the log could not have shown the difference if the second case had
+    occurred.
+
+    THAT DIFFERENCE IS ABOUT TO MATTER, WHICH IS WHY THIS EXISTS NOW. Measured
+    2026-10-28: the resting score 6 IS reachable (`memory_score.score` returns
+    6 at a gap of 31+ sessions) and the oldest scar in the store sits at a gap
+    of 21. So the lane is roughly ten sessions from nominating its first-ever
+    candidate, at which point it moves from the first case to the second - and
+    without these counts that transition is invisible. `scan_context` returns
+    `finished` for 0 of 868 rows today, so the second case will produce an
+    empty `created` for some time after.
+
+    `nominated` and `unfinished` are COUNTS, not lists. The rows themselves are
+    already reachable through the store; what no caller could reconstruct after
+    the fact is how many the pass considered, because nomination leaves no
+    trace when it does not act.
+    """
+
+    created: list[JournalEntry] = field(default_factory=list)
+    """Journal entries written by this pass. The pass's EFFECT."""
+
+    nominated: int = 0
+    """Scars that passed the score gate and were examined. Zero here means the
+    pass could not have acted whatever the contexts said."""
+
+    unfinished: int = 0
+    """Nominated scars whose context was not `finished`, so they were skipped.
+    `nominated - unfinished == len(created)` always holds."""
+
+
 def evict_concluded_scars(
     db: Session, *, agent_id: int | None = None
-) -> list[JournalEntry]:
+) -> ConcludeOutcome:
     """Move every resting scar whose context has concluded into the journal,
-    then delete the agent_memories row. Returns the journal entries created.
+    then delete the agent_memories row.
+
+    DWB-707: returns a `ConcludeOutcome`, not a bare list. Callers that want
+    the effect read `.created`; the two counts beside it are what let a reader
+    tell an idle pass from a blocked one. See the dataclass for why that
+    distinction stopped being hypothetical.
 
     `agent_id=None` scopes to every agent, matching
     `memory_evict.evict_working_memories` and
@@ -153,11 +204,16 @@ def evict_concluded_scars(
     """
     candidates = _scars_at_rest(db, agent_id=agent_id)
     if not candidates:
-        return []
+        # NOMINATED ZERO. Returned as a distinct fact rather than as an empty
+        # list, because the caller cannot otherwise tell this from a pass that
+        # examined candidates and found none finished.
+        return ConcludeOutcome()
 
     created: list[JournalEntry] = []
+    unfinished = 0
     for memory in candidates:
         if memory_scan.scan_context(db, memory) != memory_scan.ContextLiveness.finished:
+            unfinished += 1
             continue
         entry = journal_svc.create_entry(
             db,
@@ -173,4 +229,6 @@ def evict_concluded_scars(
         created.append(entry)
 
     db.flush()
-    return created
+    return ConcludeOutcome(
+        created=created, nominated=len(candidates), unfinished=unfinished
+    )

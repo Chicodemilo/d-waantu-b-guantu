@@ -100,7 +100,7 @@ class TestRestingAndConcludedIsEvicted:
         memory_id = memory.id
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=91)  # score 6, resting
 
-        created = svc.evict_concluded_scars(db_session, agent_id=agent_id)
+        created = svc.evict_concluded_scars(db_session, agent_id=agent_id).created
 
         assert len(created) == 1
         entry = created[0]
@@ -125,7 +125,7 @@ class TestRestingAndConcludedIsEvicted:
         )
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=91)
 
-        created = svc.evict_concluded_scars(db_session, agent_id=agent_id)
+        created = svc.evict_concluded_scars(db_session, agent_id=agent_id).created
         assert created[0].tags == svc.CONCLUDED_TAGS
 
 
@@ -142,7 +142,7 @@ class TestUntouchedCases:
         )
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=91)
 
-        assert svc.evict_concluded_scars(db_session, agent_id=agent_id) == []
+        assert svc.evict_concluded_scars(db_session, agent_id=agent_id).created == []
         db_session.expire_all()
         assert db_session.get(AgentMemory, memory.id) is not None
 
@@ -158,7 +158,7 @@ class TestUntouchedCases:
         )
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=91)
 
-        assert svc.evict_concluded_scars(db_session, agent_id=agent_id) == []
+        assert svc.evict_concluded_scars(db_session, agent_id=agent_id).created == []
         db_session.expire_all()
         assert db_session.get(AgentMemory, memory.id) is not None
 
@@ -170,7 +170,7 @@ class TestUntouchedCases:
         memory = _memory(db_session, agent_id=agent_id, created_session_id=origin.id)
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=91)
 
-        assert svc.evict_concluded_scars(db_session, agent_id=agent_id) == []
+        assert svc.evict_concluded_scars(db_session, agent_id=agent_id).created == []
         db_session.expire_all()
         assert db_session.get(AgentMemory, memory.id) is not None
 
@@ -189,7 +189,7 @@ class TestUntouchedCases:
         )
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=10)  # score 8
 
-        assert svc.evict_concluded_scars(db_session, agent_id=agent_id) == []
+        assert svc.evict_concluded_scars(db_session, agent_id=agent_id).created == []
         db_session.expire_all()
         assert db_session.get(AgentMemory, memory.id) is not None
 
@@ -200,14 +200,14 @@ class TestUntouchedCases:
         memory = _memory(db_session, agent_id=agent_id, tier=tier, created_session_id=origin.id)
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=91)
 
-        assert svc.evict_concluded_scars(db_session, agent_id=agent_id) == []
+        assert svc.evict_concluded_scars(db_session, agent_id=agent_id).created == []
         db_session.expire_all()
         assert db_session.get(AgentMemory, memory.id) is not None
 
     def test_no_session_origin_is_excluded(self, db_session, agent):
         agent_id = agent["id"]
         _memory(db_session, agent_id=agent_id)  # no session origin at all
-        assert svc.evict_concluded_scars(db_session, agent_id=agent_id) == []
+        assert svc.evict_concluded_scars(db_session, agent_id=agent_id).created == []
 
 
 class TestOrderingIsObserved:
@@ -253,7 +253,7 @@ class TestScoping:
         )
         _elapse(db_session, project_id=agent["project_id"], agent_id=other["id"], n=91)
 
-        assert svc.evict_concluded_scars(db_session, agent_id=agent["id"]) == []
+        assert svc.evict_concluded_scars(db_session, agent_id=agent["id"]).created == []
 
     def test_no_agent_id_scopes_to_everyone(self, db_session, agent, make_agent, make_ticket):
         other = make_agent(project_id=agent["project_id"])
@@ -265,4 +265,98 @@ class TestScoping:
         )
         _elapse(db_session, project_id=agent["project_id"], agent_id=other["id"], n=91)
 
-        assert len(svc.evict_concluded_scars(db_session, agent_id=None)) == 1
+        assert len(svc.evict_concluded_scars(db_session, agent_id=None).created) == 1
+
+
+class TestNominationIsReported:
+    """DWB-707: an idle pass and a blocked pass must not render identically.
+
+    THE TWO STATES, and why the pair is the test rather than either half.
+    `nominated == 0` means the resting-score gate let nothing through, so the
+    pass could not have acted whatever the contexts said. `nominated > 0` with
+    an empty `created` means it DID run and every context was still live.
+    Before DWB-707 both returned `[]` and both logged `concluded_scars: 0`.
+
+    Asserting only the second would pass against a function that reported
+    every pass as blocked; asserting only the first would pass against one
+    that reported every pass as idle. The discrimination is the two together
+    on the same fixture shape, which is also why they are not parametrised
+    into one case.
+    """
+
+    def test_nothing_at_rest_reports_nominated_zero(
+        self, db_session, agent, make_ticket
+    ):
+        """A scar too young to rest: the gate stops it before any scan."""
+        agent_id, project_id = agent["id"], agent["project_id"]
+        ticket = make_ticket(
+            project_id=project_id, ticket_key="DWB-1808", status="done"
+        )
+        origin = _closed_session(db_session, project_id, hours_ago=1000)
+        _memory(
+            db_session, agent_id=agent_id, created_session_id=origin.id,
+            context_key=f"{ticket['ticket_key']} / notes",
+        )
+        # No _elapse: the row is at score 10, nowhere near resting.
+        out = svc.evict_concluded_scars(db_session, agent_id=agent_id)
+
+        assert out.nominated == 0, "nothing was at rest, so nothing could be examined"
+        assert out.unfinished == 0
+        assert out.created == []
+
+    def test_nominated_but_unfinished_is_distinguishable_from_idle(
+        self, db_session, agent, make_ticket
+    ):
+        """A resting scar whose ticket is still OPEN.
+
+        This is the state the lane enters the moment any scar ages past the
+        resting threshold, and the one that was previously indistinguishable
+        from the idle case.
+        """
+        agent_id, project_id = agent["id"], agent["project_id"]
+        ticket = make_ticket(
+            project_id=project_id, ticket_key="DWB-1809", status="in_progress"
+        )
+        origin = _closed_session(db_session, project_id, hours_ago=1000)
+        _memory(
+            db_session, agent_id=agent_id, created_session_id=origin.id,
+            context_key=f"{ticket['ticket_key']} / notes",
+        )
+        _elapse(db_session, project_id=project_id, agent_id=agent_id, n=91)
+
+        out = svc.evict_concluded_scars(db_session, agent_id=agent_id)
+
+        assert out.created == [], "the ticket is open, so nothing concludes"
+        assert out.nominated == 1, "but the pass DID examine it"
+        assert out.unfinished == 1
+        # The whole point: the effect is identical to the idle case and the
+        # report is not.
+        idle = svc.ConcludeOutcome()
+        assert out.created == idle.created
+        assert out.nominated != idle.nominated
+
+    def test_the_counts_balance_when_the_pass_acts(
+        self, db_session, agent, make_ticket
+    ):
+        """nominated - unfinished == len(created), asserted on a mixed pass."""
+        agent_id, project_id = agent["id"], agent["project_id"]
+        done = make_ticket(
+            project_id=project_id, ticket_key="DWB-1810", status="done"
+        )
+        open_ = make_ticket(
+            project_id=project_id, ticket_key="DWB-1811", status="in_progress"
+        )
+        origin = _closed_session(db_session, project_id, hours_ago=1000)
+        for key in (done["ticket_key"], open_["ticket_key"]):
+            _memory(
+                db_session, agent_id=agent_id, created_session_id=origin.id,
+                context_key=f"{key} / notes",
+            )
+        _elapse(db_session, project_id=project_id, agent_id=agent_id, n=91)
+
+        out = svc.evict_concluded_scars(db_session, agent_id=agent_id)
+
+        assert out.nominated == 2
+        assert out.unfinished == 1
+        assert len(out.created) == 1
+        assert out.nominated - out.unfinished == len(out.created)

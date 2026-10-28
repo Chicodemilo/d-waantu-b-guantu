@@ -16,7 +16,10 @@
 # Data In: db Session, agent_id
 # Data Out: ConsolidationResult - what each movement did, for the caller to
 #           log and for tests to assert against
-# Last Modified: 2026-10-08 (DWB-649: tier_for_raw gained a second caller -
+# Last Modified: 2026-10-28 (DWB-707: ConsolidationResult carries
+#                concluded_nominated / concluded_unfinished; moved_anything
+#                deliberately does not read them)
+#                (DWB-649: tier_for_raw gained a second caller -
 #                raw_memory.append_raw_memory runs it at INSERT, so
 #                tier_raw_memories is now a backlog drain, not the main path)
 # DWB-650: consolidate_project_roster fans consolidate_agent out over every
@@ -110,6 +113,17 @@ class ConsolidationResult:
     concluded_scars: list[JournalEntry] = field(default_factory=list)
     """Journal entries created by evicting a scar whose context concluded."""
 
+    concluded_nominated: int = 0
+    """DWB-707. Scars the conclude pass examined, i.e. those that cleared the
+    resting-score gate. Zero means the pass COULD NOT have acted; a positive
+    number with an empty `concluded_scars` means it looked and found nothing
+    finished. Those two were indistinguishable before this field existed."""
+
+    concluded_unfinished: int = 0
+    """DWB-707. Nominated scars skipped because their context was not
+    finished. `concluded_nominated - concluded_unfinished ==
+    len(concluded_scars)` always holds."""
+
     evicted_working: list[JournalEntry] = field(default_factory=list)
     """Journal entries created by evicting a WORKING memory at the floor."""
 
@@ -129,7 +143,15 @@ class ConsolidationResult:
     def moved_anything(self) -> bool:
         """True if this pass had any effect at all. A quiet pass (nothing met
         any trigger) is the overwhelmingly common case and is not an error -
-        this is for a caller that wants to skip logging a no-op pass."""
+        this is for a caller that wants to skip logging a no-op pass.
+
+        DWB-707: `concluded_nominated` and `concluded_unfinished` are
+        DELIBERATELY NOT READ HERE. They describe what the pass CONSIDERED,
+        not what it did, and a pass that nominated twenty scars and concluded
+        none moved nothing. Folding them in would flip this property true on
+        exactly the quiet passes it exists to identify, and every caller that
+        skips logging a no-op would start logging all of them.
+        """
         return bool(
             self.promoted_scars
             or self.concluded_scars
@@ -328,9 +350,17 @@ def consolidate_agent(db: Session, *, agent_id: int) -> ConsolidationResult:
             result.promoted_scars.append((memory.id, reason.value))
 
     # 2. Scar context concluded -> journal, on whatever remains after step 1.
-    result.concluded_scars = memory_scar_conclude.evict_concluded_scars(
+    # DWB-707: `.created` is assigned to `concluded_scars` rather than the
+    # outcome object itself, so the field keeps its list type and
+    # `moved_anything`'s truthiness test keeps meaning what it meant. A
+    # dataclass is always truthy, so assigning the outcome here would have
+    # reported every pass as having moved something.
+    conclude_outcome = memory_scar_conclude.evict_concluded_scars(
         db, agent_id=agent_id
     )
+    result.concluded_scars = conclude_outcome.created
+    result.concluded_nominated = conclude_outcome.nominated
+    result.concluded_unfinished = conclude_outcome.unfinished
 
     # 3. WORKING floor -> journal. Independent tier.
     result.evicted_working = memory_evict.evict_working_memories(
