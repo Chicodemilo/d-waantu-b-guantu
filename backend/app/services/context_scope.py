@@ -12,31 +12,84 @@
 # Data In: the author's context_key and broad-scope declaration, plus the
 #          agent whose project the key is resolved against
 # Data Out: nothing on success; ContextScopeUnresolvable on refusal
-# Last Modified: 2026-10-28 (DWB-704)
+# Last Modified: 2026-10-28 (DWB-704 correction: the measured block went stale
+#                the same day DWB-710 landed, so the figures are re-measured and
+#                now state what would invalidate them rather than when they were
+#                taken; the volatile count is out of the refusal text)
 
 """The write-time half of the context-liveness contract (DWB-704).
 
-THE DEFECT THIS CLOSES, WITH ITS NUMBER. The context-liveness design is built
-and correct and has never concluded a single scar in its existence. Measured
-store-wide on 2026-10-28: 868 scar-family rows, 424 carrying a `context_key`,
-132 distinct values, and ZERO containing anything ticket-shaped. Running
-`scan_context` over all of them returns 421 `unresolvable`, 447 `still_active`
-and 0 `finished`. The journal has never received a concluded scar.
+THE DEFECT THIS CLOSES. The context-liveness design is built and correct and
+has never concluded a single scar in its existence.
+
+WHAT WOULD INVALIDATE THE FIGURES BELOW, stated instead of a date, because the
+first version of this paragraph carried a date and went stale four hours later
+ON THE SAME DAY. They are counts over `agent_memories` rows in SCAR_FAMILY, and
+they move when: a scar is written or retiered; anything rewrites `context_key`
+in bulk; or a ticket or epic named by a key changes status. The second has
+already happened once - DWB-710 moved 380 adopted heading paths out of
+`context_key` into `adopted_from_heading` - and it changed every number here.
+Re-derive by running `scan_context` over SCAR_FAMILY; do not quote these.
+
+    scar-family rows                   870
+    with a context_key                  45   (424 before DWB-710)
+    distinct values                     41
+    containing a ticket key              1
+    scan_context verdicts              829 still_active, 41 unresolvable,
+                                       0 declared_broad, 0 FINISHED
+    carrying adopted_from_heading      380
+
+TWO OF THOSE LINES ARE STANDING CLAIMS AND THE REST ARE A SNAPSHOT.
+
+THE FIRST: zero scars have concluded, before DWB-710 or after. That is the
+reason this module exists.
+
+THE SECOND, AND IT IS THE SHAPE THIS MODULE WAS WRITTEN TO REFUSE, SITTING IN
+THE MODULE'S OWN VERDICT. Of the 829 `still_active` verdicts, 825 are rows with
+NO `context_key` at all; only 4 are keys that resolved to live work. A row with
+no scope recorded is NOT a row whose scope is alive. The verdict is the SAFE
+answer - it declines to delete, which is right - but the NAME states something
+the data does not support, and it is the same move this file condemns two
+paragraphs down: reading "I could not resolve this" as a positive claim about
+the scope. That reading, in a different branch, promoted 381 of 455 rows into
+the tier only a human may grant. NOTHING MAY EVER READ `still_active` AS
+EVIDENCE THAT A SCOPE EXISTS.
 
 THE MECHANISM IS NOT BROKEN, IT IS STARVED, and that was established by driving
 a real ticket key through the live write route: the row reported `still_active`
 while its ticket was open and `finished` the moment the ticket closed. Every
 part of the lane works except that nothing ever feeds it a scope it can resolve.
 
-WHERE THE 424 CAME FROM, because it decides what this gate can and cannot fix.
-Two write paths set `context_key` and they are disjoint. `memory_decide.decide`
-sets it to `" / ".join(heading_path)` while adopting a markdown memory.md, and
-that path produced every one of the 132 heading-shaped values - `'ABOVE THE
-FOLD'`, `'Agreement is not verification'`. `raw_memory.append_raw_memory` stores
-whatever the author supplied, and on 2026-10-28 that was None on all 23 writes
-by 10 different agents. So THIS GATE REFUSES NOTHING TODAY. It is a tripwire,
-armed for the moment agents start supplying the field, and it is deliberately
-not the repair for the rows that already exist.
+WHERE THE HEADING PATHS CAME FROM, because it decides what this gate can and
+cannot fix. Two write paths set `context_key` and they are disjoint.
+`memory_decide.decide` set it to `" / ".join(heading_path)` while adopting a
+markdown memory.md, and that path produced every one of the heading-shaped
+values - `'ABOVE THE FOLD'`, `'Agreement is not verification'`. DWB-710 has
+since moved all 380 of those out of the scope column entirely. This gate never
+touched them and was never the repair for them; it governs what arrives from
+now on.
+
+WHAT THIS GATE REFUSES IN PRACTICE, AND THE SENTENCE THAT USED TO BE HERE. The
+first version read "THIS GATE REFUSES NOTHING TODAY. It is a tripwire, armed for
+the moment agents start supplying the field." True when written - 0 of 23 writes
+that day carried a `context_key` - and false within hours, which is the point:
+it was phrased as a standing property when it was a reading off one afternoon.
+
+The field now arrives. Row 1756 (agent 171, `'DWB-704'`) was written through
+this gate and accepted, and is the live verification of the resolvable path.
+Row 1755 (agent 203, `'V707-001 / notes'`) carries a well-shaped key but is NOT
+attested as having passed here: its author has no `project_id`, so this gate
+would refuse it with `context_unscoped_agent`, and it most likely predates the
+gate rather than clearing it.
+
+AN OPEN QUESTION IN THE CONCLUDE DESIGN, pointing at no ticket because there is
+no ticket. A `working` row carrying a validated `context_key` is inert to
+`scan_context`, which raises `not_a_scar` for it - so it can never conclude. If
+it is ever retiered to `scar`, it concludes immediately against work that may
+have closed long before. Row 1756 is already in exactly that state: its ticket
+is closed and the row is `working`. This gate validates keys on every tier
+precisely so such a row is not ALSO carrying a key that was never resolvable,
+but validation at insert does not answer what should happen on retier.
 
 THE SERVER NEVER INFERS THE SCOPE, and that is a ruling rather than a
 convenience. The original proposal was to fill the key from the session's
@@ -116,9 +169,15 @@ _CONTRAST = (
     "like 'DWB-704', or an epic name that appears in the text like 'Memory "
     "retrieval'. UNRESOLVABLE, because nothing closes them: 'ABOVE THE FOLD', "
     "'Agreement is not verification', 'API facts that bite' - these are section "
-    "headings, and 424 live rows carry exactly this shape, which is why no scar "
-    "has ever concluded."
+    "headings rather than scopes, which is the shape most of this store's keys "
+    "were written in and the reason no scar has ever concluded."
 )
+# NO COUNT IN THAT SENTENCE, DELIBERATELY. It used to read "424 live rows carry
+# exactly this shape", which was true when written and false eight hours later
+# when DWB-710 moved 380 of them into another column - in text an agent READS,
+# not in a comment. A refusal message is the worst place to put a number that
+# moves, because nobody re-reads it the way they re-read a docstring. The
+# standing claim survives; the volatile figure is gone.
 
 _SCOPE_FREE_NOTE = (
     "If this lesson is not bound to any one piece of work - a craft lesson that "
