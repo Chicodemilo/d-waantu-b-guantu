@@ -53,6 +53,14 @@ from app.routers import (
     tracking,
 )
 from app.services import idle_sweeper, marker_sweep_task, server_log_handler
+
+# DWB-692: top-level import so memory_pointers registers its nodeify 'memory'
+# provider at startup, the same way doc_pointers registers via playbook_deploy
+# and code_pointers via the hooks router. Imported HERE rather than piggybacking
+# on another module because this provider has no natural caller to ride in on,
+# and an override that depends on an unrelated import happening to run is one
+# refactor away from silently reverting to the file-only default.
+from app.services import memory_pointers  # noqa: F401
 from app.services.schema_guard import verify_schema
 from app.services.failed_hook import log_failed_hook
 
