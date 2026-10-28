@@ -266,6 +266,13 @@ insight; it was one more column in the same SELECT. Same idea as printing the
 size of the input beside a hash, already on DWB-690 and DWB-698 - third costume
 in one evening.
 
+**A MECHANISM FINDING AND ITS URGENCY CAN COME APART, AND THEY USUALLY DO NOT.**
+That is what the extra column did to DWB-714. Nothing automates the index and on
+three live projects nobody ever built one - that survives untouched. The alarm
+it arrived with, ten neglected projects starving retrieval, did not: the index
+exists wherever there was a corpus to build it from. Read the ticket for the
+mechanism, not for the tone it was filed in.
+
 **Put the seam in the artifact, not in the author's head.** The reason the
 three-tier structure on DWB-713 works is not that it is more careful: it is that
 ESTABLISHED / OBSERVED / INFERRED-NOT-MEASURED forces the join between a
