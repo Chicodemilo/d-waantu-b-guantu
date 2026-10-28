@@ -27,11 +27,15 @@ PM has **NO authority** over Jira sprints (close/create/edit/delete). Pull/read 
 ## Sprint Gates
 
 Authoritative list: `GET /api/projects/1/gate-status`. Currently enabled on DWB:
-- `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md`, `force_coding_standards_md`, `force_consolidation` (DWB-322, DWB-004).
-- `force_headers` reserved/not yet enforced.
+- `force_test_run`, `force_test_coverage`, `force_initial_md`, `force_architecture_md`, `force_handoff_md` (DWB-322, DWB-004).
+- OFF on DWB: `force_coding_standards_md`, `force_consolidation`, `force_standards_audit`, `force_headers`. Verified against the project row 2026-10-28; this list drifts, so trust gate-status over it.
 - `force_team_md` removed in DWB-321 (DB-authoritative roster).
 
-Plus: unreviewed failure records (type=TBD) block close.
+Plus: unreviewed failure records block close, and there are TWO kinds (`sprint.py`,
+the unreviewed-failure-records gate). `failure_type == "TBD"` blocks on its own.
+`failure_type == "rework"` blocks while `reviewed` is false — that is the
+auto-detected stub, and it is the one that catches people, because a three-week-old
+rework nobody looked at still blocks today's close.
 
 ## Alert Patterns
 
@@ -48,7 +52,12 @@ When a blocker finishes, immediately move the dependent ticket to `in_progress` 
 ### Sprint close checklist
 1. All tickets done (or moved to next sprint)
 2. `GET /api/projects/1/gate-status` — all_passing=true
-3. `GET /api/failure-records?sprint_id=X&resolved=false` — no TBD stubs
+3. `GET /api/failure-records?sprint_id=X` — then filter CLIENT-SIDE for
+   `failure_type == "TBD"`, or `failure_type == "rework" and reviewed is false`.
+   `resolved` and `reviewed` are different columns and the gate reads `reviewed`;
+   the list endpoint has no `reviewed` filter (DWB-510 added the column for the
+   gate and never added the query param), so `resolved=false` answers a question
+   nobody is asking and quietly returns the wrong set.
 4. `PATCH /api/sprints/X {"status": "completed"}`
 5. Post sprint evaluation to activity log
 6. Report to TL with scorecard
