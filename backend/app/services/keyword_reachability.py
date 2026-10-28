@@ -11,7 +11,9 @@
 #          _tokenize, _keyword_tokens, _MATCH_TOKENS_REQUIRED) - READ ONLY
 # Data In: the author's keywords and the one-line situation they wrote
 # Data Out: nothing on success; KeywordUnreachable on refusal
-# Last Modified: 2026-10-09 (DWB-667)
+# Last Modified: 2026-10-28 (DWB-689: the `keyword_unreachable` refusal offers a
+#                re-gated KEYWORD-side repair when one exists, and never a
+#                situation-side one)
 
 """The write-time half of the retrieval contract (DWB-667).
 
@@ -226,8 +228,87 @@ def require_situation(situation: str | None) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# DWB-689: THE REFUSAL OFFERS THE KEYWORD-SIDE REPAIR, AND NEVER THE SITUATION.
+# ---------------------------------------------------------------------------
+#
+# The refusal already computes the missing tokens, so it is one step from naming
+# an amendment that would pass. There are TWO such amendments and THIS GATE
+# CANNOT TELL THEM APART, which is the entire reason only one of them is offered.
+#
+# MEASURED, on `['ORM model edit', 'alembic downgrade']` against the author's own
+# situation "I edited an ORM model and ran alembic autogenerate":
+#
+#   splice the missing tokens into the SITUATION -> gate PASS, and the stored row
+#     fires on 0 of 3 later sentences written without looking at it.
+#   drop them from the KEYWORD                   -> gate PASS, and the stored row
+#     fires on 3 of 3 of the same sentences.
+#
+# Same author, same minute, same verdict from this gate, opposite retrieval. An
+# amended situation line IS the inflection failure named as THE LIMIT in the
+# module docstring above - `edit` spliced into a sentence whose author wrote
+# `edited` - so offering it would industrialise the one class this gate is known
+# to be blind to, one write at a time, while every row still passed. The
+# situation amendment is therefore never computed and never suggested, however
+# cheap it would be from here.
+#
+# THE SUGGESTION IS RE-GATED BEFORE IT IS OFFERED, and that is what makes
+# offering it safe. The mechanical repair is not always legal: dropping the
+# missing words can take the set below `_MATCH_TOKENS_REQUIRED` (`sprint close` +
+# `gate status report` reduces to `['sprint']`) or empty it entirely (`commit` +
+# `staged diff` against a situation containing neither). An unchecked suggestion
+# in those cases costs a SECOND refusal, which is worse than the single round
+# trip this exists to save. Running the repair back through both predicates means
+# an illegal one is never emitted and the message is simply unchanged.
+#
+# IT IS ONE OPTION, NOT THE FIX, and the wording is load-bearing. Widening the
+# situation is still the better repair whenever the words the author left out are
+# words they really would have used. This function cannot know that and the
+# author can, so the existing message's two routes stay balanced and the
+# suggestion is explicitly subordinate to them.
+#
+# WHOLE WORDS ONLY, AND ONLY DELETION. The split is on whitespace rather than on
+# the tokenizer's boundary, so a hyphenated term is dropped entire rather than
+# reduced to a fragment - `self-exempt` never becomes `self`. The repair may only
+# DELETE words the author wrote; it never invents one and never rewrites one.
+
+
+def _keyword_side_repair(
+    terms: list[str], situation: str, unreachable: list[str]
+) -> list[str] | None:
+    """The author's own keywords minus the words this situation does not supply.
+
+    Returns None when there is nothing honest to offer: the repair changes
+    nothing, empties the set, or does not itself pass the gate.
+    """
+    situation_tokens = _tokenize(situation or "")
+    repaired: list[str] = []
+    for keyword in terms:
+        if keyword not in unreachable:
+            repaired.append(keyword)
+            continue
+        kept = " ".join(
+            word
+            for word in keyword.split()
+            if not (_keyword_tokens(word) - situation_tokens)
+        )
+        # A remnant made only of stopwords carries no token and would be refused
+        # as `keyword_unmatchable`; drop the keyword rather than propose it.
+        if kept and _keyword_tokens(kept):
+            repaired.append(kept)
+
+    if not repaired or repaired == terms:
+        return None
+    try:
+        require_subject_bearing_keywords(repaired)
+        require_reachable_keywords(repaired, situation, _suggest=False)
+    except KeywordUnreachable:
+        return None
+    return repaired
+
+
 def require_reachable_keywords(
-    keywords: list[str] | None, situation: str | None
+    keywords: list[str] | None, situation: str | None, *, _suggest: bool = True
 ) -> None:
     """Refuse a keyword set that this situation - or any situation - cannot reach.
 
@@ -259,6 +340,11 @@ def require_reachable_keywords(
     situation sentence that contains all of them is the normal shape when they
     are situational words, and is impossible when one of them is a filing label.
     That difference is the whole gate.
+
+    `_suggest` is private and exists for exactly one reason: this function is
+    called a second time, on its OWN proposed repair, to establish that the
+    repair is legal before it is offered (see `_keyword_side_repair` above). That
+    inner call must not compute a suggestion for a suggestion.
     """
     terms = list(keywords or [])
 
@@ -304,6 +390,22 @@ def require_reachable_keywords(
             f"{k!r} needs {missing[k]} which your situation does not contain"
             for k in unreachable
         )
+        repair = (
+            _keyword_side_repair(terms, situation or "", unreachable)
+            if _suggest
+            else None
+        )
+        suggestion = ""
+        if repair is not None:
+            suggestion = (
+                f" ONE SET THAT WOULD PASS, offered as an option rather than as "
+                f"the answer: {repair}. That is your own keywords with the words "
+                "your situation does not supply removed - nothing invented and "
+                "nothing rewritten - so it claims less than what you wrote. "
+                "Widening the situation is the better repair instead whenever "
+                "the words you left out are words you really would have used: "
+                "this suggestion cannot know that and you can."
+            )
         raise KeywordUnreachable(
             "keyword_unreachable",
             f"your own situation does not recall {len(unreachable)} of your "
@@ -314,7 +416,7 @@ def require_reachable_keywords(
             "sentence anyone writes later will either, and the lesson will be "
             "stored correctly and never served. Either rewrite the keyword in "
             "the words you actually used, or widen the situation if it was too "
-            f"narrow. {_FORM_NOTE} {_CONTRAST}",
+            f"narrow.{suggestion} {_FORM_NOTE} {_CONTRAST}",
         )
 
 
@@ -466,9 +568,20 @@ def require_reachable_keywords(
 # what the fix LOOKS like, which is exactly why reading it as evidence is
 # persuasive and wrong.
 #
-# Evidence it is live rather than pending a deploy: uvicorn runs --reload, and
-# CORE #390 carries fired_count 1 against session 3360 - a CORE row recalled in
-# production, the only CORE row in the store with a fire.
+# Evidence it is live rather than pending a deploy: CORE #390 carries fired_count
+# 1 against session 3360 - a CORE row recalled in production, the only CORE row in
+# the store with a fire. That is an ARTIFACT. The recall happened, so the code
+# that served it was live, and no claim about a deploy mechanism is needed.
+#
+# THIS PARAGRAPH USED TO CITE "uvicorn runs --reload" AS WELL. THAT LEG IS
+# WITHDRAWN (2026-10-28): the reload supervisor had been dead since 16 Oct, so
+# :8000 was an orphaned worker picking up no edit at all. The conclusion is
+# unchanged, because it never rested on that leg. Recorded rather than quietly
+# deleted, for what it says about this paragraph: it exists to record a PREVIOUS
+# false claim and was itself resting on an unverified mechanism while doing so. A
+# comment arguing why it should be trusted should mark which of its legs is
+# ARTIFACT and which is INFERENCE, because the inferred leg is the one that
+# expires without telling anybody.
 #
 # HOW THE FALSE LINE GOT HERE, because it is the same defect twice in one
 # afternoon and the second time was mine about my own module. I read
