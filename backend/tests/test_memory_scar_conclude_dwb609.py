@@ -12,6 +12,8 @@
 #          hook_session rows driving the decay curve
 # Data Out: Assertions on the created journal entry, on deletion, on order
 # Last Modified: 2026-09-30 (DWB-609)
+#                (DWB-706: two cases inverted - the resting-score gate is
+#                gone, so a non-resting finished scar is now concluded)
 
 """DWB-609's absorbed consumer, acceptance mirrored from DWB-607's own
 (`test_memory_evict_dwb607.py`) since the shape is identical - journal
@@ -174,12 +176,23 @@ class TestUntouchedCases:
         db_session.expire_all()
         assert db_session.get(AgentMemory, memory.id) is not None
 
-    def test_not_yet_resting_is_untouched_even_with_a_done_ticket(
+    def test_not_yet_resting_IS_concluded_now_that_the_clock_is_gone(
         self, db_session, agent, make_ticket
     ):
-        """Spec section 2: 'entries sitting at 6 get periodically
-        re-examined.' A scar still climbing toward 6 (gap=10 -> score 8) is
-        not a candidate yet, regardless of what its context resolves to."""
+        """INVERTED BY DWB-706, AND KEPT RATHER THAN DELETED.
+
+        It used to assert the opposite, citing spec section 2 ("entries
+        sitting at 6 get periodically re-examined"): a scar still climbing
+        toward 6 was not a candidate regardless of its context. That was the
+        resting-score gate, and it has been removed - a context question
+        should not wait for a clock, and the clock it waited on measured
+        DISUSE rather than elapsed work.
+
+        The row below is at score 8, nowhere near resting, and its ticket is
+        done. It is now concluded, which is the entire behaviour change in one
+        case. Deleting this test would have removed the only place in this
+        file where the old gate is still visible.
+        """
         agent_id, project_id = agent["id"], agent["project_id"]
         ticket = make_ticket(project_id=project_id, ticket_key="DWB-1804", status="done")
         origin = _closed_session(db_session, project_id, hours_ago=1000)
@@ -189,9 +202,12 @@ class TestUntouchedCases:
         )
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=10)  # score 8
 
-        assert svc.evict_concluded_scars(db_session, agent_id=agent_id).created == []
+        created = svc.evict_concluded_scars(db_session, agent_id=agent_id).created
+        assert len(created) == 1, "a finished context is no longer gated on decay"
         db_session.expire_all()
-        assert db_session.get(AgentMemory, memory.id) is not None
+        assert db_session.get(AgentMemory, memory.id) is None, (
+            "conclusion journals AND deletes; a surviving row means only half ran"
+        )
 
     @pytest.mark.parametrize("tier", [MemoryTier.core, MemoryTier.working, MemoryTier.raw])
     def test_non_scar_tiers_are_never_touched(self, db_session, agent, tier):
@@ -272,10 +288,16 @@ class TestNominationIsReported:
     """DWB-707: an idle pass and a blocked pass must not render identically.
 
     THE TWO STATES, and why the pair is the test rather than either half.
-    `nominated == 0` means the resting-score gate let nothing through, so the
-    pass could not have acted whatever the contexts said. `nominated > 0` with
-    an empty `created` means it DID run and every context was still live.
-    Before DWB-707 both returned `[]` and both logged `concluded_scars: 0`.
+    `nominated == 0` means the pass could not have acted whatever the contexts
+    said. `nominated > 0` with an empty `created` means it DID run and every
+    context was still live. Before DWB-707 both returned `[]` and both logged
+    `concluded_scars: 0`.
+
+    DWB-706 CHANGED WHAT PRODUCES THE FIRST STATE, not the need to tell them
+    apart. While the resting-score gate existed, "idle" meant nothing had
+    decayed to 6. With the gate gone, every scar in scope is nominated, so
+    idle now means there is nothing in scope at all. The discrimination this
+    class exists for is unchanged and is still asserted on both sides.
 
     Asserting only the second would pass against a function that reported
     every pass as blocked; asserting only the first would pass against one
@@ -284,23 +306,20 @@ class TestNominationIsReported:
     into one case.
     """
 
-    def test_nothing_at_rest_reports_nominated_zero(
-        self, db_session, agent, make_ticket
+    def test_nothing_in_scope_reports_nominated_zero(
+        self, db_session, agent
     ):
-        """A scar too young to rest: the gate stops it before any scan."""
-        agent_id, project_id = agent["id"], agent["project_id"]
-        ticket = make_ticket(
-            project_id=project_id, ticket_key="DWB-1808", status="done"
-        )
-        origin = _closed_session(db_session, project_id, hours_ago=1000)
-        _memory(
-            db_session, agent_id=agent_id, created_session_id=origin.id,
-            context_key=f"{ticket['ticket_key']} / notes",
-        )
-        # No _elapse: the row is at score 10, nowhere near resting.
+        """The IDLE state, re-expressed for DWB-706.
+
+        It used to be produced by a scar too young to rest, because the gate
+        stopped it before any scan. With the gate gone that same row IS
+        nominated, so the only remaining way to nominate nothing is to have
+        no scar-family rows in scope - which is what this now sets up.
+        """
+        agent_id = agent["id"]
         out = svc.evict_concluded_scars(db_session, agent_id=agent_id)
 
-        assert out.nominated == 0, "nothing was at rest, so nothing could be examined"
+        assert out.nominated == 0, "no scars in scope, so nothing could be examined"
         assert out.unfinished == 0
         assert out.created == []
 

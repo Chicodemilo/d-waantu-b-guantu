@@ -19,8 +19,9 @@
 #                than a bare list, so "nominated zero" and "nominated N, none
 #                finished" stop rendering identically)
 #                (DWB-609: created)
-#                (DWB-706: conclude_dry_run sizes the lane read-only, taken
-#                with the resting-score gate still in place)
+#                (DWB-706: conclude_dry_run sizes the lane read-only; step 2
+#                removed the resting-score gate - _scars_at_rest is now
+#                _conclude_candidates and nominates every scar in scope)
 
 """The fifth movement, finally with a consumer.
 
@@ -114,35 +115,50 @@ CONCLUDED_TAGS = ["consolidation", "context-concluded"]
 _RESTING_SCORE = 6
 
 
-def _scars_at_rest(db: Session, *, agent_id: int | None) -> list[AgentMemory]:
-    """Every scar-family row whose derived score is at the resting value.
+def _conclude_candidates(db: Session, *, agent_id: int | None) -> list[AgentMemory]:
+    """Every scar-family row in scope. No clock condition of any kind.
 
-    Mirrors memory_evict._working_memories_at_floor's shape exactly, for the
-    sibling movement: same unscored-row exclusion (no session origin), same
-    direct calls to the pure score functions rather than `scored_memory()` -
-    see the module docstring on why going through that function is not an
-    option here regardless of how its own firing question resolves.
+    WAS `_scars_at_rest`, WHICH KEPT ONLY ROWS AT SCORE 6 (DWB-706). Renamed
+    rather than left alone, because a function still called "at rest" that
+    returns everything is a name a reader trusts and cannot see is wrong.
+
+    WHY THE SCORE GATE WENT. A context question should not wait for a clock. A
+    scar whose ticket closed yesterday is concluded whether or not enough
+    sessions have passed to decay it. Measured before removal: 0 of 870
+    scar-family rows were at the resting score, the largest gap in the store
+    was 23 and score 6 first occurs at gap 31, so the context check had never
+    run on anything - and `sessions_since_reinforced` counts from
+    COALESCE(last_reinforced, created), so ANY recall resets the gap to zero.
+    A row that fires on its way up never arrives at 6 at all. The gate was
+    therefore not a delay, it was a condition on DISUSE, and disuse is not
+    what "this work finished" means.
+
+    WHY THE UNSCORED EXCLUSION WENT WITH IT, ruled by Archie_DWB. `gap is
+    None` is a CLOCK FACT - it says the row has no session origin to count
+    from. Keeping it inside a decision the clock was just removed from would
+    smuggle the decay dependency back in through a side door, which is the
+    same shape as the thing being removed wearing a different name. A row with
+    no session origin can still have a context, and `scan_context` can still
+    answer it; nothing about a missing clock origin makes "this work finished"
+    less true. Measured at the time of the ruling: 4 rows sat in that
+    difference.
+
+    WHAT STILL STOPS A ROW BEING CONCLUDED is `scan_context` returning
+    `finished`, and nothing else. The protection against concluding a lesson
+    too early lives at the WRITE: DWB-704 refuses a key naming an
+    already-closed ticket, and `context_free` lets an author declare that no
+    single piece of work owns the lesson. A second condition here would
+    rebuild what this removed.
     """
     conditions = [AgentMemory.tier.in_(memory_scan.SCAR_FAMILY)]
     if agent_id is not None:
         conditions.append(AgentMemory.agent_id == agent_id)
 
-    memories = list(
+    return list(
         db.execute(select(AgentMemory).where(*conditions).order_by(AgentMemory.id.asc()))
         .scalars()
         .all()
     )
-
-    at_rest = []
-    for memory in memories:
-        gap = memory_score.sessions_since_reinforced(db, memory)
-        if gap is None:
-            # Same exclusion scored_memory() applies: a row with no session
-            # origin is reported unscored, never a candidate for anything.
-            continue
-        if memory_score.score(MemoryTier.scar, gap) == _RESTING_SCORE:
-            at_rest.append(memory)
-    return at_rest
 
 
 @dataclass
@@ -151,48 +167,51 @@ class ConcludeDryRun:
 
     DWB-706 step 1. Read-only: nothing here moves, journals or deletes a row.
 
-    IT IS TAKEN WITH THE GATE STILL IN PLACE, ON PURPOSE. A counter that first
-    runs in the same change that alters the behaviour cannot say what the
-    behaviour used to be, so the before-reading has to exist before the
-    change does. `at_rest_now` is that before-reading: what the gate nominates
-    today, which is the number the gate's removal is measured against.
+    IT WAS FIRST TAKEN WITH THE GATE STILL IN PLACE, ON PURPOSE. A counter
+    whose first run is in the same change that alters the behaviour cannot say
+    what the behaviour used to be, so the before-reading shipped one commit
+    earlier (aa86d0a): 866 scored candidates, 870 including unscored, 0 moving.
 
-    THE TWO NUMBERS THAT MATTER ARE `candidates_if_gate_removed` AND
-    `would_move`, AND THEIR BEING DIFFERENT IS THE WHOLE INSTRUMENT. Measured
-    2026-10-28: 866 and 0. One number alone cannot distinguish "the gate is
-    holding back a flood" from "the gate is holding back nothing", and those
-    call for opposite decisions.
+    THE PAIR IS THE INSTRUMENT, NOT EITHER NUMBER. `candidates` and
+    `would_move` being DIFFERENT is the whole point: one number alone cannot
+    distinguish "the lane is holding back a flood" from "the lane is holding
+    back nothing", and those call for opposite decisions.
 
-    `candidates_including_unscored` exists because removing the score gate
-    raises a question the gate currently hides: `_scars_at_rest` ALSO drops
-    rows whose `sessions_since_reinforced` is None, and that exclusion is
-    there because a row with no origin has no score to compare. Once the
-    comparison goes, the exclusion's reason goes with it - so the dry run
-    reports both populations rather than resolving that silently. Today the
-    difference is 4 rows.
+    THE SCORED-ONLY PAIR IS KEPT AFTER THE CHANGE, DELIBERATELY. Archie_DWB
+    ruled the unscored rows IN, so `candidates` is now the live population and
+    `candidates_excluding_unscored` is the counterfactual. It stays so a future
+    reader can see what that decision costs - the difference was 4 rows when
+    it was made and will not stay 4.
     """
 
     scar_family: int = 0
     """Every scar-family row in scope. The denominator."""
 
     unscored_no_origin: int = 0
-    """Rows with no session origin, so no derivable score."""
+    """Rows with no session origin, so no derivable score. Since DWB-706 these
+    are CANDIDATES like any other: a missing clock origin says nothing about
+    whether the work finished."""
 
     at_rest_now: int = 0
-    """THE BEFORE-READING: what the live gate nominates today."""
+    """Rows sitting at the resting score.
 
-    candidates_if_gate_removed: int = 0
-    """Rows that would be examined with the score comparison gone, keeping the
-    unscored exclusion."""
+    GATES NOTHING SINCE DWB-706 and is kept only as a measurement. It was the
+    before-reading while the score gate existed; reading it as "what the pass
+    will nominate" is now wrong, which is why it no longer says that."""
 
-    candidates_including_unscored: int = 0
-    """As above, if the unscored exclusion went too. Reported, not chosen."""
+    candidates: int = 0
+    """THE LIVE POPULATION: every scar-family row the pass examines."""
+
+    candidates_excluding_unscored: int = 0
+    """The counterfactual - what the population would be if rows with no
+    session origin were still excluded. Reported, not used."""
 
     would_move: int = 0
-    """Candidates whose context is `finished` - the rows that would actually
-    be journaled and deleted. This is the number a human should read."""
+    """Live candidates whose context is `finished`, i.e. the rows that will
+    actually be journaled and deleted. This is the number a human should
+    read."""
 
-    would_move_including_unscored: int = 0
+    would_move_excluding_unscored: int = 0
 
     verdicts: dict = field(default_factory=dict)
     """scan_context outcome counts over the candidate set, by value."""
@@ -212,10 +231,9 @@ def conclude_dry_run(
     the resting-score precondition were removed. Pure read - no flush, no
     delete, no journal entry.
 
-    Deliberately does NOT call `_scars_at_rest` for the counterfactual, because
-    that function IS the gate. It re-derives the same population and applies
-    only the exclusion that would survive, so the two numbers come from one
-    traversal and cannot drift from each other the way two queries would.
+    Re-derives the population in ONE traversal rather than calling
+    `_conclude_candidates` and counting separately, so the live counts and the
+    counterfactual cannot drift from each other the way two queries would.
     """
     conditions = [AgentMemory.tier.in_(memory_scan.SCAR_FAMILY)]
     if agent_id is not None:
@@ -239,8 +257,8 @@ def conclude_dry_run(
             out.at_rest_now += 1
 
         if scored:
-            out.candidates_if_gate_removed += 1
-        out.candidates_including_unscored += 1
+            out.candidates_excluding_unscored += 1
+        out.candidates += 1
 
         try:
             verdict = memory_scan.scan_context(db, memory)
@@ -251,9 +269,9 @@ def conclude_dry_run(
         key = getattr(verdict, "value", str(verdict))
         verdicts[key] = verdicts.get(key, 0) + 1
         if verdict == memory_scan.ContextLiveness.finished:
-            out.would_move_including_unscored += 1
+            out.would_move += 1
             if scored:
-                out.would_move += 1
+                out.would_move_excluding_unscored += 1
 
     out.verdicts = verdicts
     return out
@@ -318,7 +336,7 @@ def evict_concluded_scars(
     once a scar is evicted its agent_memories row is gone, so a repeated call
     simply finds nothing left to nominate.
     """
-    candidates = _scars_at_rest(db, agent_id=agent_id)
+    candidates = _conclude_candidates(db, agent_id=agent_id)
     if not candidates:
         # NOMINATED ZERO. Returned as a distinct fact rather than as an empty
         # list, because the caller cannot otherwise tell this from a pass that

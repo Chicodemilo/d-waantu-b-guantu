@@ -3,7 +3,7 @@
 # Created: 2026-10-28
 # Purpose: DWB-706 step 1 - the dry-run counter, taken with the resting-score gate STILL IN PLACE
 # Caller: pytest
-# Callees: app/services/memory_scar_conclude.conclude_dry_run, _scars_at_rest, app/services/memory_consolidate.consolidate_agent
+# Callees: app/services/memory_scar_conclude.conclude_dry_run, _conclude_candidates, evict_concluded_scars, app/services/memory_consolidate.consolidate_agent
 # Data In: factory fixtures, closed DWB sessions to drive the decay gap
 # Data Out: Assertions on candidates / would_move / at_rest_now and on read-only-ness
 # Last Modified: 2026-10-28
@@ -16,11 +16,15 @@ be. The before-reading has to exist before the change does, so this lands with
 the gate untouched and `at_rest_now` still reporting what the gate lets
 through.
 
-THE INSTRUMENT IS THE PAIR, NOT EITHER NUMBER. `candidates_if_gate_removed`
-and `would_move` being DIFFERENT is the whole point: one number alone cannot
-distinguish "the gate is holding back a flood" from "the gate is holding back
-nothing", and those call for opposite decisions. Measured store-wide on
-2026-10-28: 866 and 0.
+THE INSTRUMENT IS THE PAIR, NOT EITHER NUMBER. `candidates` and `would_move`
+being DIFFERENT is the whole point: one number alone cannot
+distinguish "the lane is holding back a flood" from "the lane is holding back
+nothing", and those call for opposite decisions.
+
+STEP 2 REMOVED THE GATE, and these tests moved with it rather than being
+deleted - see `test_a_finished_scar_is_now_nominated_and_concluded`, which
+asserted the opposite until the gate went. Deleting it would have erased the
+only evidence in the suite that the gate was ever there.
 
 EVERY ZERO HERE IS PAIRED WITH A CASE THAT MAKES IT NON-ZERO. A counter that
 reports 0 because it cannot count is indistinguishable from one reporting 0
@@ -114,7 +118,7 @@ class TestTheCounterCanCountAtAll:
 
         d = svc.conclude_dry_run(db_session, agent_id=agent_id)
         assert d.scar_family == 1
-        assert d.candidates_if_gate_removed == 1
+        assert d.candidates == 1
         assert d.would_move == 1, "the counter cannot report a finished scar"
         assert d.verdicts.get("finished") == 1
 
@@ -139,22 +143,28 @@ class TestTheCounterCanCountAtAll:
         )
 
         d = svc.conclude_dry_run(db_session, agent_id=agent_id)
-        assert d.candidates_if_gate_removed == 1
+        assert d.candidates == 1
         assert d.would_move == 0
         assert d.verdicts.get("still_active") == 1
 
 
 class TestItShowsTheGapTheGateCreates:
 
-    def test_a_finished_scar_counts_as_would_move_while_the_gate_refuses_it(
+    def test_a_finished_scar_is_now_nominated_and_concluded(
         self, db_session, agent, make_ticket
     ):
-        """THE WHOLE POINT OF STEP 1.
+        """WAS `test_a_finished_scar_counts_as_would_move_while_the_gate_
+        refuses_it`, AND IT ASSERTED THE OPPOSITE.
 
-        The row is finished and would be journaled, and the live gate
-        nominates nothing - so `would_move` and `at_rest_now` disagree, which
-        is the measurement the gate's removal gets judged against. This test
-        is what would go red if someone removed the gate in this commit.
+        Until DWB-706 step 2 this pinned the GAP: the row was finished,
+        `would_move` said 1, and `at_rest_now` said 0 because the
+        resting-score gate refused to nominate anything. That gap is what the
+        gate's removal closed, so the test inverts rather than disappears -
+        deleting it would erase the evidence that the gate was ever there.
+
+        `at_rest_now` is still asserted, and still 0, but it now means
+        something different: it is a measurement that gates nothing. The row
+        is nominated despite it, which is the whole change in one assertion.
         """
         agent_id, project_id = agent["id"], agent["project_id"]
         ticket = make_ticket(
@@ -173,20 +183,27 @@ class TestItShowsTheGapTheGateCreates:
         d = svc.conclude_dry_run(db_session, agent_id=agent_id)
         assert d.would_move == 1
         assert d.at_rest_now == 0, (
-            "the resting-score gate let something through; this test is the "
-            "before-reading and must be taken with the gate intact"
+            "the row is nowhere near the resting score - which is exactly why "
+            "it could never be concluded before the gate was removed"
         )
-        # And the live pass agrees it did nothing.
-        out = svc.evict_concluded_scars(db_session, agent_id=agent_id)
-        assert out.nominated == 0 and out.created == []
 
-    def test_at_rest_now_agrees_with_the_live_gate(
+        # The live pass now acts on it, with no clock involved.
+        out = svc.evict_concluded_scars(db_session, agent_id=agent_id)
+        assert out.nominated == 1, "the gate is back: a finished scar was not nominated"
+        assert len(out.created) == 1
+        assert out.unfinished == 0
+
+    def test_the_dry_run_population_agrees_with_the_live_one(
         self, db_session, agent, make_ticket
     ):
-        """`at_rest_now` is re-derived inside the dry run rather than taken
-        from `_scars_at_rest`, so that the counterfactual and the live number
-        come from one traversal. That is also how they could silently drift,
-        hence this."""
+        """WAS a cross-check of `at_rest_now` against `_scars_at_rest`, which
+        was the gate. DWB-706 removed both, so the check moves to the thing
+        that can still drift.
+
+        `conclude_dry_run` re-derives the population in its own traversal
+        rather than calling `_conclude_candidates`, which is what keeps its
+        two counts consistent with each other - and is exactly how it could
+        come to disagree with what the pass actually examines."""
         agent_id, project_id = agent["id"], agent["project_id"]
         ticket = make_ticket(
             project_id=project_id, ticket_key="DWB-7063", status="done",
@@ -203,16 +220,26 @@ class TestItShowsTheGapTheGateCreates:
         _elapse(db_session, project_id=project_id, agent_id=agent_id, n=3)
 
         d = svc.conclude_dry_run(db_session, agent_id=agent_id)
-        assert d.at_rest_now == len(svc._scars_at_rest(db_session, agent_id=agent_id))
+        assert d.candidates == len(
+            svc._conclude_candidates(db_session, agent_id=agent_id)
+        ), "the dry run and the pass disagree about what gets examined"
+        # And the pass itself nominates that same number.
+        out = svc.evict_concluded_scars(db_session, agent_id=agent_id)
+        assert out.nominated == d.candidates
 
 
 class TestUnscoredRowsAreReportedNotResolved:
 
     def test_both_populations_are_reported(self, db_session, agent, make_ticket):
-        """Removing the score comparison raises a question the gate hides:
-        `_scars_at_rest` ALSO drops rows with no session origin, and that
-        exclusion exists only because there is no score to compare. The dry
-        run reports both counts rather than choosing silently."""
+        """Archie_DWB ruled the unscored rows IN: `gap is None` is a CLOCK
+        FACT, and keeping an exclusion on it inside a decision the clock was
+        removed from would smuggle the decay dependency back in under another
+        name.
+
+        So `candidates` includes them and `candidates_excluding_unscored` is
+        kept as the counterfactual, which is what shows a later reader what
+        that ruling costs. The two differing is the point; asserting only the
+        live one would let the counterfactual silently become a copy."""
         agent_id, project_id = agent["id"], agent["project_id"]
         ticket = make_ticket(
             project_id=project_id, ticket_key="DWB-7064", status="done",
@@ -232,12 +259,13 @@ class TestUnscoredRowsAreReportedNotResolved:
         d = svc.conclude_dry_run(db_session, agent_id=agent_id)
         assert d.scar_family == 2
         assert d.unscored_no_origin == 1
-        assert d.candidates_if_gate_removed == 1
-        assert d.candidates_including_unscored == 2
-        assert d.would_move == 1
-        assert d.would_move_including_unscored == 2, (
-            "both finished rows should appear in the wider population"
-        )
+        assert d.candidates == 2, "the unscored row must be a candidate now"
+        assert d.candidates_excluding_unscored == 1
+        assert d.would_move == 2, "both finished rows move"
+        assert d.would_move_excluding_unscored == 1
+        # The pass agrees: the unscored row is concluded like any other.
+        out = svc.evict_concluded_scars(db_session, agent_id=agent_id)
+        assert out.nominated == 2 and len(out.created) == 2
 
 
 class TestItMovesNothing:
@@ -306,6 +334,10 @@ class TestTheRealPassCarriesTheNumbers:
         result = memory_consolidate.consolidate_agent(db_session, agent_id=agent_id)
         assert result.conclude_candidates == 1
         assert result.conclude_would_move == 1
-        # ...while the gate still let nothing through, so the pass did nothing.
-        assert result.concluded_nominated == 0
-        assert result.concluded_scars == []
+        # BEFORE DWB-706 step 2 the next two asserted 0 and [] - the gate let
+        # nothing through, so the counter predicted a move the pass could not
+        # make. Now the prediction and the action agree, which is the whole
+        # change. The pair is still worth asserting together: a counter that
+        # silently stopped matching the pass would be worse than no counter.
+        assert result.concluded_nominated == 1
+        assert len(result.concluded_scars) == 1

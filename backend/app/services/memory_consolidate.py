@@ -364,16 +364,17 @@ def consolidate_agent(db: Session, *, agent_id: int) -> ConsolidationResult:
     # `moved_anything`'s truthiness test keeps meaning what it meant. A
     # dataclass is always truthy, so assigning the outcome here would have
     # reported every pass as having moved something.
-    # DWB-706 step 1: the BEFORE-READING, taken while the resting-score gate
-    # is still in place. A counter that first runs in the same change that
-    # removes the gate cannot say what the behaviour used to be, so this ships
-    # and is observed first. Read-only - it moves nothing.
+    # DWB-706: the sizing counter. It shipped one commit BEFORE the gate was
+    # removed (aa86d0a) so the before-reading existed independently of the
+    # change it measures - a counter whose first run is in the same commit
+    # cannot say what the behaviour used to be. Read-only; it moves nothing,
+    # and `evict_concluded_scars` below is what acts.
     #
     # `candidates` and `would_move` being DIFFERENT is the instrument: one
     # number alone cannot tell "the gate holds back a flood" from "the gate
     # holds back nothing", and those call for opposite decisions.
     conclude_preview = memory_scar_conclude.conclude_dry_run(db, agent_id=agent_id)
-    result.conclude_candidates = conclude_preview.candidates_if_gate_removed
+    result.conclude_candidates = conclude_preview.candidates
     result.conclude_would_move = conclude_preview.would_move
 
     conclude_outcome = memory_scar_conclude.evict_concluded_scars(
