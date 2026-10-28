@@ -83,6 +83,30 @@ LESSON and not the setup. All are author-supplied rather than server-derived, be
 extractor pulls what a text says most often and that names the subject while losing the
 point.
 
+`context_key` IS NOW GATED AT WRITE (DWB-704). It is still OPTIONAL, but if you send
+one it is resolved at write time and a string that names nothing is REFUSED with 400.
+Four codes:
+
+    context_unresolvable    the key names no ticket or epic on this project
+    context_already_closed  it names something already done
+    context_contradiction   you sent context_key AND context_free together
+    context_unscoped_agent  your agent row has no project, so nothing can resolve
+
+The refusal is 400 and not 422 deliberately: the request is well formed, and what is
+wrong is a claim it makes about itself.
+
+`context_free: bool` is NEW on the write and on the response. It is the author's
+DECLARATION that no single piece of work owns this lesson, and IT IS NOT THE SAME AS
+LEAVING `context_key` OUT. Omitting the key records that no scope was given, which is a
+data gap; the flag records that a human decided there is no scope, which is a
+judgement. Those two were collapsed once before and 381 of 455 rows were promoted into
+CORE on the strength of it.
+
+**THE REPAIR AN AGENT REACHES FOR FIRST IS THE WRONG ONE**, and this is the one to
+brief when you chase a refusal. Do NOT bind the lesson to a nearby ticket to make the
+gate pass. If the lesson is a craft lesson that outlives the work, send
+`context_free: true`. The refusal text says so; read it rather than guessing.
+
 `keywords` ARE THE WORDS THAT WILL BE IN THE AIR WHEN THE AGENT IS IN THAT SITUATION,
 never a label for what the lesson is ABOUT. Reachable: `git checkout` / `shared tree`,
 `working tree` / `mutation test`, `sprint close` / `backlog ticket`. Unreachable:
@@ -93,6 +117,9 @@ lessons across 30 realistic situations. `situation` is what enforces it: the key
 are matched against that one line with THE SAME comparison retrieval uses, so a
 keyword the author's own sentence does not contain is refused at 400 (DWB-667), naming
 the keyword and the exact tokens that were missing.
+Since DWB-689 that refusal also NAMES THE SMALLEST AMENDMENT THAT WOULD PASS; it will
+never write the `situation` line for the author, because that would make the gate
+self-attestation with an extra step.
 Write the SITUATION first, as a natural prompt, then read the keywords OUT of it - two
 agents re-keywording 76 rows converged on that independently. INFLECTION is the hard
 half and is worse than a filing label: `doc` vs `docs`, `trim` vs `trimming`, nothing
@@ -149,10 +176,22 @@ keyword nobody would type, not a long one. `cost` and `caught_by` are enums, `no
 prose in either is a 422, and any `tier` at all is a 400. Episodes go to
 **`POST /api/journal`**. Reads come from **`GET /api/agents/{id}/memory/scored`**.
 
-**This is the one that bites at close.** When you chase a non-writer, name the two
-required fields along with the route. A participant who writes from an older
-four-field example gets a 400, not a row, and the write-on-close gate still has
-nothing on record for them.
+A JOURNAL ENTRY CAN NOW BE READ BY ID (DWB-687): **`GET /api/journal/{entry_id}`**
+returns the one entry, a missing id 404s NAMING the entity rather than returning a bare
+Not Found, and reading one entry does NOT increment `retrieval_count`. The rule was
+never "never read the journal" - it is NEVER READ IT WHOLE. A filtered search still
+needs one of the real filters; `agent_id` alone is refused by design.
+
+**This is the one that bites at close.** When you chase a non-writer, name ALL FOUR
+required fields along with the route - `body`, `condensed`, `keywords`, `situation`.
+A participant who writes from an older example that omits one gets a 400, not a row,
+and the write-on-close gate still has nothing on record for them.
+
+You no longer have to supply that list from memory. Since DWB-688 the gate refusals
+themselves name `POST /api/agents/{id}/memories` and its four required fields on a
+`human_memory` project, instead of pointing at the stock routes that return 409 here.
+Stock projects are unchanged. So quote the refusal the agent actually received rather
+than paraphrasing it.
 
 #### What blocks a close here, and what does not
 
@@ -187,6 +226,18 @@ compressed line, 2-4 is flagged for demotion and 1 is the last pass before the j
 `cost`, `caught_by` and `surprised` pick the tier via
 `memory_consolidate.tier_for_raw`. Any ONE of `cost: high`, `surprised: true`, or
 `caught_by` not `me` makes a `scar`; everything else becomes `working`.
+
+**A SCAR DOES NOT LEAVE BY THAT ROUTE, AND AS OF DWB-706 IT NEVER WAITS ON A CLOCK.**
+What ends a scar is its CONTEXT FINISHING: the scar is journaled and then REMOVED from
+`agent_memories`, and the journal is never auto-loaded, so a wrong binding does not
+mis-file a lesson, it takes it out of recall permanently. The conclude lane used to
+nominate only scars whose score had decayed to a resting value, which measured DISUSE
+rather than whether the work finished - any recall reset the clock, so a scar that
+kept being useful never qualified. That gate is gone.
+
+Consequence to brief, because it is the one that bites: a `context_key` naming a
+ticket that closes TOMORROW can take that lesson out of recall tomorrow. Bind a lesson
+to a scope only when the lesson genuinely dies with that scope.
 
 **Do not turn that into a chase.** Telling people to tag `high` so their lessons
 survive disables the guard that stops unjudged notes reaching `core`, the tier that
@@ -273,6 +324,12 @@ Monitor, track, communicate, escalate. The PM does NOT create projects, assign t
 - `GET /api/sprints?project_id={pid}&status=active`, find active sprint
 - `GET /api/tickets?sprint_id={sid}`, DWB-side view
 **Red flags:** pileup in `todo` (blocked agents?), stuck `in_progress` (check activity logs), empty `in_review` (agents not finishing or TL not reviewing?), skewed token usage (one ticket 10x+ others). Bucket by status, report to TL if burndown is off.
+
+**Before you read anything into commit activity, check the project is armed (DWB-695).** `.git/hooks` is never in git, so EVERY FRESH CLONE STARTS WITH NO POST-COMMIT HOOK. `scripts/install-git-hooks.sh` arms it and nothing runs it for you.
+
+`GET /api/projects/{id}/hook-status` answers whether a project is actually armed. `armed` is THREE-VALUED on the `gate-status` convention: `true`, `false`, or `null` meaning COULD NOT ANSWER. Null is falsy, so `if armed` lands on the safe reading, but a caller acting on "unarmed" must test `is False`.
+
+**Read `silence_means` before concluding anything from `commit_rows`.** Zero commit rows means four different things depending on the state beside it, and only one of them is about the work - "nobody committed" and "nothing was ever installed" look identical from inside DWB. Do not raise a red flag about an agent's commits on an unarmed project. See `docs/git_hook_arming.md`.
 
 ---
 
@@ -445,6 +502,10 @@ Failure types: `context_degradation`, `spec_drift`, `sycophantic_confirmation`, 
 You carry a reputation score per project, shown on the Team Status leaderboard. It moves automatically from your work and can be adjusted by the human or by any peer. The ledger is append-only and every change carries a reason.
 
 **Automatic (nothing to do):** closing a ticket earns points (bonus when it never needed rework); points are lost for rework, attributed test failures, going stale in `in_progress`, closing with zero attributed tokens, gate misses, and "forgetting" (closing with no commit referencing the key, never moving to `in_progress`, or no test run before close).
+
+**`zero_token_close` takes 2 points, and you will be asked about it.** It fires on a TICKET CLOSE, not on activity: an agent can work all day with nothing attributed and take no penalty at all, and then lose 2 the moment they close. That is the fact someone needs when they ask why they were docked.
+
+It has fired 442 times since June across 26 agents, and roughly four in five closed tickets ever carry it. **Miles has ruled that the existing docks STAND and the work is prevention** - that is settled, not pending, so do not re-escalate it and do not log it as a new finding when you meet it. There is no workaround and none should be briefed; an agent who asks how to avoid it should be told the ruling, not a technique.
 
 **Peer scoring is flat - there is no hierarchy.** Any agent can give a carrot (+) or stick (-) to ANY other agent, regardless of role: a worker can stick the TL, the PM can carrot a worker, no one is exempt and no role outranks another. Being the PM gives you no scoring privilege. Spend from your per-sprint influence budget:
 

@@ -55,7 +55,11 @@ already remembered the lesson. 288 live scars carry the second kind and recalled
 lessons across 30 realistic situations. `situation` is what enforces it: the keywords
 are matched against that one line with THE SAME comparison retrieval uses, so a
 keyword the author's own sentence does not contain is refused at 400 (DWB-667), naming
-the keyword and the exact tokens that were missing.
+the keyword and the exact tokens that were missing. **The refusal now also names the
+smallest KEYWORD-side amendment that would pass, when one exists (DWB-689)**, so a
+worker who reads it does not have to work the repair out. It will never write the
+situation line for the author: offering a situation-side repair would turn the gate
+into self-attestation with an extra step, which is the thing it exists to prevent.
 Write the SITUATION first, as a natural prompt, then read the keywords OUT of it - two
 agents re-keywording 76 rows converged on that independently. INFLECTION is the hard
 half and is worse than a filing label: `doc` vs `docs`, `trim` vs `trimming`, nothing
@@ -110,6 +114,63 @@ prose in either is a 422, and any `tier` at all is a 400. Episodes go to
 **`POST /api/journal`** `{agent_id, body, tags}`. Reads come from
 **`GET /api/agents/{id}/memory/scored`**. There is no 12000-token ceiling on
 this path, so there is nothing to chase anyone to trim.
+
+**One journal entry can be read by id: `GET /api/journal/{entry_id}` (DWB-687).**
+A missing id 404s NAMING the entity rather than returning a bare `Not Found`, and
+reading one entry does NOT increment `retrieval_count`. An addressed fetch is not
+evidence the entry answered a question, and counting it would let three page loads
+promote an entry to the tier that never decays. The search route still refuses an
+unfiltered read with **422**, and `agent_id` alone still does not satisfy it: it
+scopes a dump rather than narrowing one. THE RULE WAS NEVER "NEVER READ THE
+JOURNAL", IT IS NEVER READ IT WHOLE. Before this route existed a bare id returned
+FastAPI's default `Not Found`, a team lead read that as the entry's absence, and
+told the human a teammate's journal entry was missing when it was there. If you are
+checking whether someone wrote something, fetch the id or search with a filter;
+do not infer from a 404 you got off the wrong route.
+
+#### `context_key` is resolved at the write now, and a wrong one DELETES the lesson
+
+`context_key` is still OPTIONAL. But if a write sends one, it is RESOLVED AT WRITE
+TIME against this project's tickets and epics, and a string that names nothing is
+refused with **400** (DWB-704). Four codes, and brief them by name because the
+refusal is what teaches the fix:
+
+| code | what it means |
+|---|---|
+| `context_unresolvable` | the key names no ticket or epic on this project |
+| `context_already_closed` | it names something already done |
+| `context_contradiction` | the write sent `context_key` AND `context_free` together |
+| `context_unscoped_agent` | the agent row has no project, so nothing can resolve |
+
+400 and not 422 deliberately: the request is well formed, and what is wrong is a
+claim it makes about itself.
+
+**`context_free: bool` is NEW on the write and echoed on the response.** It is the
+author's DECLARATION that no single piece of work owns this lesson. **It is NOT the
+same as leaving `context_key` out.** Omitting the key records that no scope was
+GIVEN, which is a data gap; the flag records that a human DECIDED there is no
+scope, which is a judgement. Those two were collapsed once before and 381 of 455
+rows were promoted into CORE on the strength of it.
+
+**THE REPAIR AN AGENT REACHES FOR FIRST IS THE WRONG ONE, so brief this before it
+happens.** When the gate refuses, do NOT bind the lesson to a nearby ticket to make
+the write pass. A craft lesson that outlives the work takes `context_free: true`.
+The refusal text says so; a worker who guesses instead of reading it produces a row
+that stores cleanly and is wrong in the one way nothing downstream can detect.
+
+**Why a wrong binding is not a filing error.** A scar whose context FINISHES is
+journaled and then REMOVED from `agent_memories`, and the journal is never
+auto-loaded, so a wrong binding does not mis-file a lesson, it takes it out of
+recall permanently (`backend/app/services/memory_scar_conclude.py`).
+
+As of 2026-10-28 the conclude lane NO LONGER WAITS FOR A DECAY CLOCK (DWB-706).
+It used to nominate only scars whose score had decayed to a resting value, which
+measured DISUSE rather than whether the work finished: any recall reset the clock,
+so a scar that kept being useful never qualified. That gate is gone. The only thing
+that concludes a scar now is its context actually being finished. **Consequence to
+hand a worker: a `context_key` naming a ticket that closes tomorrow can take the
+lesson out of recall tomorrow.** Bind a lesson to a scope only when the lesson
+genuinely dies with that scope.
 
 **Brief the two required fields when you spawn.** An agent arriving with an older
 playbook in context knows the four-field body and will burn its first write on a 400.
@@ -284,8 +345,27 @@ Until both fields are set, `POST/PATCH /api/tickets` will refuse `jira_issue_key
 2. For empty repos: ask user for goals/constraints, then write `INITIAL.md`, `ARCHITECTURE.md`, `HANDOFF.md`
 3. Create first epic, first sprint, assign agents (TL + PM + worker minimum). Agents go in the DB via `POST /api/agents` + `POST /api/project-agents`
 4. Have PM check gates and raise alerts for gaps
+5. **Arm the commit hook: run `scripts/install-git-hooks.sh`.** Nothing runs it for you.
 
 The team roster lives in the DB. `HANDOFF.md` = session continuity: read on start, update on end. Naming conventions for new agents are in § Naming Convention below.
+
+#### Commits are recorded, and a fresh clone is UNARMED (DWB-695)
+
+`.git/hooks` is never in git, so **every fresh clone starts with no post-commit hook** and records no commits. `scripts/install-git-hooks.sh` arms it; nothing arms it automatically. Full detail in `docs/git_hook_arming.md`.
+
+**`GET /api/projects/{id}/hook-status` is how you find out, and you need it because "nobody committed" and "nothing was ever installed" are THE SAME OBSERVATION FROM INSIDE DWB.** A TL reading zero commit rows will otherwise conclude something about the work that is actually a fact about the filesystem.
+
+**`armed` is THREE-VALUED**, on the same convention `gate-status` uses for `all_passing`:
+
+| value | meaning |
+|---|---|
+| `true` | the hook is installed |
+| `false` | it is not |
+| `null` | **COULD NOT ANSWER**. No `repo_path`, or a path this machine cannot read |
+
+**Null is falsy, so `if armed` lands on the safe reading. A caller acting on "unarmed" must test `is False`**. Anything looser treats "could not answer" as "answered no", which is the exact conflation the endpoint exists to end.
+
+**READ `silence_means` BEFORE CONCLUDING ANYTHING FROM `commit_rows`.** Zero rows means four different things depending on the state beside it, and only one of them is about the work. The field spells out which one applies; it is there so you never have to infer it.
 
 ---
 
@@ -364,6 +444,8 @@ If `.claude/ALERTS_PENDING.md` exists, **read it immediately, it takes priority.
 | Critical / human decision | DB errors, agent loop, scope questions, compliance | Escalate to human |
 
 A zero-token close is NOT an alert: it applies a `zero_token_close` score penalty automatically (`scoring_triggers.py`). There is no alert row to dismiss for it.
+
+**Context, so nobody re-escalates it as new (DWB-708).** The dock is **-2** (`backend/app/config/scoring.py`). It has fired **442 times since June across 26 agents**, and roughly **four in five closed tickets** ever carry it. **Miles has ruled that the existing docks STAND** and that the work is prevention, so this is not something to chase, reverse or raise again. It fires on a **TICKET CLOSE, not on activity**: an agent can work all day with nothing attributed and take no penalty until a ticket closes. Do not reshape anyone's workflow around it and do not brief workarounds; knowing why the number is large is the whole point of this paragraph.
 
 Don't let open alerts accumulate, an ignored queue trains everyone to ignore alerts.
 
@@ -543,6 +625,25 @@ Response is the identity bundle to inject into the spawn prompt. Confirms the ag
 
 Do not read every empty list as expected. `relevant_lessons` returned `[]` for an entire sprint once and nobody noticed, which is the incident the status field exists to prevent. Assign the ticket first, then spawn, and the status tells you whether the lane actually ran.
 
+**The pointers lead somewhere readable now, ON PROJECT 1 ONLY (DWB-692).** They used to point into `.dwb/memory/**/memory.md`, files frozen on 2026-10-01 and, on a `human_memory` project, sealed against the very agents being handed them. On project 1 they are now row refs shaped `agent_memories/<PREFIX>/<AgentName>/<row id>`, resolving to live `condensed` text. The path shape is load-bearing rather than cosmetic: `source_agent` is derived from the parent directory, so a bare row id would have returned every lesson unattributed with no error.
+
+TWO LIMITS, and state both if you brief this:
+
+- **The payload still carries NO TEXT FIELD.** What shipped is REACHABILITY: the pointer leads somewhere readable. Putting the `condensed` line into the bundle is DWB-685 and is NOT BUILT. Do not tell a worker its lessons will arrive as text.
+- **It is per-project and takes a manual sweep.** Ten of twelve projects have never been indexed at all, so on anything but project 1 a `complete` with an empty list means the corpus was never built, not that it had nothing for this ticket. Those two read identically in the status field.
+
+#### DO NOT RUN A NODEIFY SWEEP WHILE ANYONE IS WORKING (DWB-713)
+
+The sweep in question is `POST /api/projects/{project_id}/nodeify`. It is an operator action with a real blast radius: it clears every pointer in the swept domains and rewrites them. Nothing automates the index: it is built when a human calls the route, so the decision to run it is always someone's, and it should not be yours mid-sprint.
+
+The evidence comes in three tiers and they are NOT the same kind of claim. Keep them apart when you pass this on; the seam between a measurement and an inference is the thing worth preserving.
+
+**ESTABLISHED.** One transaction, one commit at the end. It held for **3m06s** on DWB. The endpoint is **synchronous**, so minutes of CPU-bound work run in-process alongside every other request.
+
+**OBSERVED.** Two API responses were lost during the 2026-10-28 pass: a write returning `000`, and an unrelated `PATCH` timing out at 30s. **BOTH WRITES LANDED.** A dropped response on a committed write is the shape most likely to produce a DUPLICATE if someone retries it. **Read the DB to find out what happened; do not retry.**
+
+**INFERRED, NOT MEASURED.** GIL starvation as the mechanism joining those two observations. Plausible, unproven, and named as unproven so nobody later cites it as a finding.
+
 ### Session Marker (TL writes before spawning a worker)
 
 Subagents can't write to `.claude/` paths (writes crash Claude Code). The TL pre-writes a pending marker so the hook resolver can attribute the new session's tokens to the right agent:
@@ -705,6 +806,8 @@ The human's `/carrot` and `/stick` commands are the human's; you (an agent) use 
 Two gates can block a sprint close; the TL is the final witness on both.
 
 **Write-on-close gate (DWB-519, ALWAYS ON).** `PATCH /api/sprints/{id} {"status":"completed"}` is REFUSED with HTTP 400 if any active sprint participant has no memory write within the sprint window (on stock, any `append` or `session-complete` counts; on human_memory those are sealed and a `POST /api/agents/{id}/memories` row counts, stamping the same column; detection takes whichever is LATER of `agents.last_memory_write_at`, stamped directly by the write endpoints, and `memory.md`'s own file mtime; the old scan of your ISO write-headings was retired as a gate source in DWB-564, because condensing removes the headings and stranded agents who had written correctly). The 400 names the non-writers. This is not a per-project toggle; it is skipped only when the project has no `repo_path`. So before closing, make sure every participant (you included) has landed a memory write: on stock the natural one is their `session-complete` wrap-up, on human_memory it is a `/memories` row. Chase non-writers the same way you chase missing acks.
+
+**The refusal now names a route the project's mode actually accepts (DWB-688).** It used to tell a `human_memory` agent to fix the refusal by calling `memory/append` or `session-complete`, both sealed at 409, so the gate was unpassable by following its own instructions: a wall whose sign pointed at another wall. On human_memory the refusal now names `POST /api/agents/<agent_id>/memories` and says all four of `body, condensed, keywords, situation` are REQUIRED. The sprint gate names several agents at once, so it emits a literal `<agent_id>` placeholder for you to fill rather than one id. Stock refusals are byte-for-byte unchanged. **Only the TEXT was ever wrong; the check was always right**: both gates decide via `memory_trace.agent_wrote_since`, which has been mode-aware since DWB-589, so anyone "fixing" the predicate in response to this has misdiagnosed it. One definition serves all three call sites (`memory_mode.write_on_close_instruction`); the compaction gate has its own sibling, because under human_memory there is no compaction route at all rather than a different one.
 
 **What the close itself mints (DWB-566).** Closing a sprint creates a test ticket for the NEXT sprint's work, but it lands on the sprint you just CLOSED, as `backlog`, unassigned, and fires no alert. Nothing pulls it forward for you: when the next sprint opens, move it or it strands. Ten tickets sat stranded on a stale placeholder for three months exactly this way.
 
