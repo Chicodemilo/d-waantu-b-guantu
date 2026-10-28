@@ -183,6 +183,87 @@ arrived at this independently today, in a docstring and in a ticket. A reader
 who remembers the old claim needs to find out it died; a deletion tells them
 nothing.
 
+## The retrieval lane delivered a lesson, and the index was rotten
+
+The nodeify sweep ran on project 1 (operator action, authorised by Miles).
+
+**Before:** every `relevant_lessons` ref was `.dwb/memory/DWB/<Agent>/memory.md`
+- a sealed file agents may not open. **After:** `agent_memories/DWB/Stan/511`
+resolving to real text. Zero file-style memory refs remain on project 1. First
+time in the lane's existence that a pointer led somewhere readable.
+
+**The honest limit:** `RelevantLesson` still carries no text FIELD. What shipped
+is REACHABILITY. Text in the bundle is DWB-685 and is not built.
+
+**The index was stale in every domain, and that is the bigger finding.**
+
+    project 1 node_pointers     BEFORE    AFTER
+      code                       36243    91478    <- not DWB-692's doing
+      doc                        14643    22541    <- not DWB-692's doing
+      memory                      2897     6639    <- changed SOURCE, not drift
+      TOTAL                      53783   120658
+
+The sweep did not grow the index 2.24x; it revealed how far behind it had
+fallen. The memory column is NOT part of that story - that domain changed from
+8 frozen files to 599 live rows, so before and after measure different things.
+**Do not quote one ratio for the whole index.**
+
+**Ten of twelve projects have never been nodeified at all** - `nodeified_at` is
+NULL on 2, 5, 6, 7, 8, 13, 14, 15, 175, 176. Only 1 (tonight) and 40
+(2026-09-17) have ever been built. The only caller of `nodeify_project` anywhere
+is the HTTP route: no task, no sweeper, no startup hook. On those ten,
+`relevant_lessons` was never stale - it was EMPTY, so any claim about retrieval
+working or not working there was made against nothing.
+
+### Running a sweep is an outage for everyone else
+
+Three tiers, and keep them apart:
+
+- **ESTABLISHED.** One `db.commit()`, at the end. Pointers written continuously
+  18:24:18 to 18:27:24 - 3m06s - with the provider sweep running BEFORE the
+  first insert, so the transaction was open longer. The endpoint is
+  `def nodeify_project`, not `async def` (`backend/app/routers/nodes.py:111`),
+  so minutes of pure-Python tokenising over 62,996 code units run in the
+  threadpool of a single-worker process.
+- **OBSERVED.** Two responses lost during the pass - a write returning 000 and
+  an unrelated 30s PATCH timeout. BOTH WRITES LANDED. The failure mode is a
+  dropped response on a committed write, which is the shape most likely to
+  produce a duplicate if someone retries. The DB settled both; a retry would
+  have duplicated.
+- **INFERRED, NOT MEASURED.** GIL starvation as the mechanism. The transaction
+  locks `nodes` and `node_pointers` and the PATCH touched NEITHER, so lock
+  contention cannot be the explanation - which is why "it holds a long
+  transaction" would have documented the wrong cost.
+
+**The free test, for whoever next runs a sweep for their own reasons:** poll
+`GET /api/status` every second for the duration. Flat latencies with only
+node-table writes stalling means lock contention and a narrow cost. Spikes
+across the whole pass mean the entire API degrades for minutes. **Nobody should
+run a sweep to find this out.** DWB-555 covers the CALLER's experience; this is
+a different cost with a different victim.
+
+## A predicate that can only return presences cannot find an absence
+
+Ten never-indexed projects were missed because the query was
+`where nodeified_at is not null`. **The absence WAS the answer, and the filter
+removed it.** Found by widening the same query by one column.
+
+This is the fourth and cleanest member of a family that ran all evening - a
+sentence, or a query, wider or narrower than the instrument under it:
+
+- a sample sufficient for the CLAIM is not sufficient for the SIZE (1 of 442)
+- measuring a COLUMN and reporting a CONCEPT (`reverted_by` vs "correction")
+- attaching a MECHANISM to someone else's measurement and passing it on as
+  established (mine: "the transaction is why your PATCH stalled")
+- filtering out the rows that carry the finding (this one)
+
+**Flag the unreviewed line even when you cannot say what is wrong with it.** The
+"permanently ineligible" overreach was caught because Pam marked a sentence as
+hers and unchecked, not because she spotted the error. That discipline is
+strictly more available than catching the error, because it needs no insight -
+anyone can say "this line is mine and nobody has checked it", about anything, at
+any time.
+
 ## Operational facts that cost someone an hour
 
 - **`information_schema.innodb_trx` is unavailable** - the app credentials lack
