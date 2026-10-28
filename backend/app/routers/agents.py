@@ -64,7 +64,7 @@ from app.services import agent_consolidation as consolidation_svc
 from app.services import memory_mode as memory_mode_svc
 from app.services import memory_score as memory_score_svc
 from app.services import memory_origin
-from app.services import keyword_reachability
+from app.services import context_scope, keyword_reachability
 from app.services import memory_fill as memory_fill_svc
 from app.services import raw_memory as raw_memory_svc
 
@@ -671,7 +671,16 @@ def append_raw_memory(
             condensed=data.condensed,
             keywords=data.keywords,
             situation=data.situation,
+            context_free=data.context_free,
         )
+    except context_scope.ContextScopeUnresolvable as e:
+        # DWB-704. 400 for the same reason as the keyword gate below: the
+        # request is well-formed and what is wrong is a claim it makes about
+        # itself - that this string names something whose closing ends the
+        # lesson's life. The detail names what was searched and offers the
+        # scope-free declaration, because "bind it to a nearby ticket" is the
+        # wrong repair and the one an agent reaches for first.
+        raise HTTPException(400, e.detail)
     except keyword_reachability.KeywordUnreachable as e:
         # DWB-667. 400 rather than 422: the request is well-formed, and what is
         # wrong with it is a claim it makes about itself - that these keywords

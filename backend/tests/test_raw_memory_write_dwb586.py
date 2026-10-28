@@ -307,7 +307,7 @@ class TestWhatLandsInTheRow:
     that exists."""
 
     def test_the_written_tier_is_derived_and_not_null(
-        self, client, db_session, human_memory_agent
+        self, client, db_session, human_memory_agent, make_ticket
     ):
         """DWB-584 chose an enum value over a nullable tier so the scoring query
         has to NAME what it excludes. This asserts the write side of that choice:
@@ -326,10 +326,18 @@ class TestWhatLandsInTheRow:
         empty for an unrelated reason passes trivially, and that is the failure
         family this suite is trying not to join.
         """
-        agent, _project = human_memory_agent
+        agent, project = human_memory_agent
+        # DWB-704: a context_key must now resolve to a live ticket or epic on
+        # the project, so this uses a real one. The subject here is the derived
+        # TIER; a literal like "node-index-v1" would now 400 and this test would
+        # fail on the context rule rather than on its own subject - the same
+        # trap the fixture docstring above describes for the session rule.
+        # make_ticket rather than a raw POST: a ticket needs an epic and a
+        # sprint above it and the factory creates the whole chain.
+        context_key = make_ticket(project_id=project["id"])["ticket_key"]
         r = client.post(
             f"/api/agents/{agent['id']}/memories",
-            json={**MEMORY_WRITE_EXTRAS, "body": "unsorted at write time", "context_key": "node-index-v1"},
+            json={**MEMORY_WRITE_EXTRAS, "body": "unsorted at write time", "context_key": context_key},
         )
         assert r.status_code == 201, r.text
         written = r.json()
@@ -338,7 +346,7 @@ class TestWhatLandsInTheRow:
         assert row is not None, "nothing was persisted; the checks below are vacuous"
         assert row.agent_id == agent["id"]
         assert row.body == "unsorted at write time"
-        assert row.context_key == "node-index-v1"
+        assert row.context_key == context_key
         # Only now are the tier claims meaningful.
         assert row.tier is not None
         assert row.tier != MemoryTier.raw, (

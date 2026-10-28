@@ -6,7 +6,7 @@
 # Callees: pydantic
 # Data In: JSON request body
 # Data Out: RawMemoryCreate, RawMemoryResponse
-# Last Modified: 2026-10-09 (DWB-667: `situation` on the write request and
+# Last Modified: 2026-10-28 (DWB-667: `situation` on the write request and
 #                response; MemoryRekeyRequest/Response for the keywords-only
 #                replace)
 #                (DWB-649: response tier is derived at insert and is
@@ -14,6 +14,8 @@
 #                (DWB-651: both request models refuse undeclared keys)
 #                (DWB-657: condensed + keywords accepted here, enforced in the
 #                service so the refusal can teach rather than 422)
+#                (DWB-704: `context_free`, the author's scope-free declaration,
+#                on the request and echoed on the response)
 
 from datetime import datetime
 from typing import Literal
@@ -51,6 +53,10 @@ class RawMemoryCreate(BaseModel):
 
     body: str
     context_key: str | None = None
+    # DWB-704: the author's declaration that no single piece of work owns this
+    # lesson. Distinct from omitting `context_key`, which only records that no
+    # scope was given. Sending both is refused rather than reconciled.
+    context_free: bool = False
     cost: Literal["none", "low", "high"] | None = None
     caught_by: Literal["me", "worker", "human", "ci"] | None = None
     # Tri-state: True, False, and "nobody said". None is not False - section 1
@@ -119,6 +125,10 @@ class RawMemoryResponse(BaseModel):
     tier: str
     body: str
     context_key: str | None
+    # DWB-704: echoed so a caller can see its declaration was stored rather
+    # than trusting that it was. A flag the author can set and cannot read
+    # back is indistinguishable from one the server dropped.
+    context_free: bool = False
     cost: str | None
     caught_by: str | None
     surprised: bool | None

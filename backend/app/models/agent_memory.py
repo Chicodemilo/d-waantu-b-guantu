@@ -10,7 +10,9 @@
 # Callees: app/database.Base
 # Data In: DB rows
 # Data Out: AgentMemory, MemoryTier, MemoryCost, MemoryCaughtBy
-# Last Modified: 2026-10-09 (DWB-667: `situation`, the author-written line the
+# Last Modified: 2026-10-28 (DWB-704: `context_free`, the author's declaration
+#                that no single piece of work owns a lesson)
+#                (DWB-667: `situation`, the author-written line the
 #                keywords are checked against; nothing matches on it)
 #                (DWB-611: scar_context_bound collapsed into scar -
 #                Miles's ruling was four buckets, all scars context-bound, not
@@ -31,6 +33,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -144,6 +147,21 @@ class AgentMemory(Base):
     # a context-bound scar whose context has not been named yet. The SCAN reads
     # this to ask whether the context is still alive.
     context_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # DWB-704: the author's DECLARATION that this lesson is bound to no single
+    # piece of work. NOT the same fact as `context_key IS NULL`, and the whole
+    # reason this column exists rather than being inferred from that: a null key
+    # means "no scope was recorded", which is a data gap, and this flag means "a
+    # human decided there is no scope", which is a judgement. Collapsing those
+    # two is exactly the 2026-10-06 defect, where one branch could not tell "I
+    # looked and found nothing" from "this scope is eternal" and promoted 381 of
+    # 455 rows into CORE on the strength of it.
+    #
+    # NOT NULL with a False default rather than nullable: a third state here
+    # would be the same ambiguity one level down, and every row that predates
+    # this column genuinely has no declaration, which is what False says.
+    context_free: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0"), default=False
+    )
     # DWB-584 amendment: cost, caught_by and surprised moved here from
     # journal_entries by TL ruling on 2026-09-29, after Stan hit the collision
     # between spec sections 4 and 6. All three are READ against memories, and

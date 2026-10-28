@@ -8,7 +8,8 @@
 # Callees: alembic CLI (subprocess), sqlalchemy.inspect, app.models
 # Data In: Base.metadata; a scratch MySQL database replayed from base
 # Data Out: Assertions on declared and migrated schema
-# Last Modified: 2026-10-09 (DWB-667: agent_memories gains `situation`)
+# Last Modified: 2026-10-28 (DWB-704: agent_memories gains `context_free`)
+#                (DWB-667: agent_memories gains `situation`)
 #                (DWB-605: journal_entries gains created_at)
 
 """Schema guards for DWB-584, the human_memory substrate.
@@ -136,6 +137,32 @@ AGENT_MEMORIES_COLUMNS = {
     # NULL means "written before this was asked for", same transitional state
     # and same reasoning as the two above.
     "situation",
+    # DWB-704, answering this set's own question: who writes it, and what does
+    # the default mean?
+    #
+    # The AUTHOR writes it, at the moment of the write, and it is the explicit
+    # declaration that no single piece of work owns this lesson. It exists
+    # BECAUSE it cannot be derived from `context_key IS NULL`, and that is the
+    # whole argument for the column. A null key means no scope was RECORDED,
+    # which is a data gap; this flag means a human DECIDED there is no scope,
+    # which is a judgement. On 2026-10-06 one branch could not tell those apart
+    # - it read "I looked and found nothing" as "this scope is eternal" - and
+    # classified 381 of 455 scars that way, promoting them into CORE, the tier
+    # only a human may grant. Deriving this from the null would rebuild that
+    # defect with a new name.
+    #
+    # NOT NULL with a False default, unlike the three transitional columns
+    # above, and for the opposite reason. There is nothing to backfill: every
+    # row predating this column genuinely carries no declaration, which is
+    # exactly what False says. A nullable version would reintroduce the same
+    # ambiguity one level down - NULL meaning "nobody declared" against False
+    # meaning "declared not broad", with nothing able to tell them apart.
+    #
+    # Read by `memory_scan.scan_context`, which returns `declared_broad` for a
+    # row carrying it. That verdict is NOT `cannot_die` and must never be wired
+    # to promotion: declaring that no ticket owns a lesson is not a claim that
+    # the lesson is permanent.
+    "context_free",
     "created_at",
     "updated_at",
 }

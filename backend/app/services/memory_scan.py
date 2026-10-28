@@ -115,6 +115,24 @@ class ContextLiveness(str, enum.Enum):
     # long note at the bottom of `scan_context` for why every unresolvable key
     # used to land here and what it cost.
     cannot_die = "cannot_die"  # a named context that resolves to nothing trackable
+    # DWB-704: the author DECLARED this lesson bound to no single piece of
+    # work (`agent_memories.context_free`). Distinct from `unresolvable`, which
+    # is "I looked and found nothing", and from `still_active`, which is "no
+    # scope was ever recorded". This one is a JUDGEMENT a human made, and it is
+    # the state the 2026-10-06 defect could not express: that branch had to
+    # infer eternity from a failed lookup because nothing let an author say it.
+    #
+    # It is NOT `cannot_die` and must not be wired to promotion. Declaring that
+    # no ticket owns a lesson is not a claim that the lesson is permanent; the
+    # death condition for a scope-free lesson is DISUSE, and that lane is
+    # deliberately unbuilt while measured recall on this store is zero. A future
+    # eviction pass branches here; nothing else should.
+    #
+    # Inert at every existing call site by construction, which is the same
+    # argument the note at the bottom of `scan_context` makes for
+    # `unresolvable`: `maybe_promote_scar` acts only on `cannot_die` and
+    # `memory_scar_conclude` only on `finished`, both by equality.
+    declared_broad = "declared_broad"
     # A key was named and matched no ticket and no epic in this project.
     #
     # DISTINCT FROM `still_active`, which is a positive finding (a real, open
@@ -188,6 +206,13 @@ def scan_context(db: Session, memory: AgentMemory) -> ContextLiveness:
             f"({', '.join(t.value for t in SCAR_FAMILY)}); memory {memory.id} "
             f"is tier {memory.tier.value}",
         )
+
+    # DWB-704: a declaration is read BEFORE the missing-key branch, because the
+    # two look identical in the data and mean opposite things. Both have a NULL
+    # `context_key`; only one of them is somebody's decision. Checked first so a
+    # declared row can never be reported as the data gap below.
+    if getattr(memory, "context_free", False):
+        return ContextLiveness.declared_broad
 
     if not memory.context_key or not memory.context_key.strip():
         # DWB-604/611 SEQUENCING RULING (Archie + Stan + Barry, 2026-09-30):

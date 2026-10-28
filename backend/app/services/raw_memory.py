@@ -120,7 +120,12 @@ from app.models.agent_memory import (
     MemoryTier,
 )
 from app.models.project import Project
-from app.services import keyword_reachability, memory_consolidate, memory_origin
+from app.services import (
+    context_scope,
+    keyword_reachability,
+    memory_consolidate,
+    memory_origin,
+)
 from app.services.agent import _record_memory_write
 
 # What the session lookup found. ONE value, because after DWB-637 there is one
@@ -236,6 +241,7 @@ def append_raw_memory(
     agent_id: int,
     body: str,
     context_key: str | None = None,
+    context_free: bool = False,
     cost: str | None = None,
     caught_by: str | None = None,
     surprised: bool | None = None,
@@ -409,10 +415,23 @@ def append_raw_memory(
         db, project_id=project.id, action="Memory write"
     )
 
+    # DWB-704: a named scope that resolves to nothing is a binding the context
+    # scan can never act on, which is how 424 live rows came to carry markdown
+    # headings and no scar has ever concluded. Placed AFTER the origin
+    # precondition because "there is no open session" blocks the write outright
+    # while this only rejects one field, and before the row is built so a
+    # refusal still leaves the database untouched. Absence is not refused -
+    # `context_key` stays optional; see the module docstring on why an
+    # unconditional gate would attach a false scope to every broad lesson.
+    context_scope.require_resolvable_context(
+        db, agent=agent, context_key=context_key, context_free=context_free
+    )
+
     row = AgentMemory(
         agent_id=agent.id,
         body=body,
         context_key=context_key,
+        context_free=context_free,
         cost=MemoryCost(cost) if cost is not None else None,
         caught_by=MemoryCaughtBy(caught_by) if caught_by is not None else None,
         surprised=surprised,
@@ -463,6 +482,10 @@ def append_raw_memory(
         "tier": row.tier.value,
         "body": row.body,
         "context_key": row.context_key,
+        # DWB-704: read off the ROW rather than echoing the argument, so what
+        # the caller sees is what was stored. Echoing the input would report a
+        # declaration the database had not accepted.
+        "context_free": row.context_free,
         "cost": row.cost.value if row.cost is not None else None,
         "caught_by": row.caught_by.value if row.caught_by is not None else None,
         "surprised": row.surprised,
