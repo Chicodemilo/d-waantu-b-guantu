@@ -8,7 +8,8 @@
 # Callees: app/services/memory_removal, app/models/agent_memory, app/models/agent
 # Data In: db Session, owning agent id, memory id, acting agent id, reason
 # Data Out: a dict describing what was withdrawn and where it went
-# Last Modified: 2026-10-01 (DWB-626)
+# Last Modified: 2026-10-28 (DWB-684: recorded, with the measurement behind it,
+#                that this is the only reachable exit from the scar tier)
 
 """The first way anything has ever left agent_memories by choice.
 
@@ -32,6 +33,35 @@ Withdrawal is one of those triggers and owns only the question of who may pull
 it. Keeping the trigger out of the mechanism is the same reason
 memory_scar_conclude.py is a sibling FILE of memory_evict.py rather than a
 second function inside it.
+
+DWB-684: THIS IS THE ONLY REACHABLE EXIT FROM THE SCAR TIER, and that is a
+measured fact rather than a description of intent. It is also not what this
+module was built for, so nothing here announces it and nobody looking for a
+consolidation path would arrive at a file named "withdraw".
+
+The scar curve floors at 6 (`memory_score._CURVE`) while the demotion band is
+2-4 and the eviction band is 1, so `scored_memory` can never nominate a scar at
+any age. `memory_demote.demote_from_core` refuses any row that is not CORE.
+`memory_scar_conclude.evict_concluded_scars` takes only rows at score 6 whose
+`context_key` the scan calls finished, and a row with no context_key reads
+`still_active` per the DWB-604/611 sequencing ruling. Measured on the agent the
+ticket was raised about: 82 scars, all scoring 7-9, 79 with no context_key, and
+twelve consecutive consolidation passes reporting `concluded_scars=0` while
+succeeding for every agent. A lane that is structurally incapable of acting and
+a lane with nothing to do look identical in every log.
+
+Exercised rather than inferred, on a throwaway human_memory project: a scar-tier
+row withdrawn by its owner returned 200, left `agent_memories`, and arrived in
+the journal under the WITHDRAWAL_TAGS below with its body intact. There is no
+tier check anywhere in `withdraw_memory` - ownership is the whole policy - so
+every tier reaches this path, scar included.
+
+WHAT THIS DOES NOT MAKE IT. Withdrawal says "this lesson is wrong"; the absent
+scar movement would say "this lesson is spent". They remove the same row and
+mean opposite things, so using this as the consolidation path records the wrong
+reason in the journal for every row it drains. Whether the scar tier should be
+nominable at all is a change to the scoring substrate every human_memory agent
+reads from, and it is a ticket of its own.
 """
 
 from __future__ import annotations

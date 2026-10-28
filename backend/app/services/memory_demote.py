@@ -10,7 +10,9 @@
 #          tier, a required reason
 # Data Out: a dict describing the movement, including the journal entry id that
 #           records it
-# Last Modified: 2026-10-09 (DWB-665)
+# Last Modified: 2026-10-28 (DWB-684: the not_core refusal no longer claims
+#                every other tier moves under consolidation - the scar tier
+#                does not and cannot, so it names withdraw instead)
 
 """CORE was a one-way door, and that is what made a mistake permanent.
 
@@ -168,14 +170,50 @@ def demote_from_core(
             "tier is supposed to carry.",
         )
 
+    # DWB-684: this refusal used to close with "every other tier already moves
+    # under consolidation". That sentence was false for the scar tier, and it
+    # was the sentence that stopped anyone looking - a refusal asserting a
+    # property of the system reads as a statement someone checked.
+    #
+    # Measured, not argued. The scar curve floors at 6 (`memory_score._CURVE`)
+    # while BAND_DEMOTION_CANDIDATE is 2-4 and BAND_LAST_CONSOLIDATION is 1, so
+    # the intersection is empty at every age: no scar can ever be nominated by
+    # `scored_memory`'s demote or evict list, however long it sits. The one
+    # automatic scar exit, `memory_scar_conclude.evict_concluded_scars`, takes
+    # only rows at score 6 whose context_key the scan calls finished, and a row
+    # with no context_key reads `still_active` per the DWB-604/611 sequencing
+    # ruling. On the agent the ticket was raised about: 82 scars, all scoring
+    # 7-9, 79 of them with no context_key, and twelve consecutive consolidation
+    # passes reporting concluded_scars=0 while succeeding for every agent.
+    #
+    # So the scar tier has no consolidation exit, and the only thing left to
+    # name is the one route that does reach it. Whether the tier SHOULD be
+    # nominable is a change to the scoring substrate every human_memory agent
+    # reads from, which is Miles's call and a ticket of its own - not something
+    # to smuggle in by widening this route.
     if memory.tier != MemoryTier.core:
         raise DemoteError(
             "not_core",
             f"memory {memory_id} is tier {memory.tier.value}, not core. This "
-            "movement exists only to open the one door that had no way back; "
-            "every other tier already moves under consolidation, and a general "
-            "set-the-tier route would reintroduce exactly the agent-chooses-"
-            "its-own-tier problem `memory_decide` refuses.",
+            "movement is the way OFF core specifically - the tier that had no "
+            "way back - and a general set-the-tier route would reintroduce "
+            "exactly the agent-chooses-its-own-tier problem `memory_decide` "
+            "refuses. Note for the scar tier (DWB-684): it has NO consolidation "
+            "exit. Its only reachable per-row exit is POST /api/agents/"
+            # The REAL ids, not `{agent_id}`/`{memory_id}` placeholders, and
+            # that is the point rather than a flourish. The reader of this
+            # sentence is an agent whose demote was just refused and who is
+            # already working out why; making them perform a substitution
+            # before they can act is a cost charged at the worst moment.
+            # `_WRITE_REPLACEMENT` in memory_mode.py formats real ids for the
+            # same reason and is the precedent followed here;
+            # STOCK_MEMORY_SEALED_POINTER ships literal braces and is the
+            # thing diverged from. `memory.agent_id` rather than the path
+            # `agent_id`, because withdraw refuses a mismatch between the two
+            # and the OWNER is the one that route wants.
+            f"{memory.agent_id}/memories/{memory.id}/withdraw, which is "
+            "owner-only and journals the row before removing it, so the "
+            "content survives.",
         )
 
     target = MemoryTier(to_tier) if not isinstance(to_tier, MemoryTier) else to_tier
