@@ -257,6 +257,22 @@ sentence, or a query, wider or narrower than the instrument under it:
   established (mine: "the transaction is why your PATCH stalled")
 - filtering out the rows that carry the finding (this one)
 
+**When a COUNT is the finding, put the column that would explain it away next
+to it.** Ten NULL `nodeified_at` is a finding. Ten NULLs beside ten zero-memory
+counts is a smaller and truer one - the index exists on exactly the two projects
+that have a corpus (1 at 602 memories, 40 at 615) and nowhere else, so the
+correlation runs opposite to the alarming reading. The second query was not more
+insight; it was one more column in the same SELECT. Same idea as printing the
+size of the input beside a hash, already on DWB-690 and DWB-698 - third costume
+in one evening.
+
+**Put the seam in the artifact, not in the author's head.** The reason the
+three-tier structure on DWB-713 works is not that it is more careful: it is that
+ESTABLISHED / OBSERVED / INFERRED-NOT-MEASURED forces the join between a
+measured finding and an attached mechanism to be visible to a reader. My error
+there was handing Benny's measurement and my own mechanism over in one sentence,
+with nothing marking which half was which.
+
 **Flag the unreviewed line even when you cannot say what is wrong with it.** The
 "permanently ineligible" overreach was caught because Pam marked a sentence as
 hers and unchecked, not because she spotted the error. That discipline is
