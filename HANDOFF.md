@@ -4,26 +4,29 @@
 
 ## 2026-11-10 — ENVIRONMENT A (`/Users/mileschick/...`), pull + fleet deploy
 
-Everything below this section was written from the other checkout and is left intact; the
-two boxes run separate databases, so treat ids in it as theirs. See
-`.claude/project_rules_team_lead.md` for how to resolve your own.
+Everything below is the other checkout's, left intact; the two boxes run separate
+databases, so its ids are theirs. Resolve your own per `project_rules_team_lead.md`.
 
-- Pulled `ce42a51` -> `ae77708` (61 commits), applied 12 migrations, now at
-  `dwb710a1b2c3`. No `create_all` drift; checked before migrating.
-- **Uvicorn had been serving pre-pull code despite `--reload`** (127 routes, no
-  `/api/journal`). Restarted; 142 routes now. Probe a known-new route after a big pull.
-- Playbooks deployed to all eight active projects, verified on disk: tl 7056 -> 11005,
-  wk 4025 -> 12976. Announced on the TL channel.
-- **UNCOMMITTED, awaiting Miles:** four files in `.claude/`. The
-  `project_rules_team_lead.md` rewrite (all ids stripped, resolution recipe in their
-  place) is safe to commit. The three re-stripped playbooks are built for this box's
-  `stock` memory mode and will flip the other box's `human_memory` copies on their next
-  pull — open question whether deployed copies should be gitignored instead.
-- Sibling repos have dirty trees from the deploy; their git was not touched.
-- Sprint 4 (id 25): 8 done, the S3 test ticket in `todo`, 8 backlog. No team spawned this
-  session. Ten stale alerts cleared.
-- **This file is at its 8000-token ceiling** (7565 before this section). The next writer
-  trims before adding.
+- Pulled `ce42a51` -> `ae77708` (61 commits), 12 migrations, now `dwb710a1b2c3`. No
+  `create_all` drift; checked first.
+- **Uvicorn served pre-pull code despite `--reload`** (127 routes, no `/api/journal`).
+  Restarted; 142 now. Health stays 200 either way — probe a known-new route after a pull.
+- Playbooks deployed to all eight active projects, verified on disk, announced on the
+  TL channel.
+- **DWB-041 (done):** the deployed worker playbook hardcoded `/projects/1/topoff`, aiming
+  every worker on every project at one project's page. Emitter was already parameterised —
+  doc only. Audit #28 PASS.
+- `project_rules_team_lead.md` now names **no** project id, agent id or counter. The pull
+  had carried the other box's ids in, and the id labelled DWB there is a different project
+  here. Resolution keys on `repo_path`, the only field separating the two checkouts.
+- Pushed, clean at `001c0bb`. Sibling repos are dirty from the deploy; their git untouched.
+- **Open for Miles:** `.claude/` holds config-derived output under version control, so
+  deployed playbooks rebuild for whichever box deployed last and flip on the other's next
+  pull. Gitignoring them ends it; deploy rebuilds on demand.
+- Sprint 4 (id 25): 9 done, S3 test ticket in `todo`, 8 backlog. No team spawned. Ten
+  stale alerts cleared. Session closed at 356,570 tokens / 46m; DWB-041 came after that
+  close and is outside its totals.
+- **This file is at its ceiling. Trim before adding.**
 
 ## Current state (2026-10-28)
 
