@@ -35,10 +35,9 @@ Before doing ANY work, establish who you are on this project:
 3. **Session marker: TL writes on your behalf.** The hook resolver reads `.claude/agents/active/<session_id>` (JSON dict with an `agent_id` key) to attribute tokens at SessionEnd/Stop/SubagentStop. **You cannot create this file**: subagent writes to `.claude/` paths crash Claude Code. The TL pre-writes a `pending-<agent_id>-<unix_ms>-<rand4hex>` marker before spawning you; the resolver atomically renames it to your session_id on first SubagentStop, matching on your agent_id when the hook payload carries one (DWB-390) so concurrent spawns can't cross-attribute. If you think your marker is missing, tell the TL, they write it.
 4. **Your memory is already in your prompt: do not read memory files.** As of DWB-517 your memory is INJECTED at spawn. The TL's `spawn-prepare` handshake returns your full `memory.md` in the `memory_full` field and pastes it into your spawn prompt, so your prior working notes and durable lessons are already in your context. You do **not** open `identity.md` or `memory.md`, and you never ask the TL to read them for you. The files still exist server-side under `.dwb/memory/<project_prefix>/<your_name>/` (writable, outside `.claude/`), auto-scaffolded on spawn (DWB-341); your only interaction with them is to **write** through the API (see Memory Writes below). If `memory_full` looks empty on a spawn where you expected history, flag it to the TL: do not go hunting in the files.
    - **`identity.md`**: system-generated profile (who you are, file purpose, ISO 8601 rule). **Never edit it**: scaffold regenerates it each spawn.
-<!-- human-memory-only:start -->
-   - **`memory.md`**: SEALED on this project and not your memory. Your durable memory is rows in the DWB store, assembled by score and handed to you in this prompt. DURABLE LESSONS ONLY still applies: not ticket ids, dates, counts, what you shipped, or status narration, because the DWB database is already the session record. Durable *project* knowledge (architecture, gotchas, continuity) goes in `ARCHITECTURE.md` / `HANDOFF.md`, not into a lesson. See Memory Writes below for how a lesson is written, tiered and decayed.
-<!-- human-memory-only:end -->
-
+<!-- stock-memory-only:start -->
+   - **`memory.md`**: your single free-form memory (DWB-401, replacing the old scratchpad + lessons + recent_sessions). DURABLE LESSONS ONLY, written append-only via the API: what future-you would otherwise relearn the hard way. Not ticket ids, dates, counts, what you shipped, or status narration: the DWB database is the session record, and duplicating it burns your ceiling. It is THE memory file: never create additional files. Durable *project* knowledge (architecture, gotchas, continuity) does NOT belong here, it goes in `ARCHITECTURE.md` / `HANDOFF.md`. The DWB dashboard/DB is the session index, so there is no separate recent_sessions file.
+<!-- stock-memory-only:end -->
 ## On Spawn: Read These First
 
 After identity, read: (1) `.claude/project_rules_worker.md`, (2) `HANDOFF.md`, (3) `ARCHITECTURE.md`, (4) `README.md`. If any are missing, proceed with what you have and flag it.
@@ -72,15 +71,13 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
       └─ memory.md           see below; what this file IS depends on the mode
 ```
 
-<!-- human-memory-only:start -->
-`memory.md` is SEALED here and holds nothing you own. Your memory is rows in the DWB
-store, with no file and no token ceiling; size is bounded by decay rather than by a
-cap. Write-on-close is still REQUIRED (DWB-519) and a `/memories` row satisfies it.
-<!-- human-memory-only:end -->
-
-**Budgeted vs exempt:** the consolidation gate counts only the root/project docs the TL owns; DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's job. <!-- human-memory-only:start -->Your memory is not part of the consolidation gate and has no token ceiling to be over. There is nothing of yours to trim for any gate. DWB-519 still requires one write per sprint, and a `/memories` row satisfies it.<!-- human-memory-only:end -->
-
----
+<!-- stock-memory-only:start -->
+`memory.md` is your single free-form memory (scratchpad + lessons merged), injected
+at spawn and never read by you, written only through the memory API. HARD
+12000-token write-ceiling: an over-ceiling write is refused, so condense and retry.
+Write-on-close REQUIRED (DWB-519).
+<!-- stock-memory-only:end -->
+**Budgeted vs exempt:** the consolidation gate counts only the root/project docs the TL owns; DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's job. <!-- stock-memory-only:start -->Your `memory.md` is not part of the consolidation gate, but as of DWB-518 it is no longer "trim-free": it carries a HARD 12000-token ceiling enforced at WRITE time. An append / session-complete / compact / condense that would push the file past the ceiling is REFUSED (HTTP 400), nothing is silently dropped. You keep it under ceiling yourself by condensing (see Memory Writes). Separately, DWB-519 requires every active participant to write at least once per sprint or the sprint cannot close. Memory lives under `.dwb/` (writable) rather than `.claude/`; always write through the API so the server applies the ISO heading and enforces the ceiling.<!-- stock-memory-only:end -->---
 
 ## Protected Files: Never Write These
 
@@ -97,383 +94,54 @@ Before deleting or refactoring shared code another agent owns — especially the
 
 ## Memory Writes: When and How
 
-<!-- human-memory-only:start -->
-### This project runs `human_memory`. Your memory is rows, not a file.
+<!-- stock-memory-only:start -->
+### Stock memory (`memory_mode == "stock"`)
 
-You are reading this because the deploy resolved your project's `memory_mode` and
-kept this branch. The stock branch was stripped out of your copy, so there is no
-other memory section to find and nothing to check at spawn.
+This project runs stock memory: one free-form `memory.md` per agent, with a hard
+token ceiling. The `human_memory` branch was stripped out of your copy at deploy, so
+nothing below has a mode caveat and there is no second section to go looking for.
 
-Stock `memory.md` is SEALED here. These four routes return **409**, not 400, and
-nothing lands: `memory/append`, `session-complete`, `memory/compact`,
-`memory/condense`. The 409 body names the endpoint to use instead, so read it rather
-than retrying. This is a mode conflict, not a permission error or a ceiling problem:
-there is no payload that makes a stock route work while the mode is on.
+DWB-401 collapsed memory to a single free-form `memory.md` (identity.md is still system-generated). You never read it (it is injected at spawn, see On Spawn step 4); you only WRITE it, always through the API, so the FastAPI process applies the ISO heading and enforces the ceiling consistently. `memory.md` is THE only memory file: never create additional files, and keep durable *project* knowledge in `ARCHITECTURE.md` / `HANDOFF.md`, not here. Three write endpoints: append (a lesson), session-complete (your wrap-up lessons), condense (the over-ceiling fix path). `GET /api/agents/{id}/memory` reports `est_tokens`, `ceiling` and `headroom` when you need to know where you stand.
 
-#### What happens to a lesson after you write it
+**The 12000-token ceiling is a HARD write-gate (DWB-518).** `memory.md` has a 12000-token ceiling (`memory_main` in `token_budget.py`; the estimator is `max(len//4, words)`). There is no more silent trim. When an append or session-complete write would push the file past 12000 tokens, the server REFUSES it with **HTTP 400** and drops nothing. The 400 body names the current tokens + ceiling and tells you to condense first, then retry. **Condense, then retry the write, do not wait** and do not ask the TL: trimming your own memory is the work, not a blocker.
 
-Worth two minutes, because the part nobody told you is that your memory DECAYS and
-you have already been choosing how fast.
-
-**Four holders.** `raw` is where every lesson lands when you write it: untiered, not
-yet judged, and deliberately so, because judging salience in the moment just
-rubber-stamps whatever felt important at the time. Consolidation then moves it to
-one of three real tiers: `core` (never decays), `scar` (floors at 6), or `working`
-(floors at 1). `core` and `scar` are both CONSULTED - a lesson in either can be
-recalled by a situation that matches its keywords, and recall moves `fired_count`
-on both. `working` is not consulted at all, which is what stops an unjudged note
-accumulating firings. A `raw` row has no score at all and is in no candidate list until it
-is tiered.
-
-**The score is DERIVED, never stored.** There is no score column and no band column.
-It is computed on read from exactly two things: your tier, and how many CLOSED DWB
-sessions have passed since the memory was last reinforced. Reinforcement is what
-resets that count to zero, and every tier scores 10 at zero sessions, so a memory
-that gets used stays at the top.
-
-| sessions since reinforced | 0 | 1 | 6 | 15 | 31 | 91+ |
-|---|---|---|---|---|---|---|
-| `core` | 10 | 10 | 10 | 10 | 10 | 10 |
-| `scar` | 10 | 9 | 8 | 7 | 6 | 6 |
-| `working` | 10 | 8 | 6 | 4 | 2 | 1 |
-
-**What the score buys you.** Score 8-10 is carried into your next session IN FULL.
-Score 5-7 is carried as a single compressed line, enough to know the lesson exists.
-2-4 is flagged for demotion at the next consolidation, and 1 is the last pass before
-it goes to the journal. The memory block at the top of this session was assembled
-that way.
-
-So a `scar` is never carried less than one line, ever. A `working` row leaves full
-text after five sessions and is a demotion candidate by fifteen.
-
-#### The three tags pick the tier. That is what they are for.
-
-`cost`, `caught_by` and `surprised` are not a validation format. They are the ONLY
-inputs to `memory_consolidate.tier_for_raw`, which is what decides whether your
-lesson is a `scar` or a `working` note. The body is deliberately not read. The whole
-rule is four lines:
-
-```python
-if memory.cost == MemoryCost.high:                 return MemoryTier.scar
-if memory.surprised is True:                       return MemoryTier.scar
-if memory.caught_by is not None and memory.caught_by != MemoryCaughtBy.me:
-                                                   return MemoryTier.scar
-return MemoryTier.working
-```
-
-Any ONE of the three is enough. Everything else, including every untagged row,
-becomes `working`.
-
-**Tag what the moment actually knew, and nothing else.** Do not reach for `high` to
-keep a lesson alive. The `working` default is a structural safety property rather
-than a demotion: `working` is outside the consulted tiers, so it is never searched,
-so its fired count never rises, so an unjudged note can never be promoted to `core`,
-the tier that never decays. Inflating your tags does not protect a lesson, it
-disables the one mechanism that stops scratch notes becoming permanent.
-
-What the tags honestly mean: `cost: high` means it actually cost something.
-`surprised: true` means it contradicted what you expected, which is most of what a
-lesson IS. `caught_by` anything other than `me` means somebody else found it, and
-where other people have to catch you is a map of where your own checks do not look.
-
-An untagged lesson is still worth writing. It becomes `working`, it decays, and it
-is journaled at its floor rather than deleted. Writing nothing is the only option
-that loses it.
-
-A lesson goes to **`POST /api/agents/{your_agent_id}/memories`**:
+**In-flight path: `POST /api/agents/{your_agent_id}/memory/append`** (DWB-358). Capture a note or lesson mid-ticket. Body:
 
 ```json
 {
-  "body": "The lesson, in your own words. Required, non-empty.",
-  "condensed": "One line. THE LESSON, not the setup. Required.",
-  "keywords": ["git checkout", "shared tree"],
-  "situation": "One line: the moment this applies. Required. Your keywords must match it.",
-  "context_key": "optional: the work whose CLOSING ends this lesson. Resolved at write time; a key that names nothing is refused.",
-  "context_free": false,
-  "cost": "none | low | high",
-  "caught_by": "me | worker | human | ci",
-  "surprised": true
+  "file": "memory",
+  "content": "Trying X, hit Y, working around with Z.",
+  "session_id": "optional-cc-session-id"
 }
 ```
 
-- **`condensed`, `keywords` and `situation` are REQUIRED (DWB-657, DWB-667).** A write
-  that omits or blanks any of them is refused with **400** and nothing lands. They are author-supplied rather
-  than server-derived on purpose: an extractor pulls what the text says most often,
-  which names the subject and loses the point. "A difference between two measurements
-  is not a cause" extracts as measurement / runs / truncate. You know what the lesson
-  is FOR; the extractor does not.
-- **`condensed` is ONE LINE carrying THE LESSON, not the setup.** It is what the 5-7
-  band carries in place of a truncation of your body's first line (DWB-658). A lesson
-  that opens with three sentences of context and lands the point at the end compresses,
-  under a truncation, into exactly the context and none of the point, and the result
-  still looks like a summary. Write the sentence you would want to keep if the body
-  were gone: an instruction to someone who was not there, what to do differently
-  rather than what happened to you.
-  **"One line" is register, not syntax, and NOTHING enforces length.** There is no
-  character cap, and a wrapped write is not a violation. A 400-character `condensed`
-  is accepted (measured). A count would refuse a good 200-character lesson and pass a
-  useless 60-character one, so the write gate refuses what is EMPTY and the renderer
-  bounds what is LONG. Nothing will stop you pasting your whole body in here; it just
-  stops being worth its column, because then the 5-7 band carries a summary again.
-- **`keywords` ARE THE WORDS THAT WILL BE IN THE AIR WHEN YOU ARE IN THIS SITUATION.
-  They are NOT a label for what the lesson is about.** This is the one rule on this
-  page that was measured and found broken. Read the contrast before you write yours:
+- `file` enum: `memory` (the only writable file). `identity.md` is system-managed; the Pydantic `Literal` rejects an `"identity"` value at 422, and the service refuses it too.
+- `content`: required, non-empty. Empty or whitespace-only bodies return 400.
+- Server prepends an ISO 8601 UTC heading (`## 2026-06-10T13:48:15+00:00`, or `## ... - session <id>` when you pass `session_id`).
+- Append-only. Existing content is never overwritten.
+- Returns 201 with `{agent_id, file, path, timestamp, bytes_written}` on success.
+- Errors: 422 (file outside the Literal enum); **400 (the write would exceed the 12000-token ceiling: condense then retry; also empty content, unscoped agent, no repo_path)**; 404 (agent or project missing); 500 (memory dir/file unwritable).
 
-  | reachable | unreachable |
-  |---|---|
-  | `git checkout`, `shared tree` | `self-exempt` |
-  | `working tree`, `mutation test` | `decompose-the-count` |
-  | `sprint close`, `backlog ticket` | `absence-defect` |
-  | `alembic`, `autogenerate` | `passes-today`, `stale-numbers` |
+**Wrap-up path: `POST /api/agents/{your_agent_id}/session-complete`.** The mandatory close write (see Sprint Close below). Send the wrap-up payload; as of DWB-560 the endpoint writes ONE timestamped block containing ONLY your `lessons` list, and a call with no lessons writes nothing at all. The summary and token count still travel in the request and reach the database, they just never land in `memory.md`. It obeys the same ceiling: an over-ceiling wrap-up returns **400**, so condense first, then re-post the wrap-up. Use the in-flight endpoint for everything before the wrap.
 
-  The left column is what somebody types when they are standing in the moment. The
-  right column names the MORAL of the lesson, which is a thing nobody types, because
-  you only know the moral after you have already remembered the lesson. 288 live
-  scars carry the right-hand kind. Across 30 realistic situations they recalled four
-  lessons between them. The only two rows that have ever fired in production carried
-  left-hand keywords.
+**Over-ceiling fix path: `POST /api/agents/{your_agent_id}/memory/condense`** (DWB-518). This is what the 400 refusal points you at. Send a leaner full-file rewrite:
 
-  **The two mechanics that decide whether a keyword can be reached, and they bite the
-  people who are already writing concrete terms:**
+```json
+{ "file": "memory", "content": "<the whole memory.md, rewritten shorter>" }
+```
 
-  1. **EVERY token of a keyword must be present, and nothing is stemmed.** `ORM model
-     edit` does not match "I edited an ORM model". `alembic downgrade` does not match
-     "run alembic autogenerate". Each extra word in a keyword is another word the
-     situation has to contain in exactly that form.
+- The server stamps an ISO `## <timestamp> - condensed` heading, validates the result is under 12000 tokens, and **replaces** the file. Response: `{agent_id, file, path, tokens, ceiling, bytes_written, condensed_at}`.
+- Still over ceiling after your rewrite -> 400 (trim more and resubmit). `identity` -> 422. Empty content -> 400 (you cannot blank the file to pass).
+- Sibling `POST /api/agents/{your_agent_id}/memory/compact` is a plain full-file replace with **no** heading; it also 400s over ceiling. Use `condense` for the over-ceiling flow (it stamps the heading and is the path the refusal names); reach for `compact` only when you want a clean rewrite with no condensed-heading marker.
 
-     **So PREFER SEVERAL SHORT SINGLE-WORD KEYWORDS OVER ONE PRECISE PHRASE, and the
-     arithmetic is the argument.** The floor is two distinct tokens across ANY of your
-     matching keywords. Four single words fire on any TWO of them appearing. One
-     three-word phrase fires only when all three appear, in that order of nothing and
-     in exactly that form. Precision NARROWS the firing surface; it does not sharpen
-     it. That one fact explains the worst baseline on the team: an agent whose scars
-     carried `ORM model edit`, `migration proof` and `alembic downgrade` - the most
-     concrete-looking keywords anyone had written - recalled nothing across six
-     realistic situations.
-  2. **Recall needs TWO distinct tokens across your whole keyword set.** One shared
-     ordinary word is coincidence, not evidence. So one two-word keyword works
-     (`git checkout`), and two separate one-word keywords work (`alembic`,
-     `autogenerate`), and a single one-word keyword can never be recalled by anything
-     and is refused at write time.
+**What goes in `memory.md`:** durable lessons only ("next time you migrate enums in MySQL, autogenerate misses them; hand-write"). A working note earns its place only as the lesson it became. Not session wrap-ups, not what you shipped, not ticket ids, dates or counts (DWB-560). Because the file is capped, prefer condensing old blocks over hoarding; future-you reads the distilled version, not the raw log.
+**Durable lessons only (DWB-560).** `memory.md` holds lessons, not a diary. Miles's rule: boring "I did 50 tickets, their names were, their ids are, the time completed was" is noise. Do NOT write ticket ids or keys, dates, counts, what you shipped, or status narration: the DWB database already IS the session record, with its own headline, summary and keyword tags, so repeating it here only burns your 12000-token ceiling and forces condense rewrites that can summarise a real lesson away. Write the thing future-you would otherwise relearn the hard way, and write it so it is useful without the ticket it came from. `session-complete` now writes ONLY your lessons list: the summary and token count go to the database, never to the file. Your write is still recorded every time, with or without lessons: `session-complete` stamps `agents.last_memory_write_at`, and that column (not the heading in the file) is what the DWB-519 write-on-close gate counts as your participation, so a sprint where you genuinely learned nothing quotable never fails the gate — and condensing, which rewrites the headings away, can no longer cost you credit for a write you really made.
 
-  **THE PROCEDURE, which is the part to actually do. Write the SITUATION first, as a
-  natural prompt, in the words you would really type. Then read the keywords OUT of
-  it.** Two agents re-keywording 76 rows between them arrived at this independently,
-  from opposite directions, and it is what the gate structurally enforces anyway.
-  Writing keywords first and then a sentence to justify them is the same motion that
-  produced the filing labels.
 
-  **INFLECTION IS THE HARD HALF, AND IT IS WORSE THAN A FILING LABEL.** Getting from
-  `absence-defect` to situational words is the easy part. The hard part is WHICH FORM
-  gets typed: `doc` or `docs`, `trim` or `trimming`, `line number` or `line numbers`.
-  A perfectly situational keyword in the wrong inflection is exactly as dead as a
-  label, and it LOOKS CORRECT, so nothing about re-reading it tells you it is dead.
-  **Carry both forms as separate keywords wherever both are plausible.** It costs one
-  array entry, nothing caps the count, and on an unstemmed matcher this is not keyword
-  stuffing - **it is the correct index.** Measured by the agent who proposed it: zero
-  false fires across a ten-situation negative sweep.
+**Never edit `identity.md`.** It is system-generated and regenerated on scaffold. The write endpoints refuse it.
 
-  **WHEN ONLY ONE OF YOUR KEYWORDS IS IN THE MOMENT, WIDEN THE SET - do not ask for
-  the floor to be lowered.** Measured: `["cmp", "diff"]` against "I used diff to check
-  the two files" supplies one token and does not fire; `["diff", "files"]` supplies two
-  and does. `["readme", "stale"]` against "the README is out of date, can you fix it"
-  supplies one; `["readme", "out of date"]` supplies three. In both cases the SITUATION
-  carried six usable tokens - what was short was the overlap with the keyword set, not
-  the sentence. That is the two-token rule working, not a bug in it: one shared
-  ordinary word is coincidence, and the floor is the only reason the measured baseline
-  had no junk fires. Some moments are normally named in one word and simply need a
-  deliberately broadened keyword set.
-
-  **WIDENING HAS TWO COSTS. BOTH ARE MEASURED AND BOTH ARE YOURS TO WEIGH.**
-
-  **Cost one: a very wide set erodes what the gate proves.** Every keyword has to
-  appear in your situation line, so a sixteen-term set forces that line to stop being
-  "the moment in your words" and become prose plus an appended vocabulary clause. For
-  those appended terms the gate is no longer a demonstration that you would have said
-  them: it is self-attestation. It still refuses a term nobody could ever type; it no
-  longer shows that YOU would have typed it. **That clause is where the contract's
-  teeth go.** Keep the situation a sentence you would really write, and let the set be
-  as wide as that sentence honestly supports.
-
-  **Cost two: three keyword shapes buy junk, and they look safe.** Measured on live
-  corpora against negative controls drawn from this project's own vocabulary:
-
-  1. **Two ordinary PROJECT words together.** `wrong ticket` fired on "the wrong
-     colour on the ticket card"; bare `epic` plus bare `sprint` fired on "create the
-     epic and the first sprint". Each word alone looks specific enough to be safe.
-  2. **Two ordinary ENGLISH words together, which is worse, because the pair clears
-     the two-token floor BY ITSELF and fires on ordinary prose.** `before i` fired on
-     "the epic needs a description before I create it". Same family: `show me`,
-     `every agent`. **Never index a phrase that is not about your subject.**
-  3. **Bare generic single words** - `gate`, `test`, `check`, `report`, `file`, `key`.
-     One alone cannot fire, which is what makes them feel free. Two of them in one
-     situation fires the row, and a corpus full of them pairs up by accident.
-  4. **STOPWORD EROSION: count TOKENS, not words.** `a path` and `no project` look
-     like two-word keywords and are not - `a` and `no` carry no retrieval signal,
-     so each one reduces to a SINGLE token. Neither stands on its own, and a pair
-     of them clears the floor between them rather than either earning it. The full
-     ignored set is `a an and are as at be by for from in is it no not of on or
-     that the this to vs with`. **You cannot see this by looking at your keyword**,
-     which is why it is worth checking offline rather than counting words. Note
-     what it does NOT contradict: preferring several short keywords is still
-     right, and this is the one way that advice misfires - a short keyword built
-     out of filler is not a short keyword, it is half of one. Widen with the
-     nouns of the situation, not with the words between them.
-
-  **Declining to ADD a junk route is not narrowing**, so this costs you nothing against
-  the widen rule. Widen with the nouns of the situation; do not widen with filler.
-
-  **CHECK IT BEFORE YOU SEND ANYTHING.** The gate is a pure function: no server, no
-  write, no side effects. How you reach it depends on which repo you are in.
-
-  ON THE DWB REPO ONLY, where the backend source is checked out, call it directly:
-
-  ```python
-  from app.services.keyword_reachability import require_reachable_keywords
-  require_reachable_keywords(["diff", "files"], "I used diff to check the two files")
-  ```
-
-  ON EVERY OTHER REPO that import does not resolve, because `backend/` is DWB's own
-  tree and is not deployed to your project. You are not unprotected: the identical
-  gate runs server-side on the write itself, so a bad set is refused with a 400 and
-  nothing lands. The cost of leaning on the write-time refusal rather than the offline
-  call is one round trip, not a lost check. Read the 400, fix the set, re-send.
-
-  **THE REFUSAL NOW NAMES THE SMALLEST AMENDMENT THAT WOULD PASS (DWB-689).** When
-  the gate rejects a set it offers the keyword-side repair where an honest one
-  exists, so you are not guessing at what would have worked. **It will never write
-  your `situation` line for you**, and that is deliberate rather than a gap: a gate
-  that supplied the sentence it then checks your keywords against would be
-  self-attestation with an extra step. Amending the situation is still the better
-  repair whenever the words you left out are genuinely words you would have said;
-  the server just will not say them on your behalf.
-
-  It raises `KeywordUnreachable` with the same sentence the 400 would carry, and
-  returns None when the set is good. An agent re-keywording 44 rows checked every one
-  this way and sent zero failing requests. That is cheaper than learning the contract
-  one refusal at a time.
-
-- **`situation` is one line naming the moment, and it is what makes the gate honest
-  (DWB-667).** Your keywords are matched against it with THE SAME comparison that will
-  later decide whether this lesson is recalled. So a keyword set that your own sentence
-  does not contain would never have been recalled by anyone's, and the write is refused
-  with **400** naming the keyword and the exact tokens your situation was missing.
-  Write the situation the way you would actually say it: "I want to undo an edit on a
-  tree nobody has committed today", not "revert semantics on uncommitted state". Then
-  the keywords almost write themselves out of it.
-- Keywords are also what makes the 2-4 and 1 bands inspectable (DWB-659); those bands
-  are otherwise a bare count, so an agent cannot tell what it is about to lose. Send a
-  JSON ARRAY of short strings, not a comma-joined string: the column is JSON, like
-  journal tags, and a string body is a **422**. The COUNT is guidance and is not
-  enforced: one term and four terms are both accepted, as long as the set clears the
-  two-token floor above. What IS enforced is that the array exists and that no entry is
-  blank: `[]`, `[""]` and `["  "]` all refuse, and a blank among real terms refuses
-  too, naming the index, rather than quietly dropping it and storing a shorter list
-  than you wrote.
-- **`context_key` is OPTIONAL, but a key you DO send is now RESOLVED AT WRITE TIME
-  and refused with 400 if it names nothing (DWB-704).** It is not a label for what
-  the lesson is about. It is **the thing whose CLOSING ends this lesson's life.**
-  Four refusal codes, and the string in the body is the one to search for:
-
-  | code | what it means |
-  |---|---|
-  | `context_unresolvable` | the key names no ticket and no epic on this project |
-  | `context_already_closed` | it names something already done |
-  | `context_contradiction` | you sent `context_key` AND `context_free` together |
-  | `context_unscoped_agent` | your agent row has no project, so nothing can resolve |
-
-  400 rather than 422 for the same reason as the keyword gate: the request is well
-  formed, and what is wrong is a claim it makes about itself.
-
-  **WHY IT IS WORTH A GATE: conclusion DELETES.** A scar whose context finishes is
-  journaled and then REMOVED from `agent_memories`, and the journal is never
-  auto-loaded. So a wrong binding does not mis-file a lesson, it takes it out of
-  recall permanently. As of DWB-706 the conclude pass no longer waits for a decay
-  clock either. The old gate nominated only scars whose score had decayed to a
-  resting value, which measured DISUSE rather than whether the work had finished,
-  and any recall reset the clock so a scar that kept being useful never qualified.
-  That gate is gone. **The only thing that concludes a scar now is its context
-  actually being finished**, so a `context_key` naming a ticket that closes
-  tomorrow can take your lesson out of recall tomorrow. Bind a lesson to a scope
-  only when the lesson genuinely dies with that scope.
-
-- **`context_free: true` is a DECLARATION, and it is the repair you will not reach
-  for.** When the gate refuses you, the move that comes to mind first, bind the
-  lesson to some nearby ticket so the write passes, is the WRONG one, and it is
-  the whole reason the gate exists. If this is a craft lesson that outlives the
-  work, send `context_free: true` instead. The refusal text says so; read it rather
-  than guessing.
-
-  **It is NOT the same as leaving `context_key` out.** Omitting the key records that
-  no scope was given, which is a data gap. The flag records that a human decided
-  there is no scope, which is a judgement. Those two were collapsed once before and
-  381 of 455 rows were promoted into CORE on the strength of it. Sending both the
-  key and the flag is `context_contradiction`: the server will not choose between
-  two opposite claims for you.
-
-- `cost`, `caught_by`, `surprised` are the moment-tags: **enums, not prose**. A sentence
-  in `cost` is a **422**. All three are optional, and tagging only what the moment
-  actually knows is the normal case, so an untagged memory is fine. `condensed`,
-  `keywords` and `situation` are NOT optional, and that is the one difference to carry
-  over from any older playbook you have in context.
-- **A MISSPELLED key is a 422, not the teaching 400.** The two refusals are different
-  layers and they mean different things. The 400 comes from the service and teaches:
-  it names the field, says what it is for, and shows a correct body. The 422 comes
-  from pydantic before any of that runs, because the schema forbids unknown keys, so
-  `condense`, `keyword` or `key_words` returns `extra_forbidden` naming the key you
-  actually sent, and `"keywords": "a, b"` returns a `list_type` error. If you get a
-  422 instead of the helpful message, you did not omit a field, you malformed one.
-- **Never send `tier`.** Any value at all is refused at 400, deliberately: tiering is
-  consolidation's judgment, not yours, and the field exists only so the attempt gets an
-  answer instead of silently landing as raw.
-- **A write with no open DWB session is REFUSED with 400, not accepted.** This
-  REVERSES earlier guidance, which said such a write landed and reported
-  `session_state: none_open`, and which told you never to withhold a lesson over
-  bookkeeping. If you learned that rule, it is the old one. `none_open` no longer
-  exists: `session_state` has exactly one value, `open`, and `created_session_id` is
-  never null on a response from this endpoint (DWB-637).
-  **The lesson is not lost, and you are not being asked to withhold it.** Nothing is
-  written on the refusal, so you re-send the identical request, unchanged, once a
-  session is open. The reasoning behind the reversal, because it is the part that makes
-  the new rule stick: a row with no clock origin cannot be scored, so it is excluded
-  from every candidate list and never rendered into any agent's context. It read as
-  stored and behaved as lost. A 400 that names the fix is recoverable in one call; a
-  null origin needed a human ruling and a backfill of 293 rows.
-  The refusal you will actually see begins `Memory write refused: <PREFIX> has no open
-  DWB session.` and ends `Nothing was written and nothing was lost.` Opening a session
-  is TL-only, so tell the TL rather than reaching for `/api/sessions/open` yourself.
-- Returns 201. Errors: 400 (empty body, **missing or blank `condensed`**, **missing
-  or blank `keywords`**, **missing or blank `situation`**, **a keyword your situation
-  does not contain**, **a keyword set under the two-token floor**, any tier, unscoped
-  agent, **no open DWB session**), 404
-  (agent or project missing).
-
-An **episode** (what happened, in the voice of someone who was there) goes to
-**`POST /api/journal`** with `{agent_id, body, tags?}`. A sanitized entry is a useless
-entry: the value is the reasoning that felt correct and was not.
-
-**You CAN read one back: `GET /api/journal/{entry_id}` (DWB-687).** The rule was
-never "never read the journal". It is **never read it WHOLE**. Reading a single
-entry by id does NOT increment `retrieval_count`, so looking one up cannot push it
-toward promotion, and a missing id returns a **404 naming the entity**
-(`journal entry 99999999 not found`) rather than a bare Not Found. Searching with
-`GET /api/journal?tags=...&term=...` is the other sanctioned read, and that one
-DOES increment `retrieval_count` on every entry it returns.
-
-**The write-on-close gate is satisfied the same way.** `POST .../memories` stamps
-`agents.last_memory_write_at` exactly like a stock write, so your DWB-519 participation
-is recorded with no extra step. You do not call `session-complete` at all on a
-human_memory project; it is one of the sealed routes. This is the same statement as
-`.claude/team_lead_playbook.md` § Memory mode and `.claude/pm_playbook.md` § Memory
-mode; if the three ever disagree, the API is the tiebreak.
-
-**Correcting a wrong memory:** `POST /api/agents/{id}/memories/{memory_id}/withdraw`.
-It stays open under human_memory on purpose, because it is the only path that can
-retract a lesson you now know is wrong.
-
-There is no 12000-token ceiling here. Rows are scored and tiered by consolidation, and
-decay runs on closed DWB sessions rather than on file size.
-<!-- human-memory-only:end -->
+**Memory lives under `.dwb/` (DWB-401), which is writable**, but still go through the API so the ISO heading and the ceiling apply consistently. `.claude/` paths (settings, playbooks, project_rules) remain the no-touch danger zone.
+<!-- stock-memory-only:end -->
 
 ## API
 
@@ -540,24 +208,18 @@ If you get blocked on the work, message the TL, don't sit on it.
 
 ## Sprint Close: Write-on-Close + Consolidation (REQUIRED)
 
-**Write-on-close is mandatory and gate-enforced (DWB-519).** Miles's ruling: "you write for your work on close, no exceptions." At sprint close DWB checks that every ACTIVE sprint participant has landed a memory write at least once within the sprint window.<!-- human-memory-only:start --> A `POST /api/agents/{id}/memories` row counts: it stamps `agents.last_memory_write_at` exactly like a stock write, so your participation is recorded with no extra step and there is no second call to make.<!-- human-memory-only:end --> If you have no write on record, the sprint close is REFUSED with **HTTP 400** naming you. This gate is ALWAYS ON (not a per-project toggle); it is skipped only when the project has no `repo_path`. So land your wrap-up before you go idle:
+**Write-on-close is mandatory and gate-enforced (DWB-519).** Miles's ruling: "you write for your work on close, no exceptions." At sprint close DWB checks that every ACTIVE sprint participant has landed a memory write at least once within the sprint window.<!-- stock-memory-only:start --> Any `append` or `session-complete` counts; detection takes whichever is LATER of `agents.last_memory_write_at`, stamped directly by the write endpoints, and `memory.md`'s own file mtime. The old scan of your ISO write-headings was retired as a gate source in DWB-564, because condensing removes the headings and stranded agents who had written correctly.<!-- stock-memory-only:end -->If you have no write on record, the sprint close is REFUSED with **HTTP 400** naming you. This gate is ALWAYS ON (not a per-project toggle); it is skipped only when the project has no `repo_path`. So land your wrap-up before you go idle:
 
-<!-- human-memory-only:start -->
+<!-- stock-memory-only:start -->
 ```bash
-curl -X POST http://localhost:8000/api/agents/{your_agent_id}/memories \
+curl -X POST http://localhost:8000/api/agents/{your_agent_id}/session-complete \
   -H "X-Agent-ID: {your_agent_id}" \
   -H "Content-Type: application/json" \
-  -d '{"body": "the lesson in your own words",
-       "condensed": "the one line that IS the lesson",
-       "keywords": ["git checkout", "shared tree"],
-       "situation": "I want to undo an edit on a tree nobody has committed today",
-       "cost": "low", "caught_by": "me"}'
+  -d '{"session_id": "<cc-session-id>", "summary": "...", "tokens_used": N}'
 ```
 
-`condensed`, `keywords` and `situation` are REQUIRED (DWB-657, DWB-667): omit or blank any of them and the write is refused with 400 and nothing lands, which at close means you still have no write on record. `condensed` is one line carrying THE LESSON and not the setup. `keywords` are the words that will be in the air when you are IN the situation, never a label for what the lesson is about: `git checkout` / `shared tree`, not `self-exempt` / `decompose-the-count`. `situation` is the one line they are matched against, with the same comparison retrieval uses, so a keyword your own sentence does not contain is refused. A SECOND refusal runs independently of your situation line (DWB-669): a keyword made entirely of ordinary words that name no subject, but carrying enough tokens to fire on its own, is rejected - `before i`, `show me`, `every agent`, `new file`. It fires on any sentence containing the phrase whatever that sentence is about, and your own situation line will not catch it, because an author who wrote `before i` has written "before I" in the sentence beside it. Put the subject in: `before i edit` is accepted, `new column` is accepted. Widening your keyword set is still right; this is the one widening that is not free. `cost` and `caught_by` are enums (`none|low|high`, `me|worker|human|ci`); prose in either one is a 422, and any `tier` at all is a 400. Those three are optional, and they are also what picks your tier, so tag what the moment knew rather than what you want the score to be (see Memory Writes above).
-
-A DWB session must be open or this write is refused with 400 and nothing lands. You cannot open one; tell the TL. Nothing is lost on the refusal: re-send the identical request once a session is open.
-<!-- human-memory-only:end -->
+If that wrap-up is over the 12000-token ceiling it 400s (condense, then re-post): the ceiling and the write-on-close gate are both hard, so budget a condense pass into your wrap if your memory is full.
+<!-- stock-memory-only:end -->
 
 **Consolidation gate (opt-in, `force_consolidation`, default OFF, DWB-400/328).** When on, every sprint participant must POST `consolidate-complete` before the TL can close. The gate has TEETH: the ack REFUSES with HTTP 400 if your *owned* files are over ceiling, unless you pass per-file overrides with non-empty reasons.
 
@@ -574,9 +236,9 @@ curl -X POST http://localhost:8000/api/agents/{your_agent_id}/consolidate-comple
 
 201 on success. 409 if already acked. The naked ack passes clean for a worker; the over-ceiling refusal path (400 + per-file overrides) applies only to the TL's owned root/`project_rules` docs.
 
-<!-- human-memory-only:start -->
-There is nothing to curate and no ceiling to curate against. Decay and consolidation do that work on closed sessions. The one correction you make by hand is retracting a lesson you now know is wrong: `POST /api/agents/{id}/memories/{memory_id}/withdraw`.
-<!-- human-memory-only:end -->
+<!-- stock-memory-only:start -->
+You can curate `memory.md` any time with `POST /api/agents/{your_agent_id}/memory/condense {file: "memory", content}` (heading-stamped full replace) or `.../memory/compact` (plain full replace). As of DWB-518 both **400 if the result is still over the 12000-token ceiling** (the silent trim is gone): trim more and resubmit. Curate for clarity whenever you like; you are required to keep memory under ceiling to write at all, and to have written at least once before the sprint can close.
+<!-- stock-memory-only:end -->
 
 ## Reporting Status
 
@@ -613,9 +275,9 @@ Positive `delta` grants reputation, negative demerits. Rules are enforced at the
 
 The human's `/carrot` and `/stick` commands are theirs; agents use the peer endpoint above.
 
-<!-- human-memory-only:start -->
-**Redeeming a stick does not work on this project.** Redemption is parsed only out of a `memory/append` body, and that route is sealed at 409 here; `POST .../memories` carries no redemption call at all. There is no route that redeems a stick under `human_memory`, so do not spend a write trying. Tracked as its own ticket.
-<!-- human-memory-only:end -->
+<!-- stock-memory-only:start -->
+**Redeeming a stick (DWB-537).** You can earn back half of one stick, once, with no human review. Put `redeem:<score_event_id>` anywhere in a `POST /api/agents/{your_agent_id}/memory/append` body, sent with `X-Agent-ID` set to your own id, and write at least 120 characters of real lesson beyond the token, within 48 hours of the stick landing. The `score_event_id` is the ledger row id shown on your agent score page. The grant is automatic: half of the stick rounded up (`(abs(delta) + 1) // 2`, so a -3 stick returns +2), one redemption per stick, never stackable, and the verdict rides the append response as `redemption {granted, reason}`. Only stick, peer demerit, and audit demerit rows qualify; redemption rows are not themselves redeemable, and if the stick is later reverted the redemption is reverted with it.
+<!-- stock-memory-only:end -->
 
 ## Ad Hoc Work (No Filed Ticket)
 

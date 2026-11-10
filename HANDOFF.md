@@ -2,6 +2,29 @@
 
 > Session-to-session continuity. Read at session start, update at end.
 
+## 2026-11-10 — ENVIRONMENT A (`/Users/mileschick/...`), pull + fleet deploy
+
+Everything below this section was written from the other checkout and is left intact; the
+two boxes run separate databases, so treat ids in it as theirs. See
+`.claude/project_rules_team_lead.md` for how to resolve your own.
+
+- Pulled `ce42a51` -> `ae77708` (61 commits), applied 12 migrations, now at
+  `dwb710a1b2c3`. No `create_all` drift; checked before migrating.
+- **Uvicorn had been serving pre-pull code despite `--reload`** (127 routes, no
+  `/api/journal`). Restarted; 142 routes now. Probe a known-new route after a big pull.
+- Playbooks deployed to all eight active projects, verified on disk: tl 7056 -> 11005,
+  wk 4025 -> 12976. Announced on the TL channel.
+- **UNCOMMITTED, awaiting Miles:** four files in `.claude/`. The
+  `project_rules_team_lead.md` rewrite (all ids stripped, resolution recipe in their
+  place) is safe to commit. The three re-stripped playbooks are built for this box's
+  `stock` memory mode and will flip the other box's `human_memory` copies on their next
+  pull — open question whether deployed copies should be gitignored instead.
+- Sibling repos have dirty trees from the deploy; their git was not touched.
+- Sprint 4 (id 25): 8 done, the S3 test ticket in `todo`, 8 backlog. No team spawned this
+  session. Ten stale alerts cleared.
+- **This file is at its 8000-token ceiling** (7565 before this section). The next writer
+  trims before adding.
+
 ## Current state (2026-10-28)
 
 HEAD `933b916` on master, thirteen commits today, pushed, tree clean.

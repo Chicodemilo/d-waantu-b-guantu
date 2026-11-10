@@ -26,201 +26,13 @@ DWB is still internal: never reference DWB ticket IDs in commits, PR titles, or 
 6. Check open alerts (API + `ALERTS_PENDING.md`)
 7. Jump to § 5 for the typical session flow
 
-<!-- human-memory-only:start -->
-### Memory mode: this project runs `human_memory`
+<!-- stock-memory-only:start -->
+### Memory mode: this project runs `stock`
 
-Stock `memory.md` is SEALED, for you and for everyone you brief. These four routes
-return **409**, not 400, and nothing lands: `memory/append`, `session-complete`,
-`memory/compact`, `memory/condense`. The 409 names the replacement. This is a mode
-conflict, not a permission error or a ceiling problem: no payload makes a stock route
-work while the mode is on. The stock branch was stripped out of your copy at deploy,
-so you are not choosing between two sets of instructions.
-
-Your own lessons and every worker's go to **`POST /api/agents/{agent_id}/memories`**
-`{body, condensed, keywords, situation, cost, caught_by, surprised}`. `body`,
-`condensed`, `keywords` and `situation` are REQUIRED; omit or blank any of them and the
-write is refused with 400 (DWB-657, DWB-667). `condensed` is ONE LINE carrying THE
-LESSON and not the setup, and it is what the 5-7 band carries instead of a truncation of
-the body's first line (DWB-658). `keywords` are what makes the 2-4 and 1 bands
-inspectable instead of a bare count (DWB-659). All are author-supplied, never
-server-derived: an extractor pulls what a text says most often, which names the subject
-and loses the point.
-
-`keywords` ARE THE WORDS THAT WILL BE IN THE AIR WHEN THE AGENT IS IN THAT SITUATION,
-never a label for what the lesson is ABOUT. Reachable: `git checkout` / `shared tree`,
-`working tree` / `mutation test`, `sprint close` / `backlog ticket`. Unreachable:
-`self-exempt`, `decompose-the-count`, `absence-defect`, `passes-today`,
-`stale-numbers` - nobody types those, because you only know the moral after you have
-already remembered the lesson. 288 live scars carry the second kind and recalled four
-lessons across 30 realistic situations. `situation` is what enforces it: the keywords
-are matched against that one line with THE SAME comparison retrieval uses, so a
-keyword the author's own sentence does not contain is refused at 400 (DWB-667), naming
-the keyword and the exact tokens that were missing. **The refusal now also names the
-smallest KEYWORD-side amendment that would pass, when one exists (DWB-689)**, so a
-worker who reads it does not have to work the repair out. It will never write the
-situation line for the author: offering a situation-side repair would turn the gate
-into self-attestation with an extra step, which is the thing it exists to prevent.
-Write the SITUATION first, as a natural prompt, then read the keywords OUT of it - two
-agents re-keywording 76 rows converged on that independently. INFLECTION is the hard
-half and is worse than a filing label: `doc` vs `docs`, `trim` vs `trimming`, nothing
-is stemmed, and a situational keyword in the wrong form is exactly as dead while
-LOOKING correct. Carry both forms as separate keywords where both get typed. When only
-one keyword lands in the moment, WIDEN THE SET rather than asking for the floor to be
-lowered - measured, `['cmp','diff']` gives one token on "I used diff to check the two
-files" and `['diff','files']` gives two; the sentence carried six usable tokens either
-way, so what was short was the overlap, not the situation. The gate is a pure function
-and can be checked offline with no server and no write, by calling
-`keyword_reachability.require_reachable_keywords(keywords, situation)` from
-`backend/app/services/`. That import resolves ONLY on the DWB repo itself; on every
-other project the same gate runs server-side at write time and refuses a bad set with
-a 400, so brief the refusal rather than the offline call.
- PREFER SEVERAL SHORT SINGLE-WORD KEYWORDS OVER ONE PRECISE PHRASE: the floor is two
-distinct tokens across ANY matching keywords, so four single words fire on any two of
-them while one three-word phrase fires only when all three appear in exactly that
-form. Precision narrows the firing surface rather than sharpening it, and that alone
-explains the worst baseline on the team - `ORM model edit`, `migration proof`,
-`alembic downgrade`, the most concrete-looking keywords anyone wrote, recalling
-nothing. Carrying both inflections is not keyword stuffing on an unstemmed matcher, it
-is the correct index, and it cost zero false fires in a ten-situation negative sweep.
-
-AND COUNT TOKENS, NOT WORDS. `a path` and `no project` look like two-word keywords and
-are not: `a` and `no` are ignored, so each reduces to a SINGLE token, neither stands
-alone, and a pair of them clears the floor between them. An author counting words
-cannot see it, and it bites hardest in the very shape the rule above recommends, so
-check offline rather than counting.
-
-WIDENING HAS TWO MEASURED COSTS. A very wide set erodes what the gate PROVES: every
-keyword must appear in the situation line, so a 16-term set turns that line into prose
-plus an appended vocabulary clause, and for those terms the gate becomes
-self-attestation rather than a demonstration the author would have said them. And
-three shapes buy junk while looking safe: two ordinary PROJECT words together (`wrong
-ticket` on "the wrong colour on the ticket card"); two ordinary ENGLISH words together,
-which is worse because the pair clears the floor by itself and fires on ordinary prose
-(`before i` on "the epic needs a description before I create it", same family as `show
-me` and `every agent`); and bare generic single words (`gate`, `test`, `check`,
-`report`) which cannot fire alone but pair up by accident across a corpus. Declining to
-ADD a junk route is not narrowing, so none of this conflicts with widen-never-narrow.
- Two mechanics decide reachability:
-EVERY token of a keyword must be present and nothing is stemmed (`ORM model edit` does
-not match "I edited an ORM model"), and recall needs TWO distinct tokens across the
-whole set, so a single one-word keyword can never be recalled and is refused.
-
-NO FIELD HERE HAS A SIZE RULE: there is no character cap on `condensed` or `situation`,
-and the keyword COUNT is guidance, not a limit, so do not brief any of them as one. What
-is enforced is emptiness and reachability, never length. A misspelled key is a pydantic **422**
-`extra_forbidden` rather than the teaching 400, which is worth knowing before you
-debug a worker's refusal. `cost` and `caught_by` are enums, `none|low|high` and `me|worker|human|ci`;
-prose in either is a 422, and any `tier` at all is a 400. Episodes go to
-**`POST /api/journal`** `{agent_id, body, tags}`. Reads come from
-**`GET /api/agents/{id}/memory/scored`**. There is no 12000-token ceiling on
-this path, so there is nothing to chase anyone to trim.
-
-**One journal entry can be read by id: `GET /api/journal/{entry_id}` (DWB-687).**
-A missing id 404s NAMING the entity rather than returning a bare `Not Found`, and
-reading one entry does NOT increment `retrieval_count`. An addressed fetch is not
-evidence the entry answered a question, and counting it would let three page loads
-promote an entry to the tier that never decays. The search route still refuses an
-unfiltered read with **422**, and `agent_id` alone still does not satisfy it: it
-scopes a dump rather than narrowing one. THE RULE WAS NEVER "NEVER READ THE
-JOURNAL", IT IS NEVER READ IT WHOLE. Before this route existed a bare id returned
-FastAPI's default `Not Found`, a team lead read that as the entry's absence, and
-told the human a teammate's journal entry was missing when it was there. If you are
-checking whether someone wrote something, fetch the id or search with a filter;
-do not infer from a 404 you got off the wrong route.
-
-#### `context_key` is resolved at the write now, and a wrong one DELETES the lesson
-
-`context_key` is still OPTIONAL. But if a write sends one, it is RESOLVED AT WRITE
-TIME against this project's tickets and epics, and a string that names nothing is
-refused with **400** (DWB-704). Four codes, and brief them by name because the
-refusal is what teaches the fix:
-
-| code | what it means |
-|---|---|
-| `context_unresolvable` | the key names no ticket or epic on this project |
-| `context_already_closed` | it names something already done |
-| `context_contradiction` | the write sent `context_key` AND `context_free` together |
-| `context_unscoped_agent` | the agent row has no project, so nothing can resolve |
-
-400 and not 422 deliberately: the request is well formed, and what is wrong is a
-claim it makes about itself.
-
-**`context_free: bool` is NEW on the write and echoed on the response.** It is the
-author's DECLARATION that no single piece of work owns this lesson. **It is NOT the
-same as leaving `context_key` out.** Omitting the key records that no scope was
-GIVEN, which is a data gap; the flag records that a human DECIDED there is no
-scope, which is a judgement. Those two were collapsed once before and 381 of 455
-rows were promoted into CORE on the strength of it.
-
-**THE REPAIR AN AGENT REACHES FOR FIRST IS THE WRONG ONE, so brief this before it
-happens.** When the gate refuses, do NOT bind the lesson to a nearby ticket to make
-the write pass. A craft lesson that outlives the work takes `context_free: true`.
-The refusal text says so; a worker who guesses instead of reading it produces a row
-that stores cleanly and is wrong in the one way nothing downstream can detect.
-
-**Why a wrong binding is not a filing error.** A scar whose context FINISHES is
-journaled and then REMOVED from `agent_memories`, and the journal is never
-auto-loaded, so a wrong binding does not mis-file a lesson, it takes it out of
-recall permanently (`backend/app/services/memory_scar_conclude.py`).
-
-As of 2026-10-28 the conclude lane NO LONGER WAITS FOR A DECAY CLOCK (DWB-706).
-It used to nominate only scars whose score had decayed to a resting value, which
-measured DISUSE rather than whether the work finished: any recall reset the clock,
-so a scar that kept being useful never qualified. That gate is gone. The only thing
-that concludes a scar now is its context actually being finished. **Consequence to
-hand a worker: a `context_key` naming a ticket that closes tomorrow can take the
-lesson out of recall tomorrow.** Bind a lesson to a scope only when the lesson
-genuinely dies with that scope.
-
-**Brief the two required fields when you spawn.** An agent arriving with an older
-playbook in context knows the four-field body and will burn its first write on a 400.
-The refusal names the field and shows a correct body, so nothing is lost, but it costs
-a round trip you can spend by stating the shape once in the brief.
-
-**A `/memories` row satisfies the DWB-519 write-on-close gate with no extra step.** It
-stamps `agents.last_memory_write_at` exactly like a stock write. Nobody calls
-`session-complete` here; it is sealed. This is the same statement as
-`.claude/worker_playbook.md` § Memory Writes and `.claude/pm_playbook.md` § Memory
-mode; if the three ever disagree, the API is the tiebreak.
-
-#### What the gate is actually measuring, and what it is not
-
-The write-on-close gate checks ONE column, `agents.last_memory_write_at`, within the
-sprint window. It does not look at tier, score, or whether the lesson was any good. A
-participant who wrote one untagged throwaway row passes it. That is the gate working
-as designed, and it is the reason the gate is not your quality control.
-
-What decides whether a lesson survives is a different mechanism entirely, and you need
-it when you brief people rather than when you close:
-
-- **Four holders.** `raw` on write (untiered, unscored, in no candidate list),
-  then consolidation moves it to `core` (never decays), `scar` (floors at 6) or
-  `working` (floors at 1).
-- **The score is DERIVED and never stored.** No score column, no band column. It is
-  computed on read from (tier, CLOSED DWB sessions since last reinforced).
-  Reinforcement resets that count to zero and every tier is 10 at zero, so a memory
-  that gets used stays at the top.
-- **Bands decide what reaches a spawn prompt.** 8-10 is carried in full, 5-7 as a
-  single compressed line, 2-4 is flagged for demotion, 1 is the last pass before the
-  journal. The memory block you were handed at spawn was assembled exactly that way.
-- **`cost`, `caught_by` and `surprised` pick the tier**, via
-  `memory_consolidate.tier_for_raw`. Any ONE of `cost: high`, `surprised: true`, or
-  `caught_by` not `me` makes it a `scar`; everything else, including every untagged
-  row, becomes `working`.
-
-**Do not tell a worker to tag `high` so their lesson survives.** The `working` default
-is a structural guard: `working` is outside the consulted tiers, is never searched,
-never raises a fired count, and so can never be promoted to `core`, the tier that never
-decays. `core` and `scar` are both consulted (DWB-668), so a promoted lesson stays
-reachable instead of leaving retrieval, and `core` can be left by its owner. Inflating tags disables the one mechanism stopping scratch notes from becoming
-permanent. Brief it as "tag what the moment actually knew".
-
-**One operational consequence for you.** A `/memories` write REQUIRES an open DWB
-session and is refused with 400 otherwise. Opening a session is yours alone. If a
-worker reports their memory write refused at the end of a sprint, that is a session you
-did not open, not a worker who ignored the gate. Nothing is lost: they re-send the
-identical request once you open one.
-<!-- human-memory-only:end -->
+Everything this playbook says about `memory.md` applies as written. The
+`human_memory` branch was stripped out of your copy at deploy, so there is nothing
+to check and no second section to reconcile.
+<!-- stock-memory-only:end -->
 
 ### Your Personal Memory Dir
 
@@ -269,12 +81,12 @@ Four doc layers load into an agent at spawn. Which layer a file is in decides **
       └─ memory.md           see below; what this file IS depends on the mode
 ```
 
-<!-- human-memory-only:start -->
-`memory.md` is SEALED here and holds nothing anyone owns. Memory is rows in the DWB
-store, with no file and no token ceiling; size is bounded by decay rather than a cap.
-Write-on-close is still REQUIRED (DWB-519) and a `/memories` row satisfies it.
-<!-- human-memory-only:end -->
-
+<!-- stock-memory-only:start -->
+`memory.md` is a single free-form memory (scratchpad + lessons merged), injected at
+spawn, never read by its owner, written only through the memory API. HARD
+12000-token write-ceiling: an over-ceiling write is refused, condense then retry.
+Write-on-close REQUIRED (DWB-519).
+<!-- stock-memory-only:end -->
 **Budgeted vs exempt:** the consolidation gate counts only the root/`project_rules_*` docs the TL owns. DWB-shipped docs (playbooks, agent defs) are *exempt*, keeping those lean is the DWB team's editorial job. Every agent's `memory.md` is NOT counted by the consolidation gate, but as of DWB-518 it carries its own HARD 12000-token ceiling enforced at WRITE time (over-ceiling append / session-complete / compact / condense refused with HTTP 400, nothing dropped; condense to get back under). On a `human_memory` project all four of those routes are sealed at 409 and there is no ceiling to enforce (§ Memory mode). Separately, DWB-519 requires every active participant, TL included, to write to `memory.md` at least once per sprint or the sprint cannot close. No worker and no PM can Edit a `.claude/` path directly (the permission dialog crashes them); memory goes through the API, and only the TL (running with a human attached) edits the other `.claude/` files.
 
 ---
