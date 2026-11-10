@@ -709,7 +709,7 @@ Three states, never two: PASS, FAIL, and a named third for inputs that cannot di
 Periodically a line like this appears in your context:
 
 ```
-••TopOff Complete http://localhost:5173/projects/1/topoff
+••TopOff Complete http://localhost:5173/projects/{project_id}/topoff
 ```
 
 That is not information. **It is an instruction to stop and run four checks on yourself**, and it is the whole content of the feature. The line is deliberately short and identical every time, because a wall of text every N prompts becomes wallpaper and wallpaper gets skipped exactly like the rule it replaced.
